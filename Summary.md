@@ -176,6 +176,10 @@ needed by an actual request rather than starting a repository-wide rewrite.
 - Implementation stays in `codex/window-drag-browser-resize`, based on the
   existing MirrorCoding feature and refreshed `origin/main` at `996922fa`.
   Delivery is local only; application profiles and artifacts remain outside Git.
+- Candidate `60bd65c2`, refreshed against base `996922fa`, passed the complete
+  browser-layout runner on Windows / Electron 43.6.0. Visual review confirmed
+  one-column 360px and three-column 650px/825px pages. Evidence is retained in
+  `D:/piformc-artifacts/window-layout/candidate`; this record changes no code.
 
 ### 2026-09-20 - MirrorCoding account and model usage
 
