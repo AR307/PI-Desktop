@@ -7,7 +7,7 @@ import {
   type ProviderPublic,
 } from "@pi-desktop/shared";
 
-type ConfiguredProvider = Pick<ProviderPublic, "id" | "models" | "defaultModelId">;
+type ConfiguredProvider = Pick<ProviderPublic, "id" | "models" | "defaultModelId" | "mirrorCoding">;
 
 /**
  * Resolve the provider heading shown in the Composer model menu.
@@ -54,7 +54,7 @@ export function composerModelsForProvider(
 ): ModelInfo[] {
   return configuredModelIds(provider).map((modelId) => {
     const metadata = (discovered ?? []).find((model) =>
-      modelIdsMatch(model.modelId, modelId),
+      provider.mirrorCoding ? model.modelId === modelId : modelIdsMatch(model.modelId, modelId),
     );
     const row: ModelInfo = metadata
       ? { ...metadata, modelId, providerId: provider.id }
@@ -94,6 +94,7 @@ export function composerModelBinding(
   provider: ConfiguredProvider,
   modelId: string,
 ): ModelBinding | undefined {
+  if (provider.mirrorCoding) return provider.models.find((model) => model.id === modelId);
   const normalizedModelId = modelId.trim().toLowerCase();
   const bindings = provider.models ?? [];
   return (

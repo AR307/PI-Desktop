@@ -23,6 +23,7 @@ import {
   type ComposerMenuView,
 } from "../model";
 import { createLatestCommitQueue } from "../thinking-commit-queue";
+import { api } from "../../../../lib/api";
 
 type UseComposerModelMenuOptions = {
   mode: Mode;
@@ -53,6 +54,8 @@ export function useComposerModelMenu({
   const [query, setQuery] = useState("");
   const [modelHighlight, setModelHighlight] = useState(-1);
   const [thinkingHighlight, setThinkingHighlight] = useState(-1);
+  const [pendingMirrorModel, setPendingMirrorModel] = useState<string>();
+  const groupListRef = useRef<HTMLDivElement>(null);
   const rootMenuRef = useRef<HTMLDivElement>(null);
   const modelSearchRef = useRef<HTMLInputElement>(null);
   const modelListRef = useRef<HTMLDivElement>(null);
@@ -126,11 +129,23 @@ export function useComposerModelMenu({
         .filter((group) => group.models.length > 0),
     [providers, providerModels],
   );
+  const displayGroups = useMemo(() => {
+    const managed = modelGroups.filter((group) => group.provider.mirrorCoding);
+    const regular = modelGroups.filter((group) => !group.provider.mirrorCoding);
+    if (!managed.length) return regular;
+    const seen = new Set<string>();
+    const models = managed.flatMap((group) => group.models).filter((model) => {
+      if (seen.has(model.modelId)) return false;
+      seen.add(model.modelId); return true;
+    });
+    return [{ ...managed[0], providerDisplayName: "MirrorCoding", providerSearchText: "MirrorCoding", models }, ...regular];
+  }, [modelGroups]);
+  const mirrorGroups = modelGroups.filter((group) => group.provider.mirrorCoding && group.models.some((model) => model.modelId === pendingMirrorModel));
   const queryNeedle = query.trim().toLowerCase();
   const filteredModelGroups = useMemo(
     () =>
       queryNeedle
-        ? modelGroups
+        ? displayGroups
             .map((group) => ({
               ...group,
               models: group.models.filter((model) =>
@@ -142,8 +157,8 @@ export function useComposerModelMenu({
               ),
             }))
             .filter((group) => group.models.length > 0)
-        : modelGroups,
-    [modelGroups, queryNeedle],
+        : displayGroups,
+    [displayGroups, queryNeedle],
   );
   const flatModels = useMemo(
     () =>
@@ -180,6 +195,11 @@ export function useComposerModelMenu({
 
   useEffect(() => {
     if (!open) return;
+    void api.mirrorCodingRefresh().catch(() => {});
+  }, [open]);
+
+  useEffect(() => {
+    if (!open) return;
     for (const candidate of providers) {
       if (candidate.enabled && (candidate.hasSecret || candidate.authKind === "none")) {
         void loadProviderModels(candidate.id);
@@ -210,6 +230,7 @@ export function useComposerModelMenu({
       if (view === "root") rootMenuRef.current?.querySelector<HTMLButtonElement>("button")?.focus();
       if (view === "model") modelSearchRef.current?.focus();
       if (view === "thinking") thinkingListRef.current?.querySelector<HTMLButtonElement>("button")?.focus();
+      if (view === "group") groupListRef.current?.querySelector<HTMLButtonElement>("button")?.focus();
       if (view === "model" && modelHighlight >= 0) {
         modelListRef.current
           ?.querySelector(`[data-model-index="${modelHighlight}"]`)
@@ -244,7 +265,12 @@ export function useComposerModelMenu({
     if (nextView !== "model") setQuery("");
   };
 
-  const selectModel = async (candidate: ProviderPublic, nextModelId: string) => {
+  const selectModel = async (candidate: ProviderPublic, nextModelId: string, groupChosen = false) => {
+    if (candidate.mirrorCoding && !groupChosen) {
+      setPendingMirrorModel(nextModelId);
+      showView("group");
+      return;
+    }
     thinkingQueueRef.current?.invalidate();
     await thinkingQueueRef.current?.idle();
     try {
@@ -254,7 +280,7 @@ export function useComposerModelMenu({
         providerModels[candidate.id],
       );
       const nextBinding = candidate.models.find((entry) =>
-        modelIdsMatch(entry.id, nextModelId),
+        candidate.mirrorCoding ? entry.id === nextModelId : modelIdsMatch(entry.id, nextModelId),
       );
       const nextThinkingLevel = activeSessionId
         ? thinkingLevelForProvider(nextModelProvider, thinkingLevel)
@@ -268,6 +294,14 @@ export function useComposerModelMenu({
         modelId: nextModelId,
         thinkingLevel: nextThinkingLevel,
       });
+      if (candidate.mirrorCoding && !useAppStore.getState().settings?.defaultProviderId) {
+        const settings = await api.getSettings();
+        if (!settings.defaultProviderId) {
+          const updated = { ...settings, defaultProviderId: candidate.id, defaultModelId: nextModelId };
+          await api.setSettings(updated);
+          useAppStore.setState({ settings: updated });
+        }
+      }
       setQuery("");
       setView("root");
       setModelHighlight(-1);
@@ -307,7 +341,7 @@ export function useComposerModelMenu({
     }
     if (event.key === "ArrowLeft" && view !== "root") {
       event.preventDefault();
-      showView("root");
+      showView(view === "group" ? "model" : "root");
       return;
     }
     if (event.key !== "ArrowDown" && event.key !== "ArrowUp") {
@@ -328,6 +362,13 @@ export function useComposerModelMenu({
       return;
     }
     if (view === "root") return;
+    if (view === "group") {
+      event.preventDefault();
+      const buttons = [...groupListRef.current?.querySelectorAll<HTMLButtonElement>("button") ?? []];
+      const current = buttons.indexOf(document.activeElement as HTMLButtonElement);
+      buttons[(current + (event.key === "ArrowDown" ? 1 : buttons.length - 1)) % buttons.length]?.focus();
+      return;
+    }
     event.preventDefault();
     if (view === "model") {
       if (!flatModels.length) return;
@@ -347,6 +388,8 @@ export function useComposerModelMenu({
   };
 
   return {
+    pendingMirrorModel, mirrorGroups, groupListRef,
+    mirrorCodingSelected: Boolean(provider?.mirrorCoding),
     open,
     setOpen,
     view,

@@ -10,6 +10,7 @@ import {
   type CommandShellId,
   type ModelBinding,
   type SessionThinkingLevel,
+  type MirrorCodingProvider,
 } from "@pi-desktop/shared";
 import {
   capabilitiesFromModelConfig,
@@ -19,6 +20,8 @@ import {
   type ThinkingCapabilities,
 } from "@pi-desktop/agent-runtime";
 import type { HostProcess } from "../host-process";
+import type { MirrorCodingRuntime } from "../mirrorcoding/runtime";
+import { modelMetadata } from "../mirrorcoding/catalog";
 import {
   modelConfigFromModelsDev,
   type ModelsDevCatalog,
@@ -30,6 +33,7 @@ const ErrorCodes = {
 } as const;
 
 export type RuntimeProvider = {
+  mirrorCoding?: MirrorCodingProvider;
   id: string;
   name: string;
   vendorKey?: string;
@@ -62,19 +66,22 @@ export type SessionCapabilityDefaults = {
 };
 
 export type ProviderCatalogRuntimeDependencies = {
+  mirrorCoding?: Pick<MirrorCodingRuntime, "isReady">;
   getHost: () => HostProcess | null;
   modelsDevCatalog: ModelsDevCatalog;
 };
 
 export function createProviderCatalogRuntime({
+  mirrorCoding,
   getHost,
   modelsDevCatalog,
 }: ProviderCatalogRuntimeDependencies) {
   const bindingForModel = (
-    provider: Pick<RuntimeProvider, "models">,
+    provider: Pick<RuntimeProvider, "models" | "authKind">,
     modelId: string,
   ): ModelBinding | undefined =>
-    provider.models?.find((binding) => modelIdsMatch(binding.id, modelId));
+    provider.models?.find((binding) => provider.authKind === "mirrorcoding"
+      ? binding.id === modelId : modelIdsMatch(binding.id, modelId));
 
   const modelsDevModelFor = (provider: RuntimeProvider, modelId: string) =>
     modelsDevCatalog.findModel({
@@ -82,6 +89,13 @@ export function createProviderCatalogRuntime({
       baseUrl: provider.baseUrl,
       modelId,
     });
+
+  const catalogConfigFor = (provider: RuntimeProvider, modelId: string) => {
+    if (provider.mirrorCoding) return modelMetadata(modelsDevCatalog, modelId);
+    const known = modelsDevModelFor(provider, modelId);
+    return known ? modelConfigFromModelsDev(known, provider.baseUrl)
+      : genericModelConfig(modelId, provider.baseUrl ?? "");
+  };
 
   /**
    * Apply the exact provider/model binding before exposing a model to a
@@ -120,9 +134,7 @@ export function createProviderCatalogRuntime({
     const storedModel = bindingForModel(provider, modelId);
     const modelsDevModel = modelsDevModelFor(provider, modelId);
     const resolved = resolveBindingContextWindow(
-      modelsDevModel
-        ? modelConfigFromModelsDev(modelsDevModel, provider.baseUrl)
-        : genericModelConfig(modelId, provider.baseUrl ?? ""),
+      catalogConfigFor(provider, modelId),
       storedModel,
     );
     const modelConfig = modelConfigWithBinding(
@@ -133,7 +145,7 @@ export function createProviderCatalogRuntime({
       const catalogModel = modelsDevModelFor(provider, binding.id);
       if (!catalogModel) return binding;
       const bindingResolved = resolveBindingContextWindow(
-        modelConfigFromModelsDev(catalogModel, provider.baseUrl),
+        catalogConfigFor(provider, binding.id),
         binding,
       );
       const effective = modelConfigWithBinding(
@@ -154,6 +166,7 @@ export function createProviderCatalogRuntime({
     });
     return {
       ...provider,
+      ...(provider.mirrorCoding ? { hasSecret: mirrorCoding?.isReady(provider.mirrorCoding) === true } : {}),
       ...(models ? { models } : {}),
       ...(modelsDevModel
         ? {
@@ -227,7 +240,9 @@ export function createProviderCatalogRuntime({
       { includeDisabled },
     );
     await modelsDevCatalog.ensureLoaded();
-    return result.providers;
+    return result.providers.map((provider) => provider.mirrorCoding
+      ? { ...provider, hasSecret: mirrorCoding?.isReady(provider.mirrorCoding) === true }
+      : provider);
   };
 
   const enrichProviderList = async <T extends RuntimeProvider>(result: {
@@ -307,11 +322,8 @@ export function createProviderCatalogRuntime({
       };
     }
     const { provider, modelId } = target;
-    const catalogModel = modelsDevModelFor(provider, modelId);
     const resolved = resolveBindingContextWindow(
-      catalogModel
-        ? modelConfigFromModelsDev(catalogModel, provider.baseUrl)
-        : genericModelConfig(modelId, provider.baseUrl ?? ""),
+      catalogConfigFor(provider, modelId),
       bindingForModel(provider, modelId),
     );
     const modelConfig = modelConfigWithBinding(

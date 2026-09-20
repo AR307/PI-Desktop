@@ -237,10 +237,10 @@ export function ComposerModelPicker({
             type="button"
             className="composer-menu-back"
             role="menuitem"
-            onClick={() => showView("root")}
+            onClick={() => showView(view === "group" ? "model" : "root")}
           >
             <IconChevronLeft size={14} aria-hidden="true" />
-            <span>{view === "model" ? t("chat.model") : t("chat.reasoningLevel")}</span>
+            <span>{view === "model" ? t("chat.model") : view === "group" ? controller.pendingMirrorModel : t("chat.reasoningLevel")}</span>
           </button>
           <div className="composer-menu-separator" />
           {view === "model" ? (
@@ -273,10 +273,10 @@ export function ComposerModelPicker({
                       <div className="composer-model-group-label">{group.providerDisplayName}</div>
                       {group.models.map((model) => {
                         const index = flatIndex++;
-                        const active =
-                          selectedProviderId === group.provider.id &&
-                          modelIdsMatch(selectedModelId ?? "", model.modelId);
-                        const optionTitle = model.displayName || model.modelId;
+                        const active = group.provider.mirrorCoding
+                          ? controller.mirrorCodingSelected && selectedModelId === model.modelId
+                          : selectedProviderId === group.provider.id && modelIdsMatch(selectedModelId ?? "", model.modelId);
+                        const optionTitle = group.provider.mirrorCoding ? model.modelId : model.displayName || model.modelId;
                         return (
                           <button
                             key={`${group.provider.id}:${model.modelId}`}
@@ -284,8 +284,9 @@ export function ComposerModelPicker({
                             data-model-index={index}
                             title={optionTitle}
                             className={`composer-plus-item composer-model-option ${active ? "active" : ""} ${modelHighlight === index ? "kb-active" : ""}`}
-                            role="menuitemradio"
-                            aria-checked={active}
+                            role={group.provider.mirrorCoding ? "menuitem" : "menuitemradio"}
+                            aria-haspopup={group.provider.mirrorCoding ? "menu" : undefined}
+                            aria-checked={group.provider.mirrorCoding ? undefined : active}
                             onMouseMove={() => setModelHighlight(index)}
                             onClick={() => void selectModel(group.provider, model.modelId)}
                           >
@@ -309,6 +310,7 @@ export function ComposerModelPicker({
                               </span>
                             </span>
                             {active ? <IconCheck size={14} className="composer-model-check" aria-hidden="true" /> : null}
+                            {group.provider.mirrorCoding ? <IconChevronRight size={14} aria-hidden="true" /> : null}
                           </button>
                         );
                       })}
@@ -320,6 +322,21 @@ export function ComposerModelPicker({
                 ) : null}
               </div>
             </>
+          ) : view === "group" ? (
+            <div className="composer-model-list" ref={controller.groupListRef} aria-label={t("mirrorCoding.chooseGroup")}>
+              {controller.mirrorGroups.map(({ provider }) => {
+                const group = provider.mirrorCoding!;
+                const model = provider.models.find((entry) => entry.id === controller.pendingMirrorModel);
+                const active = provider.id === selectedProviderId && controller.pendingMirrorModel === selectedModelId;
+                return <button type="button" role="menuitemradio" aria-checked={active} className={`composer-plus-item mirrorcoding-group-option ${active ? "active" : ""}`} key={provider.id} onClick={() => void selectModel(provider, controller.pendingMirrorModel!, true)}>
+                  <strong className="mirrorcoding-group-name">{group.groupName}</strong>
+                  <span className="mirrorcoding-group-rate">{group.dynamicBilling ? t("mirrorCoding.dynamic") : `${group.ratio}×`}</span>
+                  {group.description && <span className="mirrorcoding-group-detail">{group.description}</span>}
+                  <span className="mirrorcoding-group-detail">{t("mirrorCoding.reasoning", { levels: model?.thinkingLevels.join(" / ") || "off" })}</span>
+                </button>;
+              })}
+              {controller.mirrorGroups.length === 0 && <p role="status">{t("mirrorCoding.model_or_group_unavailable")}</p>}
+            </div>
           ) : (
             <>
               <div className="composer-thinking-heading">

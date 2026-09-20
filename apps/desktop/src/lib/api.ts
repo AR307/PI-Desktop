@@ -1,4 +1,5 @@
 import type {
+  MirrorCodingAccountState,
   ActivationScope,
   AgentCapabilityMove,
   AgentCapabilityQuery,
@@ -468,6 +469,17 @@ function normalizePlansChangedEvent(value: unknown): PlanningStateEvent {
 }
 
 export const api = {
+  mirrorCodingState: () => invoke<MirrorCodingAccountState>(IPC.invoke.mirrorCodingGetState),
+  mirrorCodingLogin: (confirmed = false) => invoke<{ state?: MirrorCodingAccountState; confirmationRequired?: boolean }>(IPC.invoke.mirrorCodingLogin, confirmed),
+  mirrorCodingCancel: () => invoke<MirrorCodingAccountState>(IPC.invoke.mirrorCodingCancelLogin),
+  mirrorCodingRefresh: () => invoke<MirrorCodingAccountState>(IPC.invoke.mirrorCodingRefresh),
+  mirrorCodingLogout: (confirmed = false) => invoke<{ state?: MirrorCodingAccountState; confirmationRequired?: boolean }>(IPC.invoke.mirrorCodingLogout, confirmed),
+  mirrorCodingRetryRevocation: () => invoke<MirrorCodingAccountState>(IPC.invoke.mirrorCodingRetryRevocation),
+  mirrorCodingCompleteWelcome: () => invoke<{ ok: boolean }>(IPC.invoke.mirrorCodingCompleteWelcome),
+  onMirrorCodingChanged: (listener: (state: MirrorCodingAccountState) => void) => {
+    if (!window.piDesktop?.on) return () => undefined;
+    return window.piDesktop.on(IPC.event.mirrorCodingChanged, (value) => listener(value as MirrorCodingAccountState));
+  },
   getVersion: () => invoke<AppVersionInfo>(IPC.invoke.appGetVersion),
   health: () => invoke<HostHealth>(IPC.invoke.appHealth),
   getOnboarding: () => invoke<OnboardingState>(IPC.invoke.appGetOnboarding),

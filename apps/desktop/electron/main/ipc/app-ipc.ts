@@ -8,6 +8,7 @@ import {
   ErrorCodes,
   IPC,
   PROTOCOL_VERSION,
+  type OnboardingState,
   assertFeedbackIssueUrl,
   buildBugReportUrl,
 } from "@pi-desktop/shared";
@@ -15,8 +16,10 @@ import { globalInstructionPath } from "@pi-desktop/agent-runtime";
 import type { HostProcess } from "../host-process";
 import type { AppUpdaterController } from "../updater";
 import type { IpcRegistrar } from "./types";
+import type { MirrorCodingRuntime } from "../mirrorcoding/runtime";
 
 export type AppIpcDependencies = {
+  mirrorCoding?: MirrorCodingRuntime;
   registrar: IpcRegistrar;
   getHost: () => HostProcess | null;
   getPluginLauncherWindow: () => BrowserWindow | null;
@@ -27,6 +30,7 @@ export type AppIpcDependencies = {
 
 /** Register app, instruction, launcher and update channels. */
 export function registerAppIpc({
+  mirrorCoding,
   registrar,
   getHost,
   getPluginLauncherWindow,
@@ -97,7 +101,12 @@ export function registerAppIpc({
   handle(IPC.invoke.appGetOnboarding, async () => {
     const host = getHost();
     if (!host) throw new Error("host unavailable");
-    return host.call("app.getOnboarding");
+    const result = await host.call<OnboardingState>("app.getOnboarding");
+    if (mirrorCoding?.account.snapshot().status === "connected") {
+      result.steps = result.steps.map((step) => step.id === "secret" ? { ...step, done: true } : step);
+      if (result.steps.filter((step) => ["provider", "secret", "prompt"].includes(step.id)).every((step) => step.done)) result.showChecklist = false;
+    }
+    return result;
   });
 
   handle(IPC.invoke.appDismissOnboarding, async () => {

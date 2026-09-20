@@ -22,3 +22,4 @@
 | [18-line-anchored-edit-contract.md](18-line-anchored-edit-contract.md) | Line-anchored Edit contract |
 | [19-remote-agent-control-protocol.md](19-remote-agent-control-protocol.md) | Remote Agent Control Protocol |
 | [20-speech.md](20-speech.md) | Host speech (ASR/TTS) |
+| [21-mirrorcoding-account.md](21-mirrorcoding-account.md) | MirrorCoding authorization, groups and streaming relay |

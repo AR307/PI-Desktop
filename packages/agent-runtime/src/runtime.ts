@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { hasAssistantOutput } from "./provider-output.js";
 import {
   settledDelegationMessage,
   taskMessageSnapshot,
@@ -1558,6 +1559,7 @@ export class DesktopAgentRuntime {
   /** Targets of the in-flight parent wait; live snapshots refresh this set. */
   private delegationWaitTargets?: DelegationRecord[];
   private providerResponseStatus?: number;
+  private providerOutputStarted = false;
   private providerRetryHeaders?: Record<string, string>;
   /**
    * Size and message count of the provider attempt in flight. A failed request
@@ -1784,6 +1786,7 @@ Delegation rules:
       streamFn: (m, context, options) => {
         this.setAgentActivity({ phase: "waiting-model", since: Date.now() });
         this.providerResponseStatus = undefined;
+        this.providerOutputStarted = false;
         this.providerRetryHeaders = undefined;
         this.providerRequestBytes = undefined;
         this.providerRequestMessages = context.messages?.length;
@@ -3578,7 +3581,7 @@ Delegation rules:
     try {
       const result = await (this.host as any).call(
         "provider.resolveSubagentModel",
-        { key },
+        { key, sessionId: this.sessionId },
       );
       if (result && typeof result === "object" && "modelId" in result) {
         const provider = result as RuntimeProviderConfig;
@@ -5258,6 +5261,7 @@ Delegation rules:
     error: ReturnType<typeof classifyAgentError>,
     phase: "request" | "stream",
   ): number | undefined {
+    if (this.provider.authKind === "mirrorcoding" && this.providerOutputStarted) return undefined;
     if (!error.retriable) return undefined;
     if (error.code === "PROVIDER_RATE_LIMITED") {
       if (
@@ -6706,6 +6710,7 @@ Delegation rules:
         break;
       }
       case "message_update": {
+        if (event.message.role === "assistant" && hasAssistantOutput(event.message.content)) this.providerOutputStarted = true;
         if (this.currentAssistant && event.message.role === "assistant") {
           this.applyHostedSearch(event.message);
           const content = assistantContent((event.message as any).content);
@@ -6875,7 +6880,7 @@ Delegation rules:
           const exemptSilence = silence && this.allowSilentCompletion;
           if (!failed && !aborted) this.allowSilentCompletion = false;
           const silentTurn = silence && !exemptSilence;
-          if (silentTurn && !this.silentTurnRerunAttempted) {
+          if (silentTurn && !this.silentTurnRerunAttempted && !(this.provider.authKind === "mirrorcoding" && this.providerOutputStarted)) {
             this.silentTurnRerunAttempted = true;
             this.pendingSilentTurnRerun = true;
             this.suppressSilentTurnRunEnd = true;
@@ -6924,6 +6929,7 @@ Delegation rules:
             this.autonomousExecution &&
             !this.silentTurnRerunAttempted &&
             !this.progressTurnRerunAttempted &&
+            !(this.provider.authKind === "mirrorcoding" && this.providerOutputStarted) &&
             isProgressOnlyAssistantTurn(event.message);
           if (progressOnlyTurn) {
             this.progressTurnRerunAttempted = true;
@@ -7018,6 +7024,7 @@ Delegation rules:
           this.currentAssistant = undefined;
           const canRecoverOverflow =
             this.compactionEnabled &&
+            !(this.provider.authKind === "mirrorcoding" && this.providerOutputStarted) &&
             overflow &&
             !this.overflowRecoveryAttempted;
           if (exemptSilence) {

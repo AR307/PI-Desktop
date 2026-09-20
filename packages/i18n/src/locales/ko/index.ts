@@ -1,6 +1,9 @@
 import type { EnglishCatalog } from "../en/index.js";
 
+import { mirrorCodingEn } from "../mirrorcoding.js";
+
 export const ko = {
+  mirrorCoding: mirrorCodingEn,
   app: {
     shellName: "PI-Desktop",
     tagline: "로컬 AI 코딩 파트너",

@@ -39,6 +39,7 @@ import type { PluginRuntime } from "../plugin-runtime";
 import type { UserMcpRuntime } from "../user-mcp";
 import type { RuntimeState } from "./context";
 import type { RuntimeProvider } from "./provider-catalog";
+import type { MirrorCodingRuntime } from "../mirrorcoding/runtime";
 
 const ErrorCodes = {
   ...SharedErrorCodes,
@@ -49,6 +50,7 @@ const ErrorCodes = {
 } as const;
 
 export type SessionLaunchRuntimeDependencies = {
+  mirrorCoding: MirrorCodingRuntime;
   runtimeState: RuntimeState;
   logger: Logger;
   userMcp: UserMcpRuntime;
@@ -82,6 +84,7 @@ export type SessionLaunchRuntimeDependencies = {
 };
 
 export function createSessionLaunchRuntime({
+  mirrorCoding,
   runtimeState,
   logger,
   userMcp,
@@ -271,13 +274,18 @@ export function createSessionLaunchRuntime({
     const commandShell = (await resolveEffectiveCommandShell()).effective!;
     const providers = await runtimeState.host!.call<{ providers: RuntimeProvider[] }>(
       "providers.list",
-      { includeDisabled: false },
+      { includeDisabled: true },
     );
     const requestedProviderId = overrides.providerId ?? session.providerId;
+    const requested = providers.providers.find((item) => item.id === (requestedProviderId ?? settings.defaultProviderId));
+    if (requested?.authKind === "mirrorcoding" && (!requested.enabled || !mirrorCoding.isReady(requested.mirrorCoding))) {
+      throw Object.assign(new Error("MirrorCoding account or group unavailable; sign in or select a model explicitly"), { errorCode: "MIRRORCODING_UNAVAILABLE" });
+    }
+    providers.providers = providers.providers.filter((item) => item.enabled);
     const extensionAgentKey = requestedProviderId
       ? trustedExtensionAgentKeyFromProviderId(requestedProviderId)
       : undefined;
-    const provider: RuntimeProvider = extensionAgentKey
+    const provider: RuntimeProvider | undefined = extensionAgentKey
       ? {
           id: requestedProviderId!,
           name: "Plugin agent",
@@ -288,9 +296,9 @@ export function createSessionLaunchRuntime({
       : providers.providers.find((item) => item.id === requestedProviderId) ||
         providers.providers.find((item) => item.id === settings.defaultProviderId) ||
         providers.providers.find(
-          (item) => item.hasSecret || item.hasOauth || item.authKind === "none",
+          (item) => item.authKind !== "mirrorcoding" && (item.hasSecret || item.hasOauth || item.authKind === "none"),
         ) ||
-        providers.providers[0];
+        providers.providers.find((item) => item.authKind !== "mirrorcoding");
     if (!provider) {
       throw Object.assign(new Error("No provider configured"), {
         errorCode: ErrorCodes.MODEL_NOT_CONFIGURED,
@@ -300,12 +308,13 @@ export function createSessionLaunchRuntime({
     // extension; the host never reads or injects a secret for them.
     const isExtensionAgent = Boolean(extensionAgentKey);
     const isVendorAccount = !isExtensionAgent && provider.authKind === OAUTH_AUTH_KIND;
-    const secret = isExtensionAgent || isVendorAccount
+    const isMirrorCoding = provider.authKind === "mirrorcoding";
+    const secret = isExtensionAgent || isVendorAccount || isMirrorCoding
       ? { value: undefined }
       : await runtimeState.host!.call<{ value?: string }>("providers.getSecret", {
           id: provider.id,
         });
-    if (!secret.value && !isExtensionAgent && !isVendorAccount && provider.authKind !== "none") {
+    if (!secret.value && !isExtensionAgent && !isVendorAccount && !isMirrorCoding && provider.authKind !== "none") {
       throw Object.assign(new Error("Provider API key missing"), {
         errorCode: ErrorCodes.PROVIDER_SECRET_MISSING,
       });
@@ -340,10 +349,11 @@ export function createSessionLaunchRuntime({
       );
     }
     const storedModel = bindingForModel(provider, modelId);
-    const apiStyle = vendorBinding?.apiStyle ?? provider.apiStyle;
-    const baseUrl = vendorBinding?.baseUrl ?? provider.baseUrl;
+    const mirrorBinding = isMirrorCoding ? await mirrorCoding.bindingFor(provider.id, modelId, sessionId) : undefined;
+    const apiStyle = mirrorBinding?.apiStyle ?? vendorBinding?.apiStyle ?? provider.apiStyle;
+    const baseUrl = mirrorBinding?.baseUrl ?? vendorBinding?.baseUrl ?? provider.baseUrl;
     const modelsDevModel = modelsDevModelFor(provider, modelId);
-    const catalogModelConfig = vendorBinding?.modelConfig ??
+    const catalogModelConfig = mirrorBinding?.modelConfig ?? vendorBinding?.modelConfig ??
       (modelsDevModel
         ? modelConfigFromModelsDev(modelsDevModel, baseUrl)
         : genericModelConfig(modelId, baseUrl ?? ""));
@@ -463,6 +473,7 @@ export function createSessionLaunchRuntime({
       disabledBuiltins: await disabledBuiltinSubagents(),
     });
     const subagentBindings = await resolveSubagentProviders({
+      resolveManagedBinding: (pinned, pinnedModelId) => mirrorCoding.bindingFor(pinned.id, pinnedModelId, sessionId),
       definitions: subagentCatalog.definitions,
       providers: providers.providers,
       getSecret: async (id: string) =>
@@ -512,6 +523,11 @@ export function createSessionLaunchRuntime({
         if (subagentBindings.providers[key]) {
           subagentModelKeys.push(key);
           continue; // already resolved, and independently opted in
+        }
+        if (row.authKind === "mirrorcoding") {
+          subagentBindings.providers[key] = await mirrorCoding.bindingFor(row.id, binding.id, sessionId);
+          subagentModelKeys.push(key);
+          continue;
         }
         const isVendorAccount = row.authKind === OAUTH_AUTH_KIND;
         let apiKey = "";
@@ -619,11 +635,11 @@ export function createSessionLaunchRuntime({
           vendorKey: provider.vendorKey,
           baseUrl,
           modelId,
-          apiKey: secret.value || "",
+          apiKey: mirrorBinding?.apiKey ?? secret.value ?? "",
           authKind: provider.authKind,
           extensionAgentKey: provider.extensionAgentKey,
           apiStyle,
-          ...optionalProviderHeaders(provider.headers),
+          ...optionalProviderHeaders(mirrorBinding?.headers ?? provider.headers),
           supportsReasoning: thinkingCapabilities.supportsReasoning,
           supportsVision: visionFromModelConfig(modelConfig),
           supportedThinkingLevels: [...thinkingCapabilities.supportedThinkingLevels],

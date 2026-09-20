@@ -128,6 +128,7 @@ import {
   createProviderCatalogRuntime,
 } from "./runtime/provider-catalog";
 import { createSessionLaunchRuntime } from "./runtime/session-launch";
+import { createMirrorCodingRuntime } from "./mirrorcoding/runtime";
 import { createSessionCoordination } from "./runtime/session-coordination";
 import { createScheduledRuntime } from "./runtime/scheduled";
 import { createDesktopServices } from "./services/desktop-services";
@@ -681,9 +682,15 @@ const {
   speech,
 } = pluginServices;
 
+const mirrorCoding = createMirrorCodingRuntime({
+  dataDir, getHost: () => host, modelsDev: modelsDevCatalog,
+  openExternal: safeOpenExternal, send: sendToRenderer,
+});
+
 const providerCatalogRuntime = createProviderCatalogRuntime({
   getHost: () => host,
   modelsDevCatalog,
+  mirrorCoding,
 });
 const {
   bindingForModel,
@@ -700,6 +707,7 @@ const {
 } = providerCatalogRuntime;
 
 const createdSessionLaunchRuntime = createSessionLaunchRuntime({
+  mirrorCoding,
   runtimeState,
   logger,
   userMcp,
@@ -1169,6 +1177,7 @@ const eventPersistence = createEventPersistence({
 const { persistAgentEvent } = eventPersistence;
 
 const sidecarRuntime = createSidecarRuntime({
+  mirrorCoding,
   runtimeState,
   steeringReplies,
   logger,
@@ -1245,6 +1254,7 @@ const { bootHostStatus, runtimeArch, bootBackends } = runtimeLifecycle;
 
 function registerIpc() {
   return registerIpcHandlers({
+    mirrorCoding,
     traySessions: applicationLifecycle!.traySessions,
     ipcMain,
     getMainWindow: () => mainWindow,
@@ -1382,6 +1392,7 @@ const startupState: StartupState = {
 };
 
 registerApplicationStartup({
+  mirrorCoding,
   hasSingleInstanceLock,
   state: startupState,
   dataDir,
@@ -1469,6 +1480,7 @@ const shutdownState: ShutdownState = {
 };
 
 registerShutdownHandlers({
+  mirrorCoding,
   hasSingleInstanceLock,
   state: shutdownState,
   getHost: () => host,

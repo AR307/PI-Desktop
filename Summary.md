@@ -17,7 +17,8 @@ local tools, subagents, model providers, plugins, Skills, MCP, and remote hosts.
 - The existing GitHub fork is the remote source/archive. The full Git history
   was cloned, `origin` retained, and `upstream` added locally.
 
-This document records source inspection, not a successful application run.
+The onboarding sections below record the initial source inspection. Current
+implementation and actual runtime evidence appear in the update log.
 
 ## Code architecture
 
@@ -120,7 +121,8 @@ belong in project commits.
 
 Source inspection already found provider retry and transport-rebuild modules;
 network recovery work should start there. Their presence is not proof that all
-failure scenarios work. No network-failure experiment was run in this task.
+failure scenarios work. No network-failure experiment was run during initial
+onboarding; MirrorCoding acceptance below records the later local fault checks.
 
 The renderer already has feature modules and store slices. Several backend
 files remain large: `rpc/mod.rs` has 8,679 lines, agent `runtime.ts` 7,683,
@@ -129,7 +131,7 @@ revision, including inline tests where present. These are navigation and
 maintenance hotspots, not measured performance defects. Improve the module
 needed by an actual request rather than starting a repository-wide rewrite.
 
-## Onboarding verification and current readiness
+## Initial onboarding verification snapshot
 
 - Full, non-shallow clone completed; source revision and workspace manifests
   checked. The original `main` checkout had no local modifications.
@@ -151,6 +153,55 @@ needed by an actual request rather than starting a repository-wide rewrite.
   worktree. No delivery-policy files were rewritten.
 
 ## Update log
+
+### 2026-09-20 - MirrorCoding account and model usage
+
+- Added main-owned PKCE account lifecycle, OS-encrypted credentials, coalesced
+  catalog/refresh work, revoke-only retry records and the loopback streaming relay
+  under `apps/desktop/electron/main/mirrorcoding/`.
+- Rust projects account/group identities into existing managed provider rows;
+  shared contracts and host protocol are version 12. No database migration was
+  added, and disabled historical providers retain session references.
+- Added Settings Account, optional first-launch welcome, explicit default
+  selection, and model-then-group menu with actual multipliers/dynamic billing.
+  Welcome and confirmation dialogs use viewport centering, focus containment and
+  narrow-window sizing. Existing manual providers remain separate.
+- Resolved native model metadata/protocols and verified actual reasoning effort,
+  Anthropic budget and Gemini thinking requests through the real desktop. Added
+  request-scoped Google SDK transport support after observing its rejection of
+  custom fetch, and prevented automatic MirrorCoding replay after partial output.
+- Actual Electron + local MirrorCoding browser consent + controlled upstream
+  acceptance passed authorization, skip/restart, selection, native streams/tools,
+  inherited subagents, auxiliary calls, pre-output retries and active continuation.
+  HTTP/Rust recovery acceptance passed 27 account/relay fault scenarios. Targeted
+  agent-runtime tests passed 91 cases; Rust provider tests passed 39 cases.
+- Added the feature specification, ADR 0299, unreleased changelog, and repeatable
+  local acceptance instructions. Production-domain authorization, real paid model
+  behavior, OS default-browser association and installer packaging remain outside
+  the completed local fixture verification.
+- Delivery remains local commits only. Test profiles, screenshots, logs and
+  generated credentials stay outside Git; no service is deployed or pushed.
+
+### 2026-09-20 - MirrorCoding visual and delivery verification
+
+- Centered the welcome and running-task confirmation against the viewport, with
+  focus containment and narrow-window sizing. Changed group rows to place the
+  name/rate on the first line, with description and reasoning on separate lines.
+- Actual desktop acceptance now includes direct welcome login, skip/settings
+  login, restart, group keyboard navigation, dismissing the active-task dialog,
+  and confirmed logout while an ordinary provider continues its own request.
+- JS workspace build, desktop typecheck, lint, Rust formatting/build and clippy
+  succeeded. Clippy retains an existing `useless_format` warning in
+  `crates/host-core/src/user_skills.rs:921`; the desktop bundler reports large
+  chunks. Desktop targeted tests passed 123 cases, shared tests 870, i18n 25;
+  the final menu-only rerun passed 23 cases after the layout change.
+- Host-runtime tests passed 28 of 29. The existing launch-resolver test expects
+  `/data/scratch/s1` while Node's `path.join` produces Windows separators.
+  Both the resolver and that test are unchanged from `origin/main`; this is a
+  pre-existing Windows test portability issue, not a MirrorCoding runtime failure.
+- Refreshed `origin/main` before candidate preparation; it remains
+  `996922fa729870e88ed9e439aa6959e388c12f91`. No main checkout, server deployment,
+  real account, paid provider, or published branch was used for acceptance.
 
 ### 2026-09-20 - Initial architecture onboarding
 

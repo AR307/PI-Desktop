@@ -1,0 +1,17 @@
+.mirrorcoding-account { display: grid; gap: 20px; }
+.mirrorcoding-card { display: grid; gap: 12px; padding: 20px; }
+.mirrorcoding-card h2, .mirrorcoding-card h3, .mirrorcoding-dialog h2 { margin: 0; }
+.mirrorcoding-card p, .mirrorcoding-dialog p { margin: 0; color: var(--ds-text-secondary); line-height: 1.6; overflow-wrap: anywhere; }
+.mirrorcoding-heading { display: flex; align-items: center; gap: 14px; }
+.mirrorcoding-mark { display: grid; place-items: center; width: 44px; height: 44px; flex: none; border-radius: 12px; background: var(--ds-accent); color: var(--ds-bg-primary); font-weight: 700; }
+.mirrorcoding-actions { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.mirrorcoding-status { font-weight: 600; }
+.mirrorcoding-name { overflow-wrap: anywhere; }
+.mirrorcoding-group-summary { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; padding: 12px 0; border-top: 1px solid var(--ds-border-default); }
+.mirrorcoding-group-summary > div { flex: 1; min-width: 130px; }
+.mirrorcoding-dialog { position: fixed; inset: 0; margin: auto; width: min(480px, calc(100vw - 32px)); max-height: calc(100vh - 32px); overflow-y: auto; pointer-events: auto; box-sizing: border-box; padding: 28px; border: 1px solid var(--ds-border-default); border-radius: 18px; background: var(--ds-bg-elevated-opaque); color: var(--ds-text-primary); }
+.mirrorcoding-dialog[open] { display: grid; gap: 20px; }
+.mirrorcoding-dialog::backdrop { background: color-mix(in oklab, var(--ds-bg-under) 60%, transparent); }
+.mirrorcoding-error { color: var(--ds-error) !important; }
+.mirrorcoding-card label { display: grid; gap: 8px; }
+.mirrorcoding-card select { width: 100%; min-width: 0; }

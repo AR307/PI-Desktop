@@ -1,5 +1,27 @@
 # 04. E2E Test Plan
 
+## MirrorCoding local acceptance
+
+Run the MirrorCoding suites on the dedicated task candidate incorporating the
+latest `origin/main`; record candidate/base revisions and the artifact directory.
+Do not merge into local main for validation.
+
+- `apps/desktop/test/e2e/mirrorcoding/acceptance.mjs`: actual Electron window,
+  Edge consent against a local MirrorCoding server, actual Rust/Node runtime,
+  controlled HTTP/SSE upstream. Covers centered welcome/confirmation, skip and
+  restart, Account settings, model→group selection/prices, four protocols with
+  reasoning parameters, tool continuation, inherited subagent, auxiliary calls,
+  429/503, interrupted output/Continue and scoped logout.
+- `apps/desktop/test/e2e/mirrorcoding/recovery.mjs`: account/relay service workflow
+  with real Rust persistence and controlled local OAuth/HTTP faults. Covers
+  concurrent rotation, PKCE, cancellation/timeout, network/empty catalogs,
+  permission refresh, group encoding, SDK auth stripping, stop propagation,
+  account reuse/switch and offline revocation retry.
+
+Keep screenshots, reports and isolated profiles outside Git. Production origin
+verification requires a separately authorized run; local acceptance is not
+production deployment evidence. See the suite README for prerequisites.
+
 > Scope: MVP acceptance scenarios plus current shipped product increments for PI-Desktop
 > Status: Accepted (protocol/Electron automation is active; full desktop Playwright remains planned)
 > Cross-references: [acceptance-criteria](02-acceptance-criteria.md) · [milestones](01-mvp-milestones.md) · [ai-development-workflow](03-ai-development-workflow.md) · [change-checklist](05-change-checklist.md)

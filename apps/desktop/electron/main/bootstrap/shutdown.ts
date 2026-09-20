@@ -13,6 +13,7 @@ import type { AppUpdaterController } from "../updater";
 import type { UserMcpRuntime } from "../user-mcp";
 import type { McpControlServer } from "../mcp-control";
 import type { McpOAuthManager } from "../mcp-oauth";
+import type { MirrorCodingRuntime } from "../mirrorcoding/runtime";
 import { getActiveRemoteHostsBoot, setActiveRemoteHostsBoot } from "./remote-hosts";
 
 const QUIT_TURN_SETTLE_BUDGET_MS = 2_000;
@@ -29,6 +30,7 @@ export type ShutdownState = {
 };
 
 export type ShutdownDependencies = {
+  mirrorCoding: MirrorCodingRuntime;
   hasSingleInstanceLock: boolean;
   state: ShutdownState;
   getHost: () => HostProcess | null;
@@ -50,6 +52,7 @@ export type ShutdownDependencies = {
 
 /** Register the last-window and before-quit resource lifecycle handlers. */
 export function registerShutdownHandlers({
+  mirrorCoding,
   hasSingleInstanceLock,
   state,
   getHost,
@@ -145,6 +148,7 @@ export function registerShutdownHandlers({
         logger,
       });
       const hostShutdown = getHost()?.dispose();
+      mirrorCoding.dispose();
       const mcpShutdown = getMcpControl()?.stop();
       const pluginPanelShutdown = pluginPanels.closeAll();
       updater.dispose();

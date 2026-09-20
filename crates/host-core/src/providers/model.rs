@@ -3,6 +3,8 @@ use super::*;
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ProviderPublic {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mirror_coding: Option<MirrorCodingProvider>,
     pub id: String,
     pub name: String,
     pub vendor_key: String,

@@ -1,6 +1,9 @@
 import type { EnglishCatalog } from "../en/index.js";
 
+import { mirrorCodingZhCN } from "../mirrorcoding.js";
+
 export const zhTW = {
+  mirrorCoding: mirrorCodingZhCN,
   app: {
     shellName: "PI-Desktop",
     tagline: "本地 AI 程式設計助手",

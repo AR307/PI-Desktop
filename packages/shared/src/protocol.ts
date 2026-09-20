@@ -1,4 +1,4 @@
-export const PROTOCOL_VERSION = 11 as const;
+export const PROTOCOL_VERSION = 12 as const;
 export const SCHEMA_VERSION = 16 as const;
 export const APP_ID = "net.aiuo.pi-desktop";
 export const APP_NAME = "PI-Desktop";
@@ -50,6 +50,13 @@ export type WindowControlAction = (typeof WINDOW_CONTROL_ACTIONS)[number];
 
 export const IPC = {
   invoke: {
+    mirrorCodingGetState: "pi-desktop/mirrorcoding/getState",
+    mirrorCodingLogin: "pi-desktop/mirrorcoding/login",
+    mirrorCodingCancelLogin: "pi-desktop/mirrorcoding/cancelLogin",
+    mirrorCodingRefresh: "pi-desktop/mirrorcoding/refresh",
+    mirrorCodingLogout: "pi-desktop/mirrorcoding/logout",
+    mirrorCodingRetryRevocation: "pi-desktop/mirrorcoding/retryRevocation",
+    mirrorCodingCompleteWelcome: "pi-desktop/mirrorcoding/completeWelcome",
     appGetVersion: "pi-desktop/app/getVersion",
     appOpenFeedback: "pi-desktop/app/openFeedback",
     appHealth: "pi-desktop/app/health",
@@ -305,6 +312,7 @@ export const IPC = {
     nativeMenuAction: "pi-desktop/menu/nativeAction",
   },
   event: {
+    mirrorCodingChanged: "pi-desktop/mirrorcoding/changed",
     pluginChanged: "pi-desktop/event/pluginChanged",
     /** Progress of an install or update, while it is still running. */
     pluginInstallProgress: "pi-desktop/plugin/event/installProgress",

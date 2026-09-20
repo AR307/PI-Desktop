@@ -1,5 +1,10 @@
 # PI-Desktop Baseline Freeze
 
+Post-baseline MirrorCoding amendment (2026-09-20): protocol version 12 adds
+main-owned account authorization and group providers without a database schema
+change. See [MirrorCoding account](03-runtime/21-mirrorcoding-account.md) and
+ADR 0299. Historical baseline version references below describe their releases.
+
 - Baseline Version: `0.4.18`
 - Date: `2026-09-14`
 - Status: `Frozen for implementation details (Plan checkpoint artifact + approval/execution startup fence + protocol v11 + schema v16 + host-owned plugin session import/read/update/delete P0/P1 + selectable shell catalog + icon-free composer prompt row + turn-boundary context checkpoint compaction + session-scoped work panel + edge-specific work-panel/chat resize ownership + models.dev model catalog with a bundled release snapshot + provider/runtime safety + M5 hardening + settings IA + project archive + sidebar organization + app update delivery + three-platform release + Extensions page density and theme-readable actions + custom global UI font + ChatGPT-style logical project groups)`

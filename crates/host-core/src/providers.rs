@@ -13,6 +13,7 @@ pub(crate) use crate::secrets::{
 
 mod catalog;
 mod credentials;
+mod mirrorcoding;
 mod model;
 mod order;
 mod repository;
@@ -20,6 +21,7 @@ mod validation;
 
 pub use catalog::{cache_discovered_models, list_models};
 pub use credentials::get_secret_for_provider;
+pub use mirrorcoding::{sync_mirrorcoding, MirrorCodingProvider, MirrorCodingSync};
 pub use model::{
     DiscoveredModelInput, ModelBinding, ModelCatalogItem, ProviderCreateInput, ProviderPublic,
     ProviderUpdateInput,

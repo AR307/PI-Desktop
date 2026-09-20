@@ -158,6 +158,8 @@ export function registerAgentIpc({
       try {
         launch = await launchFor(pinnedProviderId, pinnedModelId || undefined);
       } catch (error) {
+        const pinned = await host.call<{ provider?: { authKind?: string } }>("providers.get", { id: pinnedProviderId });
+        if (pinned.provider?.authKind === "mirrorcoding") throw error;
         logger.app("session", "warn", "prompt enhancement model unavailable", {
           data: {
             pinnedProviderId,

@@ -118,7 +118,7 @@ export function ignoreBrokenStdio(): void {
 }
 
 const SECRET_KEY_RE =
-  /token|secret|password|api[_-]?key|authorization|cookie|credential|private[_-]?key|client[_-]?secret/i;
+  /token|secret|password|api[_-]?key|authorization|cookie|credential|private[_-]?key|client[_-]?secret|x-pi-mirrorcoding-key/i;
 const SECRET_VALUE_RE =
   /\b(?:sk|rk|pk)-[A-Za-z0-9_-]{10,}\b|\b(?:gh[pousr]_|github_pat_|glpat-|xox[baprs]-|AIza|ya29\.)[A-Za-z0-9._-]{8,}\b/g;
 const SECRET_ASSIGNMENT_RE =

@@ -1,4 +1,7 @@
+import { mirrorCodingEn } from "../mirrorcoding.js";
+
 export const en = {
+  mirrorCoding: mirrorCodingEn,
   app: {
     shellName: "PI-Desktop",
     tagline: "Local AI coding partner",

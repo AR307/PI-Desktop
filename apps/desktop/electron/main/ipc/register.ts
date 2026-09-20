@@ -18,6 +18,8 @@ import { registerNotificationIpc } from "./notification-ipc";
 import { registerPluginIpc } from "./plugin-ipc";
 import { registerPluginUiIpc } from "./plugin-ui-ipc";
 import { registerProviderIpc } from "./provider-ipc";
+import { registerMirrorCodingIpc } from "../mirrorcoding/ipc";
+import type { MirrorCodingRuntime } from "../mirrorcoding/runtime";
 import { registerPullsIpc } from "./pulls-ipc";
 import { registerScheduledIpc } from "./scheduled-ipc";
 import { registerSessionIpc } from "./session-ipc";
@@ -34,6 +36,7 @@ import type { IpcRegistrar } from "./types";
 import type { createTraySessions } from "../tray-sessions";
 
 export type RegisterIpcDependencies = {
+  mirrorCoding: MirrorCodingRuntime;
   ipcMain: IpcMain;
   getMainWindow: () => BrowserWindow | null;
   getHost: () => HostProcess | null;
@@ -69,6 +72,7 @@ function wrap<T>(fn: () => Promise<T>): Promise<Result<T>> {
 
 export function registerIpcHandlers(dependencies: RegisterIpcDependencies) {
   const {
+    mirrorCoding,
     ipcMain,
     getMainWindow,
     getHost,
@@ -214,6 +218,7 @@ export function registerIpcHandlers(dependencies: RegisterIpcDependencies) {
   };
 
   registerAppIpc({
+    mirrorCoding,
     registrar,
     getHost,
     getPluginLauncherWindow,
@@ -268,6 +273,14 @@ export function registerIpcHandlers(dependencies: RegisterIpcDependencies) {
     listRuntimeProviders,
     enrichProviderList,
     bindingForModel,
+  });
+  registerMirrorCodingIpc({
+    registrar, runtime: mirrorCoding, activeTurns,
+    abort: async (sessionId) => {
+      const handler = ipcHandlers.get(IPC.invoke.agentAbort);
+      if (!handler) throw new Error("agent unavailable");
+      return handler({ sessionId });
+    },
   });
   const loadComposerTemplatesCached = createComposerTemplateLoader(logger);
   const composerCommandService = registerComposerIpc({

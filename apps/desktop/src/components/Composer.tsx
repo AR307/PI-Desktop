@@ -375,7 +375,7 @@ export function Composer({
       )
     : undefined;
   const modelLabel = provider && modelId
-    ? composerModelDisplayName(provider, modelId, selectedModel?.displayName)
+    ? `${composerModelDisplayName(provider, modelId, selectedModel?.displayName)}${provider.mirrorCoding ? ` · ${provider.mirrorCoding.groupName}` : ""}`
     : selectedModel?.displayName || modelId || t("chat.model");
   const modelMenu = useComposerModelMenu({
     mode,

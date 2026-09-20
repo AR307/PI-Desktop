@@ -365,6 +365,12 @@ export function registerProviderIpc({
         }
       };
 
+      if (provider?.authKind === "mirrorcoding") {
+        return {
+          models: (provider.enabled ? provider.models ?? [] : []).map((model) => decorate({ modelId: model.id, displayName: model.id })),
+          source: "catalog" as const,
+        };
+      }
       // A signed-in vendor account has no key to probe /models with, and pi-ai
       // already knows which models the account may use (Copilot narrows the
       // list to the subscription).

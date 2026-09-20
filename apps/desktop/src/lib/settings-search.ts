@@ -6,6 +6,7 @@
  */
 
 export type SettingsTabId =
+  | "account"
   | "general"
   | "ai"
   | "shortcuts"
@@ -50,6 +51,10 @@ export type SettingsNavEntry = {
 };
 
 export const SETTINGS_NAV: SettingsNavEntry[] = [
+  {
+    id: "account", labelKey: "mirrorCoding.account", titleKey: "mirrorCoding.account", group: "preferences",
+    keywordKeys: ["mirrorCoding.title", "mirrorCoding.login", "mirrorCoding.refresh", "mirrorCoding.logout"],
+  },
   {
     id: "general",
     labelKey: "settings.nav.general",

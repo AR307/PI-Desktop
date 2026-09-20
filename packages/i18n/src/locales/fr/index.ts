@@ -1,6 +1,9 @@
 import type { EnglishCatalog } from "../en/index.js";
 
+import { mirrorCodingEn } from "../mirrorcoding.js";
+
 export const fr = {
+  mirrorCoding: mirrorCodingEn,
   "app": {
     "shellName": "PI-Desktop",
     "tagline": "Partenaire de codage IA local",
