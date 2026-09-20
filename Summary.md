@@ -202,6 +202,15 @@ needed by an actual request rather than starting a repository-wide rewrite.
 - Refreshed `origin/main` before candidate preparation; it remains
   `996922fa729870e88ed9e439aa6959e388c12f91`. No main checkout, server deployment,
   real account, paid provider, or published branch was used for acceptance.
+- Final task candidate `4f22ee42a88d1e8695bd25173745ff30306bb572` includes that
+  base. Its Electron/browser suite passed all 47 checks and its HTTP/Rust
+  recovery suite passed all 27 checks. Local artifacts are retained under
+  `acceptance-candidate` and `recovery-candidate` outside this worktree. Screenshots
+  confirm centered dialogs in both themes and readable model/group rows.
+- Validation environment: Windows, Node 24.19.0, pnpm 11.18.0, Rust 1.90.0,
+  Electron 43.6.0, headed Edge, isolated Docker MirrorCoding authorization, and
+  controlled HTTP/SSE model responses. The following documentation-only commit
+  records results; it does not change the tested executable source.
 
 ### 2026-09-20 - Initial architecture onboarding
 
