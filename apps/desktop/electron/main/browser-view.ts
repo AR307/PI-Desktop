@@ -1,4 +1,4 @@
-import { shell, WebContentsView, type BrowserWindow } from "electron";
+import { shell, WebContentsView, type BrowserWindow, type WebContents } from "electron";
 import { statSync, watch, type FSWatcher } from "node:fs";
 import { dirname, isAbsolute, resolve, sep } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -85,6 +85,8 @@ export class BrowserPane {
   private watcher: FSWatcher | null = null;
   private watchedDir: string | null = null;
   private reloadTimer: NodeJS.Timeout | null = null;
+  private capturing = false;
+  private captureTail: Promise<unknown> = Promise.resolve();
 
   constructor(onState: (state: BrowserState) => void) {
     this.onState = onState;
@@ -112,6 +114,32 @@ export class BrowserPane {
     const wc = this.view?.webContents;
     if (!wc || wc.isDestroyed()) return null;
     return wc;
+  }
+
+  /**
+   * Chromium temporarily changes the viewport during capture, then restores
+   * its starting size. Defer native resizing until that restoration completes
+   * so it cannot overwrite a newer panel size. Captures share the same queue.
+   */
+  captureScreenshot<T>(capture: (wc: WebContents) => Promise<T>): Promise<T> {
+    const task = this.captureTail.then(async () => {
+      const wc = this.getWebContents();
+      if (!wc) {
+        throw Object.assign(new Error("browser guest is not available"), {
+          code: "UNAVAILABLE",
+        });
+      }
+      this.capturing = true;
+      try {
+        return await capture(wc);
+      } finally {
+        this.capturing = false;
+        this.applyBounds();
+      }
+    });
+    // A failed capture still rejects its caller without blocking later captures.
+    this.captureTail = task.catch(() => undefined);
+    return task;
   }
 
   navigate(raw: string, fileRoot: string | null = null): BrowserState | null {
@@ -187,7 +215,7 @@ export class BrowserPane {
       height: Math.max(0, Math.round(Number(bounds.height) || 0)),
     };
     this.bounds = safe;
-    if (this.view && this.visible) this.view.setBounds(safe);
+    this.applyBounds();
   }
 
   setVisible(visible: boolean): void {
@@ -234,7 +262,13 @@ export class BrowserPane {
     if (!this.window.contentView.children.includes(this.view)) {
       this.window.contentView.addChildView(this.view);
     }
-    this.view.setBounds(this.bounds);
+    this.applyBounds();
+  }
+
+  private applyBounds(): void {
+    if (this.view && this.visible && !this.capturing) {
+      this.view.setBounds(this.bounds);
+    }
   }
 
   private detach(): void {

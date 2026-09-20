@@ -977,6 +977,30 @@ identify the platform validation still needed.
 - **Status**: Unit-covered (`bundled-plugins`, `browser-cdp`,
   `browser-preview-tool`); full Electron journey pending
 
+#### E2E-008b-layout: Browser resizing and work-panel header dragging
+
+- **Preconditions**: Built Electron app, isolated profile, bundled Browser, and
+  a local responsive page with a tall document and a 600px media breakpoint.
+- **Steps**: Open Browser from the work-panel launcher. Drag the divider from
+  360px to 650px and back while taking full-page and raw CDP screenshots. Run
+  two concurrent captures; reject an invalid capture and resize again. Maximize
+  the panel, resize the native window, restore, collapse, and reopen. Click the
+  new-tab and close buttons with an overflowing tab strip. With actual OS mouse
+  input, drag blank header space in docked and preview modes, then click tabs
+  and panel buttons.
+- **Expected**: Native guest bounds, page viewport, and responsive columns
+  follow the final panel size without reload. Captures preserve their image
+  result or error and never overwrite a newer viewport. Guest content remains
+  inside its chrome. Empty header space moves the native window; tabs and
+  buttons remain interactive.
+- **Automation**: `node scripts/e2e-browser-layout.mjs` runs the real desktop
+  and loopback fixture, retaining profile, geometry results, and separate shell
+  and guest screenshots. `PI_DESKTOP_HOST_BIN` and `PI_DESKTOP_ELECTRON_BIN`
+  can select built binaries; `PI_DESKTOP_LAYOUT_ARTIFACT_DIR` selects output.
+  Native titlebar dragging also requires an OS-input check, not a DOM click.
+- **Specs linked**: `04-ux/09-interaction-patterns.md`, ADR 0170
+- **Acceptance**: Electron + local HTTP fixture + native mouse + visual review
+
 #### E2E-008c: Quiet intervals explain active work
 
 - **Preconditions**: A deterministic provider fixture can delay the first

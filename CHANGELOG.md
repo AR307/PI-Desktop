@@ -1,5 +1,11 @@
 # Unreleased local changes
 
+## Work-panel window behavior
+
+- Allow native window dragging from empty space beside work-panel tabs.
+- Keep browser pages responsive when screenshot capture overlaps panel or
+  window resizing, including concurrent and failed captures.
+
 ## MirrorCoding account integration
 
 - Added optional first-launch authorization and Settings → Account.

@@ -154,6 +154,29 @@ needed by an actual request rather than starting a repository-wide rewrite.
 
 ## Update log
 
+### 2026-09-20 - Work-panel dragging and browser resize
+
+- Moved the tab-strip drag exclusion onto individual tabs, leaving header
+  whitespace available to the native window while keeping controls clickable.
+- Reproduced Chromium restoring a 360px capture viewport after the native
+  browser had already grown to 750px. BrowserPane now queues screenshot work
+  and applies the latest requested bounds after capture, including failures.
+  Both the screenshot API and raw CDP capture share that lifecycle.
+- Added a real Electron regression runner with a loopback responsive fixture,
+  isolated profiles, retained geometry evidence and guest screenshots. It covers
+  eight capture/resize overlaps, concurrent captures, capture failure recovery,
+  panel maximize/restore, native window resizing, collapse/reopen and tab controls.
+- Desktop build, typecheck, lint and 79 relevant existing tests passed. The
+  Electron runner passed 16 geometry scenarios and tab control interactions.
+  No Rust or provider changes were made; no paid API or account was used.
+- Native mouse double-click on the fixed header invoked OS maximize. The
+  automation drag gesture did not move either the panel header or the unchanged
+  chat header, so it does not establish a successful OS drag. The built fixed
+  window remains open for the user's direct drag check.
+- Implementation stays in `codex/window-drag-browser-resize`, based on the
+  existing MirrorCoding feature and refreshed `origin/main` at `996922fa`.
+  Delivery is local only; application profiles and artifacts remain outside Git.
+
 ### 2026-09-20 - MirrorCoding account and model usage
 
 - Added main-owned PKCE account lifecycle, OS-encrypted credentials, coalesced
