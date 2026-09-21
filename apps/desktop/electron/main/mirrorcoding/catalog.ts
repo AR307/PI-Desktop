@@ -1,6 +1,6 @@
 import type {
-  MirrorCodingCatalog, MirrorCodingEndpoint, MirrorCodingImageEndpoint,
-  MirrorCodingProviderSync, ModelBinding,
+  ImageGenerationCapability, MirrorCodingCatalog, MirrorCodingEndpoint,
+  MirrorCodingImageRoutes, MirrorCodingProviderSync, ModelBinding,
 } from "@pi-desktop/shared";
 import { genericModelConfig, type ModelConfig } from "@pi-desktop/agent-runtime";
 import { modelConfigFromModelsDev, type ModelsDevCatalog } from "../models-dev-catalog";
@@ -45,17 +45,20 @@ function parseImageCapability(value: unknown): NonNullable<MirrorCodingCatalog["
   if (supportsChat !== undefined && typeof supportsChat !== "boolean") throw new Error("invalid_catalog");
   const generationPath = image.generation_path ?? image.generationPath;
   const referencePath = image.reference_path ?? image.referencePath;
-  for (const path of [generationPath, referencePath]) {
-    if (path !== undefined && (typeof path !== "string" || !path.startsWith("/"))) throw new Error("invalid_catalog");
-  }
+  if (generationPath !== "/v1/images/generations" ||
+      (referencePath !== undefined && referencePath !== "/v1/images/generations" && referencePath !== "/v1/images/edits") ||
+      maxCount === undefined || supportsChat === undefined) throw new Error("invalid_catalog");
+  const sizes = optionalStringArray(image.sizes);
+  const qualities = optionalStringArray(image.qualities);
+  const aspectRatios = optionalStringArray(image.aspect_ratios ?? image.aspectRatios);
   return {
-    ...(generationPath === undefined ? {} : { generationPath: generationPath as string }),
-    ...(referencePath === undefined ? {} : { referencePath: referencePath as string }),
-    ...(optionalStringArray(image.sizes) ? { sizes: optionalStringArray(image.sizes) } : {}),
-    ...(optionalStringArray(image.qualities) ? { qualities: optionalStringArray(image.qualities) } : {}),
-    ...(optionalStringArray(image.aspect_ratios ?? image.aspectRatios) ? { aspectRatios: optionalStringArray(image.aspect_ratios ?? image.aspectRatios) } : {}),
-    ...(maxCount === undefined ? {} : { maxCount: maxCount as number }),
-    ...(supportsChat === undefined ? {} : { supportsChat: supportsChat as boolean }),
+    generationPath,
+    ...(referencePath === undefined ? {} : { referencePath }),
+    ...(sizes ? { sizes } : {}),
+    ...(qualities ? { qualities } : {}),
+    ...(aspectRatios ? { aspectRatios } : {}),
+    maxCount: maxCount as number,
+    supportsChat: supportsChat as boolean,
   };
 }
 
@@ -132,8 +135,9 @@ export function compileCatalog(catalog: MirrorCodingCatalog, modelsDev: ModelsDe
     accountId: catalog.user.id,
     groups: catalog.groups.map((group) => {
       const routes: Record<string, MirrorCodingEndpoint> = {};
-      const imageRoutes: Record<string, MirrorCodingImageEndpoint> = {};
+      const imageRoutes: Record<string, MirrorCodingImageRoutes> = {};
       const imageCapabilities: NonNullable<MirrorCodingProviderSync["groups"][number]["metadata"]["imageCapabilities"]> = {};
+      const imageModels: Record<string, ImageGenerationCapability> = {};
       const models: ModelBinding[] = [];
       for (const model of group.models) {
         const config = modelMetadata(modelsDev, model.id);
@@ -141,19 +145,43 @@ export function compileCatalog(catalog: MirrorCodingCatalog, modelsDev: ModelsDe
         const candidates = [...new Set([...(native ? [native] : []), ...Object.keys(ENDPOINTS) as MirrorCodingEndpoint[]])];
         const endpoint = candidates.find((kind) => {
           const advertised = catalog.supportedEndpoints[kind];
-          return model.supportedEndpointTypes.includes(kind) && advertised?.method === "POST" && advertised.path === ENDPOINTS[kind].path;
+          return model.image?.supportsChat !== false && model.supportedEndpointTypes.includes(kind) && advertised?.method === "POST" && advertised.path === ENDPOINTS[kind].path;
         });
-        const imageEndpoint = (["image-edit", "image-generation"] as const).find((kind) => {
-          const advertised = catalog.supportedEndpoints[kind];
-          const declaredPath = kind === "image-edit" ? model.image?.referencePath : model.image?.generationPath;
-          return model.supportedEndpointTypes.includes(kind) && advertised?.method === "POST" && advertised.path === IMAGE_ENDPOINTS[kind].path &&
-            (!declaredPath || declaredPath === advertised.path);
-        });
-        if (!endpoint && !imageEndpoint) continue;
+        // Image routes are only usable when the server supplied the image
+        // capability object. Endpoint type names alone are not sufficient:
+        // the capability carries the generation/reference path contract.
+        const imageGeneration = model.image?.generationPath === IMAGE_ENDPOINTS["image-generation"].path &&
+          model.supportedEndpointTypes.includes("image-generation") &&
+          catalog.supportedEndpoints["image-generation"]?.method === "POST" &&
+          catalog.supportedEndpoints["image-generation"]?.path === IMAGE_ENDPOINTS["image-generation"].path;
+        const imageReferenceKind = model.image?.referencePath === IMAGE_ENDPOINTS["image-edit"].path
+          ? "image-edit"
+          : model.image?.referencePath === IMAGE_ENDPOINTS["image-generation"].path
+            ? "image-generation"
+            : undefined;
+        const imageReference = imageGeneration && imageReferenceKind &&
+          model.supportedEndpointTypes.includes(imageReferenceKind) &&
+          catalog.supportedEndpoints[imageReferenceKind]?.method === "POST" &&
+          catalog.supportedEndpoints[imageReferenceKind]?.path === IMAGE_ENDPOINTS[imageReferenceKind].path;
+        if (!endpoint && !imageGeneration) continue;
         if (endpoint) routes[model.id] = endpoint;
-        if (imageEndpoint) {
-          imageRoutes[model.id] = imageEndpoint;
-          imageCapabilities[model.id] = model.image ?? {};
+        if (imageGeneration && model.image) {
+          imageRoutes[model.id] = {
+            generation: "image-generation",
+            ...(imageReference ? { reference: imageReferenceKind } : {}),
+          };
+          imageCapabilities[model.id] = model.image;
+          imageModels[model.id] = {
+            generation_path: "/v1/images/generations",
+            ...(imageReference && model.image.referencePath ? {
+              reference_path: model.image.referencePath as "/v1/images/generations" | "/v1/images/edits",
+            } : {}),
+            ...(model.image.sizes ? { sizes: model.image.sizes } : {}),
+            ...(model.image.qualities ? { qualities: model.image.qualities } : {}),
+            ...(model.image.aspectRatios ? { aspect_ratios: model.image.aspectRatios } : {}),
+            max_count: model.image.maxCount ?? 1,
+            supports_chat: model.image.supportsChat ?? false,
+          };
         }
         models.push({
           id: model.id, contextWindow: config.contextWindow, contextWindowSource: "catalog",
@@ -167,7 +195,7 @@ export function compileCatalog(catalog: MirrorCodingCatalog, modelsDev: ModelsDe
           accountId: catalog.user.id, groupId: group.id, groupName: group.name,
           description: group.description, ratio: group.dynamicBilling ? null : group.ratio,
           dynamicBilling: group.dynamicBilling, routes,
-          ...(Object.keys(imageRoutes).length ? { imageRoutes, imageCapabilities } : {}),
+          ...(Object.keys(imageRoutes).length ? { imageRoutes, imageCapabilities, imageModels } : {}),
         }, models,
       };
     }),

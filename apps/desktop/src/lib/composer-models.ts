@@ -35,13 +35,19 @@ function configuredModelIds(provider: ConfiguredProvider): string[] {
 export function composerModelsForProvider(
   provider: ConfiguredProvider,
   discovered: readonly ModelInfo[] | undefined,
-  imageGeneration?: ImageGenerationBindings | null,
+  imageGenerationOrTask?: ImageGenerationBindings | null | "chat" | "image",
 ): ModelInfo[] {
-  return configuredModelIds(provider).filter((modelId) =>
-    !isImageGenerationModel(imageGeneration, provider.id, modelId),
-  ).filter((modelId) =>
-    provider.mirrorCoding ? Boolean(provider.mirrorCoding.routes[modelId]) : true,
-  ).map((modelId) => {
+  const task = typeof imageGenerationOrTask === "string" ? imageGenerationOrTask : "chat";
+  const imageGeneration = typeof imageGenerationOrTask === "string" ? undefined : imageGenerationOrTask;
+  return configuredModelIds(provider).filter((modelId) => {
+    if (provider.mirrorCoding) {
+      return task === "image"
+        ? Boolean(provider.mirrorCoding.imageRoutes?.[modelId] || provider.mirrorCoding.imageModels?.[modelId])
+        : Boolean(provider.mirrorCoding.routes[modelId]) && !isImageGenerationModel(imageGeneration, provider.id, modelId);
+    }
+    if (task === "image") return isImageGenerationModel(imageGeneration, provider.id, modelId);
+    return !isImageGenerationModel(imageGeneration, provider.id, modelId);
+  }).map((modelId) => {
     const metadata = (discovered ?? []).find((model) =>
       sameComposerModelId(model.modelId, modelId),
     );

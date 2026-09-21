@@ -13,6 +13,19 @@ export * from "./types/agent.js";
 export * from "./types/workspace.js";
 export * from "./types/providers.js";
 export * from "./types/mirrorcoding.js";
+export {
+  type ImageGenerationCapability,
+  type ImageGenerationOptions,
+  type ImageSessionConfig,
+  type ImageModelInfo,
+  type ImageGenerationRequest,
+  type GeneratedImage,
+  type ImageGenerationResult,
+  type ImageOutput,
+  type ImageGenerationState,
+  validateImageOptions,
+  parseImageCapability,
+} from "./types/images.js";
 export * from "./types/settings.js";
 export * from "./types/plugins.js";
 export * from "./types/capabilities.js";

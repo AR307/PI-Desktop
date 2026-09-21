@@ -82,3 +82,6 @@ The shared, agent-runtime, and desktop TypeScript builds pass in this worktree.
 The workspace currently runs Node `22.12.0`; the repository declares
 `>=22.19.0`, so final release validation must rerun under a supported Node
 runtime. Rust validation is still pending.
+
+The old image contract introduced `ImageSessionConfig` and the desktop image
+handoff requirements; these are being reconciled with the new baseline.
