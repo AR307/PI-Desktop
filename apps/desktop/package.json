@@ -73,6 +73,8 @@
     "unified": "^11.0.5",
     "vite": "^7.3.6",
     "ws": "8.21.1",
+    "https-proxy-agent": "7.0.6",
+    "socks-proxy-agent": "8.0.5",
     "zustand": "^5.0.15"
   },
   "build": {

@@ -9,7 +9,29 @@
   error class between browser and Host. Desktop share UI, scoped relay and the
   React/Capacitor Android implementation are integrated in follow-up commits.
 
-## Project overview
+### Desktop sync implementation
+
+- Added opt-in project/session sharing, centered pairing dialogs and the account
+  page's mobile device manager. Main owns the outbound MC relay; the restricted
+  mobile peer checks current sharing scope for history, commands and attachments.
+- Reused AgentHost queues, permission/plan approvals and questions. Mobile Stop
+  uses the same immediate interruption path as the desktop composer. Client
+  message IDs remain stable through the Rust-backed queue and process restart.
+- Reused ImageService for mobile generation and result downloads. Admission now
+  acknowledges only after parameter validation and user-message persistence so
+  an invalid image request retains the mobile draft and reference images.
+- Kept attachment access tied to explicit session messages and chunked transfer.
+  Session history uses Rust's bounded query instead of loading every message.
+- AgentHost 26 tests, host ports 4 tests, Rust queue 10 tests, shared 876 tests,
+  RACP 21 tests and i18n 25 tests passed. Desktop production build, typecheck,
+  repository lint and Rust formatting passed; Clippy completed with one existing
+  unrelated `user_skills.rs` warning.
+- Real isolated Electron/mobile browser flows have exercised pairing, scope
+  isolation, history, continuation, queues, immediate stop, questions, approval,
+  photos, reconnect, image generation, restart and revocation. Final candidate
+  counts and native Android acceptance are recorded after the remaining checks.
+
+## Project and source baseline
 
 This branch starts from upstream PI-Desktop `920b12b8e` (0.15.6, 2026-09-24)
 and adds MirrorCoding support without replacing upstream agent, image, plan, or
@@ -54,9 +76,9 @@ Capacitor application after the desktop relay contracts are in place.
    bindings are now parsed and routed through the same local relay. Reference
    images use the documented JSON data-URL shape, while credentials remain in
    Electron main.
-4. Mobile-sync shared contracts and encrypted desktop device credentials are
-   present, while scope enforcement, the MC relay service, Android client, and
-   mobile configuration remain follow-up work.
+4. Mobile-sync shared contracts, scoped desktop relay service, pairing UI, and
+   attachment/image forwarding are implemented. Android client and mobile
+   configuration controls remain follow-up work.
 5. Window sizing, panel dragging, and Plan prompt-question behavior have been
    migrated with focused regression coverage.
 
@@ -71,9 +93,9 @@ identity with Electron `safeStorage` and writes it atomically. The optional
 `MobileSyncService` IPC seam validates pairing, cancellation, refresh, and
 grant-revocation inputs without changing the existing remote-host protocol.
 
-The relay and catalog image capability layer are present; image parameter
-validation, the desktop image mode UI, scope enforcement, Android client, and
-MC service implementation remain separate follow-up work.
+The relay and catalog image capability layer are present. Desktop scope checks
+cover history, continuation, approvals, attachments and image jobs; Android
+client and MC service integration are migrated in the next commits.
 
 ## Latest implementation update
 

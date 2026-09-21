@@ -13,6 +13,8 @@ import type { AppUpdaterController } from "../updater";
 import type { UserMcpRuntime } from "../user-mcp";
 import type { McpControlServer } from "../mcp-control";
 import type { McpOAuthManager } from "../mcp-oauth";
+import type { MirrorCodingRuntime } from "../mirrorcoding/runtime";
+import type { MobileSyncService } from "../mobile-sync/service";
 import { getActiveRemoteHostsBoot, setActiveRemoteHostsBoot } from "./remote-hosts";
 
 const QUIT_TURN_SETTLE_BUDGET_MS = 2_000;
@@ -29,6 +31,8 @@ export type ShutdownState = {
 };
 
 export type ShutdownDependencies = {
+  mobileSync?: MobileSyncService;
+  mirrorCoding: Pick<MirrorCodingRuntime, "dispose">;
   hasSingleInstanceLock: boolean;
   state: ShutdownState;
   getHost: () => HostProcess | null;
@@ -50,6 +54,8 @@ export type ShutdownDependencies = {
 
 /** Register the last-window and before-quit resource lifecycle handlers. */
 export function registerShutdownHandlers({
+  mobileSync,
+  mirrorCoding,
   hasSingleInstanceLock,
   state,
   getHost,
@@ -145,6 +151,8 @@ export function registerShutdownHandlers({
         logger,
       });
       const hostShutdown = getHost()?.dispose();
+      mobileSync?.dispose();
+      mirrorCoding.dispose();
       const mcpShutdown = getMcpControl()?.stop();
       const pluginPanelShutdown = pluginPanels.closeAll();
       updater.dispose();

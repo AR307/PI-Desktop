@@ -31,6 +31,8 @@ export type ImageModelInfo = {
 export type ImageGenerationRequest = {
   sessionId: string;
   jobId?: string;
+  /** Shared identity for a mobile optimistic row and its durable desktop message. */
+  messageId?: string;
   providerId: string;
   modelId: string;
   prompt: string;

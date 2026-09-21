@@ -1,7 +1,11 @@
+import { mobileSyncEn } from "../mobile-sync.js";
+import { mobileEn } from "../mobile.js";
 import { imagesEn } from "../images.js";
 import type { EnglishCatalog } from "../en/index.js";
 
 export const fr = {
+  mobileSync: mobileSyncEn,
+  mobile: mobileEn,
   images: imagesEn,
   "app": {
     "shellName": "PI-Desktop",

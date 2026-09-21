@@ -1,7 +1,11 @@
+import { mobileSyncZhCN } from "../mobile-sync.js";
+import { mobileZhCN } from "../mobile.js";
 import { imagesZhCN } from "../images.js";
 import type { EnglishCatalog } from "../en/index.js";
 
 export const zhTW = {
+  mobileSync: mobileSyncZhCN,
+  mobile: mobileZhCN,
   images: imagesZhCN,
   app: {
     shellName: "PI-Desktop",

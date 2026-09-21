@@ -28,6 +28,7 @@ pub struct QueuedTurnInput {
     pub input_hash: String,
     pub content: String,
     pub session_message_id: Option<String>,
+    pub user_message_id: Option<String>,
     pub attachments: Option<Value>,
     pub permission_mode: String,
 }
@@ -44,6 +45,8 @@ pub struct QueuedTurn {
     pub content: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub session_message_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub user_message_id: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub attachments: Option<Value>,
     pub permission_mode: String,
@@ -66,6 +69,7 @@ fn row_to_entry(row: &rusqlite::Row<'_>) -> rusqlite::Result<QueuedTurn> {
         input_hash: row.get(4)?,
         content: row.get(5)?,
         session_message_id: row.get(10)?,
+        user_message_id: row.get(12)?,
         attachments: attachments.and_then(|text| serde_json::from_str(&text).ok()),
         permission_mode: row.get(7)?,
         position: row.get(8)?,
@@ -75,7 +79,9 @@ fn row_to_entry(row: &rusqlite::Row<'_>) -> rusqlite::Result<QueuedTurn> {
 }
 
 const SELECT: &str = "SELECT id, session_id, principal, idempotency_key, input_hash, content,
-        attachments_json, permission_mode, position, created_at, session_message_id, priority
+        attachments_json, permission_mode, position, created_at, session_message_id, priority,
+        (SELECT json_extract(value_json, '$.userMessageId') FROM kv
+         WHERE ns = 'turnQueueMetadata' AND key = turn_queue.id)
  FROM turn_queue";
 
 /// Delivery order: promoted entries first in click order (ascending
@@ -150,6 +156,17 @@ pub fn push(db: &Database, input: QueuedTurnInput) -> Result<QueuedTurn> {
             input.session_message_id
         ],
     )?;
+    if let Some(message_id) = &input.user_message_id {
+        tx.execute(
+            "INSERT INTO kv (ns, key, value_json, updated_at)
+             VALUES ('turnQueueMetadata', ?1, ?2, ?3)",
+            params![
+                id,
+                serde_json::json!({ "userMessageId": message_id }).to_string(),
+                created_at
+            ],
+        )?;
+    }
     tx.commit()?;
     Ok(QueuedTurn {
         id,
@@ -159,6 +176,7 @@ pub fn push(db: &Database, input: QueuedTurnInput) -> Result<QueuedTurn> {
         input_hash: input.input_hash,
         content: input.content,
         session_message_id: input.session_message_id,
+        user_message_id: input.user_message_id,
         attachments: input.attachments,
         permission_mode: input.permission_mode,
         position: max_position + 1,
@@ -187,10 +205,15 @@ pub fn list(db: &Database, session_id: Option<&str>) -> Result<Vec<QueuedTurn>> 
 /// Remove one entry; `false` when it was not queued. Positions of the
 /// remaining entries keep their relative order.
 pub fn remove(db: &Database, id: &str) -> Result<bool> {
-    let removed = db
-        .conn()
+    let tx = db.conn().unchecked_transaction()?;
+    let removed = tx
         .prepare_cached("DELETE FROM turn_queue WHERE id = ?1")?
         .execute(params![id])?;
+    tx.execute(
+        "DELETE FROM kv WHERE ns = 'turnQueueMetadata' AND key = ?1",
+        params![id],
+    )?;
+    tx.commit()?;
     Ok(removed > 0)
 }
 
@@ -330,9 +353,40 @@ mod tests {
             input_hash: format!("hash:{content}"),
             content: content.to_string(),
             session_message_id: None,
+            user_message_id: None,
             attachments: None,
             permission_mode: "ask".into(),
         }
+    }
+
+    #[test]
+    fn mobile_message_identity_survives_restart_and_dequeue() {
+        let (dir, db, session_id) = open_with_session();
+        let mut entry = input(
+            &session_id,
+            "Continue from my phone",
+            Some("mobile-request"),
+        );
+        let message_id = Uuid::new_v4().to_string();
+        entry.user_message_id = Some(message_id.clone());
+        let queued = push(&db, entry).unwrap();
+        drop(db);
+        let restarted = Database::open_in_dir(dir.path()).unwrap();
+        let restored = list(&restarted, Some(&session_id)).unwrap();
+        assert_eq!(
+            restored[0].user_message_id.as_deref(),
+            Some(message_id.as_str())
+        );
+        assert!(remove(&restarted, &queued.id).unwrap());
+        let count: i64 = restarted
+            .conn()
+            .query_row(
+                "SELECT COUNT(*) FROM kv WHERE ns = 'turnQueueMetadata' AND key = ?1",
+                params![queued.id],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(count, 0);
     }
 
     #[test]

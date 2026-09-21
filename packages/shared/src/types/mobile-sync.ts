@@ -1,5 +1,6 @@
 import type { RacpSession, RacpSessionSnapshot } from "../racp.js";
 import type { ModelModalities, SessionThinkingLevel, ThinkingLevel } from "./models.js";
+import type { ImageGenerationState, ImageSessionConfig } from "./images.js";
 import type { PlanProposal } from "./plans.js";
 
 /** A desktop-owned share. Project membership is resolved at request time. */
@@ -26,7 +27,6 @@ export type MobileGrant = {
   scope: MobileSyncScope;
   createdAt: string;
 };
-
 export type MobileSyncStatus = {
   status: "signed_out" | "connecting" | "online" | "offline" | "error";
   deviceId?: string;
@@ -34,15 +34,13 @@ export type MobileSyncStatus = {
   grants: MobileGrant[];
   error?: string;
 };
-
 /** Persisted through the host settings boundary; secrets remain in Electron main. */
 export type MobileSyncSettings = {
-  deviceId?: string;
+  deviceId: string;
   accountId: string;
   scopes: MobileSyncScope[];
   revokedGrantIds: string[];
 };
-
 export type MobileTaskMode = "agent" | "plan" | "goal" | "image";
 
 /** The subset of image capability metadata required by the mobile picker. */
@@ -55,21 +53,8 @@ export type MobileImageGenerationCapability = {
   maxCount?: number;
 };
 
-export type MobileImageSessionConfig = {
-  active: boolean;
-  providerId?: string;
-  modelId?: string;
-  options?: Record<string, unknown>;
-};
-
-export type MobileImageGenerationState = {
-  jobId: string;
-  sessionId: string;
-  status: "queued" | "running" | "completed" | "failed" | "aborted";
-  prompt?: string;
-  images?: string[];
-  error?: string;
-};
+export type MobileImageSessionConfig = ImageSessionConfig;
+export type MobileImageGenerationState = ImageGenerationState;
 
 export type MobileSession = RacpSession & {
   providerId?: string;

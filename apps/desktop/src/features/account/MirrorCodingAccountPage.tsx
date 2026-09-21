@@ -4,6 +4,7 @@ import { Button } from "../../components/ui";
 import { api } from "../../lib/api";
 import { AccountDialog } from "./AccountDialog";
 import { observeMirrorCoding, useMirrorCoding } from "./state";
+import { MobileSyncSettings } from "../mobile-sync/MobileSyncSettings";
 import "./account.css";
 
 export function MirrorCodingAccountPage() {
@@ -115,6 +116,8 @@ export function MirrorCodingAccountPage() {
           {account.catalog?.groups.length === 0 ? <p>{t("mirrorCoding.empty")}</p> : null}
         </section>
       ) : null}
+
+      {connected ? <MobileSyncSettings /> : null}
 
       {confirmation ? (
         <AccountDialog title={t("mirrorCoding.confirmTitle")} onCancel={() => setConfirmation(undefined)}>

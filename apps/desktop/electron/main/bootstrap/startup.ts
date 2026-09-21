@@ -29,6 +29,7 @@ import {
 } from "../mcp-control";
 import type { ModelsDevCatalog } from "../models-dev-catalog";
 import type { MirrorCodingRuntime } from "../mirrorcoding/runtime";
+import type { MobileSyncService } from "../mobile-sync/service";
 import type { AppUpdaterController } from "../updater";
 import type { HostProcess } from "../host-process";
 import type { Logger } from "../logger";
@@ -71,7 +72,8 @@ export type StartupState = {
 };
 
 export type StartupDependencies = {
-  mirrorCoding?: Pick<MirrorCodingRuntime, "start">;
+  mirrorCoding: Pick<MirrorCodingRuntime, "start">;
+  mobileSync?: MobileSyncService;
   hasSingleInstanceLock: boolean;
   state: StartupState;
   dataDir: string;
@@ -281,9 +283,6 @@ export function registerApplicationStartup(deps: StartupDependencies): void {
     let bootError: unknown = null;
     try {
       await bootBackends();
-      void mirrorCoding?.start().catch((error) => {
-        logger.app("provider", "warn", "MirrorCoding startup sync failed", { data: String(error) });
-      });
     } catch (error) {
       bootError = error;
       logger.app("runtime", "error", "backend boot failed", {
@@ -331,6 +330,10 @@ export function registerApplicationStartup(deps: StartupDependencies): void {
       // If the backend never started, retain the default focused/global path.
       applyPluginLauncherShortcut();
       applyToggleWindowShortcut();
+    }
+    if (host && !bootError) {
+      await deps.mirrorCoding.start();
+      await deps.mobileSync?.start();
     }
     await ensureWindow();
     if (process.env.PI_DESKTOP_MCP_CONTROL === "1") {

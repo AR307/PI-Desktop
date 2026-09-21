@@ -45,6 +45,7 @@ coverage/
 .turbo/
 
 # Local runtime data
+.artifacts/
 .pi-desktop/
 .pi-desktop-test/
 .pi/

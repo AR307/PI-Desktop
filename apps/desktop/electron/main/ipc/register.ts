@@ -170,6 +170,7 @@ export function registerIpcHandlers(dependencies: RegisterIpcDependencies) {
     const handler = async (...args: any[]) => {
       const result = await fn(...args);
       traySessions.observeInvoke(channel);
+      dependencies.mobileSync?.observeInvoke(channel);
       return result;
     };
     ipcHandlers.set(channel, handler);
@@ -288,6 +289,7 @@ export function registerIpcHandlers(dependencies: RegisterIpcDependencies) {
     bindingForModel,
   });
   registerImageIpc(registrar, mirrorCoding.images);
+  if (dependencies.mobileSync) registerMobileSyncIpc(registrar, dependencies.mobileSync);
   registerMirrorCodingIpc({
     registrar,
     runtime: mirrorCoding,

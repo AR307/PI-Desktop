@@ -41,8 +41,13 @@ describe("host ports", () => {
       status: "complete" as const,
     }));
     const port = createHostSessionPort(() => ({
-      async call<T>() {
-        return { session: { id: "s1", messages } } as T;
+      async call<T>(_method: string, params: Record<string, unknown> = {}) {
+        const limit = Number(params.messageLimit);
+        expect(limit).toBeGreaterThan(0);
+        const anchor = typeof params.messageAround === "string" ? messages.findIndex((message) => message.id === params.messageAround) : undefined;
+        const end = anchor !== undefined ? anchor + 1 : Number(params.messageBefore ?? messages.length);
+        const start = Math.max(0, end - limit);
+        return { session: { id: "s1", messages: messages.slice(start, end), messageStart: start, hasMoreBefore: start > 0 } } as T;
       },
     }));
     const page = await port.history("s1", { limit: 2, beforeItemId: "m4" });
@@ -66,6 +71,7 @@ describe("host ports", () => {
                 id: "q1",
                 sessionId: "s1",
                 principal: "phone",
+                userMessageId: "mobile-message",
                 inputHash: "h",
                 content: "later",
                 permissionMode: "auto",
@@ -82,10 +88,10 @@ describe("host ports", () => {
       },
     }));
     const [record] = await store.listAll();
-    expect(record).toMatchObject({ id: "q1", principalSubject: "phone", effectivePermissionMode: "auto", priority: 2 });
+    expect(record).toMatchObject({ id: "q1", principalSubject: "phone", effectivePermissionMode: "auto", priority: 2, userMessageId: "mobile-message" });
     expect(record?.createdAt).toBe(Date.parse("2026-09-18T00:00:00.000Z"));
     await store.push({ ...record!, attachments: [{ path: "/x", name: "x", kind: "file" }] });
-    expect(calls.at(-1)?.params).toMatchObject({ id: "q1", principal: "phone", permissionMode: "auto" });
+    expect(calls.at(-1)?.params).toMatchObject({ id: "q1", principal: "phone", permissionMode: "auto", userMessageId: "mobile-message" });
     expect(await store.remove("q1")).toBe(true);
     expect(await store.reorder!("q1", "up")).toBe(false);
     expect(fromHostQueueEntry({ id: "q", sessionId: "s", principal: "p", inputHash: "h", content: "c", permissionMode: "nope", position: 1, createdAt: "bad" })).toMatchObject({

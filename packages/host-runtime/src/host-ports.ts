@@ -26,6 +26,8 @@ export type HostSessionRecord = {
   createdAt?: string;
   updatedAt?: string;
   messages?: UiMessage[];
+  messageStart?: number;
+  hasMoreBefore?: boolean;
 };
 
 export function requireHostRpc(getHost: () => HostRpc | null): HostRpc {
@@ -71,10 +73,10 @@ export function toRacpItem(message: UiMessage): RacpItemSummary {
 
 /** Session metadata and transcript pages straight from host `session.get`. */
 export function createHostSessionPort(getHost: () => HostRpc | null): SessionPort {
-  async function fetchSession(sessionId: string): Promise<HostSessionRecord | null> {
+  async function fetchSession(sessionId: string, window: Record<string, unknown> = { messageLimit: 1 }): Promise<HostSessionRecord | null> {
     const host = getHost();
     if (!host) return null;
-    const result = await host.call<{ session?: HostSessionRecord | null }>("session.get", { id: sessionId });
+    const result = await host.call<{ session?: HostSessionRecord | null }>("session.get", { id: sessionId, ...window });
     return result.session ?? null;
   }
   return {
@@ -83,14 +85,16 @@ export function createHostSessionPort(getHost: () => HostRpc | null): SessionPor
       return record ? toSessionSummary(record) : null;
     },
     async history(sessionId, { limit, beforeItemId }) {
-      const record = await fetchSession(sessionId);
-      const messages = record?.messages ?? [];
-      const end = beforeItemId ? messages.findIndex((message) => message.id === beforeItemId) : messages.length;
-      const cut = end === -1 ? messages.length : end;
-      const start = Math.max(0, cut - limit);
+      let messageBefore: number | undefined;
+      if (beforeItemId) {
+        const anchor = await fetchSession(sessionId, { messageAround: beforeItemId, messageLimit: 1 });
+        if (!anchor?.messages?.some((message) => message.id === beforeItemId)) throw new RacpError("NOT_FOUND", "history_anchor_not_found");
+        messageBefore = anchor.messageStart;
+      }
+      const record = await fetchSession(sessionId, { messageLimit: limit, ...(messageBefore !== undefined ? { messageBefore } : {}) });
       return {
-        items: messages.slice(start, cut).map(toRacpItem),
-        hasMore: start > 0,
+        items: (record?.messages ?? []).map(toRacpItem),
+        hasMore: record?.hasMoreBefore === true,
       };
     },
   };
@@ -104,6 +108,7 @@ export type HostQueueEntry = {
   inputHash: string;
   content: string;
   sessionMessageId?: string;
+  userMessageId?: string;
   attachments?: unknown;
   permissionMode: string;
   position: number;
@@ -120,6 +125,7 @@ export function fromHostQueueEntry(entry: HostQueueEntry): QueuedTurnRecord {
     principalSubject: entry.principal,
     content: entry.content,
     ...(entry.sessionMessageId ? { sessionMessageId: entry.sessionMessageId } : {}),
+    ...(entry.userMessageId ? { userMessageId: entry.userMessageId } : {}),
     ...(Array.isArray(entry.attachments) ? { attachments: entry.attachments as QueuedTurnRecord["attachments"] } : {}),
     effectivePermissionMode: permissionMode,
     ...(entry.idempotencyKey ? { idempotencyKey: entry.idempotencyKey } : {}),
@@ -147,6 +153,7 @@ export function createHostQueueStore(getHost: () => HostRpc | null): QueueStore 
         inputHash: record.inputHash,
         content: record.content,
         ...(record.sessionMessageId ? { sessionMessageId: record.sessionMessageId } : {}),
+        ...(record.userMessageId ? { userMessageId: record.userMessageId } : {}),
         ...(record.attachments ? { attachments: record.attachments } : {}),
         permissionMode: record.effectivePermissionMode,
       });

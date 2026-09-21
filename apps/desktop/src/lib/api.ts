@@ -1,6 +1,9 @@
 import type { ImageGenerationState, ImageModelInfo, ImageSessionConfig } from "@pi-desktop/shared";
 import type {
   ScheduledTaskRun,
+  MobilePairing,
+  MobileSyncScopeInput,
+  MobileSyncStatus,
   ImageGenerationRequest,
   ImageGenerationResult,
   ActivationScope,
@@ -516,6 +519,15 @@ function normalizePlansChangedEvent(value: unknown): PlanningStateEvent {
 }
 
 export const api = {
+  mobileSync: {
+    status: () => invoke<MobileSyncStatus>(IPC.invoke.mobileSyncStatus),
+    createPairing: (scope: MobileSyncScopeInput) => invoke<MobilePairing>(IPC.invoke.mobileSyncCreatePairing, scope),
+    cancelPairing: (pairingId: string) => invoke<MobileSyncStatus>(IPC.invoke.mobileSyncCancelPairing, pairingId),
+    revoke: (grantId: string) => invoke<MobileSyncStatus>(IPC.invoke.mobileSyncRevoke, grantId),
+    refresh: () => invoke<MobileSyncStatus>(IPC.invoke.mobileSyncRefresh),
+    onChanged: (listener: (state: MobileSyncStatus) => void): (() => void) =>
+      window.piDesktop!.on(IPC.event.mobileSyncChanged, (value) => listener(value as MobileSyncStatus)),
+  },
   generateImage: (request: ImageGenerationRequest) =>
     invoke<{ jobId: string; result: ImageGenerationResult }>(IPC.invoke.imageGenerate, request),
   configureImage: (key: string, config: ImageSessionConfig) => invoke<ImageSessionConfig>(IPC.invoke.imageConfigure, { key, config }),
