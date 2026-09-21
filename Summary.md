@@ -1,5 +1,19 @@
 # PI-Desktop project summary
 
+## 2026-09-21 — Android companion implementation
+
+- Created the independent `codex/mobile-companion` worktree from current
+  `origin/main` (`996922fa`) and incorporated the committed desktop account,
+  window fixes, and image-generation baseline (`8834fc5f`).
+- Added the MC-team requirements handoff, scoped online-sync domain spec and
+  architecture decision. MC retains device/grant metadata; desktop owns
+  transcripts, attachments and all task execution.
+- Exposed browser-safe RACP client/framing entry points and shared the protocol
+  error class between browser and Host. Existing RACP suite: 21 tests passed.
+- Desktop share UI, scoped relay and React/Capacitor Android implementation are
+  being integrated. Actual Electron/Android acceptance will be recorded below;
+  MC production service deployment is a separate team's deliverable.
+
 ## Project and source baseline
 
 PI-Desktop is a local-first desktop workbench for AI coding agents. It combines

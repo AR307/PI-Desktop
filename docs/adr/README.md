@@ -18,6 +18,8 @@ Each ADR includes:
 
 ## Index
 
+- [Scoped MC relay for the Android companion](mobile-companion-relay.md)
+
 | ID | Title | Status |
 |---|---|---|
 | subagent-model-fallback | [Ordered subagent model fallback](subagent-model-fallback.md) | Accepted for implementation |

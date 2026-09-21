@@ -1,5 +1,7 @@
 # Runtime Core
 
+- [Android companion and scoped desktop sync](23-mobile-companion.md)
+
 | Doc | Description |
 |---|---|
 | [01-ipc-protocol.md](01-ipc-protocol.md) | Electron IPC protocol |

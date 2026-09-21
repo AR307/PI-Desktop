@@ -1,5 +1,12 @@
 # PI-Desktop Baseline Freeze
 
+Post-baseline mobile amendment (2026-09-21): opt-in Android access to explicitly
+shared projects/sessions uses the MC online relay. Desktop remains the history
+and execution authority. This supersedes the historical browser/remote-control
+exclusion only for the scoped companion profile. See
+[Android companion](03-runtime/23-mobile-companion.md) and
+[its ADR](../adr/mobile-companion-relay.md).
+
 Post-baseline MirrorCoding amendment (2026-09-20): protocol version 12 adds
 main-owned account authorization and group providers without a database schema
 change. See [MirrorCoding account](03-runtime/21-mirrorcoding-account.md) and
