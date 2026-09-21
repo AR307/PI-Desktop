@@ -8,7 +8,9 @@ public class MainActivity extends BridgeActivity {
     @Override
     public void onCreate(Bundle savedInstanceState) {
         registerPlugin(MobileAppearancePlugin.class);
-        EdgeToEdge.enable(this);
         super.onCreate(savedInstanceState);
+        // BridgeActivity installs its NoActionBar theme in super.onCreate.
+        // Creating the decor earlier locks in the launch theme's native title bar.
+        EdgeToEdge.enable(this);
     }
 }
