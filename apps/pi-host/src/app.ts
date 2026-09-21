@@ -14,7 +14,7 @@ import {
   listPendingToolRequests,
 } from "@pi-desktop/host-runtime";
 import { DeviceTokenAuthenticator, RacpServer, bindRacpWebSocket, type RacpHostOperations, type WsBinding } from "@pi-desktop/racp";
-import { APP_VERSION, type AgentEventEnvelope } from "@pi-desktop/shared";
+import { APP_VERSION, type AgentEventEnvelope, type PlanProposal } from "@pi-desktop/shared";
 
 import type { PiHostConfig } from "./config.js";
 import { FileCredentialStore, loadOrCreateHostId } from "./credentials.js";
@@ -83,6 +83,11 @@ export async function startPiHost(config: PiHostConfig, options: { log?: HostLog
       return void result;
     },
     listPendingTools: (sessionId) => listPendingToolRequests(getHost, sessionId),
+    async listPendingContracts(sessionId) {
+      const host = getHost();
+      if (!host) throw new Error("host unavailable");
+      return (await host.call<{ plans: PlanProposal[] }>("plans.pending", { sessionId })).plans;
+    },
   };
   const agentHost = new AgentHost({
     runtime,

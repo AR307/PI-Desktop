@@ -550,7 +550,7 @@ fn claim_and_finish_are_durable_cas_transitions() {
 }
 
 #[test]
-fn configure_gate_blocks_pending_and_active_execution_changes() {
+fn configure_gate_blocks_pending_mode_changes_but_allows_next_turn_model_changes() {
     let (dir, db) = test_db();
     let root = dir.path().join("workspace");
     fs::create_dir_all(&root).unwrap();
@@ -570,40 +570,16 @@ fn configure_gate_blocks_pending_and_active_execution_changes() {
         .to_string(),
         "PLAN_CONFIGURATION_BLOCKED"
     );
-    for blocked in [
-        gate_session_configure(
-            &db,
-            &proposal.session_id,
-            "plan",
-            Some("other-provider"),
-            None,
-            None,
-            None,
-        ),
-        gate_session_configure(
-            &db,
-            &proposal.session_id,
-            "plan",
-            None,
-            Some("other-model"),
-            None,
-            None,
-        ),
-        gate_session_configure(
-            &db,
-            &proposal.session_id,
-            "plan",
-            None,
-            None,
-            Some("high"),
-            None,
-        ),
-    ] {
-        assert_eq!(
-            blocked.unwrap_err().to_string(),
-            "PLAN_CONFIGURATION_BLOCKED"
-        );
-    }
+    assert!(gate_session_configure(
+        &db,
+        &proposal.session_id,
+        "plan",
+        Some("other-provider"),
+        Some("other-model"),
+        Some("high"),
+        None,
+    )
+    .is_ok());
     manager
         .resolve(
             &db,
@@ -628,7 +604,7 @@ fn configure_gate_blocks_pending_and_active_execution_changes() {
 }
 
 #[test]
-fn configure_gate_blocks_changes_while_a_turn_is_running() {
+fn configure_gate_allows_next_turn_model_changes_while_a_turn_is_running() {
     let (dir, db) = test_db();
     let root = dir.path().join("workspace");
     fs::create_dir_all(&root).unwrap();
@@ -642,18 +618,20 @@ fn configure_gate_blocks_changes_while_a_turn_is_running() {
     )
     .unwrap();
     let turn = sessions::begin_turn(&db, &session.id, None, None).unwrap();
+    assert!(gate_session_configure(
+        &db,
+        &session.id,
+        "agent",
+        Some("provider-2"),
+        Some("model-2"),
+        Some("high"),
+        None,
+    )
+    .is_ok());
     assert_eq!(
-        gate_session_configure(
-            &db,
-            &session.id,
-            "agent",
-            Some("provider-2"),
-            None,
-            None,
-            None,
-        )
-        .unwrap_err()
-        .to_string(),
+        gate_session_configure(&db, &session.id, "plan", None, None, None, None)
+            .unwrap_err()
+            .to_string(),
         "PLAN_CONFIGURATION_BLOCKED"
     );
     sessions::end_turn(&db, &turn, "aborted", None, None, false).unwrap();

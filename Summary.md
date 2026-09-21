@@ -382,3 +382,76 @@ needed by an actual request rather than starting a repository-wide rewrite.
 - The older delivery workflow document still describes local-main integration.
   This task follows the supplied root policy and local-only delivery instruction:
   validation and commits stay in the dedicated task worktree.
+- Candidate 699f709c proved that stopping an image download preserves its prompt
+  and aborted status, then exposed the empty-text image error card being hidden
+  by compact transcript grouping. Image results now remain visible outside that
+  disclosure so the retained download can be retried immediately.
+- The same scenario also caught live message completion discarding empty-text
+  image failures before rendering. Terminal projection now retains image result
+  rows, including cancelled results with pending downloads.
+- Candidate 071ca66f passed all 46 Electron checks with no live or shutdown
+  renderer errors. Visual capture waits for the sidebar transition and completes
+  notification dismissal before recording the narrow layout.
+
+### 2026-09-21 - Image generation final acceptance and handoff
+
+- Task candidate: `28a74eac1ba8f6ccb13b427ead124e1c7c964741`; base main:
+  `996922fa729870e88ed9e439aa6959e388c12f91`. The branch includes that base and
+  remains local in the dedicated `codex/image-generation` worktree.
+- `apps/desktop/test/e2e/images/acceptance.mjs` passed all 46 checks using actual
+  Electron, Rust, Node sidecar, an isolated profile and controlled local HTTP/SSE
+  image/chat endpoints. Both live and shutdown renderer error lists are empty.
+  The run covers direct and agent generation, declared parameters, reference
+  routes, cancellation, download-only retry, account/group recovery, persistence,
+  planning restrictions and ordinary provider use after MirrorCoding logout.
+- Reviewed the settled Chinese dark and English light 600px views, the regular
+  1200px layout and centered preview. Controls and image cards remain usable.
+  Screenshots, request evidence and the report are in
+  `D:/piformc-artifacts/images/acceptance-final`, outside version control.
+- The final desktop build, typecheck and lint passed. Additional transcript
+  verification passed 28 turn/process checks and 13 session-history checks.
+  Earlier workspace/Rust/shared/runtime checks and the unchanged Windows
+  host-runtime test limitation are recorded above.
+- `docs/mirrorcoding-image-generation-requirements.md` is the server-team handoff.
+  It defines the exact catalog, authorization, reference normalization, response
+  and acceptance contract used by PI. MirrorCoding implementation/deployment,
+  paid upstream tests and installer packaging remain separate delivery work.
+  This documentation-only record changes no tested application source.
+
+### 2026-09-21 - Mobile interface and per-session controls
+
+- Reworked the React/Capacitor companion around a compact conversation header,
+  auto-growing composer, shared bottom-sheet/full-screen/confirmation surfaces,
+  Android Back handling, safe areas, reduced motion and stable transcript
+  scrolling. Account, pairing, project and session views now use the same visual
+  hierarchy and PI light/dark tokens.
+- Added phone-side Agent, Plan, Goal and Image selection; searchable desktop chat
+  and image catalogs; MirrorCoding model-to-group selection with actual ratios;
+  reasoning levels; and service-declared image size, ratio, quality and count.
+  Chat and image choices remain separate. Model changes visibly reset unsupported
+  parameters and clamp image count; invalid reference images stay in the draft
+  with an actionable error.
+- Added scoped `session/modelCatalog` and `session/configure` mobile operations.
+  Electron builds display-only choices from usable desktop providers and the
+  image service, while Rust remains authoritative for session state. A running
+  task keeps its captured configuration; model/group/reasoning changes are saved
+  for the next turn, while mode changes remain blocked during work or approval.
+- The controlled Electron/mobile-browser acceptance passed all 59 checks with no
+  renderer or cleanup errors. It exercised the real desktop, Rust host, Node
+  runtime and phone UI across pairing, history paging, streaming, queued turns,
+  questions, approvals, attachments, reconnect, all four modes, model groups,
+  reasoning, cross-model image-option cleanup, revocation and 320px Chinese
+  light-mode layouts.
+  Reviewed screenshots show no overlap, clipping or horizontal overflow.
+- Workspace JS build, desktop/mobile typechecks and builds, repository lint,
+  shared/i18n/AgentHost/RACP/mobile/catalog tests, Rust formatting and relevant
+  configuration tests passed. Clippy retains the existing `user_skills.rs`
+  warning. Full host-core and pi-host suites retain only their existing Windows
+  path/permission assertions; the changed configuration tests pass.
+- Capacitor Android sync and Gradle `assembleDebug` succeeded. The installable
+  debug APK is at
+  `apps/mobile/android/app/build/outputs/apk/debug/app-debug.apk` (about 5.35 MiB).
+  A new native-emulator interaction run could not start because local WHPX
+  reported too many emulator instances; no AVD or lock file was removed. The
+  earlier companion native run remains baseline evidence, not a claim that this
+  UI revision was re-executed on Android.

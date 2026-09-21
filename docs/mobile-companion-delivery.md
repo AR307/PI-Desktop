@@ -1,7 +1,8 @@
 # PI Mobile local delivery
 
-The PI desktop and Android companion are implemented on
-`codex/mobile-companion`. MC server implementation and deployment remain with
+The PI desktop and Android companion baseline is implemented on
+`codex/mobile-companion`; the current interface and session controls are on
+`codex/mobile-ui-controls`. MC server implementation and deployment remain with
 the MirrorCoding team. Send them
 [`mirrorcoding-mobile-sync-requirements.md`](mirrorcoding-mobile-sync-requirements.md).
 
@@ -9,8 +10,9 @@ the MirrorCoding team. Send them
 
 1. Run this desktop branch and authorize the MC account in Settings → Account.
 2. Right-click a project or session and choose Sync to mobile.
-3. Install `pi-mobile-0.15.1-preview.apk`, sign in with the same MC account and
-   enter the eight-digit code shown on desktop.
+3. Install the current APK from
+   `apps/mobile/android/app/build/outputs/apk/debug/app-debug.apk`, sign in with
+   the same MC account and enter the eight-digit code shown on desktop.
 4. Open the shared work to read history/live output, continue messages, send
    attachments, stop work, answer questions or resolve approvals. Image mode uses
    the desktop's model/group/options and accepts supported reference images.
@@ -59,7 +61,32 @@ build and typecheck, mobile typecheck/build, repository lint, scoped mobile lint
 tests, five mobile tests, 25 i18n tests, 10 Rust queue tests and Rust format.
 Clippy completed with one pre-existing unrelated `user_skills.rs` warning.
 
-The [acceptance README](../apps/desktop/test/e2e/mobile/README.md) describes how
+## Interface and session-control update
+
+The `codex/mobile-ui-controls` task adds the compact conversation layout, shared
+animated surfaces, improved keyboard/back behavior, and phone-side selection of
+Agent, Plan, Goal or Image. It also adds searchable desktop model catalogs,
+MirrorCoding model/group pricing, reasoning levels and declared image options.
+These settings apply only to the current shared session. Model/group/reasoning
+changes made during a running task are saved for the next turn; mode changes wait
+until the task and approvals are idle.
+
+The final controlled Electron/mobile-browser run passed all **59 checks** with no
+renderer or cleanup errors. It includes the original sync flows plus current vs
+next-turn configuration, all four modes, image parameters, translated controls,
+draft preservation and visual/overflow checks at 390px and 320px. Screenshots and
+the report are under the ignored local artifact directory
+`.artifacts/mobile-ui-controls-final-20260921-234051/`.
+
+Capacitor sync and Gradle `assembleDebug` passed. The current debug APK is
+`apps/mobile/android/app/build/outputs/apk/debug/app-debug.apk` (approximately
+5.35 MiB). A fresh native interaction run for this revision could not start: the
+local Android emulator reported `WHPX: too many emulator instances are running`
+for both the existing AVD and a new isolated `PiMobileUIQA` AVD. No AVD or lock
+file was removed. The 19-check native result above applies to the companion
+baseline; it is not presented as native execution evidence for this UI revision.
+
+`apps/desktop/test/e2e/mobile/README.md` describes how
 to reproduce these real user flows. Fixtures replace only external MC/upstream
 boundaries; the desktop, Rust host, Node agent and Android native plugins run.
 

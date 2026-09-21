@@ -1,6 +1,6 @@
 import type { RacpSession, RacpSessionSnapshot } from "../racp.js";
+import type { ImageGenerationCapability, ImageGenerationState, ImageSessionConfig } from "./images.js";
 import type { ModelModalities, SessionThinkingLevel, ThinkingLevel } from "./models.js";
-import type { ImageGenerationState, ImageSessionConfig } from "./images.js";
 import type { PlanProposal } from "./plans.js";
 
 /** A desktop-owned share. Project membership is resolved at request time. */
@@ -43,15 +43,8 @@ export type MobileSyncSettings = {
 };
 export type MobileTaskMode = "agent" | "plan" | "goal" | "image";
 
-/** The subset of image capability metadata required by the mobile picker. */
-export type MobileImageGenerationCapability = {
-  supportsReferenceImages?: boolean;
-  endpoints?: Array<"generations" | "edits">;
-  sizes?: string[];
-  aspectRatios?: string[];
-  qualities?: string[];
-  maxCount?: number;
-};
+/** Image capability metadata exposed to the mobile picker. */
+export type MobileImageGenerationCapability = ImageGenerationCapability;
 
 export type MobileImageSessionConfig = ImageSessionConfig;
 export type MobileImageGenerationState = ImageGenerationState;
@@ -72,7 +65,6 @@ export type MobileSessionSnapshot = Omit<RacpSessionSnapshot, "session"> & {
   imageJobs: MobileImageGenerationState[];
   plans: PlanProposal[];
 };
-
 export type MobileModelChoice = {
   providerId: string;
   providerName: string;
@@ -90,14 +82,13 @@ export type MobileModelChoice = {
   modalities?: ModelModalities;
   image?: MobileImageGenerationCapability;
 };
-
 export type MobileModelCatalog = {
   chat: MobileModelChoice[];
   image: MobileModelChoice[];
 };
-
 export type MobileSessionConfiguration = {
   mode: MobileTaskMode;
+  /** The configuration used by the currently running turn, when known. */
   current?: {
     mode: MobileTaskMode;
     providerId?: string;
@@ -105,6 +96,7 @@ export type MobileSessionConfiguration = {
     thinkingLevel?: SessionThinkingLevel;
     imageConfig?: MobileImageSessionConfig;
   };
+  /** Persisted configuration read by the next turn. */
   next: {
     mode: MobileTaskMode;
     providerId?: string;
@@ -114,10 +106,12 @@ export type MobileSessionConfiguration = {
   };
   chat?: {
     mode: Exclude<MobileTaskMode, "image">;
+    /** The saved chat selection remains available while image mode is active. */
     providerId?: string;
     modelId?: string;
     thinkingLevel?: SessionThinkingLevel;
   };
+  /** The saved image selection remains available while chat mode is active. */
   image?: {
     mode: "image";
     providerId?: string;
@@ -128,7 +122,6 @@ export type MobileSessionConfiguration = {
   blockedReason?: "running" | "read_only" | "approval_pending";
   pendingTurn: boolean;
 };
-
 export type MobileSessionConfigureInput = {
   mode?: MobileTaskMode;
   providerId?: string;
@@ -144,7 +137,6 @@ export type MobileAttachmentRef = {
   mimeType?: string;
   size: number;
 };
-
 export type MobileRelayTicket = { ticket: string; expiresAt: string; url: string };
 
 export type MobileRelayEnvelope =

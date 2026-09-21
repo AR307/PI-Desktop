@@ -2,12 +2,11 @@ import { useState, type FormEvent } from "react";
 import { useTranslation } from "react-i18next";
 import { ChevronRight, Folder, MessageSquare, Monitor, Plus, RefreshCw, Unlink } from "lucide-react";
 import type { MobileController, MobileView } from "../state/controller";
-import { useBackDismiss } from "./useBackDismiss";
+import { Surface } from "./Surface";
 
 export function Home({ controller, view }: { controller: MobileController; view: MobileView }) {
   const { t } = useTranslation("translation", { keyPrefix: "mobile" });
   const [pairing, setPairing] = useState(false); const [code, setCode] = useState(""); const [revokeId, setRevokeId] = useState<string>();
-  useBackDismiss(pairing || Boolean(revokeId), () => { setPairing(false); setRevokeId(undefined); });
   const submit = async (event: FormEvent) => { event.preventDefault(); await controller.pair(code); if (!controller.getSnapshot().error) { setCode(""); setPairing(false); } };
   return <main className="work-list">
     <div className="section-title"><h1>{t("projects")}</h1><button className="icon-button" aria-label={t("refresh")} onClick={() => void controller.action(() => controller.refreshGrants())}><RefreshCw size={18}/></button></div>
@@ -24,8 +23,8 @@ export function Home({ controller, view }: { controller: MobileController; view:
       </article>;
     })}</div>
     <button className="pair-button" onClick={() => setPairing(true)}><Plus size={18}/>{t("pair")}</button>
-    {pairing && <div className="modal-scrim"><section className="dialog" role="dialog" aria-modal="true" aria-labelledby="pair-title"><h2 id="pair-title">{t("pair")}</h2><p className="muted">{t("pairHint")}</p><form onSubmit={submit}><label>{t("pairCode")}<input autoFocus inputMode="numeric" autoComplete="off" maxLength={8} pattern="[0-9]{8}" value={code} onChange={(event) => setCode(event.target.value.replace(/\D/g, ""))}/></label><div className="button-row"><button type="button" onClick={() => setPairing(false)}>{t("cancel")}</button><button className="primary" disabled={view.busy || code.length !== 8}>{t(view.busy ? "working" : "pairSubmit")}</button></div></form></section></div>}
-    {revokeId && <div className="modal-scrim"><section className="dialog" role="alertdialog" aria-modal="true"><h2>{t("revoke")}</h2><p>{t("revokeConfirm")}</p><div className="button-row"><button onClick={() => setRevokeId(undefined)}>{t("no")}</button><button className="danger" onClick={() => { const grant = view.grants.find((entry) => entry.id === revokeId); if (grant) void controller.revoke(grant); setRevokeId(undefined); }}>{t("yes")}</button></div></section></div>}
+    <Surface open={pairing} title={t("pair")} onClose={() => setPairing(false)} footer={<div className="surface-actions"><button type="button" onClick={() => setPairing(false)}>{t("cancel")}</button><button type="submit" form="pair-form" className="primary" disabled={view.busy || code.length !== 8}>{t(view.busy ? "working" : "pairSubmit")}</button></div>}><p className="muted">{t("pairHint")}</p><form id="pair-form" onSubmit={submit}><label>{t("pairCode")}<input autoFocus inputMode="numeric" autoComplete="off" maxLength={8} pattern="[0-9]{8}" value={code} onChange={(event) => setCode(event.target.value.replace(/\D/g, ""))}/></label></form></Surface>
+    <Surface open={Boolean(revokeId)} title={t("revoke")} variant="confirm" onClose={() => setRevokeId(undefined)} footer={<div className="surface-actions"><button type="button" onClick={() => setRevokeId(undefined)}>{t("no")}</button><button type="button" className="danger" onClick={() => { const grant = view.grants.find((entry) => entry.id === revokeId); if (grant) void controller.revoke(grant); setRevokeId(undefined); }}>{t("yes")}</button></div>}><p>{t("revokeConfirm")}</p></Surface>
   </main>;
 }
 

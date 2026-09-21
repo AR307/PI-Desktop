@@ -1,4 +1,4 @@
-import type { MobileGrant, MobileSession, MobileSessionSnapshot, RacpApprovalDecision, RacpEventEnvelope, UiMessage } from "@pi-desktop/shared";
+import type { MobileGrant, MobileModelCatalog, MobileSession, MobileSessionConfigureInput, MobileSessionSnapshot, RacpApprovalDecision, RacpEventEnvelope, UiMessage } from "@pi-desktop/shared";
 import type { RacpClientState } from "@pi-desktop/racp/client";
 import type { MobileAccount, MobileAuthChallenge, MobileDevice } from "../services/account";
 import { AccountError } from "../services/account";
@@ -9,11 +9,11 @@ import { applyTranscriptEvent, itemMessage, mergeMessages, snapshotMessages } fr
 export type MobileView = {
   signedIn: boolean; loading: boolean; error?: string; notice?: string; challenge?: MobileAuthChallenge;
   grants: MobileGrant[]; devices: MobileDevice[]; grant?: MobileGrant; sessions: MobileSession[];
-  selectedId?: string; snapshot?: MobileSessionSnapshot; messages: UiMessage[];
-  connection: RacpClientState; busy: boolean; uncertainMessageId?: string;
+  selectedId?: string; snapshot?: MobileSessionSnapshot; messages: UiMessage[]; catalog?: MobileModelCatalog;
+  connection: RacpClientState; busy: boolean; configuring: boolean; uncertainMessageId?: string;
 };
 
-const initialView = (): MobileView => ({ signedIn: false, loading: true, grants: [], devices: [], sessions: [], messages: [], connection: "disconnected", busy: false });
+const initialView = (): MobileView => ({ signedIn: false, loading: true, grants: [], devices: [], sessions: [], messages: [], connection: "disconnected", busy: false, configuring: false });
 
 export class MobileController {
   private value = initialView();
@@ -58,7 +58,7 @@ export class MobileController {
   async openGrant(grant: MobileGrant) {
     await this.disconnect();
     const selection = ++this.selection;
-    this.patch({ grant, sessions: [], selectedId: undefined, snapshot: undefined, messages: [] });
+    this.patch({ grant, sessions: [], selectedId: undefined, snapshot: undefined, messages: [], catalog: undefined });
     const relay = new MobileRelay(this.account, grant.desktopDeviceId, {
       event: (event) => { if (this.relay === relay) this.handleEvent(event); },
       state: (connection) => { if (this.relay === relay) { this.patch({ connection }); if (connection === "reconnecting") void this.background(() => this.refreshGrants()); } },
@@ -79,15 +79,41 @@ export class MobileController {
     const relay = this.relay; if (!relay) return;
     const selection = ++this.selection;
     this.connectingEvents = [];
-    this.patch({ selectedId: sessionId, snapshot: undefined, messages: [], loading: true, uncertainMessageId: this.uncertain.get(sessionId) });
+    this.patch({ selectedId: sessionId, snapshot: undefined, messages: [], catalog: undefined, loading: true, uncertainMessageId: this.uncertain.get(sessionId) });
     await this.action(async () => {
       const snapshot = await relay.attach(sessionId);
       if (selection !== this.selection || relay !== this.relay) return;
       this.acceptSnapshot(snapshot, false);
+      await this.loadCatalog(sessionId);
       const buffered = this.connectingEvents ?? []; this.connectingEvents = undefined;
       for (const event of buffered) this.handleEvent(event);
     });
     if (selection === this.selection) { this.connectingEvents = undefined; this.patch({ loading: false }); }
+  }
+  private async loadCatalog(sessionId = this.value.selectedId) {
+    const relay = this.relay;
+    if (!relay || !sessionId || sessionId !== this.value.selectedId) return;
+    const catalog = await relay.modelCatalog(sessionId);
+    if (relay === this.relay && sessionId === this.value.selectedId) this.patch({ catalog });
+  }
+  async configure(input: MobileSessionConfigureInput): Promise<boolean> {
+    const relay = this.relay; const sessionId = this.value.selectedId;
+    if (!relay || !sessionId || this.value.configuring) return false;
+    let saved = false;
+    this.patch({ configuring: true, error: undefined, notice: undefined });
+    await this.action(async () => {
+      const session = await relay.configure(sessionId, input);
+      if (relay !== this.relay || sessionId !== this.value.selectedId) return;
+      this.patch({
+        snapshot: this.value.snapshot ? { ...this.value.snapshot, session } : this.value.snapshot,
+        sessions: this.value.sessions.map((entry) => entry.id === session.id ? session : entry),
+        notice: session.configuration?.pendingTurn ? "configurationSaved" : "configurationApplied",
+      });
+      saved = true;
+      await this.loadCatalog(sessionId);
+    });
+    this.patch({ configuring: false });
+    return saved;
   }
   private acceptSnapshot(snapshot: MobileSessionSnapshot, keepHistory: boolean) {
     const incoming = snapshotMessages(snapshot);
@@ -109,7 +135,7 @@ export class MobileController {
     if (this.refreshJob) { this.refreshAgain = true; return this.refreshJob; }
     const relay = this.relay; const sessionId = this.value.selectedId;
     if (!relay || !sessionId) return;
-    this.refreshJob = (async () => { do { this.refreshAgain = false; const snapshot = await relay.snapshot(sessionId); if (relay !== this.relay || sessionId !== this.value.selectedId) return; this.acceptSnapshot(snapshot, true); } while (this.refreshAgain); })().finally(() => { this.refreshJob = undefined; });
+    this.refreshJob = (async () => { do { this.refreshAgain = false; const snapshot = await relay.snapshot(sessionId); if (relay !== this.relay || sessionId !== this.value.selectedId) return; this.acceptSnapshot(snapshot, true); await this.loadCatalog(sessionId); } while (this.refreshAgain); })().finally(() => { this.refreshJob = undefined; });
     return this.refreshJob;
   }
   async earlier() {
@@ -152,7 +178,7 @@ export class MobileController {
   }); }
   back() { if (this.value.selectedId && this.value.grant?.scope.kind !== "session") { ++this.selection; this.patch({ selectedId: undefined, snapshot: undefined, messages: [] }); } else void this.disconnect(); }
   async resume() { if (!this.value.signedIn) return; await this.background(async () => { await this.refreshGrants(); if (this.relay?.client.state === "connected") { await this.loadSessions(); await this.refreshSession(); } }); }
-  async disconnect() { ++this.selection; clearInterval(this.listTimer); this.listTimer = undefined; const relay = this.relay; this.relay = undefined; await relay?.close(); this.patch({ grant: undefined, selectedId: undefined, snapshot: undefined, messages: [], sessions: [], connection: "disconnected", uncertainMessageId: undefined }); }
+  async disconnect() { ++this.selection; clearInterval(this.listTimer); this.listTimer = undefined; const relay = this.relay; this.relay = undefined; await relay?.close(); this.patch({ grant: undefined, selectedId: undefined, snapshot: undefined, messages: [], sessions: [], catalog: undefined, connection: "disconnected", configuring: false, uncertainMessageId: undefined }); }
   async logout() { await this.disconnect(); const confirmed = await this.account.logout(); this.drafts.clear(); this.files.clear(); this.uncertain.clear(); this.value = { ...initialView(), loading: false, notice: confirmed ? undefined : "logoutPending" }; this.patch({}); }
   async dispose() { await this.disconnect(); this.listeners.clear(); }
 }

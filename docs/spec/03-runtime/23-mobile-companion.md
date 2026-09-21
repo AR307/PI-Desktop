@@ -14,11 +14,20 @@ grant management on desktop can revoke old registrations' shares without allowin
 mobile device to use them.
 
 Mobile offers login, verification challenges, pairing, shared project/session
-navigation, history paging, streamed text/thinking/tools, pending plans, image cards, approvals,
-question answering, send and stop. It inherits desktop model, group, mode,
-reasoning and permission settings. Direct images use ImageService. Unsupported
-source capabilities remain read-only. No new project/session creation or
-terminal/file browser is offered by the mobile profile.
+navigation, history paging, streamed text/thinking/tools, pending plans, image
+cards, approvals, question answering, send and stop. It can update the current
+shared session's Agent/Plan/Goal/Image mode, model/group, reasoning level and
+declared image parameters. Permission settings remain desktop-owned. Direct
+images use ImageService. Unsupported source capabilities remain read-only. No
+new project/session creation, provider management, terminal or file browser is
+offered by the mobile profile.
+
+The conversation header shows the session, desktop and connection state without
+an extra online banner. Mode and model controls open accessible bottom sheets;
+account/pairing share the same surface behavior, while destructive confirmation
+uses a centered dialog. Android Back closes the innermost surface before leaving
+the conversation. Sheets preserve unsaved choices while transcript snapshots
+continue to stream, and respect reduced-motion and safe-area settings.
 
 Attachments are transferred in chunks and resolved to desktop-owned session
 references before submission. History downloads resolve only attachments of an
@@ -52,10 +61,22 @@ MC credentials never enter mobile transcript state or desktop Node sidecar.
 
 `session/list` optionally filters to one grant. Enriched session snapshots include
 the actual provider/model/group, task mode, image configuration, pending plans
-and current image jobs. Mobile responds to image progress and desktop
-configuration changes through ephemeral `turn.activity` events, then reads the
-current snapshot. History pages use bounded Rust queries. Each command,
+and current image jobs. They distinguish the running task's captured selection
+when known from the persisted next-turn selection and preserve separate chat and
+image choices. `session/modelCatalog` exposes only selectable display/capability
+metadata. `session/configure` validates an atomic provider/model choice and
+updates only the authorized session. Mobile responds to image progress and
+desktop configuration changes through ephemeral `turn.activity` events, then
+reads the current snapshot. History pages use bounded Rust queries. Each command,
 subscription and outbound event rechecks current project/session membership.
+
+Chat model and reasoning changes may be saved while a task is active and apply
+to the next admitted turn; the active turn and its tool continuations keep their
+captured launch configuration. Mode changes wait until the task and pending
+approval are idle. Chat and image selections are remembered independently.
+MirrorCoding uses model then group with real billing metadata; other configured
+desktop providers remain source-distinguishable. Image parameters are limited to
+the selected model's declared sizes, ratios, qualities and count.
 
 See [MC API handoff](../../mirrorcoding-mobile-sync-requirements.md) and
 [architecture decision](../../adr/mobile-companion-relay.md). Local fixture
