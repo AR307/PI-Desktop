@@ -5,7 +5,7 @@ const config: CapacitorConfig = {
   appName: "PI Mobile",
   webDir: "dist",
   android: { backgroundColor: "#181818" },
-  plugins: { Keyboard: { resizeOnFullScreen: true } },
+  plugins: { SystemBars: { insetsHandling: "css", initialViewportFitValueHint: "cover" } },
 };
 
 export default config;

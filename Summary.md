@@ -55,6 +55,17 @@
   picking, image generation, preview, share and reference reuse. Final native
   restart/visual evidence and the installable package are recorded next.
 
+### Android visual refinement
+
+- Native acceptance on Android 15 / WebView 124 passed 19 checks, including real
+  secure credential recovery after force-stop/relaunch, native picker and share,
+  reference generation, foreground reconnect and Back navigation.
+- Screenshot review found light system-bar gutters around the dark application.
+  The existing Capacitor SystemBars API now follows the chosen theme, with a
+  small Android appearance bridge for older WebViews' native inset background.
+  Removed the conflicting legacy fullscreen keyboard-resize option and use
+  Capacitor's safe-area values. Final native validation reruns this refinement.
+
 ## Project and source baseline
 
 PI-Desktop is a local-first desktop workbench for AI coding agents. It combines
