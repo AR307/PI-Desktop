@@ -29,6 +29,7 @@ export type ImageModelInfo = {
 };
 export type ImageGenerationRequest = {
   sessionId: string;
+  jobId?: string;
   providerId: string;
   modelId: string;
   prompt: string;

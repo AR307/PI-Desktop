@@ -1,5 +1,7 @@
 import type {
   MirrorCodingAccountState,
+  ImageGenerationRequest,
+  ImageGenerationResult,
   ActivationScope,
   AgentCapabilityMove,
   AgentCapabilityQuery,
@@ -476,6 +478,9 @@ export const api = {
   mirrorCodingLogout: (confirmed = false) => invoke<{ state?: MirrorCodingAccountState; confirmationRequired?: boolean }>(IPC.invoke.mirrorCodingLogout, confirmed),
   mirrorCodingRetryRevocation: () => invoke<MirrorCodingAccountState>(IPC.invoke.mirrorCodingRetryRevocation),
   mirrorCodingCompleteWelcome: () => invoke<{ ok: boolean }>(IPC.invoke.mirrorCodingCompleteWelcome),
+  generateImage: (request: ImageGenerationRequest) =>
+    invoke<{ jobId: string; result: ImageGenerationResult }>(IPC.invoke.imageGenerate, request),
+  abortImage: (jobId: string) => invoke<{ aborted: boolean }>(IPC.invoke.imageAbort, jobId),
   onMirrorCodingChanged: (listener: (state: MirrorCodingAccountState) => void) => {
     if (!window.piDesktop?.on) return () => undefined;
     return window.piDesktop.on(IPC.event.mirrorCodingChanged, (value) => listener(value as MirrorCodingAccountState));

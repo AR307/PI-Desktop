@@ -57,6 +57,8 @@ export const IPC = {
     mirrorCodingLogout: "pi-desktop/mirrorcoding/logout",
     mirrorCodingRetryRevocation: "pi-desktop/mirrorcoding/retryRevocation",
     mirrorCodingCompleteWelcome: "pi-desktop/mirrorcoding/completeWelcome",
+    imageGenerate: "pi-desktop/image/generate",
+    imageAbort: "pi-desktop/image/abort",
     appGetVersion: "pi-desktop/app/getVersion",
     appOpenFeedback: "pi-desktop/app/openFeedback",
     appHealth: "pi-desktop/app/health",

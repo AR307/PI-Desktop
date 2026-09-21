@@ -167,6 +167,19 @@ needed by an actual request rather than starting a repository-wide rewrite.
   paths, JSON/multipart requests, response shapes, and local fixture coverage.
 - No credentials, production configuration, or service deployment were used.
 
+### 2026-09-21 - Main-process image relay and durable generation
+
+- Added a main-process-only image relay. It validates the latest account catalog,
+  URL-encodes the selected group, keeps Bearer credentials out of renderer and
+  sidecar requests, and sends either JSON generations or multipart edits.
+- Added image IPC for generation and cancellation. Base64 and downloadable URL
+  results are stored as content-addressed local attachments and appended to the
+  current session as an assistant image message with the selected model, group,
+  multiplier, and declared options.
+- Added shared contract tests for option filtering, reference support, count
+  limits, and capability parsing. Desktop typecheck passed after the relay and
+  IPC wiring.
+
 ### 2026-09-20 - Work-panel dragging and browser resize
 
 - Moved the tab-strip drag exclusion onto individual tabs, leaving header
