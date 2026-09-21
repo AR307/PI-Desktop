@@ -290,6 +290,7 @@ export function registerIpcHandlers(dependencies: RegisterIpcDependencies) {
       registrar,
       runtime: dependencies.mirrorCoding,
       activeTurns,
+      emitAgentEvent,
       abort: async (sessionId) => {
         const handler = ipcHandlers.get(IPC.invoke.agentAbort);
         if (!handler) throw new Error("agent unavailable");

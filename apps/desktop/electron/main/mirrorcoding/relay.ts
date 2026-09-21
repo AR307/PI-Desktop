@@ -3,7 +3,13 @@ import { createServer, type IncomingMessage, type ServerResponse } from "node:ht
 import type { AddressInfo } from "node:net";
 import { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
-import type { MirrorCodingEndpoint, MirrorCodingImageEndpoint, MirrorCodingProvider } from "@pi-desktop/shared";
+import type {
+  ImageGenerationCapability,
+  ImageGenerationOptions,
+  MirrorCodingEndpoint,
+  MirrorCodingImageEndpoint,
+  MirrorCodingProvider,
+} from "@pi-desktop/shared";
 import type { MirrorCodingAccount } from "./account";
 import { ENDPOINTS, IMAGE_ENDPOINTS } from "./catalog";
 
@@ -14,12 +20,29 @@ type Binding = {
   kind: "chat" | "image";
   endpoint: MirrorCodingEndpoint | MirrorCodingImageEndpoint;
 };
+export type ImageReference = { data: string; mimeType: string; name?: string };
+
+function imagePayload(options: ImageGenerationOptions | undefined): Record<string, unknown> {
+  return {
+    ...(options?.count !== undefined ? { n: options.count } : {}),
+    ...(options?.size ? { size: options.size } : {}),
+    ...(options?.quality ? { quality: options.quality } : {}),
+    ...(options?.aspectRatio ? { aspect_ratio: options.aspectRatio } : {}),
+  };
+}
+
+function imageCapability(metadata: MirrorCodingProvider, modelId: string): ImageGenerationCapability {
+  const capability = metadata.imageModels?.[modelId];
+  if (!capability) throw new Error("model_or_group_unavailable");
+  return capability;
+}
 
 /** Main owns upstream auth; the sidecar can only use its local selected binding. */
 export class MirrorCodingRelay {
   private server = createServer((request, response) => { void this.forward(request, response); });
   private bindings = new Map<string, Binding>();
   private requests = new Map<AbortController, Binding>();
+  private imageRequests = new Set<AbortController>();
   private listening?: Promise<string>;
   constructor(private account: MirrorCodingAccount) {}
 
@@ -71,10 +94,91 @@ export class MirrorCodingRelay {
   boundSessions(): string[] {
     return [...new Set([...this.bindings.values()].flatMap((value) => value.sessionId ? [value.sessionId] : []))];
   }
-  hasActiveRequests(): boolean { return this.requests.size > 0; }
+  hasActiveRequests(): boolean { return this.requests.size > 0 || this.imageRequests.size > 0; }
+
+  async requestImage(
+    metadata: MirrorCodingProvider,
+    modelId: string,
+    prompt: string,
+    options: ImageGenerationOptions,
+    references: readonly ImageReference[],
+    signal?: AbortSignal,
+  ): Promise<Response> {
+    const controller = new AbortController();
+    const forwardAbort = () => controller.abort();
+    if (signal?.aborted) controller.abort();
+    else signal?.addEventListener("abort", forwardAbort, { once: true });
+    this.imageRequests.add(controller);
+    try {
+      const state = this.account.snapshot();
+      if (state.status !== "connected" || state.account?.id !== metadata.accountId) {
+        throw new Error("reauthorization_required");
+      }
+      const capability = imageCapability(metadata, modelId);
+      const group = state.catalog?.groups.find((entry) => entry.id === metadata.groupId);
+      const catalogModel = group?.models.find((entry) => entry.id === modelId);
+      if (!catalogModel?.image || !catalogModel.supportedEndpointTypes.includes("image-generation")) {
+        throw new Error("model_or_group_unavailable");
+      }
+      if (references.length > 0 && !capability.reference_path) {
+        throw new Error("images_reference_unsupported");
+      }
+      const path = references.length > 0
+        ? capability.reference_path ?? capability.generation_path
+        : capability.generation_path;
+      if (path !== "/v1/images/generations" && path !== "/v1/images/edits") {
+        throw new Error("model_or_group_unavailable");
+      }
+      if (references.length > 0 && !catalogModel.supportedEndpointTypes.includes(path === "/v1/images/edits" ? "image-edit" : "image-generation")) {
+        throw new Error("model_or_group_unavailable");
+      }
+      const headers = new Headers({
+        Accept: "application/json",
+        "X-Mirrorcoding-Group": encodeURIComponent(metadata.groupId),
+      });
+      let body: BodyInit;
+      if (path === "/v1/images/edits") {
+        const form = new FormData();
+        form.set("model", modelId);
+        form.set("prompt", prompt);
+        for (const [key, value] of Object.entries(imagePayload(options))) form.set(key, String(value));
+        for (const reference of references) {
+          const bytes = Buffer.from(reference.data, "base64");
+          form.append(
+            "image",
+            new Blob([bytes], { type: reference.mimeType }),
+            reference.name || "reference-image",
+          );
+        }
+        body = form;
+      } else {
+        body = JSON.stringify({
+          model: modelId,
+          prompt,
+          ...imagePayload(options),
+          ...(references.length > 0
+            ? { images: references.map((reference) => ({ image_url: `data:${reference.mimeType};base64,${reference.data}` })) }
+            : {}),
+        });
+        headers.set("Content-Type", "application/json");
+      }
+      const response = await this.account.request(path, { method: "POST", headers, body, signal: controller.signal });
+      if (response.status === 403) {
+        const denied = await response.clone().json().catch(() => null) as { error?: { code?: string; message?: string } } | null;
+        if (denied?.error?.code?.includes("group") || denied?.error?.message === "The selected group is not available to this account") {
+          void this.account.groupUnavailable();
+        }
+      }
+      return response;
+    } finally {
+      this.imageRequests.delete(controller);
+      signal?.removeEventListener("abort", forwardAbort);
+    }
+  }
 
   invalidate(): void {
     for (const controller of this.requests.keys()) controller.abort();
+    for (const controller of this.imageRequests) controller.abort();
     this.bindings.clear();
   }
 

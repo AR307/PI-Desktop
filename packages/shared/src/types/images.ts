@@ -6,11 +6,12 @@ export type ImageGenerationCapability = {
   reference_path?: "/v1/images/generations" | "/v1/images/edits";
   sizes?: string[];
   qualities?: string[];
+  aspect_ratios?: string[];
   max_count: number;
   supports_chat: boolean;
 };
 
-export type ImageGenerationOptions = { size?: string; quality?: string; count?: number };
+export type ImageGenerationOptions = { size?: string; quality?: string; aspectRatio?: string; count?: number };
 export type ImageSessionConfig = {
   active: boolean;
   providerId?: string;
@@ -29,6 +30,7 @@ export type ImageModelInfo = {
 };
 export type ImageGenerationRequest = {
   sessionId: string;
+  jobId?: string;
   providerId: string;
   modelId: string;
   prompt: string;
@@ -73,12 +75,14 @@ export function validateImageOptions(
   if (referenceCount && !capability.reference_path) throw new Error("images_reference_unsupported");
   if (options.size && !capability.sizes?.includes(options.size)) throw new Error("images_size_unsupported");
   if (options.quality && !capability.qualities?.includes(options.quality)) throw new Error("images_quality_unsupported");
+  if (options.aspectRatio && !capability.aspect_ratios?.includes(options.aspectRatio)) throw new Error("images_aspect_ratio_unsupported");
   const count = options.count ?? 1;
   if (!Number.isInteger(count) || count < 1 || count > capability.max_count) throw new Error("images_count_unsupported");
   return {
     count,
     ...(options.size ? { size: options.size } : {}),
     ...(options.quality ? { quality: options.quality } : {}),
+    ...(options.aspectRatio ? { aspectRatio: options.aspectRatio } : {}),
   };
 }
 
@@ -97,7 +101,7 @@ export function parseImageCapability(value: unknown): ImageGenerationCapability 
   return {
     generation_path: row.generation_path,
     ...(row.reference_path ? { reference_path: row.reference_path } : {}),
-    sizes: list(row.sizes), qualities: list(row.qualities),
+    sizes: list(row.sizes), qualities: list(row.qualities), aspect_ratios: list(row.aspect_ratios),
     max_count: Number(row.max_count), supports_chat: row.supports_chat,
   };
 }
