@@ -7,6 +7,7 @@ import type { MobileController } from "./state/controller";
 import { Login } from "./components/Login";
 import { Home, Sessions } from "./components/Home";
 import { Conversation } from "./components/Conversation";
+import { applyNativeAppearance } from "./services/appearance";
 
 export function App({ controller }: { controller: MobileController }) {
   const view = useSyncExternalStore(controller.subscribe, controller.getSnapshot);
@@ -16,7 +17,11 @@ export function App({ controller }: { controller: MobileController }) {
   useEffect(() => { void controller.start(); return () => { void controller.dispose(); }; }, [controller]);
   useEffect(() => {
     const media = matchMedia("(prefers-color-scheme: dark)");
-    const update = () => { document.documentElement.dataset.theme = theme === "system" ? media.matches ? "dark" : "light" : theme; };
+    const update = () => {
+      const resolved = theme === "system" ? media.matches ? "dark" : "light" : theme === "dark" ? "dark" : "light";
+      document.documentElement.dataset.theme = resolved;
+      void applyNativeAppearance(resolved).catch((error: unknown) => console.error("Unable to update system bar appearance", error));
+    };
     update(); media.addEventListener("change", update); localStorage.setItem("pi.mobile.theme", theme);
     return () => media.removeEventListener("change", update);
   }, [theme]);

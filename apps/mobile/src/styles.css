@@ -18,7 +18,7 @@ h3 { font-size: 16px; margin: 0 0 10px; }
 h4 { font-size: 12px; margin: 12px 0 6px; color: var(--ds-text-muted); }
 p { line-height: 1.6; }
 pre { margin: 8px 0; padding: 12px; max-width: 100%; overflow: auto; background: var(--ds-bg-inset); border-radius: 10px; font-size: 12px; white-space: pre-wrap; overflow-wrap: anywhere; }
-.mobile-shell { height: 100dvh; max-width: 900px; margin: 0 auto; display: flex; flex-direction: column; padding-top: env(safe-area-inset-top); padding-bottom: env(safe-area-inset-bottom); overflow: hidden; }
+.mobile-shell { height: 100dvh; max-width: 900px; margin: 0 auto; display: flex; flex-direction: column; padding-top: var(--safe-area-inset-top, env(safe-area-inset-top)); padding-bottom: var(--safe-area-inset-bottom, env(safe-area-inset-bottom)); padding-left: var(--safe-area-inset-left, env(safe-area-inset-left)); padding-right: var(--safe-area-inset-right, env(safe-area-inset-right)); overflow: hidden; }
 .app-header { flex: none; height: 58px; padding: 6px 14px; display: flex; gap: 10px; align-items: center; }
 .wordmark { font-size: 29px; width: 44px; text-align: center; font-weight: 600; }
 .app-title { flex: 1; font-size: 15px; font-weight: 600; }
