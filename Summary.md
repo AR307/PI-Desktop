@@ -314,3 +314,6 @@ needed by an actual request rather than starting a repository-wide rewrite.
 - The same scenario also caught live message completion discarding empty-text
   image failures before rendering. Terminal projection now retains image result
   rows, including cancelled results with pending downloads.
+- Candidate 071ca66f passed all 46 Electron checks with no live or shutdown
+  renderer errors. Visual capture now waits for the sidebar transition and
+  dismisses acknowledged failure toasts before recording the narrow layout.

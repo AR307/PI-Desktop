@@ -66,9 +66,12 @@ async function screenshot(name, width, height) {
   await win.evaluate((window, size) => { window.setMinimumSize(480, 480); window.setContentSize(size.width, size.height); }, { width, height });
   await page.waitForFunction((w) => innerWidth === w, width);
   if (!name.startsWith("preview")) {
+    await page.waitForFunction((collapsed) => document.querySelector(".app-shell")?.classList.contains("sidebar-collapsed") === collapsed, width < 760);
+    while (await page.locator(".toast-dismiss").count()) await page.locator(".toast-dismiss").first().click();
     await page.locator(".transcript-skeleton-line").first().waitFor({ state: "hidden" });
     await page.locator(".image-result-thumbnail img").last().waitFor();
   }
+  await page.waitForFunction(() => !document.getAnimations().some((animation) => animation.playState === "running" && animation.effect?.getTiming().iterations !== Infinity));
   await page.screenshot({ path: join(output, `${name}.png`) });
   check(`${name}: no horizontal overflow`, await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth));
 }
