@@ -315,5 +315,5 @@ needed by an actual request rather than starting a repository-wide rewrite.
   image failures before rendering. Terminal projection now retains image result
   rows, including cancelled results with pending downloads.
 - Candidate 071ca66f passed all 46 Electron checks with no live or shutdown
-  renderer errors. Visual capture now waits for the sidebar transition and
-  dismisses acknowledged failure toasts before recording the narrow layout.
+  renderer errors. Visual capture waits for the sidebar transition and completes
+  notification dismissal before recording the narrow layout.

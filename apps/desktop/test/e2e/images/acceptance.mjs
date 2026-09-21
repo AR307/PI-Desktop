@@ -67,7 +67,8 @@ async function screenshot(name, width, height) {
   await page.waitForFunction((w) => innerWidth === w, width);
   if (!name.startsWith("preview")) {
     await page.waitForFunction((collapsed) => document.querySelector(".app-shell")?.classList.contains("sidebar-collapsed") === collapsed, width < 760);
-    while (await page.locator(".toast-dismiss").count()) await page.locator(".toast-dismiss").first().click();
+    await page.locator(".toast-dismiss").evaluateAll((buttons) => buttons.forEach((button) => button.click()));
+    await page.waitForFunction(() => !document.querySelector(".toast"));
     await page.locator(".transcript-skeleton-line").first().waitFor({ state: "hidden" });
     await page.locator(".image-result-thumbnail img").last().waitFor();
   }
