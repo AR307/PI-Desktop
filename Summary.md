@@ -31,6 +31,25 @@
   photos, reconnect, image generation, restart and revocation. Final candidate
   counts and native Android acceptance are recorded after the remaining checks.
 
+### Android client implementation
+
+- Added a React/Capacitor 8 application targeting Android SDK 36 (minimum 24),
+  using PI's design tokens, launcher assets, English/Chinese and light/dark UI.
+- Native secure storage retains mobile credentials without storing passwords.
+  Views cover pairing, shared work, history, tools, plans, questions, approvals,
+  queue state, chat continuation and desktop-selected image generation.
+- System file picking, chunked upload, image preview, save/share and reference
+  reuse work through the same scoped desktop connection. Drafts survive network
+  reconnect and foreground return; uncertain submissions are checked on desktop.
+- Fixed browser fetch binding, transient send acknowledgement recovery, live
+  mode updates, snapshot/stream merging, Android Back and persistent send errors
+  found while exercising actual interfaces. No separate mobile agent exists.
+- Mobile typecheck and five service/user-path tests passed. Scoped Biome lint
+  checked 21 mobile and locale files. Native APK runs have already exercised
+  login, pairing, continuation, keyboard layout, foreground restore, native file
+  picking, image generation, preview, share and reference reuse. Final native
+  restart/visual evidence and the installable package are recorded next.
+
 ## Project and source baseline
 
 This branch starts from upstream PI-Desktop `920b12b8e` (0.15.6, 2026-09-24)

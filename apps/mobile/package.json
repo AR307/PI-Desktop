@@ -1,0 +1,43 @@
+{
+  "name": "@pi-desktop/mobile",
+  "version": "0.15.1",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite --host 127.0.0.1",
+    "build": "tsc --noEmit && vite build",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "android:sync": "cap sync android",
+    "android:open": "cap open android"
+  },
+  "dependencies": {
+    "@aparajita/capacitor-secure-storage": "8.0.0",
+    "@capacitor/android": "8.5.2",
+    "@capacitor/app": "^8.1.1",
+    "@capacitor/core": "8.5.2",
+    "@capacitor/filesystem": "^8.1.2",
+    "@capacitor/keyboard": "^8.0.5",
+    "@capacitor/share": "^8.0.1",
+    "@capawesome/capacitor-file-picker": "8.1.0",
+    "@pi-desktop/i18n": "workspace:*",
+    "@pi-desktop/racp": "workspace:*",
+    "@pi-desktop/shared": "workspace:*",
+    "i18next": "^26.3.6",
+    "lucide-react": "^1.31.0",
+    "react": "^19.2.8",
+    "react-dom": "^19.2.8",
+    "react-i18next": "^15.6.0",
+    "react-markdown": "^10.1.0",
+    "remark-gfm": "^4.0.1"
+  },
+  "devDependencies": {
+    "@capacitor/cli": "8.5.2",
+    "@types/react": "^19.2.18",
+    "@types/react-dom": "^19.2.4",
+    "@vitejs/plugin-react": "^4.6.0",
+    "typescript": "^5.9.3",
+    "vite": "^7.3.6",
+    "vitest": "^4.1.10"
+  }
+}
