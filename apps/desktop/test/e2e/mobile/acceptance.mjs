@@ -89,6 +89,13 @@ async function mobileSend(text) {
   await phone.getByRole("button", { name: "Send", exact: true }).click();
 }
 async function screenshot(name, surface = phone) {
+  await surface.evaluate(async () => {
+    const animations = document.getAnimations().filter((animation) => {
+      const timing = animation.effect?.getComputedTiming();
+      return timing && Number.isFinite(timing.endTime);
+    });
+    await Promise.all(animations.map((animation) => animation.finished.catch(() => undefined)));
+  });
   await surface.screenshot({ path: join(output, `${name}.png`), fullPage: true });
   check(`${name}: fits viewport`, await surface.evaluate(() => document.documentElement.scrollWidth <= innerWidth));
 }
@@ -111,7 +118,9 @@ try {
   await page.getByRole("dialog").getByRole("button", { name: /使用 MirrorCoding 登录|Sign in with MirrorCoding/ }).click();
   await fetch(await until(() => desktop.evaluate(() => globalThis.__authUrl), "desktop browser authorization"));
   await until(async () => (await invoke("mirrorcoding/getState")).sync === "success", "MC catalog login");
-  const provider = (await invoke("providers/list")).providers.find((item) => item.mirrorCoding?.groupId === "中文 分组");
+  const providers = (await invoke("providers/list")).providers;
+  const provider = providers.find((item) => item.mirrorCoding?.groupId === "中文 分组");
+  const autoProvider = providers.find((item) => item.mirrorCoding?.groupId === "auto");
   await invoke("settings/set", { ...await invoke("settings/get"), defaultProviderId: provider.id, defaultModelId: "gpt-5", language: "en", theme: "dark" });
   await invoke("session/configure", shared.id, { providerId: provider.id, modelId: "gpt-5", thinkingLevel: "medium", permissionMode: "ask", mode: "agent" });
   const hidden = (await invoke("session/create", { title: "Private desktop session", providerId: provider.id, modelId: "gpt-5", mode: "agent" })).session;
@@ -166,6 +175,7 @@ try {
   await phone.locator(".grant-open").filter({ hasText: "Mobile shared session" }).click();
   await phone.getByText("History created on the desktop before pairing", { exact: true }).waitFor();
   check("phone loads existing desktop history", (await view()).sessions.length === 1);
+  check("conversation header identifies the shared session and online desktop", await phone.locator(".app-heading strong").textContent() === "Mobile shared session" && (await phone.locator(".app-heading small").textContent()).includes("Online"));
   check("phone initially bounds a long conversation", (await view()).snapshot.hasMoreHistory === true && !(await view()).messages.some((message) => message.content === "Historical message 00"));
   await editor.fill("Desktop event during mobile history paging"); await editor.press("Enter");
   await phone.getByRole("button", { name: "Load earlier messages", exact: true }).click();
@@ -184,14 +194,32 @@ try {
   await until(async () => !(await view()).busy && !(await view()).snapshot?.activeTurn, "phone turn completed");
   check("phone continuation reaches desktop and retains reasoning", fixture.chats.some((body) => body.reasoning_effort === "medium"));
   await screenshot("mobile-conversation-dark-en");
+  await phone.getByRole("button", { name: "Account and appearance", exact: true }).click();
+  await phone.getByRole("heading", { name: "Account", exact: true }).waitFor();
+  await screenshot("mobile-account-sheet-dark-en");
+  await phone.keyboard.press("Escape"); await phone.getByRole("heading", { name: "Account", exact: true }).waitFor({ state: "hidden" });
   await mobileSend("mobile-slow streaming task");
   await phone.getByText("Working on the computer.", { exact: false }).waitFor();
+  await phone.locator(".conversation-controls .model-chip").click();
+  await phone.locator(".model-row").filter({ hasText: "gpt-5" }).first().click();
+  await phone.locator(".model-variant").filter({ hasText: "auto" }).click();
+  await phone.getByLabel("Thinking level", { exact: true }).selectOption("high");
+  await phone.getByRole("button", { name: "Apply", exact: true }).click();
+  await phone.locator(".surface").waitFor({ state: "hidden" });
+  await until(async () => {
+    const configuration = (await view()).snapshot?.session.configuration;
+    return configuration?.current?.providerId === provider.id && configuration.current.thinkingLevel === "medium" && configuration.next.providerId === autoProvider.id && configuration.next.thinkingLevel === "high";
+  }, "running task keeps current configuration while mobile saves the next selection");
+  check("running task keeps its model while mobile preselects the next model and reasoning level");
   await mobileSend("Queued from the phone while running");
   await until(async () => (await view()).snapshot?.queuedTurns.length === 1, "shared queue");
   check("phone sees live output and queues messages on desktop");
   fixture.releaseChats();
   await until(async () => (await invoke("session/get", { id: shared.id })).session.messages.some((message) => message.content === "Queued from the phone while running"), "queued user message executed");
   await until(async () => !(await view()).busy && !(await view()).snapshot?.activeTurn && !(await view()).snapshot?.queuedTurns.length, "queue drained");
+  check("queued turn uses the newly saved group and reasoning level", fixture.chatRequests.some((request) => request.prompt.includes("Queued from the phone while running") && request.group === "auto") && fixture.chats.some((body) => body.reasoning_effort === "high" && JSON.stringify(body.messages.at(-1)).includes("Queued from the phone while running")));
+  await invoke("session/configure", shared.id, { providerId: provider.id, modelId: "gpt-5", thinkingLevel: "medium", permissionMode: "ask", mode: "agent" });
+  await phone.evaluate(() => window.__PI_MOBILE_CONTROLLER__.refreshSession());
   await mobileSend("mobile-slow stopped task"); await phone.getByRole("button", { name: "Stop", exact: true }).waitFor();
   await phone.getByRole("button", { name: "Stop", exact: true }).click();
   await until(async () => !(await view()).busy && !(await view()).snapshot?.activeTurn, "phone stop");
@@ -235,8 +263,10 @@ try {
   }, "unconfirmed send reconciled after reconnect");
   const uncertainMessages = (await invoke("session/get", { id: shared.id })).session.messages.filter((message) => message.role === "user" && message.content === "A single message with an unconfirmed response");
   check("lost send acknowledgement reconnects without duplicating generation", uncertainMessages.length === 1 && fixture.chats.filter((body) => body.tools?.length && JSON.stringify(body.messages.filter((message) => message.role === "user").at(-1)).includes("A single message with an unconfirmed response")).length === 1);
-  await phone.locator(".composer textarea").fill("Draft preserved across reconnect"); fixture.disconnectPhones();
-  await until(async () => (await view()).connection === "connected" && Boolean((await view()).snapshot), "phone reconnect");
+  await phone.locator(".composer textarea").fill("Draft preserved across reconnect");
+  const draftPeerIds = new Set(fixture.peers.keys());
+  fixture.disconnectPhones();
+  await until(async () => [...fixture.peers.keys()].some((peerId) => !draftPeerIds.has(peerId)) && (await view()).connection === "connected" && Boolean((await view()).snapshot), "phone reconnect");
   check("reconnect keeps draft and restores history", await phone.locator(".composer textarea").inputValue() === "Draft preserved across reconnect");
   await invoke("image/configure", { key: shared.id, config: { active: true, providerId: provider.id, modelId: "text-only-image-fixture", options: { count: 1 } } });
   await phone.evaluate(() => window.__PI_MOBILE_CONTROLLER__.refreshSession());
@@ -254,6 +284,51 @@ try {
   await phone.locator(".image-result .attachment-preview").first().click();
   await phone.locator(".image-result img").first().waitFor();
   check("phone image mode uses desktop model, group and reference endpoint", fixture.upstream.calls.at(-1).body.model === "gpt-image-1" && fixture.upstream.calls.at(-1).group === encodeURIComponent("中文 分组") && fixture.upstream.calls.at(-1).path === "/v1/images/edits" && fixture.upstream.calls.at(-1).body.images.length === 1);
+  const mobileCatalog = await view();
+  check("phone receives separate chat and image model catalogs", mobileCatalog.catalog?.chat.some((choice) => choice.modelId === "gpt-5") === true && mobileCatalog.catalog?.image.some((choice) => choice.modelId === "gpt-image-1") === true);
+  await phone.locator(".conversation-controls .model-chip").click();
+  await phone.locator(".model-row").filter({ hasText: "gpt-image-1" }).first().click();
+  await phone.locator(".model-variant").filter({ hasText: "中文 分组" }).click();
+  await phone.getByLabel("Size", { exact: true }).selectOption("1536x1024");
+  await phone.getByLabel("Quality", { exact: true }).selectOption("high");
+  await phone.getByLabel("Count", { exact: true }).selectOption("2");
+  await phone.locator(".model-row").filter({ hasText: "text-only-image-fixture" }).click();
+  check("changing image models clears unsupported parameters and clamps count", await phone.getByLabel("Count", { exact: true }).inputValue() === "1" && await phone.getByText("Unsupported parameters were reset for this model.", { exact: true }).count() === 1 && await phone.getByLabel("Size", { exact: true }).count() === 0 && await phone.getByLabel("Quality", { exact: true }).count() === 0);
+  await phone.locator(".model-row").filter({ hasText: "gpt-image-1" }).first().click();
+  await phone.locator(".model-variant").filter({ hasText: "中文 分组" }).click();
+  await phone.getByLabel("Size", { exact: true }).selectOption("1536x1024");
+  await phone.getByLabel("Quality", { exact: true }).selectOption("high");
+  await phone.getByLabel("Count", { exact: true }).selectOption("2");
+  await screenshot("mobile-image-settings-dark-en");
+  await phone.getByRole("button", { name: "Apply", exact: true }).click();
+  await until(async () => (await view()).snapshot?.session.imageConfig?.options.size === "1536x1024" && (await view()).snapshot?.session.imageConfig?.options.count === 2, "mobile saves image parameters");
+  check("mobile saves only declared image parameters for the shared session");
+  await phone.locator(".surface").waitFor({ state: "hidden" });
+  await phone.locator(".conversation-controls .config-chip").first().click();
+  await phone.getByRole("heading", { name: "Choose mode", exact: true }).waitFor();
+  await screenshot("mobile-mode-sheet-dark-en");
+  await phone.locator(".mode-option").filter({ hasText: "Agent" }).click();
+  await phone.getByRole("button", { name: "Apply", exact: true }).click();
+  await until(async () => (await view()).snapshot?.session.taskMode === "agent", "mobile returns from image mode to chat");
+  check("mobile keeps chat selection when leaving image mode", (await view()).snapshot.session.modelId === "gpt-5" && (await view()).snapshot.session.imageConfig?.active === false);
+  await phone.locator(".surface").waitFor({ state: "hidden" });
+  for (const [label, mode] of [["Plan", "plan"], ["Goal", "goal"], ["Agent", "agent"]]) {
+    await phone.locator(".conversation-controls .config-chip").first().click();
+    await phone.locator(".mode-option").filter({ hasText: label }).click();
+    await phone.getByRole("button", { name: "Apply", exact: true }).click();
+    await until(async () => (await view()).snapshot?.session.taskMode === mode, `mobile applies ${mode} mode`);
+    await phone.locator(".surface").waitFor({ state: "hidden" });
+  }
+  check("mobile applies Agent, Plan and Goal modes to the shared session");
+  await phone.locator(".conversation-controls .model-chip").click();
+  await phone.locator(".model-row").filter({ hasText: "gpt-5" }).first().click();
+  await phone.locator(".model-variant").filter({ hasText: "中文 分组" }).click();
+  await phone.getByLabel("Thinking level", { exact: true }).selectOption("high");
+  await screenshot("mobile-model-groups-dark-en");
+  await phone.getByRole("button", { name: "Apply", exact: true }).click();
+  await until(async () => (await view()).snapshot?.session.thinkingLevel === "high", "mobile saves reasoning level");
+  check("mobile saves the selected MirrorCoding group and reasoning level");
+  await phone.locator(".surface").waitFor({ state: "hidden" });
   await screenshot("mobile-images-dark-en");
   await phone.reload(); await phone.locator(".grant-open").waitFor();
   check("phone reload restores login and pairing");
@@ -295,7 +370,7 @@ try {
   check("project share includes future sessions without pairing again");
   await page.locator('[data-action="close-mobile-pairing"]').click();
   await phone.getByRole("button", { name: "Account and appearance", exact: true }).click();
-  await phone.getByLabel("Theme", { exact: true }).selectOption("light");
+  await phone.getByRole("button", { name: "Light", exact: true }).click();
   await phone.getByLabel("Language", { exact: true }).selectOption("zh-CN");
   await phone.getByRole("button", { name: "关闭", exact: true }).click();
   await phone.setViewportSize({ width: 320, height: 640 });
@@ -304,6 +379,17 @@ try {
   await until(async () => !(await view()).loading && (await view()).snapshot?.session.id === projectSession.id, "narrow conversation loaded");
   await phone.getByRole("textbox").fill("手机窄屏草稿");
   await screenshot("mobile-conversation-light-zh-narrow");
+  await phone.locator(".conversation-controls .config-chip").first().click();
+  await phone.getByRole("heading", { name: "选择模式", exact: true }).waitFor();
+  check("narrow Chinese mode sheet uses translated interaction copy", await phone.getByText("先生成计划，再确认执行", { exact: true }).count() === 1);
+  await screenshot("mobile-mode-light-zh-narrow");
+  await phone.keyboard.press("Escape"); await phone.locator(".surface").waitFor({ state: "hidden" });
+  await phone.locator(".conversation-controls .model-chip").click();
+  await phone.getByRole("heading", { name: "选择模型", exact: true }).waitFor();
+  check("narrow Chinese model sheet exposes translated reasoning controls", await phone.getByLabel("推理等级", { exact: true }).count() === 1);
+  await screenshot("mobile-model-light-zh-narrow");
+  await phone.keyboard.press("Escape"); await phone.locator(".surface").waitFor({ state: "hidden" });
+  check("configuration sheets preserve the narrow-screen draft", await phone.getByRole("textbox").inputValue() === "手机窄屏草稿");
   check("no renderer exceptions", errors.length === 0);
 } catch (error) {
   errors.push({ message: error.stack }); console.error(error);

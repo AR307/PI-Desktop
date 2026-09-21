@@ -528,6 +528,7 @@ export const RACP_OPERATIONS = {
   "session/get": { role: "viewer", profile: "v1", mutation: false },
   "session/create": { role: "controller", profile: "v1", mutation: true },
   "session/attach": { role: "viewer", profile: "v1", mutation: false },
+  "session/modelCatalog": { role: "viewer", profile: "remote-host", mutation: false },
   "session/history": { role: "viewer", profile: "v1", mutation: false },
   "events/subscribe": { role: "viewer", profile: "v1", mutation: false },
   "events/unsubscribe": { role: "viewer", profile: "v1", mutation: false },

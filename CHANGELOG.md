@@ -9,6 +9,9 @@
   save/share. Keep execution, complete history and attachments on the computer.
 - Restore login and pairings after restart, reconnect without replaying an
   uncertain generation, and revoke mobile access from desktop settings.
+- Refine the conversation header, composer, sheets and motion, and allow the
+  phone to choose Agent/Plan/Goal/Image, model/group, reasoning and declared
+  image parameters for the current shared session.
 - Add the separate MC native login, device, pairing and relay team contract.
 
 ## Image generation

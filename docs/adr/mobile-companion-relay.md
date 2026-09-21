@@ -28,6 +28,14 @@ generation. The mobile view is another controller of the same desktop state.
 Disconnect does not cancel tasks; reconnection reads current state without
 automatically replaying uncertain mutations.
 
+Expose model discovery and configuration only as scoped mobile operations.
+Electron projects the desktop and MirrorCoding catalogs without credentials,
+validates the complete model/group choice and image capability, and delegates
+authoritative session persistence to Rust. The phone never manages providers.
+Chat model/reasoning changes can persist as the next-turn selection while an
+existing turn continues with its captured launch configuration; execution mode
+changes remain gated by active work and approvals.
+
 ## Alternatives and consequences
 
 Forking Happy (Expo) or HAPI (Kotlin/Hub) would introduce a separate UI and
@@ -38,4 +46,6 @@ Host endpoint would exceed a project/session share.
 The scoped relay requires MC login/pairing/relay work described in the separate
 handoff. Until that service is delivered, only controlled local integration can
 be accepted. The browser/mobile remote-control exclusion in the historical MVP
-baseline is explicitly superseded for this opt-in feature.
+baseline is explicitly superseded for this opt-in feature. MC still treats model
+catalog/configuration frames as opaque relay data and gains no model credential,
+provider-management or transcript-storage responsibility.

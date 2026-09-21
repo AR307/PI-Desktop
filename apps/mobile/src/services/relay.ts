@@ -1,5 +1,5 @@
 import { RacpClient, type ClientTransport, type RacpClientState } from "@pi-desktop/racp/client";
-import type { MobileSession, MobileSessionSnapshot, RacpEventEnvelope, RacpItemSummary } from "@pi-desktop/shared";
+import type { MobileModelCatalog, MobileSession, MobileSessionConfiguration, MobileSessionSnapshot, RacpEventEnvelope, RacpItemSummary, MobileSessionConfigureInput } from "@pi-desktop/shared";
 import type { MobileAccount } from "./account";
 
 export type RelayObserver = {
@@ -78,6 +78,10 @@ export class MobileRelay {
     return snapshot;
   }
   snapshot(sessionId: string) { return this.request<{ snapshot: MobileSessionSnapshot }>("session/snapshot", { sessionId }).then((value) => value.snapshot); }
+  modelCatalog(sessionId: string) { return this.request<{ catalog: MobileModelCatalog }>("session/modelCatalog", { sessionId }).then((value) => value.catalog); }
+  configure(sessionId: string, input: MobileSessionConfigureInput) {
+    return this.request<{ session: MobileSession & { configuration?: MobileSessionConfiguration } }>("session/configure", { sessionId, ...input, context: { requestId: crypto.randomUUID() } }).then((value) => value.session);
+  }
   history(sessionId: string, beforeItemId: string) {
     return this.request<{ items: RacpItemSummary[]; hasMore: boolean; revision: number }>("session/history", { sessionId, beforeItemId, limit: 50 });
   }

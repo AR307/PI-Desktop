@@ -11,7 +11,7 @@ export async function mobileFixture({ port = 0 } = {}) {
   const upstream = await imageFixture();
   const devices = new Map(), sessions = new Map(), refreshTokens = new Map();
   const pairings = new Map(), grants = new Map(), tickets = new Map(), desktops = new Map(), peers = new Map();
-  const chats = [], calls = [], heldChats = new Set();
+  const chats = [], chatRequests = [], calls = [], heldChats = new Set();
   const control = { relayUnavailable: false, challenge: false, dropTurnReplyOnce: false, mobileRefreshes: 0, abortedChats: 0 };
   let origin, serial = 0;
   const send = (socket, frame) => {
@@ -59,6 +59,7 @@ export async function mobileFixture({ port = 0 } = {}) {
         chats.push(body);
         const lastUser = body.messages.findLastIndex((message) => message.role === "user");
         const turn = body.messages.slice(lastUser), prompt = JSON.stringify(turn[0]);
+        chatRequests.push({ prompt, group: req.headers["x-mirrorcoding-group"] });
         const toolResults = turn.filter((message) => message.role === "tool");
         const chunk = (delta, finish_reason = null) => `data: ${JSON.stringify({ id: `mobile-chat-${chats.length}`, object: "chat.completion.chunk", created: 1, model: body.model, choices: [{ index: 0, delta, finish_reason }] })}\n\n`;
         res.writeHead(200, { "Content-Type": "text/event-stream" });
@@ -210,7 +211,7 @@ export async function mobileFixture({ port = 0 } = {}) {
   });
   await new Promise((resolve) => server.listen(port, "127.0.0.1", resolve));
   origin = `http://127.0.0.1:${server.address().port}`;
-  return { origin, upstream, control, calls, chats, devices, pairings, grants, desktops, peers,
+  return { origin, upstream, control, calls, chats, chatRequests, devices, pairings, grants, desktops, peers,
     expireMobileAccess() { sessions.clear(); },
     releaseChats() { for (const held of heldChats) { heldChats.delete(held); held.finish(); } },
     disconnectPhones() { for (const id of peers.keys()) closePeer(id, "TEST_DISCONNECT"); },

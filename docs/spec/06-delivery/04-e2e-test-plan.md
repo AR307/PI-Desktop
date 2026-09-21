@@ -15,6 +15,7 @@ below do not govern the current delivery workflow.
 | E2E-MOBILE-04 | Upload a selected image/file, send it, reopen history and save an attachment. Continue image mode with reference images; retry a failed download without regenerating. |
 | E2E-MOBILE-05 | Background/reopen Android, change network, restart desktop/app, expire credentials and revoke a grant. Snapshots recover display; drafts survive; uncertain sends never replay automatically; revocation removes access without stopping desktop work. |
 | E2E-MOBILE-06 | Inspect actual Electron and Android light/dark EN/ZH screens, small viewport, soft keyboard, Back and attachment picker/save. No clipped input or inaccessible approval controls. |
+| E2E-MOBILE-07 | Open a shared conversation, choose Agent/Plan/Goal/Image and select desktop chat/image models. MC follows model → group and shows actual billing; ordinary providers retain source labels. Change reasoning/image options, apply, and verify desktop and phone show the same persisted selection. While a task runs, model/reasoning changes affect the next turn only; mode changes remain blocked. Switching between chat and image restores each saved selection. |
 
 Use isolated profiles, actual Electron, an Android emulator/device and controlled
 model upstream. The PI MC relay fixture is an external-boundary test service;
@@ -23,7 +24,7 @@ Keep APKs, screenshots, profiles and reports outside Git. Record the executable
 candidate, base main, commands, evidence directory and any unverified scenarios.
 
 Executable suites and prerequisites are documented in
-[`mobile/README.md`](../../../apps/desktop/test/e2e/mobile/README.md).
+`apps/desktop/test/e2e/mobile/README.md`.
 `acceptance.mjs` uses actual Electron and a touch browser; `android.mjs` uses
 actual Capacitor secure storage, Android picker/share, Back, IME and app restart.
 Full desktop restart retains the existing interrupted-plan semantics; mobile

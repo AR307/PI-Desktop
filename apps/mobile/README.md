@@ -50,6 +50,13 @@ sign-out clears the local account/device credentials; the next password login
 registers a new device and requires pairing again. Existing grants can be
 revoked from the desktop's mobile-sync manager.
 
+Conversation controls update only the current shared session. The phone can
+choose Agent, Plan, Goal or Image and select any currently usable desktop chat
+or image model. MirrorCoding selection is model then group; reasoning and image
+parameters follow capabilities returned by desktop. Chat and image choices are
+remembered separately. A model/reasoning change saved during a running chat
+applies to the next turn; mode changes wait until work and approvals are idle.
+
 ## Controlled acceptance environment
 
 Use `vite --mode acceptance` with `VITE_MC_ORIGIN` set to the controlled local MC

@@ -442,3 +442,41 @@ needed by an actual request rather than starting a repository-wide rewrite.
   and acceptance contract used by PI. MirrorCoding implementation/deployment,
   paid upstream tests and installer packaging remain separate delivery work.
   This documentation-only record changes no tested application source.
+
+### 2026-09-21 - Mobile interface and per-session controls
+
+- Reworked the React/Capacitor companion around a compact conversation header,
+  auto-growing composer, shared bottom-sheet/full-screen/confirmation surfaces,
+  Android Back handling, safe areas, reduced motion and stable transcript
+  scrolling. Account, pairing, project and session views now use the same visual
+  hierarchy and PI light/dark tokens.
+- Added phone-side Agent, Plan, Goal and Image selection; searchable desktop chat
+  and image catalogs; MirrorCoding model-to-group selection with actual ratios;
+  reasoning levels; and service-declared image size, ratio, quality and count.
+  Chat and image choices remain separate. Model changes visibly reset unsupported
+  parameters and clamp image count; invalid reference images stay in the draft
+  with an actionable error.
+- Added scoped `session/modelCatalog` and `session/configure` mobile operations.
+  Electron builds display-only choices from usable desktop providers and the
+  image service, while Rust remains authoritative for session state. A running
+  task keeps its captured configuration; model/group/reasoning changes are saved
+  for the next turn, while mode changes remain blocked during work or approval.
+- The controlled Electron/mobile-browser acceptance passed all 59 checks with no
+  renderer or cleanup errors. It exercised the real desktop, Rust host, Node
+  runtime and phone UI across pairing, history paging, streaming, queued turns,
+  questions, approvals, attachments, reconnect, all four modes, model groups,
+  reasoning, cross-model image-option cleanup, revocation and 320px Chinese
+  light-mode layouts.
+  Reviewed screenshots show no overlap, clipping or horizontal overflow.
+- Workspace JS build, desktop/mobile typechecks and builds, repository lint,
+  shared/i18n/AgentHost/RACP/mobile/catalog tests, Rust formatting and relevant
+  configuration tests passed. Clippy retains the existing `user_skills.rs`
+  warning. Full host-core and pi-host suites retain only their existing Windows
+  path/permission assertions; the changed configuration tests pass.
+- Capacitor Android sync and Gradle `assembleDebug` succeeded. The installable
+  debug APK is at
+  `apps/mobile/android/app/build/outputs/apk/debug/app-debug.apk` (about 5.35 MiB).
+  A new native-emulator interaction run could not start because local WHPX
+  reported too many emulator instances; no AVD or lock file was removed. The
+  earlier companion native run remains baseline evidence, not a claim that this
+  UI revision was re-executed on Android.

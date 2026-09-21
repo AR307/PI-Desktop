@@ -247,6 +247,8 @@ operations. Field names below match the PI client and desktop implementation.
 | `connection/ping` | `{}` → `{ok:true,serverTime}` |
 | `session/list` | `{grantId?}` → `{sessions}`; an optional grant selects exactly that shared project/session |
 | `session/get` | `{sessionId}` → `{session}` |
+| `session/modelCatalog` | `{sessionId}` → `{catalog:{chat,image}}`; returns a display-only projection of models currently usable by that desktop |
+| `session/configure` | `{sessionId,mode?,providerId?,modelId?,thinkingLevel?,imageConfig?}` → `{session}`; updates only the authorized session |
 | `session/attach` | `{sessionId,after?}` → RACP attach result with an enriched `session` and `snapshot` |
 | `session/snapshot` | `{sessionId}` → `{snapshot}` |
 | `session/history` | `{sessionId,beforeItemId?,limit?}` → `{items,hasMore,revision}`; default 50, maximum 200 items |
@@ -267,9 +269,13 @@ operations. Field names below match the PI client and desktop implementation.
 | `image/retryDownload` | `{sessionId,messageId,imageId}` → updated desktop message containing the image result; no new generation |
 
 `MobileSession` adds desktop model/provider/group, task mode, saved image
-configuration, and prompt/stop capabilities. `MobileSessionSnapshot` includes
-the enriched session, existing RACP state, current `imageJobs`, and pending
-`plans`. Plan approvals still use the existing approval operation.
+configuration, prompt/stop capabilities, and a configuration projection. The
+projection separates the running task's captured configuration when known from
+the persisted next-turn selection, and retains independent chat/image choices.
+It also states whether configuration is writable and whether mode switching is
+blocked by a running task or approval. `MobileSessionSnapshot` includes the
+enriched session, existing RACP state, current `imageJobs`, and pending `plans`.
+Plan approvals still use the existing approval operation.
 They remain available after the planning turn completes and across phone
 reconnections. A full desktop restart follows the existing host lifecycle and
 marks pending proposals interrupted; MC must not retain or replay an approval.
@@ -278,6 +284,22 @@ Notifications use `events/event` and `events/closed`. Image progress is an
 ephemeral `turn.activity` event with `{imageState}`. Desktop model/mode/image
 configuration changes emit `turn.activity` with `{configurationChanged:true}`;
 the phone refreshes the snapshot. Neither event increments the durable cursor.
+
+The model catalog contains no credentials, base URLs, or authentication headers.
+Each row carries only provider/model display identity, source, supported
+thinking levels and input/output modalities. MirrorCoding rows additionally
+carry group identity, description, actual multiplier or dynamic billing flag.
+Image rows carry only the server-declared generation capability and options. MC
+forwards these WSS frames without interpreting or persisting them.
+
+PI validates every configuration mutation against the current desktop catalog
+and shared scope. `providerId` and `modelId` are one selection; for MC the
+provider identifies the exact group. Agent, Plan and Goal use chat choices;
+Image uses the independent image choice and declared image parameters. During a
+running chat task, model and thinking changes are saved for the next admitted
+turn while the current task keeps its captured binding. Mode changes remain
+blocked while a task or plan approval is active. Image configuration remains
+fixed for a running image job. A read-only shared session cannot be configured.
 
 Every new mobile message supplies a UUID `messageId`, which is preserved in the
 desktop queue and persisted user message. If a send acknowledgement is lost,
@@ -290,14 +312,18 @@ IDs are the result image IDs. A peer can use only its completed uploads or
 attachments already present in an authorized session message. Reconnecting
 discards unfinished peer uploads; the phone retains its local draft/files.
 
-The profile excludes session creation, model/configuration changes, arbitrary
-Host RPC, host-wide subscriptions, terminals and filesystem paths.
+The profile excludes session creation, provider/account management, arbitrary
+Host RPC, host-wide subscriptions, terminals and filesystem paths. Its only
+configuration mutation is the catalog-validated `session/configure` operation
+for the currently authorized shared session.
 
 PI enforces project/session membership on each operation and outbound event.
 Desktop is the single task admission and persistence authority. Reconnection
 obtains a snapshot and cursor; it never automatically repeats a generation.
-Phones inherit desktop model/mode and permission settings. An approval already
-resolved on desktop is not executed a second time on mobile.
+Phones read and update the shared session's saved mode/model parameters; desktop
+and phone observe the same next-turn selection. Permission settings still remain
+desktop-owned. An approval already resolved on desktop is not executed a second
+time on mobile.
 
 ## MC delivery and joint acceptance
 

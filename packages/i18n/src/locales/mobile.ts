@@ -2,7 +2,7 @@ export const mobileEn = {
   title: "PI Mobile", subtitle: "Your desktop agent, wherever you are.",
   loginTitle: "Sign in to MirrorCoding", username: "Username", password: "Password", login: "Sign in",
   challenge: "Verify your account", verificationCode: "Verification code", verify: "Verify", openVerification: "Open verification",
-  logout: "Sign out", account: "Account", devices: "My desktops", pair: "Pair desktop", pairCode: "8-digit pairing code",
+  logout: "Sign out", logoutConfirm: "Sign out of MirrorCoding on this phone?", account: "Account", devices: "My desktops", pair: "Pair desktop", pairCode: "8-digit pairing code",
   pairHint: "In PI Desktop, right-click a project or conversation and choose Sync to mobile.",
   pairSubmit: "Pair and sync", paired: "Paired", empty: "No shared work yet", emptyHint: "Pair a project or conversation to see your desktop agent here.",
   online: "Online", offline: "Desktop offline", offlineHint: "Open PI Desktop on your computer to continue.",
@@ -27,13 +27,15 @@ export const mobileEn = {
   authentication_expired: "Your login expired. Sign in again.", request_failed: "The request failed. Please try again.",
   sharedWork: "Shared work", connectionStatus: "Connection status", menu: "Account and appearance", emptyHistory: "No messages yet.",
   logoutPending: "Signed out on this phone. Server sign-out could not be confirmed.", unavailable: "Unavailable",
+  mode: "Mode", chooseMode: "Choose mode", modeAgentHint: "Chat, tools and task execution", modePlanHint: "Plan first, then review", modeGoalHint: "Define a goal and approve execution", modeImageHint: "Generate images with the selected model",
+  model: "Model", chooseModel: "Choose model", chatModels: "Chat models", imageModels: "Image models", search: "Search models", apply: "Apply", groups: "Groups", dynamicBilling: "Dynamic billing", ratio: "Multiplier", thinkingLevel: "Thinking level", parameters: "Parameters", parametersAdjusted: "Unsupported parameters were reset for this model.", size: "Size", quality: "Quality", aspectRatio: "Aspect ratio", count: "Count", nextTurn: "Next turn", currentTask: "Current task", configurationSaved: "Configuration saved for the next turn.", configurationApplied: "Configuration updated.", configurationBusy: "Mode changes are unavailable while this task is running.", modelUnavailable: "This model or group is no longer available.", noModelMatches: "No matching models.", noImageModel: "Choose an image model before sending.", referenceUnsupported: "This model does not support reference images.", noOptions: "Use the service defaults", backToLatest: "Back to latest",
 };
 
 export const mobileZhCN: typeof mobileEn = {
   title: "PI 移动端", subtitle: "随时查看电脑上的智能体。",
   loginTitle: "登录 MirrorCoding", username: "账号", password: "密码", login: "登录",
   challenge: "验证账号", verificationCode: "验证码", verify: "验证", openVerification: "打开验证页面",
-  logout: "退出登录", account: "账号", devices: "我的电脑", pair: "配对电脑", pairCode: "8 位配对码",
+  logout: "退出登录", logoutConfirm: "确定在这台手机上退出 MirrorCoding 吗？", account: "账号", devices: "我的电脑", pair: "配对电脑", pairCode: "8 位配对码",
   pairHint: "在 PI 电脑端右键项目或会话，选择“同步到移动端”。",
   pairSubmit: "配对并同步", paired: "已配对", empty: "还没有同步的工作", emptyHint: "配对一个项目或会话，即可查看电脑上智能体的工作。",
   online: "在线", offline: "电脑离线", offlineHint: "在电脑上启动 PI Desktop 后即可继续。",
@@ -58,4 +60,6 @@ export const mobileZhCN: typeof mobileEn = {
   authentication_expired: "登录已失效，请重新登录。", request_failed: "请求失败，请重试。",
   sharedWork: "已同步工作", connectionStatus: "连接状态", menu: "账号与外观", emptyHistory: "暂时没有消息。",
   logoutPending: "本机已退出，服务端退出尚未确认。", unavailable: "不可用",
+  mode: "模式", chooseMode: "选择模式", modeAgentHint: "对话、工具和任务执行", modePlanHint: "先生成计划，再确认执行", modeGoalHint: "设定目标并确认执行", modeImageHint: "使用所选模型生成图片",
+  model: "模型", chooseModel: "选择模型", chatModels: "对话模型", imageModels: "生图模型", search: "搜索模型", apply: "应用", groups: "分组", dynamicBilling: "动态计费", ratio: "倍率", thinkingLevel: "推理等级", parameters: "参数", parametersAdjusted: "已按该模型能力重置不支持的参数。", size: "尺寸", quality: "质量", aspectRatio: "宽高比", count: "数量", nextTurn: "下一轮", currentTask: "当前任务", configurationSaved: "配置将在下一轮生效。", configurationApplied: "配置已更新。", configurationBusy: "任务运行时暂不能切换模式。", modelUnavailable: "该模型或分组已不可用。", noModelMatches: "没有匹配的模型。", noImageModel: "请先选择生图模型。", referenceUnsupported: "该模型不支持参考图。", noOptions: "使用服务端默认值", backToLatest: "回到最新",
 };
