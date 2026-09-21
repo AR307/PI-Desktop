@@ -317,3 +317,28 @@ needed by an actual request rather than starting a repository-wide rewrite.
 - Candidate 071ca66f passed all 46 Electron checks with no live or shutdown
   renderer errors. Visual capture waits for the sidebar transition and completes
   notification dismissal before recording the narrow layout.
+
+### 2026-09-21 - Image generation final acceptance and handoff
+
+- Task candidate: `28a74eac1ba8f6ccb13b427ead124e1c7c964741`; base main:
+  `996922fa729870e88ed9e439aa6959e388c12f91`. The branch includes that base and
+  remains local in the dedicated `codex/image-generation` worktree.
+- `apps/desktop/test/e2e/images/acceptance.mjs` passed all 46 checks using actual
+  Electron, Rust, Node sidecar, an isolated profile and controlled local HTTP/SSE
+  image/chat endpoints. Both live and shutdown renderer error lists are empty.
+  The run covers direct and agent generation, declared parameters, reference
+  routes, cancellation, download-only retry, account/group recovery, persistence,
+  planning restrictions and ordinary provider use after MirrorCoding logout.
+- Reviewed the settled Chinese dark and English light 600px views, the regular
+  1200px layout and centered preview. Controls and image cards remain usable.
+  Screenshots, request evidence and the report are in
+  `D:/piformc-artifacts/images/acceptance-final`, outside version control.
+- The final desktop build, typecheck and lint passed. Additional transcript
+  verification passed 28 turn/process checks and 13 session-history checks.
+  Earlier workspace/Rust/shared/runtime checks and the unchanged Windows
+  host-runtime test limitation are recorded above.
+- `docs/mirrorcoding-image-generation-requirements.md` is the server-team handoff.
+  It defines the exact catalog, authorization, reference normalization, response
+  and acceptance contract used by PI. MirrorCoding implementation/deployment,
+  paid upstream tests and installer packaging remain separate delivery work.
+  This documentation-only record changes no tested application source.
