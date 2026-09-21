@@ -1,5 +1,11 @@
 # 03. AI-Assisted Development Workflow
 
+Current workflow authority: root `AGENTS.md` (Policy-Sync 2026-09-20.1).
+Use a dedicated request worktree, incorporate current `origin/main`, and run
+task-candidate E2E there. Do not merge into local main for validation. Remote
+publishing and cleanup follow the user's authorized delivery scope. The old
+local-main workflow recorded in R4/R7 below is historical and superseded.
+
 > Scope: AI agents and human collaborators working on PI-Desktop
 > Status: Accepted
 > Cross-references: [00-baseline](../00-baseline.md) · [decisions-log](../08-meta/decisions-log.md) · [acceptance-criteria](02-acceptance-criteria.md) · [e2e-test-plan](04-e2e-test-plan.md) · [change-checklist](05-change-checklist.md) · [ADR index](../../adr/README.md)
@@ -35,7 +41,7 @@ The rules below govern every change to the PI-Desktop codebase and documentation
 - Document the scenario in `06-delivery/04-e2e-test-plan.md` — even before the automated test exists.
 - Internal-only changes (logging format, internal variable rename) do not require e2e doc updates.
 
-### R4 — Request branch + worktree + merge gate
+### R4 — Historical request workflow (superseded by AGENTS.md §§5, 16)
 
 > **Every development request starts from current `origin/main` in a
 > dedicated branch and worktree. Opening or updating a pull request
@@ -185,7 +191,7 @@ an unambiguous pull request number for this repository.
 - When both an issue and a pull request are linked, R6 applies to the pull
   request and R5 still applies to the issue after the merged outcome.
 
-### R7 — Code-bearing changes require relevant E2E after main integration
+### R7 — Historical local-main E2E workflow (superseded by AGENTS.md §16)
 
 > **Every code-bearing change must pass relevant E2E on a candidate that
 > already contains the latest `origin/main`, before its request branch is

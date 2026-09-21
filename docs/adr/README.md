@@ -18,6 +18,8 @@ Each ADR includes:
 
 ## Index
 
+- [Scoped MC relay for the Android companion](mobile-companion-relay.md)
+
 | ID | Title | Status |
 |---|---|---|
 | trusted-extension-operation-ownership | [Trusted extension operation ownership](trusted-extension-operation-ownership.md) | Implemented candidate |

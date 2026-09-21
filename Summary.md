@@ -1,5 +1,14 @@
 # PI-Desktop MirrorCoding Edition
 
+## 2026-09-21 - Android companion implementation
+
+- Added the MC-team requirements handoff, scoped online-sync domain spec and
+  architecture decision. MC retains device/grant metadata; desktop owns
+  transcripts, attachments and all task execution.
+- Exposed browser-safe RACP client/framing entry points and shared the protocol
+  error class between browser and Host. Desktop share UI, scoped relay and the
+  React/Capacitor Android implementation are integrated in follow-up commits.
+
 ## Project overview
 
 This branch starts from upstream PI-Desktop `920b12b8e` (0.15.6, 2026-09-24)

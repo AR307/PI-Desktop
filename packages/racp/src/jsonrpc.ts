@@ -1,4 +1,4 @@
-import { RacpError } from "@pi-desktop/agent-host";
+import { RacpError } from "@pi-desktop/shared";
 import type { RacpRemoteError } from "@pi-desktop/shared";
 
 /**
