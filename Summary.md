@@ -311,3 +311,6 @@ needed by an actual request rather than starting a repository-wide rewrite.
   and aborted status, then exposed the empty-text image error card being hidden
   by compact transcript grouping. Image results now remain visible outside that
   disclosure so the retained download can be retried immediately.
+- The same scenario also caught live message completion discarding empty-text
+  image failures before rendering. Terminal projection now retains image result
+  rows, including cancelled results with pending downloads.

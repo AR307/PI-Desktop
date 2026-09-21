@@ -72,7 +72,7 @@ export function projectMessageEnd(
   const empty =
     !(event.message.content || "").trim() &&
     !(event.message.thinking || "").trim();
-  return failed && empty && !event.message.error
+  return failed && empty && !event.message.error && !event.message.imageGeneration
     ? removeLiveSessionMessage(next, event.message.id)
     : upsertLiveSessionMessage(next, event.message);
 }
