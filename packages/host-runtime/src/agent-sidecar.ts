@@ -1,6 +1,6 @@
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { DEFAULT_RPC_TIMEOUT_MS, readNdjsonLines, rpcTimeoutMs } from "@pi-desktop/shared";
+import { readNdjsonLines, rpcTimeoutMs } from "@pi-desktop/shared";
 import type { ProcessExitHandler, StderrHandler } from "./host-process.js";
 
 // stderr lines kept per sidecar so an unexpected exit can be reported with the
@@ -21,6 +21,7 @@ export type LocalToolHandler = (input: {
   sessionId: string;
   toolCallId: string;
   args: unknown;
+  signal: AbortSignal;
 }) => Promise<LocalToolResult>;
 
 export type ProjectInstructionResolver = (input: {
@@ -121,6 +122,7 @@ export type AgentSidecarOptions = {
  * extensions).
  */
 export class AgentSidecar {
+  private localToolControllers = new Map<string, AbortController>();
   private child: ChildProcessWithoutNullStreams;
   private pending = new Map<
     string,
@@ -208,6 +210,8 @@ export class AgentSidecar {
       p.reject(error);
     }
     this.pending.clear();
+    for (const controller of this.localToolControllers.values()) controller.abort();
+    this.localToolControllers.clear();
     for (const timer of this.localToolTimers) clearTimeout(timer);
     this.localToolTimers.clear();
     this.handlers.clear();
@@ -258,20 +262,26 @@ export class AgentSidecar {
 
   private async runLocalTool(
     handler: LocalToolHandler,
-    input: Parameters<LocalToolHandler>[0],
+    input: Omit<Parameters<LocalToolHandler>[0], "signal">,
+    toolName: string,
   ): Promise<LocalToolResult> {
     let timer: ReturnType<typeof setTimeout> | undefined;
+    const key = `${input.sessionId}:${input.toolCallId}`;
+    const controller = new AbortController();
+    this.localToolControllers.set(key, controller);
     try {
       return await Promise.race([
-        handler(input),
+        handler({ ...input, signal: controller.signal }),
         new Promise<LocalToolResult>((_, reject) => {
           timer = setTimeout(() => {
+            controller.abort();
             reject(new Error("host-local tool timeout"));
-          }, DEFAULT_RPC_TIMEOUT_MS);
+          }, rpcTimeoutMs("tools.execute", { toolName }));
           this.localToolTimers.add(timer);
         }),
       ]);
     } finally {
+      this.localToolControllers.delete(key);
       if (timer) {
         clearTimeout(timer);
         this.localToolTimers.delete(timer);
@@ -506,6 +516,14 @@ export class AgentSidecar {
           );
           return;
         }
+        if (method === "tools.abort") {
+          const controller = this.localToolControllers.get(`${params.sessionId}:${params.toolCallId}`);
+          if (controller) {
+            controller.abort();
+            this.writeToChild(JSON.stringify({ jsonrpc: "2.0", id: msg.id, result: { aborted: true } }) + "\n");
+            return;
+          }
+        }
         // Host-local tools short-circuit before host-core (which doesn't
         // know them); everything else proxies through unchanged.
         const localTool =
@@ -514,12 +532,11 @@ export class AgentSidecar {
             : undefined;
         if (localTool) {
           const toolName = requestedToolName;
-          // Local tools can bypass host-core's permission boundary. Plan mode
-          // therefore permits only the read-only BrowserPreview bridge; every
-          // other host-local tool fails closed even if a stale runtime asks for
-          // it directly.
+          // Planning permits only the read-only BrowserPreview and image
+          // directory bridges. Other host-local tools are rejected even if
+          // a stale runtime asks for them directly.
           const result =
-            params.mode === "plan" && toolName !== "BrowserPreview"
+            (params.mode === "plan" || params.mode === "goal") && toolName !== "BrowserPreview" && toolName !== "ListImageModels"
               ? {
                   ok: false,
                   isError: true,
@@ -530,7 +547,7 @@ export class AgentSidecar {
                   sessionId: String(params.sessionId ?? ""),
                   toolCallId: String(params.toolCallId ?? ""),
                   args: params.args,
-                });
+                }, toolName);
           this.writeToChild(
             JSON.stringify({ jsonrpc: "2.0", id: msg.id, result }) + "\n",
           );

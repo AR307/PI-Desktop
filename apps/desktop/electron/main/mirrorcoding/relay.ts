@@ -3,37 +3,17 @@ import { createServer, type IncomingMessage, type ServerResponse } from "node:ht
 import type { AddressInfo } from "node:net";
 import { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
-import type {
-  ImageGenerationCapability,
-  ImageGenerationOptions,
-  MirrorCodingProvider,
-} from "@pi-desktop/shared";
+import { validateImageOptions, type MirrorCodingProvider } from "@pi-desktop/shared";
 import type { MirrorCodingAccount } from "./account";
 import { ENDPOINTS } from "./catalog";
 
-type Binding = { providerId: string; metadata: MirrorCodingProvider; sessionId?: string };
-export type ImageReference = { data: string; mimeType: string; name?: string };
-
-function imagePayload(options: ImageGenerationOptions | undefined): Record<string, unknown> {
-  return {
-    ...(options?.count !== undefined ? { n: options.count } : {}),
-    ...(options?.size ? { size: options.size } : {}),
-    ...(options?.quality ? { quality: options.quality } : {}),
-  };
-}
-
-function imageCapability(metadata: MirrorCodingProvider, modelId: string): ImageGenerationCapability {
-  const capability = metadata.imageModels?.[modelId];
-  if (!capability) throw new Error("model_or_group_unavailable");
-  return capability;
-}
+type Binding = { providerId: string; metadata: MirrorCodingProvider; sessionId?: string; imageModelId?: string };
 
 /** Main owns upstream auth; the sidecar can only use its local selected binding. */
 export class MirrorCodingRelay {
   private server = createServer((request, response) => { void this.forward(request, response); });
   private bindings = new Map<string, Binding>();
   private requests = new Map<AbortController, Binding>();
-  private imageRequests = new Set<AbortController>();
   private listening?: Promise<string>;
   constructor(private account: MirrorCodingAccount) {}
 
@@ -62,87 +42,22 @@ export class MirrorCodingRelay {
   }
 
   boundSessions(): string[] {
-    return [...new Set([...this.bindings.values()].flatMap((value) => value.sessionId ? [value.sessionId] : []))];
+    return [...new Set([...this.bindings.values()].flatMap((value) => value.sessionId && !value.imageModelId ? [value.sessionId] : []))];
   }
-  hasActiveRequests(): boolean { return this.requests.size > 0 || this.imageRequests.size > 0; }
+  hasActiveRequests(): boolean { return this.requests.size > 0; }
 
-  async requestImage(
-    metadata: MirrorCodingProvider,
-    modelId: string,
-    prompt: string,
-    options: ImageGenerationOptions,
-    references: readonly ImageReference[],
-    signal?: AbortSignal,
-  ): Promise<Response> {
-    const controller = new AbortController();
-    const forwardAbort = () => controller.abort();
-    if (signal?.aborted) controller.abort();
-    else signal?.addEventListener("abort", forwardAbort, { once: true });
-    this.imageRequests.add(controller);
-    try {
-      const state = this.account.snapshot();
-      if (state.status !== "connected" || state.account?.id !== metadata.accountId) {
-        throw new Error("reauthorization_required");
-      }
-      const capability = imageCapability(metadata, modelId);
-      const group = state.catalog?.groups.find((entry) => entry.id === metadata.groupId);
-      const catalogModel = group?.models.find((entry) => entry.id === modelId);
-      if (!catalogModel?.image || !catalogModel.supported_endpoint_types.includes("image-generation")) {
-        throw new Error("model_or_group_unavailable");
-      }
-      if (references.length > 0 && !capability.reference_path) {
-        throw new Error("images_reference_unsupported");
-      }
-      const path = references.length > 0
-        ? capability.reference_path ?? capability.generation_path
-        : capability.generation_path;
-      const headers = new Headers({
-        Accept: "application/json",
-        "X-Mirrorcoding-Group": encodeURIComponent(metadata.groupId),
-      });
-      let body: BodyInit;
-      if (path === "/v1/images/edits") {
-        const form = new FormData();
-        form.set("model", modelId);
-        form.set("prompt", prompt);
-        for (const [key, value] of Object.entries(imagePayload(options))) form.set(key, String(value));
-        for (const reference of references) {
-          const bytes = Buffer.from(reference.data, "base64");
-          form.append(
-            "image",
-            new Blob([bytes], { type: reference.mimeType }),
-            reference.name || "reference-image",
-          );
-        }
-        body = form;
-      } else {
-        body = JSON.stringify({
-          model: modelId,
-          prompt,
-          ...imagePayload(options),
-          ...(references.length > 0
-            ? { images: references.map((reference) => ({ image_url: `data:${reference.mimeType};base64,${reference.data}` })) }
-            : {}),
-        });
-        headers.set("Content-Type", "application/json");
-      }
-      const response = await this.account.request(path, { method: "POST", headers, body, signal: controller.signal });
-      if (response.status === 403) {
-        const denied = await response.clone().json().catch(() => null) as { error?: { code?: string; message?: string } } | null;
-        if (denied?.error?.code?.includes("group") || denied?.error?.message === "The selected group is not available to this account") {
-          void this.account.groupUnavailable();
-        }
-      }
-      return response;
-    } finally {
-      this.imageRequests.delete(controller);
-      signal?.removeEventListener("abort", forwardAbort);
-    }
+  async bindImage(providerId: string, metadata: MirrorCodingProvider, modelId: string, sessionId: string) {
+    const state = this.account.snapshot();
+    if (state.status !== "connected" || state.account?.id !== metadata.accountId) throw new Error("reauthorization_required");
+    if (!metadata.imageModels?.[modelId]) throw new Error("model_or_group_unavailable");
+    const origin = await this.listen();
+    const key = randomBytes(32).toString("base64url");
+    this.bindings.set(key, { providerId, metadata, sessionId, imageModelId: modelId });
+    return { baseUrl: `${origin}/${providerId}`, headers: { "x-pi-mirrorcoding-key": key }, release: () => { this.bindings.delete(key); } };
   }
 
   invalidate(): void {
     for (const controller of this.requests.keys()) controller.abort();
-    for (const controller of this.imageRequests) controller.abort();
     this.bindings.clear();
   }
 
@@ -173,19 +88,23 @@ export class MirrorCodingRelay {
       const chunks: Buffer[] = [];
       for await (const chunk of request) chunks.push(Buffer.from(chunk));
       const body = Buffer.concat(chunks).toString("utf8");
-      const payload = JSON.parse(body) as { model?: unknown };
+      const payload = JSON.parse(body) as { model?: unknown; images?: unknown[]; n?: number; size?: string; quality?: string; aspect_ratio?: string };
       const gemini = /^\/v1beta\/models\/(.+):(streamGenerateContent|generateContent)$/.exec(path);
       const modelId = gemini ? decodeURIComponent(gemini[1]) : payload.model;
       if (typeof modelId !== "string") throw new Error("invalid_model_request");
-      const endpoint = binding.metadata.routes[modelId];
-      if (!endpoint || (endpoint === "gemini" ? !gemini : path !== ENDPOINTS[endpoint].path)) {
-        response.writeHead(403).end(JSON.stringify({ error: { message: "Model or group unavailable", code: "model_or_group_unavailable" } }));
-        return;
-      }
-      // Availability is checked against the most recent catalog, including empty catalogs.
       const group = state.catalog?.groups.find((entry) => entry.id === binding.metadata.groupId);
-      if (!group?.models.some((model) => model.id === modelId && model.supported_endpoint_types.includes(endpoint))) {
-        throw new Error("model_or_group_unavailable");
+      const catalogModel = group?.models.find((entry) => entry.id === modelId);
+      if (binding.imageModelId) {
+        const capability = catalogModel?.image;
+        if (modelId !== binding.imageModelId || !capability || !catalogModel.supported_endpoint_types.includes("image-generation")) throw new Error("model_or_group_unavailable");
+        const references = Array.isArray(payload.images) ? payload.images.length : 0;
+        const expected = references ? capability.reference_path : capability.generation_path;
+        if (path !== expected) throw new Error("model_or_group_unavailable");
+        validateImageOptions(capability, { count: payload.n, size: payload.size, quality: payload.quality, aspectRatio: payload.aspect_ratio }, references);
+      } else {
+        const endpoint = binding.metadata.routes[modelId];
+        if (!endpoint || (endpoint === "gemini" ? !gemini : path !== ENDPOINTS[endpoint].path) ||
+            !catalogModel?.supported_endpoint_types.includes(endpoint)) throw new Error("model_or_group_unavailable");
       }
       const headers = new Headers({
         "Content-Type": "application/json", Accept: "application/json, text/event-stream",

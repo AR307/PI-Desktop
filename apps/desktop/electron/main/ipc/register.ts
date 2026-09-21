@@ -1,3 +1,4 @@
+import { registerImageIpc } from "../images/ipc";
 import { join } from "node:path";
 import { dialog, type BrowserWindow, type IpcMain, type IpcMainInvokeEvent } from "electron";
 import { err, ErrorCodes, IPC, ok, type Result } from "@pi-desktop/shared";
@@ -274,9 +275,9 @@ export function registerIpcHandlers(dependencies: RegisterIpcDependencies) {
     enrichProviderList,
     bindingForModel,
   });
+  registerImageIpc(registrar, mirrorCoding.images);
   registerMirrorCodingIpc({
     registrar, runtime: mirrorCoding, activeTurns,
-    emitAgentEvent,
     abort: async (sessionId) => {
       const handler = ipcHandlers.get(IPC.invoke.agentAbort);
       if (!handler) throw new Error("agent unavailable");
@@ -354,6 +355,7 @@ export function registerIpcHandlers(dependencies: RegisterIpcDependencies) {
     },
   });
   registerAgentIpc({
+    images: mirrorCoding.images,
     registrar,
     getHost,
     getSidecar,

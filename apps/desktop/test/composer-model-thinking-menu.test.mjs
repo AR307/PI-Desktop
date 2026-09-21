@@ -34,7 +34,7 @@ test("the menu root carries the reasoning slider under the reasoning entry", () 
   // The root view renders the slider directly beneath the Reasoning level
   // entry; the entry itself still opens the classic radio-list submenu.
   assert.match(composerSource, /onClick=\{\(\) => showView\("thinking"\)\}[\s\S]*?className="composer-thinking-slider"/);
-  assert.match(composerSource, /\{thinkingMenuLevels\.length > 1 \? \(\s*<div className="composer-thinking-slider">/);
+  assert.match(composerSource, /\{!imageMode && thinkingMenuLevels\.length > 1 \? \(\s*<div className="composer-thinking-slider">/);
   assert.match(composerSource, /type="range"/);
   assert.match(composerSource, /className="composer-thinking-range"/);
   assert.match(composerSource, /aria-label=\{t\("chat.reasoningLevel"\)\}/);

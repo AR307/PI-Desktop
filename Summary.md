@@ -273,3 +273,37 @@ needed by an actual request rather than starting a repository-wide rewrite.
 - Recorded actual toolchain checks and the untested runtime scope.
 - Documentation-only change; no application behavior changed. Delivery is a
   local commit only, with no push or pull request.
+
+
+### 2026-09-21 - Direct and agent image generation
+
+- Completed a separate image task path: Node uses pi ImagesProvider; main owns
+  MirrorCoding loopback authentication, job cancellation and attachment handling;
+  Rust stores per-session settings and image transcript content blocks.
+- Added the split mode picker, capability-specific model/group choices, declared
+  image parameters, durable cards, preview/save/reference reuse and URL retries.
+- Added ListImageModels and GenerateImage as runtime tools, with read-only
+  planning behavior and cancellation across the existing host-local tool bridge.
+- The desktop remains based on the committed account/window fixes and current
+  origin/main. Work is confined to codex/image-generation; no MirrorCoding
+  server repository, production profile or deployed domain is modified.
+- Added the server handoff, feature specification, architecture decision and a
+  real isolated Electron protocol acceptance driver. Initial desktop runs proved
+  direct generation, all three reference routes, autonomous tool generation,
+  persistence, anonymous download retry, cancellation and refresh. They exposed
+  a zero message-window request and missing mode-menu arrow handling, both fixed.
+- JS builds, desktop typecheck, lint, 876 shared tests, 25 i18n tests and 72 Rust
+  session tests passed before candidate preparation. Candidate verification and
+  final visual review are recorded separately after execution.
+- The expanded Electron run passed 44 checks including permission changes and
+  ordinary chat after sign-out. A follow-up download-cancellation scenario
+  reproduced a completed-status bug; cancellation now retains pending downloads
+  and the prompt instead of reporting success. The final candidate reruns it.
+- The complete workspace JS build, final desktop typecheck, lint and Rust format
+  check passed. Targeted agent runtime tests passed 218 cases and desktop image/
+  model/transcript tests passed 47 cases. Host-runtime retains the unchanged
+  Windows separator assertion described above (28 of 29 pass); no installer or
+  paid/deployed MirrorCoding acceptance is claimed.
+- The older delivery workflow document still describes local-main integration.
+  This task follows the supplied root policy and local-only delivery instruction:
+  validation and commits stay in the dedicated task worktree.

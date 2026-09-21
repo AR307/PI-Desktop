@@ -1,3 +1,6 @@
+import { useImageComposer } from "../features/images/useImageComposer";
+import { ImageOptions } from "../features/images/ImageOptions";
+import { useImageReference } from "../features/images/useImageReference";
 import {
   useEffect,
   useLayoutEffect,
@@ -377,14 +380,19 @@ export function Composer({
   const modelLabel = provider && modelId
     ? `${composerModelDisplayName(provider, modelId, selectedModel?.displayName)}${provider.mirrorCoding ? ` · ${provider.mirrorCoding.groupName}` : ""}`
     : selectedModel?.displayName || modelId || t("chat.model");
+  const image = useImageComposer(activeSessionId ?? undefined, mode, thinkingLevel, draft);
+  useImageReference(activeSessionId ?? undefined, draft);
   const modelMenu = useComposerModelMenu({
+    task: image.active ? "image" : "chat",
+    imageSelection: image.config,
+    onSelectImage: image.selectModel,
     mode,
     activeSessionId,
     provider,
     modelId,
     thinkingProvider,
     thinkingLevel,
-    controlsBlocked,
+    controlsBlocked: controlsBlocked || image.busy || image.running,
   });
   const modelReady = nativeSession
     ? activeSessionSummary.capabilities?.canPrompt === true
@@ -432,8 +440,9 @@ export function Composer({
     clearEnhancementError,
     enhancePrompt,
     undoPromptEnhancement,
-    submit,
+    submit: submitChat,
   } = submitController;
+  const submit = (steering?: boolean) => image.active ? image.submit() : submitChat(steering);
 
   const composerAc = useComposerAutocomplete({
     value,
@@ -550,13 +559,15 @@ export function Composer({
               onAccept={acceptCompletion}
             />
           ) : null}
+          {image.active ? <ImageOptions capability={image.capability} options={image.config.options} references={activeFileReferences.length} disabled={image.busy || image.running} onChange={image.setOptions} /> : null}
+          {image.running ? <div className="image-options-notice" role="status">{t("images.generating")} · {image.label}</div> : null}
           <ComposerInput
             imagePreview={draft.imagePreview}
             inputRef={ref}
             value={value}
-            placeholderText={placeholderText}
+            placeholderText={image.active ? t("images.prompt") : placeholderText}
             placeholderKey={`${variant}-${placeholderIndex}-${placeholderText}`}
-            inputBlocked={inputBlocked}
+            inputBlocked={inputBlocked || image.running || image.busy}
             pasting={pasting}
             enterToSend={enterToSend}
             runActive={runActive}
@@ -580,6 +591,9 @@ export function Composer({
           <ComposerToolbar
             t={t}
             mode={mode}
+            task={image.active ? "image" : "chat"}
+            onModeChange={image.selectMode}
+            modeBlocked={runActive || image.busy}
             planningLive={planningLive}
             providerId={provider?.id}
             modelId={modelId}
@@ -593,13 +607,13 @@ export function Composer({
             configureActiveSession={configureActiveSession}
             showToast={showToast}
             modelMenu={modelMenu}
-            modelLabel={modelLabel}
+            modelLabel={image.active ? image.label : modelLabel}
             thinkingLabel={thinkingLabel}
             contextUsage={composerContextUsage ?? null}
             enhancementDraft={enhancementDraft}
             value={value}
-            modelReady={modelReady}
-            sendBlocked={sendBlocked}
+            modelReady={image.active ? image.ready : modelReady}
+            sendBlocked={sendBlocked || (image.active && (image.busy || image.running))}
             enhancingPrompt={enhancingPrompt}
             enhancementUndoText={enhancementUndoText}
             enhancePrompt={enhancePrompt}
@@ -607,7 +621,7 @@ export function Composer({
             clearEnhancementError={clearEnhancementError}
             runActive={runActive}
             hasDraftContent={hasDraftContent}
-            abort={abort}
+            abort={image.active ? image.abort : abort}
             submit={submit}
           />
         </div>

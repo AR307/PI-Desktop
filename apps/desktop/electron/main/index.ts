@@ -683,6 +683,8 @@ const {
 } = pluginServices;
 
 const mirrorCoding = createMirrorCodingRuntime({
+  getSidecar: () => sidecar, getActiveTurns: () => activeTurns,
+  acquireSessionOperation: (id) => acquireSessionOperation(id), emit: (envelope) => emitAgentEvent(envelope),
   dataDir, getHost: () => host, modelsDev: modelsDevCatalog,
   openExternal: safeOpenExternal, send: sendToRenderer,
 });

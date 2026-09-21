@@ -13783,3 +13783,27 @@ the latest destination. These assertions measure work counts, not device FPS.
   `desktop_dispatch_outlasts_every_electron_budget_it_wraps` covers the dispatch
   default.
 - **Status:** Contract-covered; no end-to-end driver waits out a real 70s call.
+
+
+### E2E-IMAGE-direct-and-agent-generation
+
+- Preconditions: isolated Electron profile, Rust host binary, current JS build,
+  local MirrorCoding protocol fixture, controlled image and chat responses.
+- Steps: authorize, cycle modes, select model then group, submit prompt, preview
+  and save base64/URL images, reuse two references, switch among GPT Image,
+  Gemini and Seedream, reject unsupported references, and return to chat.
+- Expected: correct endpoint, group and declared parameters; separate manual
+  chat/image selections; chat reasoning preserved; no implicit image history.
+- Agent path: a chat model calls ListImageModels, autonomously chooses another
+  image model/group, generates and continues its reply; image cards appear for
+  a text-only chat model without changing the manual image selection.
+- Recovery: download-only retry, Stop during generation and download, 401 refresh,
+  429/503 without replay, catalog network error, removed-group permissions and
+  empty success, account sign-out during generation, ordinary chat after sign-out,
+  restart with durable images. Plan/Goal expose directory lookup only.
+- Visual: image preview, both themes, English/Chinese, keyboard mode menu;
+  600px viewport with collapsed sidebar and regular viewport with sidebar open.
+- Driver: `apps/desktop/test/e2e/images/acceptance.mjs`. Set PI_TEST_PLAYWRIGHT
+  to the installed Playwright module path if needed; PI_TEST_OUTPUT selects the
+  isolated artifact/profile folder. This is PI-side protocol acceptance only;
+  real MirrorCoding channel conversion and deployment are server-team work.

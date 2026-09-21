@@ -1,6 +1,8 @@
+import { imagesEn } from "../images.js";
 import { mirrorCodingEn } from "../mirrorcoding.js";
 
 export const en = {
+  images: imagesEn,
   mirrorCoding: mirrorCodingEn,
   app: {
     shellName: "PI-Desktop",

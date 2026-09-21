@@ -73,7 +73,8 @@ function isVisibleMessage(message: UiMessage): boolean {
     !(message.content || "").trim() &&
     !messageThinking(message) &&
     !message.hostedSearch &&
-    !message.error
+    !message.error &&
+    !message.imageGeneration
   );
 }
 
@@ -107,7 +108,7 @@ function collectSubagentRuns(
     // showing: the text is the only place its narration and report exist.
     const thinking = messageThinking(message);
     if (thinking) run.items.push({ kind: "thinking", message });
-    if ((message.content || "").trim() || message.error) {
+    if ((message.content || "").trim() || message.error || message.imageGeneration) {
       run.items.push({ kind: "answer", message });
     }
   }
@@ -253,7 +254,7 @@ export function buildTranscriptEntries(
     for (const round of hostedSearchRounds(message.hostedSearch)) {
       pushActivity({ kind: "hostedSearch", message, round });
     }
-    if ((message.content || "").trim() || !thinking || message.error) {
+    if ((message.content || "").trim() || !thinking || message.error || message.imageGeneration) {
       current.parts.push({ kind: "message", message });
       if (!current.anchorId && (message.content || "").trim()) {
         current.anchorId = message.id;

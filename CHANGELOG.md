@@ -1,5 +1,17 @@
 # Unreleased local changes
 
+## Image generation
+
+- Add an Agent/Plan/Goal/Image split mode button and separate per-session image selection.
+- Filter model menus by chat/image capability and keep model/group billing visible.
+- Generate from explicit prompts and references through pi's image provider,
+  using main-owned MirrorCoding authentication and the selected group.
+- Persist image cards with preview, save, reference reuse and download-only retry.
+- Let chat agents query image models and generate images with their own selection.
+- Cancel image work through Stop and account sign-out. Preserve chat reasoning
+  and report uncertain generation failures without automatically replaying them.
+- Define the server team's image catalog and endpoint requirements separately.
+
 ## Work-panel window behavior
 
 - Allow native window dragging from empty space beside work-panel tabs.

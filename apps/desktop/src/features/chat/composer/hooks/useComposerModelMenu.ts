@@ -21,11 +21,13 @@ import {
   thinkingLevelForProvider,
   thinkingProviderForModel,
   type ComposerMenuView,
+  type ComposerTask,
 } from "../model";
 import { createLatestCommitQueue } from "../thinking-commit-queue";
 import { api } from "../../../../lib/api";
 
 type UseComposerModelMenuOptions = {
+  task?: ComposerTask;
   mode: Mode;
   activeSessionId: string | null | undefined;
   provider: ProviderPublic | undefined;
@@ -33,9 +35,12 @@ type UseComposerModelMenuOptions = {
   thinkingProvider: ProviderPublic | null | undefined;
   thinkingLevel: SessionThinkingLevel;
   controlsBlocked: boolean;
+  imageSelection?: { providerId?: string; modelId?: string };
+  onSelectImage?: (selection: { providerId: string; modelId: string }) => Promise<void>;
 };
 
 export function useComposerModelMenu({
+  task = "chat",
   mode,
   activeSessionId,
   provider,
@@ -43,6 +48,8 @@ export function useComposerModelMenu({
   thinkingProvider: resolvedThinkingProvider,
   thinkingLevel,
   controlsBlocked,
+  imageSelection,
+  onSelectImage,
 }: UseComposerModelMenuOptions) {
   const providers = useAppStore((s) => s.providers);
   const providerModels = useAppStore((s) => s.providerModels);
@@ -118,6 +125,7 @@ export function useComposerModelMenu({
           const models = composerModelsForProvider(
             candidate,
             providerModels[candidate.id],
+            task,
           );
           return {
             provider: candidate,
@@ -127,7 +135,7 @@ export function useComposerModelMenu({
           };
         })
         .filter((group) => group.models.length > 0),
-    [providers, providerModels],
+    [providers, providerModels, task],
   );
   const displayGroups = useMemo(() => {
     const managed = modelGroups.filter((group) => group.provider.mirrorCoding);
@@ -175,10 +183,10 @@ export function useComposerModelMenu({
     () =>
       flatModels.findIndex(
         (entry) =>
-          entry.provider.id === provider?.id &&
-          entry.model.modelId === modelId,
+          entry.provider.id === (task === "image" ? imageSelection?.providerId : provider?.id) &&
+          entry.model.modelId === (task === "image" ? imageSelection?.modelId : modelId),
       ),
-    [flatModels, provider?.id, modelId],
+    [flatModels, imageSelection?.modelId, imageSelection?.providerId, modelId, provider?.id, task],
   );
 
   useEffect(() => {
@@ -216,7 +224,7 @@ export function useComposerModelMenu({
   }, [open]);
   useEffect(() => {
     thinkingQueueRef.current?.invalidate();
-  }, [activeSessionId, provider?.id, modelId]);
+  }, [activeSessionId, provider?.id, modelId, task]);
 
   useEffect(() => {
     if (!controlsBlocked) return;
@@ -274,6 +282,14 @@ export function useComposerModelMenu({
     thinkingQueueRef.current?.invalidate();
     await thinkingQueueRef.current?.idle();
     try {
+      if (task === "image") {
+        await onSelectImage?.({ providerId: candidate.id, modelId: nextModelId });
+        setQuery("");
+        setView("root");
+        setModelHighlight(-1);
+        setThinkingHighlight(-1);
+        return;
+      }
       const nextModelProvider = thinkingProviderForModel(
         candidate,
         nextModelId,
@@ -388,6 +404,8 @@ export function useComposerModelMenu({
   };
 
   return {
+    task,
+    selectedImage: imageSelection,
     pendingMirrorModel, mirrorGroups, groupListRef,
     mirrorCodingSelected: Boolean(provider?.mirrorCoding),
     open,

@@ -1,8 +1,10 @@
+import { imagesZhCN } from "../images.js";
 import type { EnglishCatalog } from "../en/index.js";
 
 import { mirrorCodingZhCN } from "../mirrorcoding.js";
 
 export const zhTW = {
+  images: imagesZhCN,
   mirrorCoding: mirrorCodingZhCN,
   app: {
     shellName: "PI-Desktop",

@@ -1,3 +1,4 @@
+import type { ImageGenerationState, ImageModelInfo, ImageSessionConfig } from "@pi-desktop/shared";
 import type {
   MirrorCodingAccountState,
   ImageGenerationRequest,
@@ -480,6 +481,11 @@ export const api = {
   mirrorCodingCompleteWelcome: () => invoke<{ ok: boolean }>(IPC.invoke.mirrorCodingCompleteWelcome),
   generateImage: (request: ImageGenerationRequest) =>
     invoke<{ jobId: string; result: ImageGenerationResult }>(IPC.invoke.imageGenerate, request),
+  configureImage: (key: string, config: ImageSessionConfig) => invoke<ImageSessionConfig>(IPC.invoke.imageConfigure, { key, config }),
+  imageJobs: () => invoke<ImageGenerationState[]>(IPC.invoke.imageJobs),
+  imageModels: () => invoke<ImageModelInfo[]>(IPC.invoke.imageModels),
+  retryImageDownload: (sessionId: string, messageId: string, imageId: string) => invoke<UiMessage>(IPC.invoke.imageRetryDownload, { sessionId, messageId, imageId }),
+  onImageState: (listener: (state: ImageGenerationState) => void): (() => void) => window.piDesktop!.on(IPC.event.imageState, (value) => listener(value as ImageGenerationState)),
   abortImage: (jobId: string) => invoke<{ aborted: boolean }>(IPC.invoke.imageAbort, jobId),
   onMirrorCodingChanged: (listener: (state: MirrorCodingAccountState) => void) => {
     if (!window.piDesktop?.on) return () => undefined;

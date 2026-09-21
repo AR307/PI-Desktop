@@ -211,6 +211,9 @@ pub struct UiMessage {
     /// as an additive `hostedSearch` transcript block; no SQL migration.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub hosted_search: Option<Value>,
+    /// Durable image results and pending anonymous downloads.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub image_generation: Option<Value>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -343,6 +346,9 @@ pub(crate) fn ui_to_record(message: &UiMessage) -> (MessageRecord, Option<String
     let mut blocks = Vec::with_capacity(2 + message.attachments.as_ref().map_or(0, Vec::len));
     if let Some(thinking) = &message.thinking {
         blocks.push(json!({ "type": "thinking", "text": thinking }));
+    }
+    if let Some(images) = &message.image_generation {
+        blocks.push(json!({ "type": "imageGeneration", "result": images }));
     }
     if let Some(hosted_search) = &message.hosted_search {
         let mut block = serde_json::Map::new();
@@ -485,6 +491,11 @@ pub(crate) fn record_to_ui(record: MessageRecord) -> UiMessage {
         })
         .collect::<Vec<_>>();
     let thinking = (!thinking.is_empty()).then(|| thinking.concat());
+    let image_generation = blocks
+        .iter()
+        .find(|b| b.get("type").and_then(Value::as_str) == Some("imageGeneration"))
+        .and_then(|b| b.get("result"))
+        .cloned();
     let hosted_search = blocks
         .iter()
         .find(|b| b.get("type").and_then(|t| t.as_str()) == Some("hostedSearch"))
@@ -566,6 +577,7 @@ pub(crate) fn record_to_ui(record: MessageRecord) -> UiMessage {
             parent_tool_call_id,
             agent_name,
             hosted_search: hosted_search.clone(),
+            image_generation: image_generation.clone(),
         }
     } else {
         let content = blocks
@@ -606,6 +618,7 @@ pub(crate) fn record_to_ui(record: MessageRecord) -> UiMessage {
             parent_tool_call_id,
             agent_name,
             hosted_search,
+            image_generation,
         }
     }
 }
@@ -3464,6 +3477,7 @@ mod tests {
             is_error: None,
             parent_tool_call_id: None,
             agent_name: None,
+            image_generation: None,
             hosted_search: None,
             session_message: None,
         }
@@ -3975,6 +3989,7 @@ mod tests {
             is_error: None,
             parent_tool_call_id: None,
             agent_name: None,
+            image_generation: None,
             hosted_search: None,
             session_message: None,
         };
@@ -4411,6 +4426,7 @@ mod tests {
             is_error: None,
             parent_tool_call_id: None,
             agent_name: None,
+            image_generation: None,
             hosted_search: None,
             session_message: None,
         };
@@ -4487,6 +4503,7 @@ mod tests {
             is_error: None,
             parent_tool_call_id: None,
             agent_name: None,
+            image_generation: None,
             hosted_search: Some(json!({
                 "status": "completed",
                 "rounds": [

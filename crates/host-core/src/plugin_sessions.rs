@@ -256,6 +256,7 @@ fn parse_message(
         parent_tool_call_id: None,
         agent_name: None,
         hosted_search: None,
+        image_generation: None,
         session_message: None,
     })
 }

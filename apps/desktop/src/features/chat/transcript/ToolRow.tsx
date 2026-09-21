@@ -1,3 +1,4 @@
+import { ImageResult, imageResultFromMessage } from "../../images/ImageResult";
 import {
   Fragment,
   memo,
@@ -497,7 +498,8 @@ export const ToolRow = memo(function ToolRow({
           {statusLabel}
         </span>
       ) : null}
-      {blocks && blocks.length > 0 ? (
+      {imageResultFromMessage(message) ? <ImageResult message={message} /> : null}
+      {!imageResultFromMessage(message) && blocks && blocks.length > 0 ? (
         <div className="tool-row-body" id={detailsId}>
           <DisclosureCollapseRail
             label={t("chat.collapseDetails")}

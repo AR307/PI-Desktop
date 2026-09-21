@@ -19,7 +19,7 @@ the selected group can call the model through an image endpoint:
 ```json
 {
   "id": "gpt-image-1",
-  "supported_endpoint_types": ["openai", "image-generation"],
+  "supported_endpoint_types": ["image-generation", "image-edit"],
   "image": {
     "generation_path": "/v1/images/generations",
     "reference_path": "/v1/images/edits",
@@ -35,10 +35,16 @@ Required rules:
 
 - `generation_path` is currently `/v1/images/generations`.
 - `reference_path` is omitted when references are unsupported; otherwise it is
-  `/v1/images/edits` for multipart edit requests or
+  `/v1/images/edits` for JSON-to-multipart edit requests or
   `/v1/images/generations` for JSON reference requests.
-- `sizes`, `qualities`, and `max_count` describe only values accepted by the
-  selected model and group. Omit a field when the upstream does not support it.
+- `sizes`, `qualities`, and `aspect_ratios` are optional arrays of accepted
+  strings. Omit optional arrays when unsupported. No name-based defaults are
+  synthesized by PI-Desktop.
+- `max_count` is a required positive integer (use 1 for single-output models).
+  The desktop sends `n: 1` by default. The gateway translates count or removes
+  the wire field if the native adapter always produces exactly one image.
+- `supports_chat` is a required boolean. For true values, also advertise an
+  actual supported chat endpoint; false removes the model from the chat menu.
 - `supports_chat` describes whether the same model/group remains available in
   the chat model menu. It does not grant image access by itself.
 - A model must not be advertised as an image model based only on its name.
@@ -85,8 +91,7 @@ desktop sends only the current prompt and explicitly selected options:
   "model": "gemini-3-pro-image-preview",
   "prompt": "A red bicycle under cherry blossoms",
   "n": 1,
-  "size": "1024x1024",
-  "quality": "high",
+  "aspect_ratio": "16:9",
   "images": [
     { "image_url": "data:image/png;base64,..." }
   ]
@@ -95,18 +100,23 @@ desktop sends only the current prompt and explicitly selected options:
 
 The `images` member is sent only when the catalog declares
 `reference_path: /v1/images/generations`. Unknown or unsupported fields must be
-rejected or ignored according to the existing image adapter contract; do not
+rejected with a structured parameter error; do not
 silently map them to another provider's parameters.
 
-### Multipart edit requests
+### GPT Image reference edits
 
-When `reference_path` is `/v1/images/edits`, accept
-`multipart/form-data` at `/v1/images/edits`:
+When `reference_path` is `/v1/images/edits`, PI-Desktop sends the same JSON
+shape to that endpoint. Reuse `buildJSONImageEditMultipart` in
+`relay/channel/openai/adaptor.go`: it already parses `images` arrays containing
+`image_url` data URLs. Convert to the upstream multipart request only inside
+MirrorCoding, preserving multiple references.
 
-- `model`: selected model id
-- `prompt`: current prompt
-- `n`, `size`, and `quality` only when declared by the catalog
-- one or more `image` parts containing the selected reference bytes
+- `model`: original selected catalog ID, resolved through channel aliases
+- `prompt`: only the current prompt
+- `n`: requested count, default 1
+- `size`, `quality`, `aspect_ratio`: present only when explicitly selected and
+  declared by this model/group
+- `images`: one or more `{ "image_url": "data:image/png;base64,..." }` objects
 
 The request must support multiple reference images when the upstream adapter
 supports them. Do not require the desktop to send an API key or SDK-specific
@@ -145,7 +155,7 @@ the upstream has accepted a generation request.
 
 Provide controlled local fixtures for:
 
-1. GPT Image text-to-image JSON and multipart edits with two reference images.
+1. GPT Image text-to-image JSON and JSON-to-multipart edits with two reference images.
 2. Gemini native image generation with JSON references.
 3. Seedream JSON references through the same generations endpoint.
 4. `auto` group capability intersection and a Chinese group name.
@@ -156,3 +166,38 @@ The fixtures must assert the decoded group, upstream path, model id, request
 body/multipart fields, and that no credential is present in the request body or
 response. Formal-domain deployment and paid-provider acceptance are separate
 from this handoff.
+
+## 6. Delivery responsibilities and acceptance
+
+PI-Desktop implements the client contract in this document. The MirrorCoding
+team should implement and deploy the following as one compatible server release:
+
+1. Permit both image paths under the existing Pi grant (no new login scope).
+2. Generate model/group capabilities from actual channel adapters and aliases.
+   Preserve original `model.id`, account-specific group ratios, and descriptions.
+   A GPT alias mapped to Gemini must advertise the actual reference route.
+3. Publish `image-generation` on each supported model, and `image-edit` only
+   for models supporting `/v1/images/edits`. Publish the same endpoint globally
+   in `supported_endpoints`. `auto` must use the intersection of all routes it
+   can select, including reference support and optional parameters.
+4. Normalize generations `images` into Gemini native image parts or Seedream's
+   `image` field as applicable. The desktop does not encode vendor-specific
+   upstream formats. Preserve absence of unspecified options so native defaults
+   apply; reject invalid options rather than silently rerouting.
+5. Normalize results into `data[].b64_json` or `data[].url`, optionally with
+   `mime_type`. Without `mime_type`, inline outputs are interpreted as PNG.
+   URL downloads must be anonymous HTTP(S) with an image content type and no
+   login redirect. Document URL validity so pending downloads can be retried.
+6. Verify token refresh, permission changes, selected Chinese groups, multiple
+   references, multipliers, dynamic billing, empty catalogs, 429/503, and client
+   disconnects. Do not replay a potentially accepted generation automatically.
+
+The request examples show schema, not a promise that every model supports those
+parameters. Only publish values verified for that model, channel and group.
+
+PI-side protocol acceptance uses
+`apps/desktop/test/e2e/images/fixture.mjs` in an isolated desktop profile. This
+fixture does not modify the MirrorCoding repository or prove the deployed
+service accepts the contract. Return the implemented catalog example, endpoint
+verification results, deployed version, and rollout domain to the PI team for
+final integration. No production or paid-upstream acceptance is implied.

@@ -107,8 +107,13 @@ export function compileCatalog(catalog: MirrorCodingCatalog, modelsDev: ModelsDe
           return model.supported_endpoint_types.includes(kind) && advertised?.method === "POST" && advertised.path === ENDPOINTS[kind].path;
         }) : undefined;
         const imageEndpoint = catalog.supported_endpoints["image-generation"];
-        if (model.image && imageEndpoint?.method === "POST" && imageEndpoint.path === model.image.generation_path) {
-          imageModels[model.id] = model.image;
+        if (model.image && model.supported_endpoint_types.includes("image-generation") && imageEndpoint?.method === "POST" && imageEndpoint.path === model.image.generation_path) {
+          const capability = { ...model.image };
+          if (capability.reference_path === "/v1/images/edits" &&
+              (!model.supported_endpoint_types.includes("image-edit") || catalog.supported_endpoints["image-edit"]?.path !== capability.reference_path || catalog.supported_endpoints["image-edit"]?.method !== "POST")) {
+            delete capability.reference_path;
+          }
+          imageModels[model.id] = capability;
         }
         if (!endpoint && !imageModels[model.id]) continue;
         if (endpoint) routes[model.id] = endpoint;

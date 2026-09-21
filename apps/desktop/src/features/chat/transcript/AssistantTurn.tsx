@@ -1,3 +1,4 @@
+import { ImageResult } from "../../images/ImageResult";
 import {
   memo,
   useMemo,
@@ -347,7 +348,8 @@ export const AssistantTurn = memo(function AssistantTurn({
         data-message-id={part.message.id}
         key={part.message.id}
       >
-        {part.message.content ? (
+        {part.message.imageGeneration ? <ImageResult message={part.message} /> : null}
+        {part.message.content && !part.message.imageGeneration ? (
           <div className="prose-chat">
             <Markdown source={part.message.content} />
           </div>
