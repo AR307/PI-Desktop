@@ -1,5 +1,16 @@
 # Unreleased local changes
 
+## Android companion
+
+- Share a project or session through an eight-digit, same-account MC pairing.
+- View desktop history, live text, thinking, tools, plans and image results on
+  Android; continue messages, queue work, stop tasks and resolve approvals.
+- Transfer files and reference images, preview generated images and use Android
+  save/share. Keep execution, complete history and attachments on the computer.
+- Restore login and pairings after restart, reconnect without replaying an
+  uncertain generation, and revoke mobile access from desktop settings.
+- Add the separate MC native login, device, pairing and relay team contract.
+
 ## Image generation
 
 - Add an Agent/Plan/Goal/Image split mode button and separate per-session image selection.
