@@ -76,7 +76,9 @@ renderer or cleanup errors. It includes the original sync flows plus current vs
 next-turn configuration, all four modes, image parameters, translated controls,
 draft preservation and visual/overflow checks at 390px and 320px. Screenshots and
 the report are under the ignored local artifact directory
-`.artifacts/mobile-ui-controls-final-20260921-234051/`.
+`.artifacts/mobile-ui-controls-candidate-480a9c4e/`. The report binds the clean
+executable candidate `480a9c4eb770b41159cf94ce74bea9a068794bb6` to base
+`996922fa729870e88ed9e439aa6959e388c12f91`.
 
 Capacitor sync and Gradle `assembleDebug` passed. The current debug APK is
 `apps/mobile/android/app/build/outputs/apk/debug/app-debug.apk` (approximately

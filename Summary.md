@@ -468,6 +468,10 @@ needed by an actual request rather than starting a repository-wide rewrite.
   reasoning, cross-model image-option cleanup, revocation and 320px Chinese
   light-mode layouts.
   Reviewed screenshots show no overlap, clipping or horizontal overflow.
+- Final executable candidate `480a9c4eb770b41159cf94ce74bea9a068794bb6`
+  includes base `996922fa729870e88ed9e439aa6959e388c12f91`. Its report recorded
+  a clean worktree at both start and finish; evidence is retained under
+  `.artifacts/mobile-ui-controls-candidate-480a9c4e/` outside version control.
 - Workspace JS build, desktop/mobile typechecks and builds, repository lint,
   shared/i18n/AgentHost/RACP/mobile/catalog tests, Rust formatting and relevant
   configuration tests passed. Clippy retains the existing `user_skills.rs`
