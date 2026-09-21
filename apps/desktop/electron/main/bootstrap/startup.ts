@@ -28,6 +28,7 @@ import {
 } from "../mcp-control";
 import type { ModelsDevCatalog } from "../models-dev-catalog";
 import type { MirrorCodingRuntime } from "../mirrorcoding/runtime";
+import type { MobileSyncService } from "../mobile-sync/service";
 import type { AppUpdaterController } from "../updater";
 import type { HostProcess } from "../host-process";
 import type { Logger } from "../logger";
@@ -66,6 +67,7 @@ export type StartupState = {
 };
 
 export type StartupDependencies = {
+  mobileSync?: MobileSyncService;
   mirrorCoding: MirrorCodingRuntime;
   hasSingleInstanceLock: boolean;
   state: StartupState;
@@ -288,7 +290,7 @@ export function registerApplicationStartup(deps: StartupDependencies): void {
       applyPluginLauncherShortcut();
       applyToggleWindowShortcut();
     }
-    if (host && !bootError) await deps.mirrorCoding.start();
+    if (host && !bootError) { await deps.mirrorCoding.start(); await deps.mobileSync?.start(); }
     await ensureWindow();
     if (process.env.PI_DESKTOP_MCP_CONTROL === "1") {
       try {

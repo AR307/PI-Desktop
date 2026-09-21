@@ -898,6 +898,7 @@ export class AgentHost {
           turnId: runtimeTurnId,
           content: head.content,
           ...(head.sessionMessageId ? { sessionMessageId: head.sessionMessageId } : {}),
+          ...(head.userMessageId ? { userMessageId: head.userMessageId } : {}),
           ...(head.attachments ? { attachments: head.attachments } : {}),
           principal: { subject: head.principalSubject, roles: ["controller"] },
         }));

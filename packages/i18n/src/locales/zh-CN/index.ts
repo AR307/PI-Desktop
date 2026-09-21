@@ -1,9 +1,13 @@
+import { mobileSyncZhCN } from "../mobile-sync.js";
+import { mobileZhCN } from "../mobile.js";
 import { imagesZhCN } from "../images.js";
 import type { EnglishCatalog } from "../en/index.js";
 
 import { mirrorCodingZhCN } from "../mirrorcoding.js";
 
 export const zhCN = {
+  mobileSync: mobileSyncZhCN,
+  mobile: mobileZhCN,
   images: imagesZhCN,
   mirrorCoding: mirrorCodingZhCN,
   app: {

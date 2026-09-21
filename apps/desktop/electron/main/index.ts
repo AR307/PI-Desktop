@@ -129,6 +129,7 @@ import {
 } from "./runtime/provider-catalog";
 import { createSessionLaunchRuntime } from "./runtime/session-launch";
 import { createMirrorCodingRuntime } from "./mirrorcoding/runtime";
+import { MobileSyncService } from "./mobile-sync/service";
 import { createSessionCoordination } from "./runtime/session-coordination";
 import { createScheduledRuntime } from "./runtime/scheduled";
 import { createDesktopServices } from "./services/desktop-services";
@@ -689,6 +690,14 @@ const mirrorCoding = createMirrorCodingRuntime({
   openExternal: safeOpenExternal, send: sendToRenderer,
 });
 
+const mobileSync = new MobileSyncService({
+  dataDir, account: mirrorCoding.account, images: mirrorCoding.images,
+  host: () => { if (!host) throw new Error("host_unavailable"); return host; },
+  agent: () => { if (!agentHostBridge) throw new Error("agent_unavailable"); return agentHostBridge.agentHost; },
+  send: sendToRenderer,
+  log: (message, error) => logger.app("runtime", "warn", message, { data: String(error ?? "") }),
+});
+
 const providerCatalogRuntime = createProviderCatalogRuntime({
   getHost: () => host,
   modelsDevCatalog,
@@ -822,6 +831,7 @@ function isHostUnavailable(error: unknown): boolean {
 
 /** Pull the user's MCP server records from host-core into the local runtime. */
 function sendToRenderer(channel: string, payload: unknown) {
+  if (channel === IPC.event.mirrorCodingChanged) mobileSync.accountChanged();
   applicationLifecycle?.traySessions.observeEvent(channel, payload);
   if (channel === IPC.event.pluginChanged) {
     applicationLifecycle?.applyNativeThemeSource({
@@ -1256,6 +1266,7 @@ const { bootHostStatus, runtimeArch, bootBackends } = runtimeLifecycle;
 
 function registerIpc() {
   return registerIpcHandlers({
+    mobileSync,
     mirrorCoding,
     traySessions: applicationLifecycle!.traySessions,
     ipcMain,
@@ -1394,6 +1405,7 @@ const startupState: StartupState = {
 };
 
 registerApplicationStartup({
+  mobileSync,
   mirrorCoding,
   hasSingleInstanceLock,
   state: startupState,
@@ -1482,6 +1494,7 @@ const shutdownState: ShutdownState = {
 };
 
 registerShutdownHandlers({
+  mobileSync,
   mirrorCoding,
   hasSingleInstanceLock,
   state: shutdownState,

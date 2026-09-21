@@ -467,6 +467,7 @@ describe("AgentHost turns", () => {
       principalSubject: "phone",
       content: "after reboot",
       sessionMessageId: "restored-message",
+      userMessageId: "mobile-restored-message",
       effectivePermissionMode: "ask",
       inputHash: "h",
       createdAt: 1,
@@ -481,6 +482,7 @@ describe("AgentHost turns", () => {
     await new Promise((resolve) => setTimeout(resolve, 0));
     expect(runtime.prompts.map((prompt) => prompt.content)).toEqual(["after reboot"]);
     expect(runtime.prompts[0]?.sessionMessageId).toBe("restored-message");
+    expect(runtime.prompts[0]?.userMessageId).toBe("mobile-restored-message");
   });
 });
 

@@ -50,6 +50,11 @@ export type WindowControlAction = (typeof WINDOW_CONTROL_ACTIONS)[number];
 
 export const IPC = {
   invoke: {
+    mobileSyncStatus: "pi-desktop/mobile-sync/status",
+    mobileSyncCreatePairing: "pi-desktop/mobile-sync/createPairing",
+    mobileSyncCancelPairing: "pi-desktop/mobile-sync/cancelPairing",
+    mobileSyncRevoke: "pi-desktop/mobile-sync/revoke",
+    mobileSyncRefresh: "pi-desktop/mobile-sync/refresh",
     mirrorCodingGetState: "pi-desktop/mirrorcoding/getState",
     mirrorCodingLogin: "pi-desktop/mirrorcoding/login",
     mirrorCodingCancelLogin: "pi-desktop/mirrorcoding/cancelLogin",
@@ -318,6 +323,7 @@ export const IPC = {
     nativeMenuAction: "pi-desktop/menu/nativeAction",
   },
   event: {
+    mobileSyncChanged: "pi-desktop/mobile-sync/changed",
     imageState: "pi-desktop/image/state",
     mirrorCodingChanged: "pi-desktop/mirrorcoding/changed",
     pluginChanged: "pi-desktop/event/pluginChanged",

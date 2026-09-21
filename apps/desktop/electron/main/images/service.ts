@@ -25,10 +25,14 @@ type Job = { state: ImageGenerationState; controller: AbortController; sidecar?:
 
 export class ImageService {
   private jobs = new Map<string, Job>();
+  private listeners = new Set<(state: ImageGenerationState) => void>();
+  private configurationListeners = new Set<(sessionId: string) => void>();
   private configWrite: Promise<unknown> = Promise.resolve();
   constructor(private deps: ImageServiceDependencies, private account: MirrorCodingAccount, private relay: MirrorCodingRelay) {}
   private host() { const host = this.deps.getHost(); if (!host) throw new Error("host_unavailable"); return host; }
   states() { return [...this.jobs.values()].filter((job) => job.direct).map((job) => job.state); }
+  subscribe(listener: (state: ImageGenerationState) => void) { this.listeners.add(listener); return () => { this.listeners.delete(listener); }; }
+  subscribeConfiguration(listener: (sessionId: string) => void) { this.configurationListeners.add(listener); return () => { this.configurationListeners.delete(listener); }; }
   hasJobs() { return this.jobs.size > 0; }
   abort(jobId: string) { const job = this.jobs.get(jobId); job?.controller.abort(); return !!job; }
   abortSession(sessionId: string) {
@@ -39,7 +43,7 @@ export class ImageService {
   dispose() { for (const id of this.jobs.keys()) this.abort(id); }
   private publish(job: Job, status: ImageGenerationState["status"], error?: string) {
     job.state = { ...job.state, status, ...(error ? { error } : {}) };
-    if (job.direct) this.deps.send(IPC.event.imageState, job.state);
+    if (job.direct) { this.deps.send(IPC.event.imageState, job.state); for (const listener of this.listeners) listener(job.state); }
   }
   private emitMessage(sessionId: string, message: UiMessage, turnId?: string) {
     for (const type of ["message_start", "message_end"] as const) this.deps.emit({ sessionId, turnId, ts: Date.now(), event: { type, message } });
@@ -66,13 +70,21 @@ export class ImageService {
       const config = { active: input.active, providerId: input.providerId, modelId: input.modelId, options };
       const settings = await this.host().call<AppSettings>("settings.get");
       await this.host().call("settings.set", { imageSessions: { ...settings.imageSessions, [key]: config } });
+      for (const listener of this.configurationListeners) listener(key);
       return config;
     });
     this.configWrite = write.catch(() => undefined);
     return write;
   }
 
-  async generate(request: ImageGenerationRequest, direct = true): Promise<{ jobId: string; result: ImageGenerationResult }> {
+  /** Return only after task admission; eventual results stay on the normal image event stream. */
+  start(request: ImageGenerationRequest): Promise<{ accepted: true; jobId: string }> {
+    return new Promise((resolve, reject) => {
+      void this.generate(request, true, (jobId) => resolve({ accepted: true, jobId })).catch(reject);
+    });
+  }
+
+  async generate(request: ImageGenerationRequest, direct = true, admitted?: (jobId: string) => void): Promise<{ jobId: string; result: ImageGenerationResult }> {
     const jobId = request.jobId || randomUUID();
     if (this.jobs.has(jobId)) throw new Error("image_job_exists");
     const releaseOperation = direct ? await this.deps.acquireSessionOperation(request.sessionId) : undefined;
@@ -115,10 +127,11 @@ export class ImageService {
         const turn = await this.host().call<{ turnId: string }>("session.beginTurn", { sessionId: request.sessionId, providerId: request.providerId, modelId: request.modelId });
         turnId = turn.turnId;
         turns.set(request.sessionId, turnId);
-        const message: UiMessage = { id: randomUUID(), role: "user", content: request.prompt, createdAt: new Date().toISOString(), status: "complete", attachments: prepared.map((ref) => ref.message) };
+        const message: UiMessage = { id: request.messageId || randomUUID(), role: "user", content: request.prompt, createdAt: new Date().toISOString(), status: "complete", attachments: prepared.map((ref) => ref.message) };
         await this.host().call("session.appendMessage", { sessionId: request.sessionId, message, turnId });
         this.emitMessage(request.sessionId, message, turnId);
       }
+      admitted?.(jobId);
       const binding = await this.relay.bindImage(request.providerId, provider.mirrorCoding!, request.modelId, request.sessionId);
       releaseBinding = binding.release;
       job.controller.signal.throwIfAborted();

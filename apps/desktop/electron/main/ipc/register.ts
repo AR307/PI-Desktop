@@ -21,6 +21,8 @@ import { registerPluginUiIpc } from "./plugin-ui-ipc";
 import { registerProviderIpc } from "./provider-ipc";
 import { registerMirrorCodingIpc } from "../mirrorcoding/ipc";
 import type { MirrorCodingRuntime } from "../mirrorcoding/runtime";
+import { registerMobileSyncIpc } from "../mobile-sync/ipc";
+import type { MobileSyncService } from "../mobile-sync/service";
 import { registerPullsIpc } from "./pulls-ipc";
 import { registerScheduledIpc } from "./scheduled-ipc";
 import { registerSessionIpc } from "./session-ipc";
@@ -38,6 +40,7 @@ import type { createTraySessions } from "../tray-sessions";
 
 export type RegisterIpcDependencies = {
   mirrorCoding: MirrorCodingRuntime;
+  mobileSync?: MobileSyncService;
   ipcMain: IpcMain;
   getMainWindow: () => BrowserWindow | null;
   getHost: () => HostProcess | null;
@@ -164,6 +167,7 @@ export function registerIpcHandlers(dependencies: RegisterIpcDependencies) {
     const handler = async (...args: any[]) => {
       const result = await fn(...args);
       traySessions.observeInvoke(channel);
+      dependencies.mobileSync?.observeInvoke(channel);
       return result;
     };
     ipcHandlers.set(channel, handler);
@@ -276,6 +280,7 @@ export function registerIpcHandlers(dependencies: RegisterIpcDependencies) {
     bindingForModel,
   });
   registerImageIpc(registrar, mirrorCoding.images);
+  if (dependencies.mobileSync) registerMobileSyncIpc(registrar, dependencies.mobileSync);
   registerMirrorCodingIpc({
     registrar, runtime: mirrorCoding, activeTurns,
     abort: async (sessionId) => {

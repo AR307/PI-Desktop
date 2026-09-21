@@ -1,9 +1,13 @@
+import { mobileSyncEn } from "../mobile-sync.js";
+import { mobileEn } from "../mobile.js";
 import { imagesEn } from "../images.js";
 import type { EnglishCatalog } from "../en/index.js";
 
 import { mirrorCodingEn } from "../mirrorcoding.js";
 
 export const es = {
+  mobileSync: mobileSyncEn,
+  mobile: mobileEn,
   images: imagesEn,
   mirrorCoding: mirrorCodingEn,
   "app": {

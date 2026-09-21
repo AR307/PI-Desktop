@@ -53,6 +53,7 @@ export type TurnSteerRequest = {
   turnId: string;
   content: string;
   sessionMessageId?: string;
+  userMessageId?: string;
   attachments?: AgentPromptAttachment[];
   principal: Principal;
 };

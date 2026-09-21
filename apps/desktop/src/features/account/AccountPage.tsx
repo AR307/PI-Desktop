@@ -5,6 +5,7 @@ import { api } from "../../lib/api";
 import { AccountDialog } from "./AccountDialog";
 import { useMirrorCoding } from "./state";
 import { MirrorCodingDefault } from "./MirrorCodingDefault";
+import { MobileSyncSettings } from "../mobile-sync/MobileSyncSettings";
 import "./account.css";
 
 export function AccountPage() {
@@ -54,6 +55,7 @@ export function AccountPage() {
         {account.catalog?.groups.length === 0 && <p>{t("mirrorCoding.empty")}</p>}
       </section>}
       {connected && <MirrorCodingDefault />}
+      {connected && <MobileSyncSettings />}
       {confirmation && <AccountDialog title={t("mirrorCoding.confirmTitle")} onCancel={() => setConfirmation(undefined)}><p>{t("mirrorCoding.confirmDescription")}</p><div className="mirrorcoding-actions"><Button variant="ghost" disabled={busy} onClick={() => setConfirmation(undefined)}>{t("common.cancel")}</Button><Button disabled={busy} onClick={() => void act(confirmation, true)}>{t("mirrorCoding.confirm")}</Button></div></AccountDialog>}
     </div>
   );

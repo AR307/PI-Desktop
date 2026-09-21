@@ -95,9 +95,12 @@ captcha. It must not silently disable the existing verification policy.
 
 Return both replacement credentials on refresh. Keep the existing MC rotation
 and concurrent-refresh behavior and document session expiry. Logout invalidates
-the mobile session and closes its relay connections. A registered installation
-can recover its own unrevoked pairings after reauthentication; another device
-does not gain access merely by claiming its identifier.
+the mobile session and closes its relay connections. Ordinary app restarts and
+token refresh retain the registered device and pairings. Explicit logout clears
+the phone's saved credentials and device registration; the next password login
+registers a device and requires pairing again. The account can inspect and revoke
+its old grants without granting a newly registered device access to their scopes.
+Another device does not gain access merely by claiming an identifier.
 
 ## Devices, pairing and grants
 
@@ -108,8 +111,8 @@ does not gain access merely by claiming its identifier.
 | POST `/api/pi-sync/pairings` | `{deviceId,scope}` → `{pairing}` |
 | POST `/api/pi-sync/pairings/{id}/cancel` | `{}` → `{}`; desktop owner only |
 | POST `/api/pi-sync/pairings/claim` | `{code,deviceId}` → `{grant}` |
-| GET `/api/pi-sync/grants` | `{grants:[...]}` for the authenticated device/account |
-| POST `/api/pi-sync/grants/{id}/revoke` | `{}` → `{}`; participating desktop/mobile only |
+| GET `/api/pi-sync/grants` | `{grants:[...]}` for account grant management; desktop supplies `?deviceId=<desktopDeviceId>` to select its grants |
+| POST `/api/pi-sync/grants/{id}/revoke` | `{}` → `{}`; authenticated owning account only |
 
 ```json
 {
@@ -145,6 +148,9 @@ does not gain access merely by claiming its identifier.
 - Scope IDs are opaque MC metadata, not filesystem paths. MC must not expand
   project membership or interpret the RACP payload as a filesystem request.
 - Persist grants across client/server restarts. Repeated revoke is successful.
+- Account-level grant listing and revocation allow cleanup after a mobile logout
+  or reinstall. Listing a grant is not permission for the current mobile device
+  to use it; ticket issuance checks its exact `mobileDeviceId`.
 - On claim/revoke, notify the desktop with `grants.changed`. A revoked mobile
   connection closes immediately; other scopes can reconnect using remaining
   grants. PI also checks current membership and local revocations.
@@ -173,7 +179,21 @@ maintains one outbound socket; MC multiplexes mobile connections with these
 envelopes. `peerId` is unique for the lifetime of the desktop connection.
 
 ```json
-{"type":"peer.open","peerId":"peer-1","accountId":"901","deviceId":"mobile-example","grants":["<full grant objects>"]}
+{
+  "type":"peer.open",
+  "peerId":"peer-1",
+  "accountId":"901",
+  "deviceId":"mobile-example",
+  "grants":[{
+    "id":"grant-example",
+    "accountId":"901",
+    "desktopDeviceId":"desktop-example",
+    "mobileDeviceId":"mobile-example",
+    "mobileDeviceName":"PI Android",
+    "scope":{"kind":"session","id":"opaque-session-id","label":"Fix layout"},
+    "createdAt":"2026-09-21T12:03:00Z"
+  }]
+}
 ```
 
 ```json
@@ -187,10 +207,14 @@ envelopes. `peerId` is unique for the lifetime of the desktop connection.
 `peer.open` is server-generated and arrives before that peer's first frame.
 Desktop replies using `peer.frame`; MC unwraps the `frame` string onto the
 corresponding mobile socket. A desktop `peer.close` closes that peer only.
-MC never accepts a phone-supplied peer/account/grant context.
+MC never accepts a phone-supplied peer/account/grant context. PI fetches current
+grants through the authenticated HTTP API before admitting a peer; the envelope
+does not replace that lookup.
 
 Control frames are `{"type":"grants.changed"}`, `{"type":"ping"}` and
-`{"type":"pong"}`. Relay envelopes preserve ordering within each peer.
+`{"type":"pong"}`. Reply to desktop `ping` with `pong`. PI sends a heartbeat
+every 20 seconds and reconnects when no relay frame arrives for 60 seconds.
+Relay envelopes preserve ordering within each peer.
 Support at least 1 MiB UTF-8 frames; PI transfers attachments as ordered
 192 KiB binary chunks encoded in RACP JSON, not one entire file in a frame.
 Use bounded socket backpressure; close an overloaded connection explicitly
@@ -212,10 +236,57 @@ instead of silently losing frames. PI restores visible state from desktop.
 
 ## PI-owned operations (MC forwards without interpreting)
 
-The restricted mobile profile includes initialize, session list/get/history/
-attach, event subscription, turn start/stop/cancel, approval/input responses,
-attachment transfer and image download retry. It excludes session creation,
-model/configuration changes, arbitrary Host RPC, terminals and filesystem paths.
+The restricted mobile profile is a subset of RACP JSON-RPC with the following
+operations. Field names below match the PI client and desktop implementation.
+
+| Method | Parameters / result |
+| --- | --- |
+| `connection/initialize` | `{protocolVersion,...}` → standard RACP initialization result |
+| `connection/ping` | `{}` → `{ok:true,serverTime}` |
+| `session/list` | `{grantId?}` → `{sessions}`; an optional grant selects exactly that shared project/session |
+| `session/get` | `{sessionId}` → `{session}` |
+| `session/attach` | `{sessionId,after?}` → RACP attach result with an enriched `session` and `snapshot` |
+| `session/snapshot` | `{sessionId}` → `{snapshot}` |
+| `session/history` | `{sessionId,beforeItemId?,limit?}` → `{items,hasMore,revision}`; default 50, maximum 200 items |
+| `events/subscribe` | `{scope:"session",sessionId,after?}` → standard RACP subscription result |
+| `events/ack` | `{subscriptionId,sequence}` → `{acknowledged:true}` |
+| `events/unsubscribe` | `{subscriptionId}` → `{removed}` |
+| `turn/start` | `{sessionId,input:{text,messageId,attachments?}}` → RACP chat admission result or `{accepted:true,jobId}` for image admission |
+| `message/status` | `{sessionId,messageId}` → `{status:"running"\|"queued"\|"persisted"\|"unknown"}` |
+| `turn/stop` | `{sessionId}` → cooperative stop result |
+| `turn/interrupt` | `{sessionId}` → immediate runtime interruption result; used by the phone Stop button |
+| `turn/cancel` | `{sessionId,turnId}` → queued-turn cancellation result |
+| `approval/respond` | `{sessionId,approvalId,decision,permissionMode?}` → existing RACP approval result |
+| `input/respond` | `{sessionId,inputId,answers}` → existing RACP question response result |
+| `attachment/create` | `{sessionId,name,kind,mimeType?,size}` → `{uploadId,chunkBytes}` |
+| `attachment/write` | `{sessionId,uploadId,offset,data}` → `{offset}`; `data` is base64 |
+| `attachment/complete` | `{sessionId,uploadId}` → `{attachment:{id,name,kind,mimeType?,size}}` |
+| `attachment/read` | `{sessionId,messageId,attachmentId,offset?}` → `{data,offset,nextOffset,size,eof,name,mimeType}` |
+| `image/retryDownload` | `{sessionId,messageId,imageId}` → updated desktop message containing the image result; no new generation |
+
+`MobileSession` adds desktop model/provider/group, task mode, saved image
+configuration, and prompt/stop capabilities. `MobileSessionSnapshot` includes
+the enriched session, existing RACP state, current `imageJobs`, and pending
+`plans`. Plan approvals still use the existing approval operation.
+
+Notifications use `events/event` and `events/closed`. Image progress is an
+ephemeral `turn.activity` event with `{imageState}`. Desktop model/mode/image
+configuration changes emit `turn.activity` with `{configurationChanged:true}`;
+the phone refreshes the snapshot. Neither event increments the durable cursor.
+
+Every new mobile message supplies a UUID `messageId`, which is preserved in the
+desktop queue and persisted user message. If a send acknowledgement is lost,
+the phone reconnects and calls `message/status` before offering another send.
+`unknown` is not permission to automatically replay an image or agent request.
+
+Completed upload references are `{id}`. Explicit historical references are
+`{id,messageId}`; ordinary attachment IDs are their stored references, and image
+IDs are the result image IDs. A peer can use only its completed uploads or
+attachments already present in an authorized session message. Reconnecting
+discards unfinished peer uploads; the phone retains its local draft/files.
+
+The profile excludes session creation, model/configuration changes, arbitrary
+Host RPC, host-wide subscriptions, terminals and filesystem paths.
 
 PI enforces project/session membership on each operation and outbound event.
 Desktop is the single task admission and persistence authority. Reconnection

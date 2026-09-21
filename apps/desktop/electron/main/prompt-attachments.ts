@@ -107,7 +107,7 @@ function isImagePromptAttachment(
   );
 }
 
-function resolvePromptPath(
+export function resolvePromptPath(
   dataRoot: string,
   sessionId: string,
   projectPath: string | undefined,

@@ -14,6 +14,28 @@
   being integrated. Actual Electron/Android acceptance will be recorded below;
   MC production service deployment is a separate team's deliverable.
 
+### Desktop sync implementation
+
+- Added opt-in project/session sharing, centered pairing dialogs and the account
+  page's mobile device manager. Main owns the outbound MC relay; the restricted
+  mobile peer checks current sharing scope for history, commands and attachments.
+- Reused AgentHost queues, permission/plan approvals and questions. Mobile Stop
+  uses the same immediate interruption path as the desktop composer. Client
+  message IDs remain stable through the Rust-backed queue and process restart.
+- Reused ImageService for mobile generation and result downloads. Admission now
+  acknowledges only after parameter validation and user-message persistence so
+  an invalid image request retains the mobile draft and reference images.
+- Kept attachment access tied to explicit session messages and chunked transfer.
+  Session history uses Rust's bounded query instead of loading every message.
+- AgentHost 26 tests, host ports 4 tests, Rust queue 10 tests, shared 876 tests,
+  RACP 21 tests and i18n 25 tests passed. Desktop production build, typecheck,
+  repository lint and Rust formatting passed; Clippy completed with one existing
+  unrelated `user_skills.rs` warning.
+- Real isolated Electron/mobile browser flows have exercised pairing, scope
+  isolation, history, continuation, queues, immediate stop, questions, approval,
+  photos, reconnect, image generation, restart and revocation. Final candidate
+  counts and native Android acceptance are recorded after the remaining checks.
+
 ## Project and source baseline
 
 PI-Desktop is a local-first desktop workbench for AI coding agents. It combines
