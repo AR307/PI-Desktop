@@ -98,8 +98,9 @@ and concurrent-refresh behavior and document session expiry. Logout invalidates
 the mobile session and closes its relay connections. Ordinary app restarts and
 token refresh retain the registered device and pairings. Explicit logout clears
 the phone's saved credentials and device registration; the next password login
-registers a device and requires pairing again. The account can inspect and revoke
-its old grants without granting a newly registered device access to their scopes.
+registers a device and requires pairing again. The paired desktop's sync manager
+can inspect and revoke old mobile grants without granting a newly registered
+device access to their scopes.
 Another device does not gain access merely by claiming an identifier.
 
 ## Devices, pairing and grants
@@ -111,8 +112,8 @@ Another device does not gain access merely by claiming an identifier.
 | POST `/api/pi-sync/pairings` | `{deviceId,scope}` → `{pairing}` |
 | POST `/api/pi-sync/pairings/{id}/cancel` | `{}` → `{}`; desktop owner only |
 | POST `/api/pi-sync/pairings/claim` | `{code,deviceId}` → `{grant}` |
-| GET `/api/pi-sync/grants` | `{grants:[...]}` for account grant management; desktop supplies `?deviceId=<desktopDeviceId>` to select its grants |
-| POST `/api/pi-sync/grants/{id}/revoke` | `{}` → `{}`; authenticated owning account only |
+| GET `/api/pi-sync/grants` | `{grants:[...]}`; mobile receives its registered device's grants; desktop supplies `?deviceId=<desktopDeviceId>` to select its grants |
+| POST `/api/pi-sync/grants/{id}/revoke` | `{}` → `{}`; participating desktop/mobile under the authenticated owning account |
 
 ```json
 {
@@ -148,9 +149,10 @@ Another device does not gain access merely by claiming an identifier.
 - Scope IDs are opaque MC metadata, not filesystem paths. MC must not expand
   project membership or interpret the RACP payload as a filesystem request.
 - Persist grants across client/server restarts. Repeated revoke is successful.
-- Account-level grant listing and revocation allow cleanup after a mobile logout
-  or reinstall. Listing a grant is not permission for the current mobile device
-  to use it; ticket issuance checks its exact `mobileDeviceId`.
+- Desktop grant listing and revocation allow cleanup after a mobile logout or
+  reinstall. The mobile work list must exclude grants of old mobile device
+  registrations. Ticket issuance checks the exact `mobileDeviceId`. MC may also
+  offer account-wide cleanup in its own console, without widening relay access.
 - On claim/revoke, notify the desktop with `grants.changed`. A revoked mobile
   connection closes immediately; other scopes can reconnect using remaining
   grants. PI also checks current membership and local revocations.
@@ -268,6 +270,9 @@ operations. Field names below match the PI client and desktop implementation.
 configuration, and prompt/stop capabilities. `MobileSessionSnapshot` includes
 the enriched session, existing RACP state, current `imageJobs`, and pending
 `plans`. Plan approvals still use the existing approval operation.
+They remain available after the planning turn completes and across phone
+reconnections. A full desktop restart follows the existing host lifecycle and
+marks pending proposals interrupted; MC must not retain or replay an approval.
 
 Notifications use `events/event` and `events/closed`. Image progress is an
 ephemeral `turn.activity` event with `{imageState}`. Desktop model/mode/image

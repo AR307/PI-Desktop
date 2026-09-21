@@ -22,6 +22,13 @@ record MC-team service acceptance separately after that implementation arrives.
 Keep APKs, screenshots, profiles and reports outside Git. Record the executable
 candidate, base main, commands, evidence directory and any unverified scenarios.
 
+Executable suites and prerequisites are documented in
+[`mobile/README.md`](../../../apps/desktop/test/e2e/mobile/README.md).
+`acceptance.mjs` uses actual Electron and a touch browser; `android.mjs` uses
+actual Capacitor secure storage, Android picker/share, Back, IME and app restart.
+Full desktop restart retains the existing interrupted-plan semantics; mobile
+reconnect while desktop remains running restores actionable pending plans.
+
 ## MirrorCoding local acceptance
 
 Run the MirrorCoding suites on the dedicated task candidate incorporating the

@@ -10,6 +10,7 @@ Requires the repository's Node version, pnpm, JDK 21 and Android SDK 36.
 
 ```sh
 pnpm install
+pnpm -r --filter ./packages/* build
 pnpm --filter @pi-desktop/mobile dev
 pnpm --filter @pi-desktop/mobile build
 pnpm --filter @pi-desktop/mobile android:sync
