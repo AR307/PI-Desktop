@@ -1,3 +1,4 @@
+import { ImageResult } from "../../images/ImageResult";
 import {
   memo,
   useMemo,
@@ -251,7 +252,7 @@ const SmoothMessageBubble = memo(function SmoothMessageBubble({
       }${showCursor ? " smooth-cursor" : ""}`}
       data-message-id={message.id}
     >
-      {displayContent ? (
+      {message.imageGeneration ? <ImageResult message={message} /> : displayContent ? (
         <div className="prose-chat">
           <Markdown source={displayContent} />
         </div>

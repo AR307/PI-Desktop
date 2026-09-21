@@ -1,0 +1,20 @@
+.composer-mode-switch { display: inline-flex; align-items: center; flex-shrink: 0; gap: 0; }
+.composer-mode-chevron { padding-inline: 3px; min-width: 20px; }
+.image-options { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; padding: 8px 12px; }
+.image-options label { display: flex; align-items: center; gap: 5px; font-size: var(--text-xs); color: var(--ds-text-secondary); }
+.image-options select, .image-options input { max-width: 140px; color: var(--ds-text-primary); background: var(--ds-bg-secondary); border: 1px solid var(--ds-border-default); border-radius: var(--radius-sm); padding: 3px 5px; }
+.image-options input { width: 52px; }
+.image-options-notice { padding: 4px 12px; font-size: var(--text-xs); color: var(--ds-text-secondary); }
+.image-options .image-options-notice { padding: 0; }
+.image-result { min-width: 0; width: 100%; margin-block: 8px; }
+.image-result-model { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 8px; font-size: var(--text-xs); color: var(--ds-text-secondary); overflow-wrap: anywhere; }
+.image-result-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(220px, 100%), 1fr)); gap: 12px; }
+.image-result-card { min-width: 0; }
+.image-result-thumbnail { display: block; border: 0; padding: 0; background: transparent; width: 100%; cursor: zoom-in; }
+.image-result-thumbnail img { display: block; width: 100%; max-height: 420px; object-fit: contain; border-radius: var(--radius-lg); }
+.image-result-actions { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; margin-top: 6px; font-size: var(--text-xs); }
+.image-result-actions button, .image-result-actions a { color: var(--ds-text-primary); padding: 4px 8px; background: var(--ds-bg-secondary); border: 1px solid var(--ds-border-default); border-radius: var(--radius-sm); cursor: pointer; }
+.image-result-preview { margin: auto; width: min(94vw, 1100px); max-height: 92vh; padding: 12px; border-radius: var(--radius-xl); border: 1px solid var(--ds-border-default); color: var(--ds-text-primary); background: var(--ds-bg-primary); }
+.image-result-preview::backdrop { background: rgb(0 0 0 / 70%); }
+.image-result-preview > button { display: block; margin-left: auto; padding: 5px 10px; }
+.image-result-preview img { display: block; width: 100%; max-height: 80vh; object-fit: contain; }

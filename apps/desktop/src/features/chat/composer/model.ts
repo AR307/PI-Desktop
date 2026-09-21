@@ -6,6 +6,7 @@ import type {
   SessionThinkingLevel,
   ThinkingLevel,
 } from "@pi-desktop/shared";
+
 import {
   isSessionThinkingLevel,
   PERMISSION_MODES,
@@ -31,6 +32,8 @@ export const PLACEHOLDER_KEYS = {
 } as const;
 
 export const MODE_CYCLE: readonly Mode[] = ["agent", "plan", "goal"];
+
+export type ComposerTask = "chat" | "image";
 
 export const MODE_LABEL_KEYS: Record<Mode, string> = {
   agent: "settings.modeAgent",

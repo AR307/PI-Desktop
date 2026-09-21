@@ -1,3 +1,4 @@
+import type { ImageService } from "../images/service";
 import { IPC, ErrorCodes, compactionRecordId, isGlobalPermissionMode, isRpcTimeoutError, type AgentEventEnvelope, type AgentPromptRequest, type AgentSteerRequest, type UiMessage, type AgentQueuePushRequest, type AgentStopRequest, type AskToolResolution, type GlobalPermissionMode, type MessageUsage, type PlanExecutionFinishStatus, type PlanResolutionResult, type PlanResolveRequest, type PromptEnhancementRequest, type SessionSummarizeTitleRequest, canonicalThinkingLevel, type ThinkingLevel } from "@pi-desktop/shared";
 import type { FinishTurn } from "../runtime/plans";
 import { expandSlashInvocation, enhancePromptDraft, summarizeSessionTitle, visionFromModelConfig, type ComposerTemplate, type RuntimeProviderConfig } from "@pi-desktop/agent-runtime";
@@ -15,6 +16,7 @@ import type { IpcRegistrar } from "./types";
 import { withPromptEnhancementTimeout } from "../prompt-enhancement-timeout";
 
 export type AgentIpcDependencies = {
+  images: ImageService;
   registrar: IpcRegistrar;
   getHost: () => HostProcess | null;
   getSidecar: () => AgentSidecar | null;
@@ -58,6 +60,7 @@ function rejectNativeAgentOperation(sessionId: string): void {
 
 /** Register prompt, agent lifecycle, queue, approval and plan channels. */
 export function registerAgentIpc({
+  images,
   registrar,
   getHost,
   getSidecar,
@@ -666,6 +669,7 @@ export function registerAgentIpc({
   });
 
   handle(IPC.invoke.agentAbort, async (req: { sessionId: string; turnId?: string }) => {
+    if (images.abortSession(req.sessionId)) return { ok: true, aborted: true };
     if (!sidecar) throw new Error("sidecar unavailable");
     const releaseSessionOperation = req.turnId ? await acquireSessionOperation(req.sessionId) : undefined;
     try {
@@ -722,6 +726,7 @@ export function registerAgentIpc({
   });
 
   handle(IPC.invoke.agentGetStatus, async (sessionId: string) => {
+    if (images.states().some((job) => job.sessionId === sessionId)) return { status: { sessionId, isRunning: true, pendingToolConfirmations: 0 } };
     if (!sidecar) throw new Error("sidecar unavailable");
     return sidecar.call("agent.getStatus", { sessionId });
   });

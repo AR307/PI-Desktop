@@ -1,6 +1,6 @@
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { DEFAULT_RPC_TIMEOUT_MS, IMAGE_BATCH_TIMEOUT_MS, imageGenerationPrompts, readNdjsonLines, rpcTimeoutMs, rpcErrorFromWire, rpcErrorToWire } from "@pi-desktop/shared";
+import { imageGenerationPrompts, readNdjsonLines, rpcTimeoutMs, rpcErrorFromWire, rpcErrorToWire } from "@pi-desktop/shared";
 import type { ProcessExitHandler, StderrHandler } from "./host-process.js";
 
 // stderr lines kept per sidecar so an unexpected exit can be reported with the
@@ -287,7 +287,7 @@ export class AgentSidecar {
           timer = setTimeout(() => {
             controller.abort();
             reject(new Error("host-local tool timeout"));
-          }, imageGeneration ? IMAGE_BATCH_TIMEOUT_MS + 130_000 : DEFAULT_RPC_TIMEOUT_MS);
+          }, rpcTimeoutMs("tools.execute", params));
           this.localToolTimers.add(timer);
         }),
       ]);
@@ -532,6 +532,14 @@ export class AgentSidecar {
           );
           return;
         }
+        if (method === "tools.abort") {
+          const controller = this.localToolControllers.get(`${params.sessionId}:${params.toolCallId}`);
+          if (controller) {
+            controller.abort();
+            this.writeToChild(JSON.stringify({ jsonrpc: "2.0", id: msg.id, result: { aborted: true } }) + "\n");
+            return;
+          }
+        }
         // Host-local tools short-circuit before host-core (which doesn't
         // know them); everything else proxies through unchanged.
         const localTool =
@@ -540,12 +548,11 @@ export class AgentSidecar {
             : undefined;
         if (localTool) {
           const toolName = requestedToolName;
-          // Local tools can bypass host-core's permission boundary. Plan mode
-          // therefore permits only the read-only BrowserPreview bridge; every
-          // other host-local tool fails closed even if a stale runtime asks for
-          // it directly.
+          // Planning permits only the read-only BrowserPreview and image
+          // directory bridges. Other host-local tools are rejected even if
+          // a stale runtime asks for them directly.
           const result =
-            params.mode === "plan" && toolName !== "BrowserPreview"
+            (params.mode === "plan" || params.mode === "goal") && toolName !== "BrowserPreview" && toolName !== "ListImageModels"
               ? {
                   ok: false,
                   isError: true,

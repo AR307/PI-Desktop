@@ -26,10 +26,12 @@ import {
   thinkingLevelForProvider,
   thinkingProviderForModel,
   type ComposerMenuView,
+  type ComposerTask,
 } from "../model";
 import { createLatestCommitQueue } from "../thinking-commit-queue";
 
 type UseComposerModelMenuOptions = {
+  task?: ComposerTask;
   mode: Mode;
   activeSessionId: string | null | undefined;
   provider: ProviderPublic | undefined;
@@ -40,9 +42,12 @@ type UseComposerModelMenuOptions = {
   configureActiveSession: (configuration: {
     mode: Mode; providerId?: string; modelId?: string; thinkingLevel: SessionThinkingLevel;
   }) => Promise<void>;
+  imageSelection?: { providerId?: string; modelId?: string };
+  onSelectImage?: (selection: { providerId: string; modelId: string }) => Promise<void>;
 };
 
 export function useComposerModelMenu({
+  task = "chat",
   mode,
   activeSessionId,
   provider,
@@ -51,6 +56,8 @@ export function useComposerModelMenu({
   thinkingLevel,
   controlsBlocked,
   configureActiveSession,
+  imageSelection,
+  onSelectImage,
 }: UseComposerModelMenuOptions) {
   const providers = useAppStore((s) => s.providers);
   const imageGeneration = useAppStore((s) => s.settings?.imageGeneration);
@@ -129,7 +136,7 @@ export function useComposerModelMenu({
           const models = composerModelsForProvider(
             candidate,
             providerModels[candidate.id],
-            imageGenerationCandidates,
+            task === "image" ? "image" : imageGenerationCandidates,
           );
           return {
             provider: candidate,
@@ -139,7 +146,7 @@ export function useComposerModelMenu({
           };
         })
         .filter((group) => group.models.length > 0),
-    [providers, providerModels, imageGenerationCandidates],
+    [imageGenerationCandidates, providers, providerModels, task],
   );
   const queryNeedle = query.trim().toLowerCase();
   const filteredModelGroups = useMemo(
@@ -176,10 +183,13 @@ export function useComposerModelMenu({
     () =>
       flatModels.findIndex(
         (entry) =>
-          entry.provider.id === provider?.id &&
-          sameComposerModelId(entry.model.modelId, modelId ?? ""),
+          entry.provider.id === (task === "image" ? imageSelection?.providerId : provider?.id) &&
+          sameComposerModelId(
+            entry.model.modelId,
+            task === "image" ? imageSelection?.modelId ?? "" : modelId ?? "",
+          ),
       ),
-    [flatModels, provider?.id, modelId],
+    [flatModels, imageSelection?.modelId, imageSelection?.providerId, modelId, provider?.id, task],
   );
 
   useEffect(() => {
@@ -212,7 +222,7 @@ export function useComposerModelMenu({
   }, [open]);
   useEffect(() => {
     thinkingQueueRef.current?.invalidate();
-  }, [activeSessionId, provider?.id, modelId]);
+  }, [activeSessionId, provider?.id, modelId, task]);
 
   useEffect(() => {
     if (!controlsBlocked) return;
@@ -263,7 +273,7 @@ export function useComposerModelMenu({
   const selectModel = async (candidate: ProviderPublic, nextModelId: string) => {
     thinkingQueueRef.current?.invalidate();
     await thinkingQueueRef.current?.idle();
-    if (isImageGenerationModel(
+    if (task !== "image" && isImageGenerationModel(
       imageGenerationBindings(
         useAppStore.getState().settings?.imageGenerationModels,
         useAppStore.getState().settings?.imageGeneration,
@@ -272,6 +282,14 @@ export function useComposerModelMenu({
       nextModelId,
     )) return;
     try {
+      if (task === "image") {
+        await onSelectImage?.({ providerId: candidate.id, modelId: nextModelId });
+        setQuery("");
+        setView("root");
+        setModelHighlight(-1);
+        setThinkingHighlight(-1);
+        return;
+      }
       const nextModelProvider = thinkingProviderForModel(
         candidate,
         nextModelId,
@@ -371,6 +389,8 @@ export function useComposerModelMenu({
   };
 
   return {
+    task,
+    selectedImage: imageSelection,
     open,
     setOpen,
     view,

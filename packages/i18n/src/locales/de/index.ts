@@ -1,6 +1,8 @@
+import { imagesEn } from "../images.js";
 import type { EnglishCatalog } from "../en/index.js";
 
 export const de = {
+  images: imagesEn,
   "app": {
     "shellName": "PI-Desktop",
     "tagline": "Lokaler AI-Codierungspartner",

@@ -1,6 +1,8 @@
+import { imagesZhCN } from "../images.js";
 import type { EnglishCatalog } from "../en/index.js";
 
 export const zhTW = {
+  images: imagesZhCN,
   app: {
     shellName: "PI-Desktop",
     tagline: "本地 AI 程式設計助手",

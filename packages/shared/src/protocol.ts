@@ -51,6 +51,10 @@ export type WindowControlAction = (typeof WINDOW_CONTROL_ACTIONS)[number];
 export const IPC = {
   invoke: {
     imageGenerate: "pi-desktop/image/generate",
+    imageConfigure: "pi-desktop/image/configure",
+    imageJobs: "pi-desktop/image/jobs",
+    imageModels: "pi-desktop/image/models",
+    imageRetryDownload: "pi-desktop/image/retryDownload",
     imageAbort: "pi-desktop/image/abort",
     appGetVersion: "pi-desktop/app/getVersion",
     appOpenFeedback: "pi-desktop/app/openFeedback",
@@ -351,6 +355,7 @@ export const IPC = {
     nativeMenuAction: "pi-desktop/menu/nativeAction",
   },
   event: {
+    imageState: "pi-desktop/image/state",
     pluginChanged: "pi-desktop/event/pluginChanged",
     /** Progress of an install or update, while it is still running. */
     pluginInstallProgress: "pi-desktop/plugin/event/installProgress",

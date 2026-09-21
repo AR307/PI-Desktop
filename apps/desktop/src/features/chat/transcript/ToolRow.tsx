@@ -1,5 +1,6 @@
 import { GeneratedImages } from "./GeneratedImages";
 import "../../../styles/generated-images.css";
+import { ImageResult, imageResultFromMessage } from "../../images/ImageResult";
 import {
   Fragment,
   memo,
@@ -239,6 +240,7 @@ export const ToolRow = memo(function ToolRow({
     };
   }
   const blocks = variant !== "topology" && open && hasDetails ? presentation.current?.blocks : null;
+  const imageResult = imageResultFromMessage(message);
   const outcome =
     variant === "topology" ? subagentOutcome(message, delegationStatuses) : null;
   // A bare `running` Task row (no delegation result yet) is still being
@@ -520,7 +522,8 @@ export const ToolRow = memo(function ToolRow({
           {statusLabel}
         </span>
       ) : null}
-      {blocks && blocks.length > 0 ? (
+      {imageResult ? <ImageResult message={message} /> : null}
+      {!imageResult && blocks && blocks.length > 0 ? (
         <div className="tool-row-body" id={detailsId} ref={disclosure.bodyRef} {...disclosure.bodyEvents}>
           <DisclosureCollapseRail
             label={t("chat.collapseToolOutput")}

@@ -1,4 +1,6 @@
+import { imagesEn } from "../images.js";
 export const en = {
+  images: imagesEn,
   app: {
     shellName: "PI-Desktop",
     tagline: "Local AI coding partner",

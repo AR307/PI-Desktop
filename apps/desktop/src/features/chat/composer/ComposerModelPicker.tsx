@@ -8,6 +8,7 @@ import {
   IconChevronDown,
   IconChevronLeft,
   IconChevronRight,
+  IconImage,
   IconSparkles,
 } from "../../../components/icons";
 import { TooltipButton } from "../../../components/ui";
@@ -43,6 +44,7 @@ export function ComposerModelPicker({
   rootActions,
 }: ComposerModelPickerProps) {
   const {
+    task,
     open,
     setOpen,
     view,
@@ -64,6 +66,7 @@ export function ComposerModelPicker({
     selectThinkingLevel,
     onMenuKeyDown,
   } = controller;
+  const imageMode = task === "image";
 
   return (
     <AnchoredMenu
@@ -71,7 +74,7 @@ export function ComposerModelPicker({
       open={open}
       onClose={() => setOpen(false)}
       menuClassName="composer-model-menu composer-model-thinking-menu"
-      label={`${t("chat.model")} ${t("chat.reasoningLevel")}`}
+      label={imageMode ? t("images.mode") : `${t("chat.model")} ${t("chat.reasoningLevel")}`}
       role="menu"
       align="end"
       side="top"
@@ -82,8 +85,8 @@ export function ComposerModelPicker({
           ref={ref}
           type="button"
           className={`icon-btn composer-model-thinking-chip ${open ? "active" : ""}`}
-          tooltip={`${modelLabel} · ${t("chat.reasoningLevel")}: ${thinkingLabel}`}
-          ariaLabel={`${t("chat.model")}: ${modelLabel}. ${t("chat.reasoningLevel")}: ${thinkingLabel}`}
+          tooltip={imageMode ? `${t("images.mode")}: ${modelLabel}` : `${modelLabel} · ${t("chat.reasoningLevel")}: ${thinkingLabel}`}
+          ariaLabel={imageMode ? `${t("images.mode")}: ${modelLabel}` : `${t("chat.model")}: ${modelLabel}. ${t("chat.reasoningLevel")}: ${thinkingLabel}`}
           aria-haspopup="menu"
           aria-expanded={open}
           disabled={controlsBlocked}
@@ -99,10 +102,10 @@ export function ComposerModelPicker({
           }}
         >
           <span className="composer-model-thinking-icon" aria-hidden="true">
-            <IconBot size={14} />
+            {imageMode ? <IconImage size={14} /> : <IconBot size={14} />}
           </span>
           <span className="composer-model-thinking-model">{modelLabel}</span>
-          {thinkingLevel !== "off" ? (
+          {!imageMode && thinkingLevel !== "off" ? (
             <>
               <span className="composer-model-thinking-dot" aria-hidden="true">·</span>
               <span className="composer-model-thinking-level">{thinkingLabel}</span>
@@ -122,12 +125,12 @@ export function ComposerModelPicker({
             aria-haspopup="menu"
             onClick={() => showView("model")}
           >
-            <IconBot size={14} aria-hidden="true" />
-            <span className="composer-menu-entry-label">{t("chat.model")}</span>
+            {imageMode ? <IconImage size={14} aria-hidden="true" /> : <IconBot size={14} aria-hidden="true" />}
+            <span className="composer-menu-entry-label">{imageMode ? t("images.model") : t("chat.model")}</span>
             <span className="composer-menu-entry-value" title={modelLabel}>{modelLabel}</span>
             <IconChevronRight size={14} aria-hidden="true" />
           </button>
-          <button
+          {!imageMode ? <button
             type="button"
             className="composer-menu-entry"
             role="menuitem"
@@ -138,11 +141,11 @@ export function ComposerModelPicker({
             <span className="composer-menu-entry-label">{t("chat.reasoningLevel")}</span>
             <span className="composer-menu-entry-value">{thinkingLabel}</span>
             <IconChevronRight size={14} aria-hidden="true" />
-          </button>
+          </button> : null}
           {/* The slider sits directly under the Reasoning level entry
               (issue #417): one drag adjusts the level without entering the
               submenu, while the entry itself opens the classic radio list. */}
-          {thinkingMenuLevels.length > 1 ? (
+          {!imageMode && thinkingMenuLevels.length > 1 ? (
             <ThinkingLevelSlider
               key={`${selectedProviderId}:${selectedModelId}:${thinkingMenuLevels.join("|")}`}
               levels={thinkingMenuLevels}
@@ -161,7 +164,7 @@ export function ComposerModelPicker({
             onClick={() => showView("root")}
           >
             <IconChevronLeft size={14} aria-hidden="true" />
-            <span>{view === "model" ? t("chat.model") : t("chat.reasoningLevel")}</span>
+            <span>{view === "model" ? (imageMode ? t("images.model") : t("chat.model")) : t("chat.reasoningLevel")}</span>
           </button>
           <div className="composer-menu-separator" />
           {view === "model" ? (

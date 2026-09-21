@@ -1,3 +1,4 @@
+import { registerImageIpc } from "../images/ipc";
 import { join } from "node:path";
 import { dialog, type BrowserWindow, type IpcMain, type IpcMainInvokeEvent } from "electron";
 import { err, ErrorCodes, IPC, ok, type Result } from "@pi-desktop/shared";
@@ -39,7 +40,7 @@ import { registerMirrorCodingIpc } from "../mirrorcoding/ipc";
 import type { MirrorCodingRuntime } from "../mirrorcoding/runtime";
 
 export type RegisterIpcDependencies = {
-  mirrorCoding?: MirrorCodingRuntime;
+  mirrorCoding: MirrorCodingRuntime;
   isQuitting: () => boolean;
   mobileSync?: MobileSyncService;
   ipcMain: IpcMain;
@@ -77,6 +78,7 @@ function wrap<T>(fn: () => Promise<T>): Promise<Result<T>> {
 
 export function registerIpcHandlers(dependencies: RegisterIpcDependencies) {
   const {
+    mirrorCoding,
     ipcMain,
     getMainWindow,
     getHost,
@@ -285,19 +287,18 @@ export function registerIpcHandlers(dependencies: RegisterIpcDependencies) {
     enrichProviderList,
     bindingForModel,
   });
-  if (dependencies.mirrorCoding) {
-    registerMirrorCodingIpc({
-      registrar,
-      runtime: dependencies.mirrorCoding,
-      activeTurns,
-      emitAgentEvent,
-      abort: async (sessionId) => {
-        const handler = ipcHandlers.get(IPC.invoke.agentAbort);
-        if (!handler) throw new Error("agent unavailable");
-        return handler({ sessionId });
-      },
-    });
-  }
+  registerImageIpc(registrar, mirrorCoding.images);
+  registerMirrorCodingIpc({
+    registrar,
+    runtime: mirrorCoding,
+    activeTurns,
+    emitAgentEvent,
+    abort: async (sessionId) => {
+      const handler = ipcHandlers.get(IPC.invoke.agentAbort);
+      if (!handler) throw new Error("agent unavailable");
+      return handler({ sessionId });
+    },
+  });
   const loadComposerTemplatesCached = createComposerTemplateLoader(logger);
   const composerCommandService = registerComposerIpc({
     registrar,
@@ -376,6 +377,7 @@ export function registerIpcHandlers(dependencies: RegisterIpcDependencies) {
     },
   });
   registerAgentIpc({
+    images: mirrorCoding.images,
     registrar,
     getHost,
     getSidecar,

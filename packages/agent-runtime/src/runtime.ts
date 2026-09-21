@@ -4,6 +4,7 @@ import { readLocalRequestErrorDetails } from "./local-request-errors.js";
 import { imageGenerationDescription, imageGenerationParameters } from "./image-generation/tool.js";
 import { scheduledToolParameters, scheduledToolDescriptions } from "./scheduled-tools.js";
 import { withPiFileOpToolNames } from "./pi-file-ops.js";
+import { IMAGE_TOOL_DESCRIPTIONS, IMAGE_TOOL_PARAMETERS } from "./image-tools.js";
 import { randomUUID } from "node:crypto";
 import {
   settledDelegationMessage,
@@ -2890,6 +2891,7 @@ Delegation rules:
     const describe = (toolName: string): string => {
       if (toolName === "GenerateImages") return imageGenerationDescription;
       if (scheduledToolDescriptions[toolName]) return scheduledToolDescriptions[toolName];
+      if (IMAGE_TOOL_DESCRIPTIONS[toolName]) return IMAGE_TOOL_DESCRIPTIONS[toolName];
       switch (toolName) {
         case "BrowserPreview":
           return "Open a workspace HTML file in PI-Desktop's built-in browser panel. `path` is workspace-relative (e.g. \"demo/index.html\"). The preview live-reloads on later edits to the file or its sibling assets, so call once per page.";
@@ -2942,6 +2944,7 @@ Delegation rules:
     // stopped being readable.
     const parameters: Record<string, Parameters<typeof Type.Object>[0]> = {
       GenerateImages: imageGenerationParameters,
+      ...IMAGE_TOOL_PARAMETERS,
       Read: {
         path: pathParam(
           "Existing regular file only, never a directory; workspace-relative or explicitly approved.",
@@ -3088,7 +3091,7 @@ Delegation rules:
             })
           : undefined;
         const abort = () => {
-          if ((!isBash && toolName !== "GenerateImages") || abortRequested || settled) return;
+          if ((!isBash && toolName !== "GenerateImages" && toolName !== "GenerateImage") || abortRequested || settled) return;
           abortRequested = true;
           abortPromise = this.host
             .call("tools.abort", {
@@ -3274,6 +3277,8 @@ Delegation rules:
         let details: unknown = rawContent;
         if (typeof rawContent === "string") {
           text = rawContent;
+        } else if (isRecord(rawContent) && rawContent.kind === "image-generation") {
+          text = JSON.stringify(rawContent);
         } else if (isRecord(rawContent) && Array.isArray(rawContent.images)) {
           text =
             typeof rawContent.text === "string"
@@ -3403,6 +3408,8 @@ Delegation rules:
     if (this.mode === "agent") {
       tools.push("PluginScaffold", "PluginPack", "GenerateImages", ...Object.keys(scheduledToolParameters));
     }
+    tools.push("ListImageModels");
+    if (this.mode === "agent") tools.push("GenerateImage");
     const builtins = tools.map(exec);
 
     // Plugins contribute Agent tools by default. Plan/Goal modes only
@@ -3552,7 +3559,7 @@ Delegation rules:
     if (!kind) return true;
     // Contract modes are read-only: inspection tools, plan-safe plugin
     // actions (ADR 0211), and the one submit tool that belongs to this kind.
-    if (this.isPlanSafePluginTool(name)) return true;
+    if (this.isPlanSafePluginTool(name) || name === "ListImageModels") return true;
     return new Set([
       "Read",
       "Glob",
@@ -3567,6 +3574,7 @@ Delegation rules:
 
   private isCoreTool(name: string): boolean {
     return (
+      name === "ListImageModels" || (name === "GenerateImage" && this.mode === "agent") ||
       name === CONTEXT_COMPACTION_TOOL_NAME ||
       MODE_TRANSITION_TOOL_NAMES.has(name) ||
       // The whole delegation lifecycle stays in the core set rather than the

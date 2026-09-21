@@ -36,8 +36,7 @@ test("the menu root carries the reasoning slider under the reasoning entry", () 
   // The root view renders the slider directly beneath the Reasoning level
   // entry; the entry itself still opens the classic radio-list submenu.
   assert.match(composerSource, /onClick=\{\(\) => showView\("thinking"\)\}[\s\S]*?className="composer-thinking-slider"/);
-  assert.match(composerSource, /\{thinkingMenuLevels\.length > 1 \? \(/);
-  assert.match(composerSource, /className="composer-thinking-slider"/);
+  assert.match(composerSource, /\{!imageMode && thinkingMenuLevels\.length > 1 \? \(/);
   assert.match(sliderSource, /"--stop-count": levels\.length/);
   assert.match(composerSource, /type="range"/);
   assert.match(composerSource, /className="composer-thinking-range"/);
@@ -145,7 +144,7 @@ test("Composer uses alias labels while preserving the exact selected wire id", a
   assert.match(listSource, /sameComposerModelId\(selectedModelId \?\? "", model\.modelId\)/);
   assert.match(modelMenuSource, /modelId: nextModelId/);
   assert.match(modelMenuSource, /sameComposerModelId\(entry\.id, nextModelId\)/);
-  assert.match(modelMenuSource, /sameComposerModelId\(entry\.model\.modelId, modelId \?\? ""\)/);
+  assert.match(modelMenuSource, /sameComposerModelId\(\s*entry\.model\.modelId,[\s\S]*?modelId \?\? ""/);
 });
 
 test("reasoning projection uses the selected exact catalog row and binding", async () => {

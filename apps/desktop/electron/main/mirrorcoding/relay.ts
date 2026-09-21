@@ -10,6 +10,7 @@ import type {
   MirrorCodingImageEndpoint,
   MirrorCodingProvider,
 } from "@pi-desktop/shared";
+import { validateImageOptions } from "@pi-desktop/shared";
 import type { MirrorCodingAccount } from "./account";
 import { ENDPOINTS, IMAGE_ENDPOINTS } from "./catalog";
 
@@ -19,6 +20,7 @@ type Binding = {
   sessionId?: string;
   kind: "chat" | "image";
   endpoint: MirrorCodingEndpoint | MirrorCodingImageEndpoint;
+  imageModelId?: string;
 };
 export type ImageReference = { data: string; mimeType: string; name?: string };
 
@@ -65,9 +67,9 @@ export class MirrorCodingRelay {
     if (state.status !== "connected" || state.account?.id !== metadata.accountId) throw new Error("reauthorization_required");
     const origin = await this.listen();
     // Reuse one ephemeral credential per session/group/route until logout or shutdown.
-    const existing = [...this.bindings].find(([, value]) => value.providerId === providerId && value.sessionId === sessionId && value.kind === kind && value.endpoint === endpoint);
+    const existing = [...this.bindings].find(([, value]) => value.providerId === providerId && value.sessionId === sessionId && value.kind === kind && value.endpoint === endpoint && (kind !== "image" || value.imageModelId === modelId));
     const key = existing?.[0] ?? randomBytes(32).toString("base64url");
-    this.bindings.set(key, { providerId, metadata, sessionId, kind, endpoint });
+    this.bindings.set(key, { providerId, metadata, sessionId, kind, endpoint, ...(kind === "image" ? { imageModelId: modelId } : {}) });
     const route = kind === "chat" ? ENDPOINTS[endpoint as MirrorCodingEndpoint] : IMAGE_ENDPOINTS[endpoint as MirrorCodingImageEndpoint];
     return {
       baseUrl: `${origin}/${providerId}${route.prefix}`,
@@ -82,17 +84,23 @@ export class MirrorCodingRelay {
     return this.bindInternal(providerId, metadata, modelId, sessionId, "chat", endpoint);
   }
 
-  async bindImage(providerId: string, metadata: MirrorCodingProvider, modelId: string, sessionId: string | undefined, edit: boolean) {
+  async bindImage(providerId: string, metadata: MirrorCodingProvider, modelId: string, sessionId: string | undefined, edit = false) {
     const routes = metadata.imageRoutes?.[modelId];
     const endpoint = edit ? routes?.reference : routes?.generation;
-    if (!endpoint || (edit ? endpoint !== "image-edit" : endpoint !== "image-generation")) {
+    if (!endpoint || (!edit && endpoint !== "image-generation") || (edit && endpoint !== "image-edit" && endpoint !== "image-generation")) {
       throw new Error("model_or_group_unavailable");
     }
-    return this.bindInternal(providerId, metadata, modelId, sessionId, "image", endpoint);
+    const bound = await this.bindInternal(providerId, metadata, modelId, sessionId, "image", endpoint);
+    const origin = await this.listen();
+    return {
+      ...bound,
+      baseUrl: `${origin}/${providerId}`,
+      release: () => { this.bindings.delete(bound.apiKey); },
+    };
   }
 
   boundSessions(): string[] {
-    return [...new Set([...this.bindings.values()].flatMap((value) => value.sessionId ? [value.sessionId] : []))];
+    return [...new Set([...this.bindings.values()].flatMap((value) => value.sessionId && !value.imageModelId ? [value.sessionId] : []))];
   }
   hasActiveRequests(): boolean { return this.requests.size > 0 || this.imageRequests.size > 0; }
 
@@ -211,9 +219,9 @@ export class MirrorCodingRelay {
       const rawBody = Buffer.concat(chunks);
       const body = rawBody.toString("utf8");
       const contentType = String(request.headers["content-type"] ?? "");
-      let payload: { model?: unknown; images?: unknown } = {};
+      let payload: { model?: unknown; images?: unknown; n?: unknown; size?: unknown; quality?: unknown; aspect_ratio?: unknown } = {};
       if (contentType.toLowerCase().includes("application/json")) {
-        payload = JSON.parse(body) as { model?: unknown; images?: unknown };
+        payload = JSON.parse(body) as { model?: unknown; images?: unknown; n?: unknown; size?: unknown; quality?: unknown; aspect_ratio?: unknown };
       } else if (contentType.toLowerCase().includes("multipart/form-data")) {
         const model = /name="model"\r?\n\r?\n([^\r\n]+)/.exec(body)?.[1];
         payload = { model };
@@ -235,14 +243,25 @@ export class MirrorCodingRelay {
       // Availability is checked against the most recent catalog, including empty catalogs.
       const group = state.catalog?.groups.find((entry) => entry.id === binding.metadata.groupId);
       const currentModel = group?.models.find((model) => model.id === modelId);
-      const hasReferences = Array.isArray(payload.images) && payload.images.length > 0;
+      const hasReferences = Array.isArray(payload.images) && payload.images.length > 0 ||
+        (contentType.toLowerCase().includes("multipart/form-data") && /name="(?:image|images)"/.test(body));
       const currentCapability = currentModel?.image;
       const currentPath = hasReferences ? currentCapability?.referencePath : currentCapability?.generationPath;
-      if (!currentModel || binding.kind === "chat"
-          ? !currentModel?.supportedEndpointTypes.includes(endpoint as MirrorCodingEndpoint)
-          : !currentCapability || !endpoint || !currentPath || currentPath !== IMAGE_ENDPOINTS[endpoint as MirrorCodingImageEndpoint].path ||
-            !currentModel.supportedEndpointTypes.includes(endpoint)) {
+      const routeAvailable = binding.kind === "chat"
+        ? Boolean(currentModel?.supportedEndpointTypes.includes(endpoint as MirrorCodingEndpoint))
+        : Boolean(currentCapability && endpoint && currentPath === IMAGE_ENDPOINTS[endpoint as MirrorCodingImageEndpoint].path &&
+            currentModel?.supportedEndpointTypes.includes(endpoint));
+      if (!currentModel || !routeAvailable) {
         throw new Error("model_or_group_unavailable");
+      }
+      if (binding.kind === "image" && contentType.toLowerCase().includes("application/json")) {
+        const capability = imageCapability(binding.metadata, modelId);
+        validateImageOptions(capability, {
+          count: typeof payload.n === "number" ? payload.n : undefined,
+          size: typeof payload.size === "string" ? payload.size : undefined,
+          quality: typeof payload.quality === "string" ? payload.quality : undefined,
+          aspectRatio: typeof payload.aspect_ratio === "string" ? payload.aspect_ratio : undefined,
+        }, Array.isArray(payload.images) ? payload.images.length : 0);
       }
       const headers = new Headers({
         "Content-Type": contentType || "application/json", Accept: "application/json, text/event-stream",

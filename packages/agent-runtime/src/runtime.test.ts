@@ -1931,6 +1931,8 @@ describe("DesktopAgentRuntime deferred tool catalog", () => {
       "Bash",
       "Edit",
       "Write",
+      "ListImageModels",
+      "GenerateImage",
       "asktool",
       "Skill",
       "EnterPlanMode",
@@ -6723,7 +6725,7 @@ describe("DesktopAgentRuntime subagents", () => {
     });
     expect(result.details.error).toContain("not available for delegation");
     expect(subagentRuns.calls).toHaveLength(0);
-    expect(host.call).toHaveBeenCalledWith("provider.resolveSubagentModel", { key: "remote/remote-model" });
+    expect(host.call).toHaveBeenCalledWith("provider.resolveSubagentModel", { sessionId: "session-1", key: "remote/remote-model" });
     await taskTool(runtime).execute("own-pin", { agent: "reviewer", task: "Review." });
     expect(subagentRuns.calls[0].provider).toBe(remote);
     expect(taskTool(runtime).description).toContain("Default model: remote/remote-model");

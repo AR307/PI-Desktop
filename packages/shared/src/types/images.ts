@@ -51,6 +51,7 @@ export type ImageGenerationResult = {
   options: ImageGenerationOptions;
   images: GeneratedImage[];
   text?: string;
+  error?: string;
 };
 export type ImageSessionBinding = {
   model: ImageModelInfo;
@@ -74,12 +75,14 @@ export function validateImageOptions(
 ): ImageGenerationOptions {
   if (referenceCount && !capability.reference_path) throw new Error("images_reference_unsupported");
   if (options.size && !capability.sizes?.includes(options.size)) throw new Error("images_size_unsupported");
+  if (options.aspectRatio && !capability.aspect_ratios?.includes(options.aspectRatio)) throw new Error("images_ratio_unsupported");
   if (options.quality && !capability.qualities?.includes(options.quality)) throw new Error("images_quality_unsupported");
   if (options.aspectRatio && !capability.aspect_ratios?.includes(options.aspectRatio)) throw new Error("images_aspect_ratio_unsupported");
   const count = options.count ?? 1;
   if (!Number.isInteger(count) || count < 1 || count > capability.max_count) throw new Error("images_count_unsupported");
   return {
     count,
+    ...(options.aspectRatio ? { aspectRatio: options.aspectRatio } : {}),
     ...(options.size ? { size: options.size } : {}),
     ...(options.quality ? { quality: options.quality } : {}),
     ...(options.aspectRatio ? { aspectRatio: options.aspectRatio } : {}),

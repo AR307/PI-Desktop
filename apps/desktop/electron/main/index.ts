@@ -687,6 +687,8 @@ const mirrorCoding = createMirrorCodingRuntime({
   getHost: () => host,
   modelsDev: modelsDevCatalog,
   openExternal: safeOpenExternal,
+  getSidecar: () => sidecar, getActiveTurns: () => activeTurns,
+  acquireSessionOperation: (id) => acquireSessionOperation(id), emit: (envelope) => emitAgentEvent(envelope),
   send: sendToRenderer,
 });
 
