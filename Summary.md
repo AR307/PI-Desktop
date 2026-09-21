@@ -307,3 +307,7 @@ needed by an actual request rather than starting a repository-wide rewrite.
 - The older delivery workflow document still describes local-main integration.
   This task follows the supplied root policy and local-only delivery instruction:
   validation and commits stay in the dedicated task worktree.
+- Candidate 699f709c proved that stopping an image download preserves its prompt
+  and aborted status, then exposed the empty-text image error card being hidden
+  by compact transcript grouping. Image results now remain visible outside that
+  disclosure so the retained download can be retried immediately.
