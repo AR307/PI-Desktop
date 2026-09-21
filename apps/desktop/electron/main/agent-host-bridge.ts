@@ -18,6 +18,7 @@ import type {
   AgentQueueChangedEvent,
   AgentQueuePushRequest,
   AskToolResolution,
+  PlanProposal,
   QueuedTurnSummary,
   RacpApprovalResult,
   RacpPermissionMode,
@@ -233,6 +234,9 @@ export function createAgentHostBridge(options: AgentHostBridgeOptions) {
       }
     },
     listPendingTools: (sessionId) => listPendingToolRequests(options.getHost, sessionId),
+    async listPendingContracts(sessionId) {
+      return (await requireHost().call<{ plans: PlanProposal[] }>("plans.pending", { sessionId })).plans;
+    },
   };
 
   // Session reads and the persisted turn queue (schema v15, ADR 0213) go

@@ -33,6 +33,9 @@ draft. Both surfaces show the same persisted messages. The phone Stop button
 uses `turn/interrupt` to abort active runtime work or image generation;
 `turn/stop` retains RACP's cooperative stop behavior.
 An approval can be resolved once; stale decisions report the resolved state.
+Plan/Goal approvals belong to the session and remain visible after the planning
+turn ends. Snapshots restore still-pending proposals from Rust after a desktop
+restart, retaining their host expiry and using the existing plan resolution flow.
 Mobile backgrounding may suspend its connection. Foreground/reconnect restores
 snapshots and events. Lost send acknowledgements are reconciled through
 `message/status` (`running`, `queued`, `persisted`, or `unknown`); uncertain sends

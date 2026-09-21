@@ -668,6 +668,10 @@ export class AgentHost {
   async snapshot(sessionId: string, summary?: SessionSummary): Promise<RacpSessionSnapshot> {
     const resolved = summary ?? (await this.requireSession(sessionId));
     const state = this.state(sessionId);
+    await this.approvals.syncPendingContracts(sessionId, {
+      revision: state.revision,
+      lifetimeMs: this.approvalLifetime(state),
+    });
     const page = await this.sessions.history(sessionId, { limit: this.snapshotItems });
     const activeTurn = state.activeTurnId ? state.turns.get(state.activeTurnId) : undefined;
     return {
@@ -780,7 +784,7 @@ export class AgentHost {
     }
     state.activeItems.clear();
     state.status = "idle";
-    for (const closed of this.approvals.cancelForSession(state.id, state.revision + 1)) {
+    for (const closed of this.approvals.cancelToolsForSession(state.id, state.revision + 1)) {
       this.emit(state, "approval.resolved", closed, outcome.meta);
     }
     for (const [inputId] of state.pendingInputs) {
