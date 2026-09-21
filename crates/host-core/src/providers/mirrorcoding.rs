@@ -10,6 +10,8 @@ pub struct MirrorCodingProvider {
     pub ratio: Option<f64>,
     pub dynamic_billing: bool,
     pub routes: BTreeMap<String, String>,
+    #[serde(default)]
+    pub image_models: BTreeMap<String, serde_json::Value>,
 }
 
 #[derive(Deserialize)]

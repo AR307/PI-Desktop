@@ -1,4 +1,5 @@
 import type { ModelBinding } from "./models.js";
+import type { ImageGenerationCapability } from "./images.js";
 
 export const MIRRORCODING_AUTH_KIND = "mirrorcoding";
 export const MIRRORCODING_ORIGIN = "https://console.mirrorcoding.xyz";
@@ -7,6 +8,7 @@ export type MirrorCodingEndpoint = "openai" | "openai-response" | "anthropic" | 
 export type MirrorCodingModel = {
   id: string;
   supported_endpoint_types: string[];
+  image?: ImageGenerationCapability;
 };
 export type MirrorCodingGroup = {
   id: string;
@@ -31,6 +33,7 @@ export type MirrorCodingProvider = {
   ratio: number | null;
   dynamicBilling: boolean;
   routes: Record<string, MirrorCodingEndpoint>;
+  imageModels?: Record<string, ImageGenerationCapability>;
 };
 export type MirrorCodingProviderSync = {
   accountId: number | null;

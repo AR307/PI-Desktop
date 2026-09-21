@@ -1,6 +1,7 @@
 import type {
-  MirrorCodingCatalog, MirrorCodingEndpoint, MirrorCodingProviderSync, ModelBinding,
+  MirrorCodingCatalog, MirrorCodingEndpoint, MirrorCodingProviderSync, ModelBinding, ImageGenerationCapability,
 } from "@pi-desktop/shared";
+import { parseImageCapability } from "@pi-desktop/shared";
 import { genericModelConfig, type ModelConfig } from "@pi-desktop/agent-runtime";
 import { modelConfigFromModelsDev, type ModelsDevCatalog } from "../models-dev-catalog";
 
@@ -48,7 +49,8 @@ export function parseCatalog(value: unknown): MirrorCodingCatalog {
       const modelId = string(model.id);
       if (!modelId || seen.has(modelId) || !Array.isArray(model.supported_endpoint_types)) throw new Error("invalid_catalog");
       seen.add(modelId);
-      return { id: modelId, supported_endpoint_types: model.supported_endpoint_types.map(string) };
+      return { id: modelId, supported_endpoint_types: model.supported_endpoint_types.map(string),
+        ...(model.image ? { image: parseImageCapability(model.image) } : {}) };
     });
     return {
       id, name: string(group.name), description: string(group.description ?? ""),
@@ -91,17 +93,25 @@ export function compileCatalog(catalog: MirrorCodingCatalog, modelsDev: ModelsDe
     accountId: catalog.user.id,
     groups: catalog.groups.map((group) => {
       const routes: Record<string, MirrorCodingEndpoint> = {};
+      const imageModels: Record<string, ImageGenerationCapability> = {};
       const models: ModelBinding[] = [];
       for (const model of group.models) {
         const config = modelMetadata(modelsDev, model.id);
         const native = preferredEndpoint(config);
         const candidates = [...new Set([...(native ? [native] : []), ...Object.keys(ENDPOINTS) as MirrorCodingEndpoint[]])];
-        const endpoint = candidates.find((kind) => {
+        const modalities = modelsDev.findModel({ modelId: model.id });
+        const supportsChat = model.image ? model.image.supports_chat :
+          !modalities?.outputPublished || modalities.modalities.output.includes("text");
+        const endpoint = supportsChat ? candidates.find((kind) => {
           const advertised = catalog.supported_endpoints[kind];
           return model.supported_endpoint_types.includes(kind) && advertised?.method === "POST" && advertised.path === ENDPOINTS[kind].path;
-        });
-        if (!endpoint) continue;
-        routes[model.id] = endpoint;
+        }) : undefined;
+        const imageEndpoint = catalog.supported_endpoints["image-generation"];
+        if (model.image && imageEndpoint?.method === "POST" && imageEndpoint.path === model.image.generation_path) {
+          imageModels[model.id] = model.image;
+        }
+        if (!endpoint && !imageModels[model.id]) continue;
+        if (endpoint) routes[model.id] = endpoint;
         models.push({
           id: model.id, contextWindow: config.contextWindow, contextWindowSource: "catalog",
           maxTokens: config.maxTokens, thinkingLevels: [...config.supportedThinkingLevels ?? []],
@@ -113,7 +123,7 @@ export function compileCatalog(catalog: MirrorCodingCatalog, modelsDev: ModelsDe
         metadata: {
           accountId: catalog.user.id, groupId: group.id, groupName: group.name,
           description: group.description, ratio: group.dynamic_billing ? null : group.ratio,
-          dynamicBilling: group.dynamic_billing, routes,
+          dynamicBilling: group.dynamic_billing, routes, imageModels,
         }, models,
       };
     }),

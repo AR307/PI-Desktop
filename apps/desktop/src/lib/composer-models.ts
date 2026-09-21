@@ -51,8 +51,16 @@ function configuredModelIds(provider: ConfiguredProvider): string[] {
 export function composerModelsForProvider(
   provider: ConfiguredProvider,
   discovered: readonly ModelInfo[] | undefined,
+  task: "chat" | "image" = "chat",
 ): ModelInfo[] {
-  return configuredModelIds(provider).map((modelId) => {
+  return configuredModelIds(provider).filter((modelId) => {
+    if (provider.mirrorCoding) return task === "image"
+      ? Boolean(provider.mirrorCoding.imageModels?.[modelId])
+      : Boolean(provider.mirrorCoding.routes[modelId]);
+    if (task === "image") return false;
+    const metadata = discovered?.find((row) => modelIdsMatch(row.modelId, modelId));
+    return !metadata?.modalities || metadata.modalities.output.includes("text");
+  }).map((modelId) => {
     const metadata = (discovered ?? []).find((model) =>
       provider.mirrorCoding ? model.modelId === modelId : modelIdsMatch(model.modelId, modelId),
     );

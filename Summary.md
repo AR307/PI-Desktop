@@ -154,6 +154,19 @@ needed by an actual request rather than starting a repository-wide rewrite.
 
 ## Update log
 
+### 2026-09-21 - PI image-generation handoff and desktop foundation
+
+- Scoped the implementation to PI-Desktop. The MirrorCoding server is treated
+  as an external dependency for this task.
+- Added shared image-generation capability, request, result, and per-session
+  selection contracts. MirrorCoding providers now retain image capabilities
+  alongside their existing chat routes, and the Composer model projection can
+  distinguish chat-capable and image-capable models.
+- Added [MirrorCoding image-generation requirements](docs/mirrorcoding-image-generation-requirements.md)
+  for the separate service team. It defines the catalog fields, authorization
+  paths, JSON/multipart requests, response shapes, and local fixture coverage.
+- No credentials, production configuration, or service deployment were used.
+
 ### 2026-09-20 - Work-panel dragging and browser resize
 
 - Moved the tab-strip drag exclusion onto individual tabs, leaving header
