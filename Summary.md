@@ -71,6 +71,10 @@
   32 AgentHost/approval checks passed, followed by all 21 RACP checks. AgentHost,
   RACP and Electron were rebuilt before rerunning the visible approval flow.
 
+- Native screenshot review also caught a launch-theme action bar appearing when
+  Android edge-to-edge initialization ran before Capacitor applied NoActionBar.
+  Initialization now runs after the bridge activity's theme setup.
+
 ## Project and source baseline
 
 This branch starts from upstream PI-Desktop `920b12b8e` (0.15.6, 2026-09-24)
