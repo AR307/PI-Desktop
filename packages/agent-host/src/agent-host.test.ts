@@ -575,7 +575,7 @@ describe("AgentHost approvals and inputs", () => {
     expect(approvals.contract).toEqual([{ proposalId: "prop_1", sessionId: "s1", action: "approve", permissionMode: "accept-edits", version: 3 }]);
   });
 
-  it("restores a durable proposal for a phone attaching after desktop restart", async () => {
+  it("restores a pending host proposal for a phone after AgentHost recreation", async () => {
     const { host, approvals, sessions } = build();
     sessions.summaries.set("s1", { ...summary("s1"), mode: "plan", planningState: "awaiting_approval" });
     approvals.plans = [{

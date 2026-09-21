@@ -66,7 +66,10 @@
 - The expanded real desktop/phone scenario reproduced a pending plan disappearing
   when its planning turn finished. AgentHost now closes only turn-bound tool
   approvals at turn completion and restores durable Plan/Goal approvals from
-  Rust during snapshots, including after desktop restart.
+  Rust during snapshots for phone reconnect or AgentHost recreation while the
+  Rust host remains available. Full desktop restart retains the existing Rust
+  behavior of marking pending proposals interrupted; it does not leave those
+  proposals available for approval.
 - Added regressions that fail on the previous lifecycle and pass after the fix:
   32 AgentHost/approval checks passed, followed by all 21 RACP checks. AgentHost,
   RACP and Electron were rebuilt before rerunning the visible approval flow.
@@ -74,6 +77,23 @@
 - Native screenshot review also caught a launch-theme action bar appearing when
   Android edge-to-edge initialization ran before Capacitor applied NoActionBar.
   Initialization now runs after the bridge activity's theme setup.
+
+### Final companion acceptance and delivery
+
+- Executable candidate `d2e5917ef4ac8558e40196e9f4446c1f1278249c`, base main
+  `996922fa729870e88ed9e439aa6959e388c12f91`; refreshed origin/main is unchanged.
+- Actual isolated Electron/touch-browser acceptance passed all 41 checks without
+  renderer/cleanup errors. Actual Android 15/WebView 124 acceptance passed all
+  19 checks, including native secure storage, picker/share, keyboard, reference
+  generation and process restart. Settled EN/ZH light/dark screenshots were
+  reviewed, with the corrected native header and system bars.
+- Rebuilt the official-origin preview APK, installed it and verified the native
+  login screen with no acceptance hooks and no production login submission.
+  Package and reports live under `D:/piformc-artifacts/mobile-companion`.
+- Workspace package builds, desktop/mobile typechecks and builds, relevant
+  tests and lint passed as detailed in `docs/mobile-companion-delivery.md`.
+  MC-team integration, physical-device coverage and production deployment remain
+  external acceptance. All implementation commits stay local in this worktree.
 
 ## Project and source baseline
 

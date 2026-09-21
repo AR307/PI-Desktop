@@ -10,7 +10,7 @@ for pending codes and paired grants. Users can cancel/regenerate codes and
 revoke devices. Restart and mobile token refresh preserve shares. Account changes
 disconnect peers. Explicit mobile logout clears local credentials and the saved
 device registration; a later password login registers and pairs again. Account
-grant management can revoke old registrations' shares without allowing a new
+grant management on desktop can revoke old registrations' shares without allowing a new
 mobile device to use them.
 
 Mobile offers login, verification challenges, pairing, shared project/session
@@ -34,8 +34,11 @@ uses `turn/interrupt` to abort active runtime work or image generation;
 `turn/stop` retains RACP's cooperative stop behavior.
 An approval can be resolved once; stale decisions report the resolved state.
 Plan/Goal approvals belong to the session and remain visible after the planning
-turn ends. Snapshots restore still-pending proposals from Rust after a desktop
-restart, retaining their host expiry and using the existing plan resolution flow.
+turn ends. Snapshots restore still-pending proposals from Rust when a phone
+reconnects or AgentHost is recreated while Rust remains available, retaining
+their host expiry and using the existing plan resolution flow. A full desktop
+restart preserves the existing Rust behavior: pending proposals become
+interrupted and cannot be approved as if they were still pending.
 Mobile backgrounding may suspend its connection. Foreground/reconnect restores
 snapshots and events. Lost send acknowledgements are reconciled through
 `message/status` (`running`, `queued`, `persisted`, or `unknown`); uncertain sends
