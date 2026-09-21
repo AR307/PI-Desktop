@@ -4,7 +4,9 @@ The PI desktop and Android companion baseline is implemented on
 `codex/mobile-companion`; the current interface and session controls are on
 `codex/mobile-ui-controls`. MC server implementation and deployment remain with
 the MirrorCoding team. Send them
-[`mirrorcoding-mobile-sync-requirements.md`](mirrorcoding-mobile-sync-requirements.md).
+[`mirrorcoding-mobile-sync-requirements.md`](mirrorcoding-mobile-sync-requirements.md)
+and the incremental
+[`mirrorcoding-mobile-session-controls-delta.md`](mirrorcoding-mobile-session-controls-delta.md).
 
 ## Using the feature after MC integration
 

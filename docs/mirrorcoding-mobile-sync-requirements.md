@@ -4,6 +4,11 @@ Status: Client integration contract. MC implementation and deployment are owned
 by the MirrorCoding team. The PI repository contains a controlled test fixture,
 not a production MC server implementation.
 
+The model/mode controls added after the initial handoff are covered by
+[`mirrorcoding-mobile-session-controls-delta.md`](mirrorcoding-mobile-session-controls-delta.md).
+MC teams that already implemented an earlier revision must review that delta;
+it is normally a relay compatibility check, not a new business-service API.
+
 ## Outcome and ownership
 
 A user shares a project or session from PI Desktop, signs into the Android app

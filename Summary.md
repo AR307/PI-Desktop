@@ -484,3 +484,18 @@ needed by an actual request rather than starting a repository-wide rewrite.
   reported too many emulator instances; no AVD or lock file was removed. The
   earlier companion native run remains baseline evidence, not a claim that this
   UI revision was re-executed on Android.
+
+### 2026-09-22 - MirrorCoding mobile session-controls delta
+
+- Added a separate MC-team delta for the phone's model, group, reasoning, mode,
+  and image settings. It documents the exact PI-owned RACP requests, refresh
+  notification, errors, reconnect behavior, and twelve joint-acceptance cases.
+- No new MC REST API, database table, catalog store, model call, or session
+  configuration persistence is required. MC code changes are conditional on an
+  inner-method allowlist, frame parsing/rewriting, insufficient payload limits,
+  frame-body logging/persistence, or transport-level replay in the current relay.
+- Clarified that PI's 1 MiB limit applies to the decoded inner RACP frame, while
+  the desktop WebSocket and reverse proxy must also allow the containing
+  `peer.frame` envelope and JSON escaping overhead.
+- Linked the delta from the authoritative MC contract and local delivery guide.
+  This is documentation-only and does not change the verified client executable.
