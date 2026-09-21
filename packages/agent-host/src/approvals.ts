@@ -1,5 +1,6 @@
 import type {
   PlanningStateEvent,
+  PlanProposal,
   RacpApprovalRequest,
   RacpApprovalResponse,
   RacpApprovalResult,
@@ -28,6 +29,8 @@ export interface ApprovalPort {
   }): Promise<void>;
   /** Open tool requests as Host state (`permissions.pending`). */
   listPendingTools(sessionId?: string): Promise<PendingToolRequest[]>;
+  /** Durable Plan/Goal proposals survive the turn that submitted them. */
+  listPendingContracts(sessionId: string): Promise<PlanProposal[]>;
 }
 
 export type PendingToolRequest = ToolPermissionRequest & {
@@ -92,9 +95,12 @@ export class ApprovalBroker {
     context: { turnId: string; revision: number; lifetimeMs: number },
   ): RacpApprovalRequest | null {
     if (event.state !== "awaiting_approval" || !event.proposalId) return null;
+    if (this.results.has(event.proposalId)) return null;
     const existing = this.pending.get(event.proposalId);
-    if (existing) return existing.request;
-    const expiresAtMs = this.clock.now() + context.lifetimeMs;
+    if (existing && existing.expiresAtMs > this.clock.now()) return existing.request;
+    const expiresAtMs = event.proposal?.expiresAt
+      ? Date.parse(event.proposal.expiresAt)
+      : this.clock.now() + context.lifetimeMs;
     const approval: RacpApprovalRequest = {
       id: event.proposalId,
       sessionId: event.sessionId,
@@ -122,6 +128,22 @@ export class ApprovalBroker {
     return open.map((request) =>
       this.fromToolPermission(request, { ...context, expiresAt: request.expiresAt }),
     );
+  }
+
+  /** Restore session-level approvals for a phone that attaches after submission or restart. */
+  async syncPendingContracts(
+    sessionId: string,
+    context: { revision: number; lifetimeMs: number },
+  ): Promise<void> {
+    const proposals = await this.port.listPendingContracts(sessionId);
+    for (const proposal of proposals) {
+      if (proposal.status !== "pending" || proposal.sessionId !== sessionId) continue;
+      this.fromPlanningState({
+        sessionId, state: "awaiting_approval", proposalId: proposal.id,
+        kind: proposal.kind, title: proposal.title, question: proposal.question,
+        artifact: proposal.artifact, version: proposal.version, proposal,
+      }, { ...context, turnId: proposal.turnId });
+    }
   }
 
   list(sessionId?: string): RacpApprovalRequest[] {
@@ -227,11 +249,11 @@ export class ApprovalBroker {
     return result;
   }
 
-  /** Close every open approval of a session, e.g. when its turn ended. */
-  cancelForSession(sessionId: string, revision: number): RacpApprovalResult[] {
+  /** Turn cleanup cancels tool requests; durable Plan/Goal approvals remain open. */
+  cancelToolsForSession(sessionId: string, revision: number): RacpApprovalResult[] {
     const closed: RacpApprovalResult[] = [];
     for (const entry of [...this.pending.values()]) {
-      if (entry.request.sessionId !== sessionId) continue;
+      if (entry.request.sessionId !== sessionId || entry.request.kind !== "tool") continue;
       closed.push(this.settle(entry.request.id, { status: "canceled", revision }));
     }
     return closed;

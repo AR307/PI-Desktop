@@ -61,6 +61,16 @@
   Removed the conflicting legacy fullscreen keyboard-resize option and use
   Capacitor's safe-area values. Final native validation reruns this refinement.
 
+### Plan approval recovery
+
+- The expanded real desktop/phone scenario reproduced a pending plan disappearing
+  when its planning turn finished. AgentHost now closes only turn-bound tool
+  approvals at turn completion and restores durable Plan/Goal approvals from
+  Rust during snapshots, including after desktop restart.
+- Added regressions that fail on the previous lifecycle and pass after the fix:
+  32 AgentHost/approval checks passed, followed by all 21 RACP checks. AgentHost,
+  RACP and Electron were rebuilt before rerunning the visible approval flow.
+
 ## Project and source baseline
 
 This branch starts from upstream PI-Desktop `920b12b8e` (0.15.6, 2026-09-24)
