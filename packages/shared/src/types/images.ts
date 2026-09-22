@@ -1,15 +1,30 @@
 import type { AgentPromptAttachment } from "./agent.js";
 import type { MessageAttachment } from "./messages.js";
 
+export const STANDARD_IMAGE_GENERATION_PATH = "/v1/images/generations";
+export const STANDARD_IMAGE_EDIT_PATH = "/v1/images/edits";
+
 export type ImageGenerationCapability = {
-  generation_path: "/v1/images/generations";
-  reference_path?: "/v1/images/generations" | "/v1/images/edits";
+  generation_path: string;
+  reference_path?: typeof STANDARD_IMAGE_GENERATION_PATH | typeof STANDARD_IMAGE_EDIT_PATH;
   sizes?: string[];
   qualities?: string[];
   aspect_ratios?: string[];
   max_count: number;
   supports_chat: boolean;
+  /** False when the account route is not an OpenAI images generations or edits path. */
+  sendable?: boolean;
 };
+
+export function imageCapabilitySendable(
+  capability: Pick<ImageGenerationCapability, "generation_path" | "sendable"> | undefined,
+): boolean {
+  if (!capability) return false;
+  if (capability.sendable === false) return false;
+  if (capability.sendable === true) return true;
+  return capability.generation_path === STANDARD_IMAGE_GENERATION_PATH
+    || capability.generation_path === STANDARD_IMAGE_EDIT_PATH;
+}
 
 export type ImageGenerationOptions = { size?: string; quality?: string; aspectRatio?: string; count?: number };
 export type ImageSessionConfig = {
@@ -89,11 +104,16 @@ export function validateImageOptions(
   };
 }
 
+function standardReferencePath(value: unknown): ImageGenerationCapability["reference_path"] | undefined {
+  if (value === STANDARD_IMAGE_GENERATION_PATH || value === STANDARD_IMAGE_EDIT_PATH) return value;
+  return undefined;
+}
+
 export function parseImageCapability(value: unknown): ImageGenerationCapability {
   if (!value || typeof value !== "object") throw new Error("invalid_image_capability");
   const row = value as Record<string, unknown>;
-  if (row.generation_path !== "/v1/images/generations" ||
-      (row.reference_path !== undefined && row.reference_path !== "/v1/images/edits" && row.reference_path !== "/v1/images/generations") ||
+  if (typeof row.generation_path !== "string" || row.generation_path.length === 0 || row.generation_path.length > 512 ||
+      (row.reference_path !== undefined && typeof row.reference_path !== "string") ||
       !Number.isSafeInteger(row.max_count) || Number(row.max_count) < 1 ||
       typeof row.supports_chat !== "boolean") throw new Error("invalid_image_capability");
   const list = (input: unknown): string[] | undefined => {
@@ -101,10 +121,13 @@ export function parseImageCapability(value: unknown): ImageGenerationCapability 
     if (!Array.isArray(input) || !input.every((entry): entry is string => typeof entry === "string" && entry.length > 0)) throw new Error("invalid_image_capability");
     return [...new Set(input)];
   };
+  const generation_path = row.generation_path;
+  const reference_path = standardReferencePath(row.reference_path);
   return {
-    generation_path: row.generation_path,
-    ...(row.reference_path ? { reference_path: row.reference_path } : {}),
+    generation_path,
+    ...(reference_path ? { reference_path } : {}),
     sizes: list(row.sizes), qualities: list(row.qualities), aspect_ratios: list(row.aspect_ratios),
     max_count: Number(row.max_count), supports_chat: row.supports_chat,
+    sendable: generation_path === STANDARD_IMAGE_GENERATION_PATH || generation_path === STANDARD_IMAGE_EDIT_PATH,
   };
 }

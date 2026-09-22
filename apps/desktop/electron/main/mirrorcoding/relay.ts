@@ -3,7 +3,7 @@ import { createServer, type IncomingMessage, type ServerResponse } from "node:ht
 import type { AddressInfo } from "node:net";
 import { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
-import { validateImageOptions, type MirrorCodingProvider } from "@pi-desktop/shared";
+import { imageCapabilitySendable, type MirrorCodingProvider } from "@pi-desktop/shared";
 import type { MirrorCodingAccount } from "./account";
 import { ENDPOINTS } from "./catalog";
 
@@ -104,29 +104,44 @@ export class MirrorCodingRelay {
       this.requests.set(controller, binding);
       const chunks: Buffer[] = [];
       for await (const chunk of request) chunks.push(Buffer.from(chunk));
-      const body = Buffer.concat(chunks).toString("utf8");
-      const payload = JSON.parse(body) as { model?: unknown; images?: unknown[]; n?: number; size?: string; quality?: string; aspect_ratio?: string };
-      const gemini = /^\/v1beta\/models\/(.+):(streamGenerateContent|generateContent)$/.exec(path);
-      const modelId = gemini ? decodeURIComponent(gemini[1]) : payload.model;
-      if (typeof modelId !== "string") throw new Error("invalid_model_request");
-      const group = state.catalog?.groups.find((entry) => entry.id === binding.metadata.groupId);
-      const catalogModel = group?.models.find((entry) => entry.id === modelId);
+      const raw = Buffer.concat(chunks);
+      const headers = upstreamHeaders(request);
+      headers.set("X-Mirrorcoding-Group", encodeURIComponent(binding.metadata.groupId));
+      let query = "";
       if (binding.imageModelId) {
-        const capability = catalogModel?.image;
-        if (modelId !== binding.imageModelId || !capability || !catalogModel.supported_endpoint_types.includes("image-generation")) throw new Error("model_or_group_unavailable");
-        const references = Array.isArray(payload.images) ? payload.images.length : 0;
-        const expected = references ? capability.reference_path : capability.generation_path;
-        if (path !== expected) throw new Error("model_or_group_unavailable");
-        validateImageOptions(capability, { count: payload.n, size: payload.size, quality: payload.quality, aspectRatio: payload.aspect_ratio }, references);
+        if (path !== "/v1/images/generations" && path !== "/v1/images/edits") throw new Error("model_or_group_unavailable");
+        const group = state.catalog?.groups.find((entry) => entry.id === binding.metadata.groupId);
+        const catalogModel = group?.models.find((entry) => entry.id === binding.imageModelId);
+        if (!catalogModel?.supported_endpoint_types.includes("image-generation") || !imageCapabilitySendable(catalogModel.image)) {
+          throw new Error("model_or_group_unavailable");
+        }
+        if (path === "/v1/images/generations") {
+          let payload: { model?: unknown };
+          try {
+            payload = JSON.parse(raw.toString("utf8")) as { model?: unknown };
+          } catch {
+            throw new Error("invalid_model_request");
+          }
+          if (payload.model !== binding.imageModelId) throw new Error("model_or_group_unavailable");
+        }
       } else {
+        let payload: { model?: unknown };
+        try {
+          payload = JSON.parse(raw.toString("utf8")) as { model?: unknown };
+        } catch {
+          throw new Error("invalid_model_request");
+        }
+        const gemini = /^\/v1beta\/models\/(.+):(streamGenerateContent|generateContent)$/.exec(path);
+        const modelId = gemini ? decodeURIComponent(gemini[1]) : payload.model;
+        if (typeof modelId !== "string") throw new Error("invalid_model_request");
+        const group = state.catalog?.groups.find((entry) => entry.id === binding.metadata.groupId);
+        const catalogModel = group?.models.find((entry) => entry.id === modelId);
         const endpoint = binding.metadata.routes[modelId];
         if (!endpoint || (endpoint === "gemini" ? !gemini : path !== ENDPOINTS[endpoint].path) ||
             !catalogModel?.supported_endpoint_types.includes(endpoint)) throw new Error("model_or_group_unavailable");
+        query = gemini?.[2] === "streamGenerateContent" ? "?alt=sse" : "";
       }
-      const headers = upstreamHeaders(request);
-      headers.set("X-Mirrorcoding-Group", encodeURIComponent(binding.metadata.groupId));
-      const query = gemini?.[2] === "streamGenerateContent" ? "?alt=sse" : "";
-      const upstream = await this.account.request(`${path}${query}`, { method: "POST", headers, body, signal: controller.signal });
+      const upstream = await this.account.request(`${path}${query}`, { method: "POST", headers, body: raw, signal: controller.signal });
       if (upstream.status === 403) {
         const denied = await upstream.clone().json().catch(() => null) as { error?: { code?: string; message?: string } } | null;
         if (denied?.error?.code?.includes("group") || denied?.error?.message === "The selected group is not available to this account") {

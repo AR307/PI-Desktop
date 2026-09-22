@@ -11,22 +11,11 @@ export function ImageOptions({ capability, options, references, disabled, onChan
   const { t } = useTranslation();
   if (!capability) return <p className="image-options-notice" role="status">{t("images.empty")}</p>;
   return <div className="image-options">
-    {([
-      ["size", "images.size", capability.sizes],
-      ["aspectRatio", "images.aspectRatio", capability.aspect_ratios],
-      ["quality", "images.quality", capability.qualities],
-    ] as const).map(([key, label, values]) => values?.length ? <label key={key}>{t(label)}
-      <select disabled={disabled} aria-label={t(label)} value={options[key] ?? ""}
-        onChange={(event) => onChange({ ...options, [key]: event.target.value || undefined })}>
-        <option value="">{t("images.serverDefault")}</option>
-        {values.map((value) => <option key={value}>{value}</option>)}
-      </select>
-    </label> : null)}
     {capability.max_count > 1 ? <label>{t("images.count")}
       <input type="number" min={1} max={capability.max_count} value={options.count ?? 1} disabled={disabled}
         aria-label={t("images.count")} onChange={(event) => {
           const count = Number(event.target.value);
-          if (Number.isInteger(count) && count >= 1 && count <= capability.max_count) onChange({ ...options, count });
+          if (Number.isInteger(count) && count >= 1 && count <= capability.max_count) onChange({ count });
         }} />
     </label> : null}
     <span role={references && !capability.reference_path ? "alert" : "status"} className="image-options-notice">

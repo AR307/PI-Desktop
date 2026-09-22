@@ -19,7 +19,7 @@ export const imagesEn = {
   service_unavailable: "Image service is temporarily unavailable. Please retry later.",
 };
 export const imagesZhCN: typeof imagesEn = {
-  mode: "图片生成", chooseMode: "选择任务模式", model: "生图模型", chooseModel: "选择生图模型",
+  mode: "生图", chooseMode: "选择任务模式", model: "生图模型", chooseModel: "选择生图模型",
   empty: "登录 MirrorCoding 后，选择可用的生图模型。", unavailable: "分组不可用",
   size: "尺寸", aspectRatio: "比例", quality: "质量", count: "数量", serverDefault: "服务端默认",
   referencesSupported: "支持参考图", noReferences: "仅支持文生图",

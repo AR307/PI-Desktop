@@ -1,7 +1,7 @@
 import type {
   MirrorCodingCatalog, MirrorCodingEndpoint, MirrorCodingProviderSync, ModelBinding, ImageGenerationCapability,
 } from "@pi-desktop/shared";
-import { parseImageCapability } from "@pi-desktop/shared";
+import { imageCapabilitySendable, parseImageCapability } from "@pi-desktop/shared";
 import { genericModelConfig, type ModelConfig } from "@pi-desktop/agent-runtime";
 import { modelConfigFromModelsDev, type ModelsDevCatalog } from "../models-dev-catalog";
 
@@ -112,7 +112,7 @@ export function compileCatalog(catalog: MirrorCodingCatalog, modelsDev: ModelsDe
               (!model.supported_endpoint_types.includes("image-edit") || catalog.supported_endpoints["image-edit"]?.path !== capability.reference_path || catalog.supported_endpoints["image-edit"]?.method !== "POST")) {
             delete capability.reference_path;
           }
-          imageModels[model.id] = capability;
+          imageModels[model.id] = { ...capability, sendable: imageCapabilitySendable(capability) };
         }
         if (!endpoint && !imageModels[model.id]) continue;
         if (endpoint) routes[model.id] = endpoint;

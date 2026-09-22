@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { parseImageCapability, validateImageOptions, type ImageGenerationCapability } from "./images.js";
+import { imageCapabilitySendable, parseImageCapability, validateImageOptions, type ImageGenerationCapability } from "./images.js";
 
 const capability: ImageGenerationCapability = {
   generation_path: "/v1/images/generations",
@@ -8,6 +8,7 @@ const capability: ImageGenerationCapability = {
   qualities: ["high"],
   max_count: 2,
   supports_chat: false,
+  sendable: true,
 };
 
 describe("image generation contracts", () => {
@@ -25,8 +26,17 @@ describe("image generation contracts", () => {
     expect(() => validateImageOptions(capability, { count: 3 }, 0)).toThrow("images_count_unsupported");
   });
 
-  it("parses the server's snake-case capability without accepting an unknown route", () => {
+  it("keeps a standard generations route sendable", () => {
     expect(parseImageCapability(capability)).toEqual(capability);
-    expect(() => parseImageCapability({ ...capability, generation_path: "/v1/images/other" })).toThrow("invalid_image_capability");
+    expect(imageCapabilitySendable(parseImageCapability(capability))).toBe(true);
+  });
+
+  it("keeps a nonstandard generation path visible and not sendable", () => {
+    const parsed = parseImageCapability({ ...capability, generation_path: "/v1/images/other", reference_path: "/custom/edits" });
+    expect(parsed.generation_path).toBe("/v1/images/other");
+    expect(parsed.reference_path).toBeUndefined();
+    expect(parsed.sendable).toBe(false);
+    expect(imageCapabilitySendable(parsed)).toBe(false);
+    expect(() => parseImageCapability({ ...capability, max_count: 0 })).toThrow("invalid_image_capability");
   });
 });

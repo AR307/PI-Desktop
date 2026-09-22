@@ -154,7 +154,7 @@ try {
   const session = (await invoke("session/get", { id: sessionId })).session;
   check("chat reasoning still reaches its chat adapter", fixture.chats.some((call) => call.reasoning_effort === "medium"));
   check("agent tool result persists without inline image binaries", session.messages.some((m) => m.toolName === "GenerateImage") && !JSON.stringify(session).includes(fixture.bytes.toString("base64")));
-  await mode("图片生成");
+  await mode("生图");
   check("agent choice leaves manual image selection intact", (await page.locator(".composer-model-thinking-chip").textContent()).includes("gpt-image-1"));
   fixture.control.downloadsFail = true;
   await image("URL image for download retry");

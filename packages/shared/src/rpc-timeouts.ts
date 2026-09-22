@@ -115,7 +115,7 @@ export function rpcTimeoutMs(
   method: string,
   params: unknown,
 ): number {
-  if (method === "image.generate" || (method === "tools.execute" && isRecord(params) && params.toolName === "GenerateImage")) return MIRROR_IMAGE_GENERATION_TIMEOUT_MS + COMMAND_RPC_BUFFER_MS;
+  if (method === "tools.execute" && isRecord(params) && params.toolName === "GenerateImage") return MIRROR_IMAGE_GENERATION_TIMEOUT_MS + COMMAND_RPC_BUFFER_MS;
   if (method === "agent.compact") return AGENT_COMPACT_RPC_TIMEOUT_MS;
   if (method === "configSync.syncNow") return CONFIG_SYNC_RPC_TIMEOUT_MS;
   if (method !== "tools.execute") return DEFAULT_RPC_TIMEOUT_MS;

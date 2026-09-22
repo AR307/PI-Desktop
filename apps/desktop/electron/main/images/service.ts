@@ -1,7 +1,10 @@
 import { randomUUID } from "node:crypto";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { join } from "node:path";
+import { generateImageBatch } from "@pi-desktop/agent-runtime";
 import {
-  IPC, MIRROR_IMAGE_GENERATION_TIMEOUT_MS, validateImageOptions,
-  type AgentEventEnvelope, type AppSettings, type ImageGenerationRequest, type ImageGenerationResult,
+  IPC, imageCapabilitySendable, validateImageOptions,
+  type AgentEventEnvelope, type AppSettings, type GeneratedImageResult, type ImageGenerationRequest, type ImageGenerationResult,
   type ImageGenerationState, type ImageModelInfo, type ImageOutput, type ImageSessionConfig,
   type ProviderPublic, type SessionDetail, type UiMessage,
 } from "@pi-desktop/shared";
@@ -10,7 +13,9 @@ import type { HostProcess } from "../host-process";
 import type { MirrorCodingAccount } from "../mirrorcoding/account";
 import type { MirrorCodingRelay } from "../mirrorcoding/relay";
 import { preparePromptAttachments } from "../prompt-attachments";
+import { imageInputLoader } from "../services/image-inputs";
 import { persistGeneratedImage } from "./attachments";
+import { mirrorImageBatchRequest } from "./batch";
 
 export type ImageServiceDependencies = {
   dataDir: string;
@@ -21,7 +26,17 @@ export type ImageServiceDependencies = {
   emit(envelope: AgentEventEnvelope): void;
   send(channel: string, value: unknown): void;
 };
-type Job = { state: ImageGenerationState; controller: AbortController; sidecar?: AgentSidecar; direct: boolean };
+type Job = { state: ImageGenerationState; controller: AbortController; direct: boolean };
+
+function imageFailureCode(code: string | undefined): string {
+  if (code === "IMAGE_TIMEOUT" || code === "image_timeout") return "image_timeout";
+  if (code === "IMAGE_CANCELLED" || code === "image_aborted") return "image_aborted";
+  if (code === "IMAGE_AUTH_FAILED" || code === "IMAGE_HTTP_401" || code === "reauthorization_required") return "reauthorization_required";
+  if (code === "IMAGE_HTTP_429" || code === "rate_limited") return "rate_limited";
+  if (code === "IMAGE_HTTP_403" || code === "IMAGE_HTTP_404" || code === "model_or_group_unavailable") return "model_or_group_unavailable";
+  if (code === "IMAGE_HTTP_502" || code === "IMAGE_HTTP_503" || code === "service_unavailable") return "service_unavailable";
+  return "image_generation_failed";
+}
 
 export class ImageService {
   private jobs = new Map<string, Job>();
@@ -65,7 +80,7 @@ export class ImageService {
       let options = input.options;
       if (input.providerId || input.modelId) {
         const model = (await this.models()).find((m) => m.providerId === input.providerId && m.modelId === input.modelId);
-        if (model) options = validateImageOptions(model.capability, options);
+        if (model) options = validateImageOptions(model.capability, { count: options.count }, 0);
       }
       const config = { active: input.active, providerId: input.providerId, modelId: input.modelId, options };
       const settings = await this.host().call<AppSettings>("settings.get");
@@ -95,9 +110,6 @@ export class ImageService {
     if (direct) turns.set(request.sessionId, jobId);
     releaseOperation?.();
     this.publish(job, "running");
-    const timer = setTimeout(() => job.controller.abort(new Error("image_timeout")), MIRROR_IMAGE_GENERATION_TIMEOUT_MS);
-    const cancel = () => { void job.sidecar?.call("image.abort", { jobId }).catch(() => undefined); };
-    job.controller.signal.addEventListener("abort", cancel);
     let turnId: string | undefined;
     let releaseBinding: (() => void) | undefined;
     let result: ImageGenerationResult | undefined;
@@ -114,13 +126,13 @@ export class ImageService {
     };
     try {
       const model = (await this.models()).find((m) => m.providerId === request.providerId && m.modelId === request.modelId);
-      if (!model) throw new Error("model_or_group_unavailable");
+      if (!model || !imageCapabilitySendable(model.capability)) throw new Error("model_or_group_unavailable");
       const { provider } = await this.host().call<{ provider: ProviderPublic }>("providers.get", { id: request.providerId });
       const { session } = await this.host().call<{ session: SessionDetail }>("session.get", { id: request.sessionId, messageLimit: 1 });
       if (!session) throw new Error("session_not_found");
       const prepared = await preparePromptAttachments(this.deps.dataDir, request.sessionId, session.projectPath, request.references ?? [], true);
       if (prepared.some((ref) => ref.message.kind !== "image" || !ref.inlineData)) throw new Error("images_reference_too_large");
-      const options = validateImageOptions(model.capability, request.options, prepared.length);
+      const options = validateImageOptions(model.capability, { count: request.options?.count }, prepared.length);
       result = { kind: "image-generation", model, prompt: request.prompt, options, images: [] };
       job.controller.signal.throwIfAborted();
       if (direct) {
@@ -135,14 +147,60 @@ export class ImageService {
       const binding = await this.relay.bindImage(request.providerId, provider.mirrorCoding!, request.modelId, request.sessionId);
       releaseBinding = binding.release;
       job.controller.signal.throwIfAborted();
-      job.sidecar = this.deps.getSidecar() ?? undefined;
-      if (!job.sidecar) throw new Error("sidecar_unavailable");
-      const output = await job.sidecar.call<{ outputs: ImageOutput[]; text?: string }>("image.generate", {
-        jobId, prompt: request.prompt, options,
-        binding: { model, baseUrl: binding.baseUrl, headers: binding.headers, references: prepared.map((ref) => ({ data: ref.inlineData!, mimeType: ref.message.mimeType || "image/png" })) },
+      const { path: scratchPath } = await this.host().call<{ path: string }>("session.getScratchPath", { sessionId: request.sessionId });
+      if (typeof scratchPath !== "string" || !scratchPath) throw new Error("invalid_image_request");
+      await mkdir(scratchPath, { recursive: true });
+      const refs = prepared.map((item) => item.message.ref);
+      const batch = mirrorImageBatchRequest({
+        baseUrl: binding.baseUrl,
+        modelId: request.modelId,
+        relayKey: binding.headers["x-pi-mirrorcoding-key"] ?? "",
+        prompt: request.prompt,
+        count: options.count ?? 1,
+        images: refs,
       });
-      result.images = await Promise.all(output.outputs.map((image, i) => persistGeneratedImage(this.deps.dataDir, image, `${jobId}-${i + 1}`, job.controller.signal)));
-      result.text = output.text;
+      let generated: GeneratedImageResult[];
+      try {
+        generated = await generateImageBatch({
+          input: batch.input,
+          endpoint: batch.endpoint,
+          signal: job.controller.signal,
+          loadImages: refs.length ? imageInputLoader({
+            dataDir: this.deps.dataDir,
+            scratchPath,
+            projectPath: session.projectPath,
+          }) : undefined,
+          save: async (image) => {
+            const target = join(scratchPath, `generated-${randomUUID()}.${image.extension}`);
+            await writeFile(target, image.bytes);
+            return target;
+          },
+        });
+      } catch (error) {
+        if (job.controller.signal.aborted) throw error;
+        const code = error && typeof error === "object" && "errorCode" in error && typeof error.errorCode === "string" ? error.errorCode : undefined;
+        throw new Error(imageFailureCode(code));
+      }
+      if (job.controller.signal.aborted) throw new Error("image_aborted");
+      if (generated.every((row) => row.status !== "succeeded")) {
+        throw new Error(imageFailureCode(generated.find((row) => row.errorCode)?.errorCode));
+      }
+      const images = [];
+      for (const [index, row] of generated.entries()) {
+        const id = `${jobId}-${index + 1}`;
+        if (row.status !== "succeeded" || !row.path) {
+          images.push({ id, error: imageFailureCode(row.errorCode) });
+          continue;
+        }
+        const bytes = await readFile(row.path);
+        images.push(await persistGeneratedImage(
+          this.deps.dataDir,
+          { data: bytes.toString("base64"), mimeType: row.mimeType } satisfies ImageOutput,
+          id,
+          job.controller.signal,
+        ));
+      }
+      result.images = images;
       job.controller.signal.throwIfAborted();
       await saveAssistant("complete");
       if (turnId) await this.host().call("session.endTurn", { turnId, status: "completed" });
@@ -157,8 +215,6 @@ export class ImageService {
       if (turnId) await this.host().call("session.endTurn", { turnId, status: job.controller.signal.aborted ? "aborted" : "error", errorCode: code });
       throw new Error(code);
     } finally {
-      clearTimeout(timer);
-      job.controller.signal.removeEventListener("abort", cancel);
       releaseBinding?.();
       this.jobs.delete(jobId);
       if (direct && (turns.get(request.sessionId) === jobId || turns.get(request.sessionId) === turnId)) turns.delete(request.sessionId);

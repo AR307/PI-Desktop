@@ -1,5 +1,16 @@
 # PI-Desktop project summary
 
+## 2026-09-22 — Composer image mode uses the upstream batch
+
+- The composer image mode is labeled 生图. It still lists every MirrorCoding
+  image model by group. A route other than `/v1/images/generations` or
+  `/v1/images/edits` stays visible and cannot be sent.
+- Sending calls `generateImageBatch` through the local account relay. Each
+  image is `model`, `prompt`, and `n: 1`. Reference images use multipart edits.
+  Size, quality, and ratio are not sent, and no copied API key is required.
+- The sidecar `mirrorcoding-images` request path is removed. Settings image
+  models and the agent `GenerateImages` tool are unchanged.
+
 ## 2026-09-22 — Plan questions and MirrorCoding runtime parity
 
 - Plan mode asks `asktool` about uncertainties that would change the plan, then

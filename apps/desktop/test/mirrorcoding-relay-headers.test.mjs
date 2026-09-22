@@ -44,7 +44,8 @@ function account(onRequest) {
   return {
     snapshot: () => ({ status: "connected", account: { id: 7 }, catalog }),
     request: async (path, init) => {
-      onRequest({ path, headers: Object.fromEntries(init.headers.entries()) });
+      const body = typeof init.body === "string" ? init.body : Buffer.from(init.body ?? []).toString("utf8");
+      onRequest({ path, headers: Object.fromEntries(init.headers.entries()), body });
       return new Response("{}", { status: 200, headers: { "content-type": "application/json" } });
     },
   };
@@ -106,6 +107,82 @@ test("image forwarding still requires the image endpoint", async () => {
       "x-pi-mirrorcoding-key": binding.headers["x-pi-mirrorcoding-key"],
     },
     JSON.stringify({ model: "image-a" }),
+  );
+  assert.equal(status, 403);
+  assert.equal(seen, false);
+  binding.release();
+  relay.dispose();
+});
+
+test("image generations JSON and edits multipart are forwarded unchanged", async () => {
+  let seen;
+  const relay = new MirrorCodingRelay(account((value) => { seen = value; }));
+  const binding = await relay.bindImage("provider-1", metadata, "image-a", "session-1");
+  const key = binding.headers["x-pi-mirrorcoding-key"];
+  const generated = await post(
+    `${binding.baseUrl}/v1/images/generations`,
+    { "content-type": "application/json", "x-pi-mirrorcoding-key": key },
+    JSON.stringify({ model: "image-a", prompt: "cat", n: 1 }),
+  );
+  assert.equal(generated, 200);
+  assert.equal(seen.path, "/v1/images/generations");
+  assert.deepEqual(JSON.parse(seen.body), { model: "image-a", prompt: "cat", n: 1 });
+  assert.equal(seen.body.includes("size"), false);
+  assert.equal(seen.headers["x-pi-mirrorcoding-key"], undefined);
+
+  const edited = await post(
+    `${binding.baseUrl}/v1/images/edits`,
+    { "content-type": "multipart/form-data; boundary=pi", "x-pi-mirrorcoding-key": key },
+    "--pi\r\nContent-Disposition: form-data; name=\"prompt\"\r\n\r\ncat\r\n--pi--\r\n",
+  );
+  assert.equal(edited, 200);
+  assert.equal(seen.path, "/v1/images/edits");
+  assert.equal(seen.body.includes("name=\"prompt\""), true);
+  assert.equal(seen.headers["content-type"].includes("multipart/form-data"), true);
+
+  const other = await post(
+    `${binding.baseUrl}/v1/images/other`,
+    { "content-type": "application/json", "x-pi-mirrorcoding-key": key },
+    JSON.stringify({ model: "image-a" }),
+  );
+  assert.equal(other, 403);
+  binding.release();
+  relay.dispose();
+});
+
+test("a nonstandard image route is not forwarded", async () => {
+  let seen = false;
+  const odd = {
+    ...metadata,
+    imageModels: {
+      "image-odd": { generation_path: "/v1/images/other", max_count: 1, supports_chat: false, sendable: false },
+    },
+  };
+  const relay = new MirrorCodingRelay({
+    snapshot: () => ({
+      status: "connected",
+      account: { id: 7 },
+      catalog: {
+        groups: [{
+          id: "fast",
+          models: [{
+            id: "image-odd",
+            supported_endpoint_types: ["image-generation"],
+            image: { generation_path: "/v1/images/other", max_count: 1, supports_chat: false, sendable: false },
+          }],
+        }],
+      },
+    }),
+    request: async () => {
+      seen = true;
+      return new Response("{}");
+    },
+  });
+  const binding = await relay.bindImage("provider-1", odd, "image-odd", "session-1");
+  const status = await post(
+    `${binding.baseUrl}/v1/images/generations`,
+    { "content-type": "application/json", "x-pi-mirrorcoding-key": binding.headers["x-pi-mirrorcoding-key"] },
+    JSON.stringify({ model: "image-odd", prompt: "cat", n: 1 }),
   );
   assert.equal(status, 403);
   assert.equal(seen, false);

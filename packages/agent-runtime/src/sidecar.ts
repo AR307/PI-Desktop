@@ -1,4 +1,3 @@
-import { ImageTasks, type ImageTask } from "./images.js";
 /**
  * Node pi agent sidecar.
  * Protocol: NDJSON JSON-RPC on stdio with Electron main.
@@ -498,8 +497,6 @@ async function handle(method: string, params: any): Promise<unknown> {
     case "agent.testRuntimeIdentity": {
       return testRuntimeIdentity(String(params.sessionId ?? ""));
     }
-    case "image.generate": return imageTasks.generate(params as ImageTask);
-    case "image.abort": return { aborted: imageTasks.abort(String(params.jobId)) };
     case "agent.prompt": {
       const sessionId = String(params.sessionId);
       const content = String(params.content ?? "");
@@ -679,8 +676,6 @@ async function handle(method: string, params: any): Promise<unknown> {
       });
   }
 }
-
-const imageTasks = new ImageTasks();
 
 readNdjsonLines(process.stdin, async (line) => {
   if (!line.trim()) return;
