@@ -13,6 +13,9 @@ describe("mode-specific system prompts", () => {
     expect(prompt).toContain(PLAN_MODE_SYSTEM_PROMPT);
     expect(prompt).toContain("Inspect the workspace");
     expect(prompt).toContain("SubmitPlan");
+    expect(prompt).toContain("Before SubmitPlan, call asktool");
+    expect(prompt).toContain("Do not call SubmitPlan in the same turn as an unanswered asktool");
+    expect(prompt).toContain("Do not wait for chat confirmation");
     expect(prompt).toContain("When any initial or revised plan is ready");
     expect(prompt).toContain("immediately exactly once in the current turn");
     expect(prompt).toContain("one complete Markdown snapshot");
@@ -22,7 +25,6 @@ describe("mode-specific system prompts", () => {
     expect(prompt).toContain("historical immutable checkpoints");
     expect(prompt).toContain("After reject, expiry, or interruption");
     expect(prompt).toContain("follow the same one-SubmitPlan rule");
-    expect(prompt).toContain("Do not wait for chat confirmation");
     expect(prompt).toContain("Do not use Write, Edit");
     expect(prompt).toContain("Do not create, overwrite, delete, or otherwise mutate workspace files in Plan mode");
     expect(prompt).toContain("including through Bash");

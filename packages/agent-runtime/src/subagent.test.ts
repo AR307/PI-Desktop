@@ -813,6 +813,21 @@ describe("SubagentRun context budget (ADR 0299)", () => {
     ]);
   });
 
+  it("does not block a MirrorCoding fallback because of auth kind", () => {
+    const next: RuntimeProviderConfig = { ...provider, id: "next", modelId: "next-model", authKind: "mirrorcoding" };
+    const { run } = createRun({
+      provider: { ...provider, authKind: "mirrorcoding" },
+      fallbackModels: [{ key: "next/next-model", provider: next }],
+    });
+    run.agent.state.messages = [
+      { role: "user", content: "hello", timestamp: 1 },
+      { ...assistantMessage({ content: [], stopReason: "error" }), errorMessage: "upstream failed" },
+    ];
+    run.streamError = { code: "PROVIDER_ERROR", message: "upstream failed" };
+    expect(run.useNextModel()).toBe(true);
+    expect(run.agent.state.model.id).toBe("next-model");
+  });
+
   it("carries the uncompacted context onto a fallback whose window fits", () => {
     const big: RuntimeProviderConfig = {
       ...provider,

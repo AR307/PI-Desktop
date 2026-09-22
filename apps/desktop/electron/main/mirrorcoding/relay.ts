@@ -7,6 +7,23 @@ import { validateImageOptions, type MirrorCodingProvider } from "@pi-desktop/sha
 import type { MirrorCodingAccount } from "./account";
 import { ENDPOINTS } from "./catalog";
 
+const HOP_BY_HOP = new Set([
+  "connection", "keep-alive", "proxy-authenticate", "proxy-authorization", "te",
+  "trailer", "trailers", "transfer-encoding", "upgrade", "host", "content-length",
+  "x-pi-mirrorcoding-key",
+]);
+
+function upstreamHeaders(request: IncomingMessage): Headers {
+  const headers = new Headers();
+  for (const [name, value] of Object.entries(request.headers)) {
+    if (HOP_BY_HOP.has(name) || value === undefined) continue;
+    headers.set(name, Array.isArray(value) ? value.join(", ") : value);
+  }
+  if (!headers.has("content-type")) headers.set("content-type", "application/json");
+  if (!headers.has("accept")) headers.set("accept", "application/json, text/event-stream");
+  return headers;
+}
+
 type Binding = { providerId: string; metadata: MirrorCodingProvider; sessionId?: string; imageModelId?: string };
 
 /** Main owns upstream auth; the sidecar can only use its local selected binding. */
@@ -106,14 +123,8 @@ export class MirrorCodingRelay {
         if (!endpoint || (endpoint === "gemini" ? !gemini : path !== ENDPOINTS[endpoint].path) ||
             !catalogModel?.supported_endpoint_types.includes(endpoint)) throw new Error("model_or_group_unavailable");
       }
-      const headers = new Headers({
-        "Content-Type": "application/json", Accept: "application/json, text/event-stream",
-        "X-Mirrorcoding-Group": encodeURIComponent(binding.metadata.groupId),
-      });
-      for (const name of ["anthropic-version", "anthropic-beta"]) {
-        const value = request.headers[name];
-        if (typeof value === "string") headers.set(name, value);
-      }
+      const headers = upstreamHeaders(request);
+      headers.set("X-Mirrorcoding-Group", encodeURIComponent(binding.metadata.groupId));
       const query = gemini?.[2] === "streamGenerateContent" ? "?alt=sse" : "";
       const upstream = await this.account.request(`${path}${query}`, { method: "POST", headers, body, signal: controller.signal });
       if (upstream.status === 403) {

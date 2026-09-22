@@ -4158,6 +4158,20 @@ describe("DesktopAgentRuntime assistant thinking events", () => {
     await runtime.dispose();
   });
 
+  it("retries a MirrorCoding session after output has started", async () => {
+    const runtime = createRuntime({
+      onEvent: vi.fn(),
+      provider: { ...provider, authKind: "mirrorcoding" },
+    });
+    (runtime as any).providerOutputStarted = true;
+    const claim = (runtime as any).claimProviderRetry.bind(runtime);
+    const gateway502 = classifyAgentError(
+      'OpenAI API error (502): {"type":"api_error","message":"Upstream API request failed."}',
+    );
+    expect(claim(gateway502, "stream")).toBe(1);
+    await runtime.dispose();
+  });
+
   it("allows the opt-in retry mode to claim beyond both bounded budgets", async () => {
     const runtime = createRuntime({ onEvent: vi.fn() });
     runtime.setInfiniteProviderRetry(true);

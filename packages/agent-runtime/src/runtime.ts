@@ -5485,7 +5485,6 @@ Delegation rules:
     error: ReturnType<typeof classifyAgentError>,
     phase: "request" | "stream",
   ): number | undefined {
-    if (this.provider.authKind === "mirrorcoding" && this.providerOutputStarted) return undefined;
     if (!error.retriable || error.details?.origin === "local") return undefined;
     const infinite = this.infiniteProviderRetry;
     if (error.code === "PROVIDER_RATE_LIMITED") {
@@ -7285,7 +7284,7 @@ Delegation rules:
           const exemptSilence = silence && this.allowSilentCompletion;
           if (!failed && !aborted) this.allowSilentCompletion = false;
           const silentTurn = silence && !exemptSilence;
-          if (silentTurn && !this.silentTurnRerunAttempted && !(this.provider.authKind === "mirrorcoding" && this.providerOutputStarted)) {
+          if (silentTurn && !this.silentTurnRerunAttempted) {
             this.silentTurnRerunAttempted = true;
             this.pendingSilentTurnRerun = true;
             this.suppressSilentTurnRunEnd = true;
@@ -7334,7 +7333,6 @@ Delegation rules:
             this.autonomousExecution &&
             !this.silentTurnRerunAttempted &&
             !this.progressTurnRerunAttempted &&
-            !(this.provider.authKind === "mirrorcoding" && this.providerOutputStarted) &&
             isProgressOnlyAssistantTurn(event.message);
           if (progressOnlyTurn) {
             this.progressTurnRerunAttempted = true;
@@ -7430,7 +7428,6 @@ Delegation rules:
           this.currentAssistant = undefined;
           const canRecoverOverflow =
             this.compactionEnabled &&
-            !(this.provider.authKind === "mirrorcoding" && this.providerOutputStarted) &&
             overflow &&
             !this.overflowRecoveryAttempted;
           if (exemptSilence) {

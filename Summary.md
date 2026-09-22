@@ -1,5 +1,15 @@
 # PI-Desktop project summary
 
+## 2026-09-22 — Plan questions and MirrorCoding runtime parity
+
+- Plan mode asks `asktool` about uncertainties that would change the plan, then
+  submits one plan after the answers. Pending approval still does not wait on
+  chat confirmation.
+- MirrorCoding chat sessions use the same retry, empty-response rerun, progress
+  nudge, overflow recovery, and subagent fallback as a manually imported
+  provider. The local relay forwards the sidecar's upstream headers and still
+  keeps the account credential.
+
 ## 2026-09-22 — Fork experience: updates, models, subagents, icon, images
 
 - In-app updates and bug reports now target `AR307/PI-Desktop`. Remote-host
