@@ -2,6 +2,18 @@ import type { ChangelogEntry } from "./changelog.js";
 
 export const trEntries: ChangelogEntry[] = [
   {
+    "version": "0.15.2",
+    "date": "2026-09-22",
+    "highlights": [
+      "PI-Desktop projelerini ve oturumlarını Android eşlikçi uygulamasıyla eşleyip telefondan çalışmaya devam edin.",
+      "Mobil uygulamadan sonraki tur için modu, modeli, grubu, akıl yürütme düzeyini ve görüntü ayarlarını seçin.",
+      "MirrorCoding mobil oturumu şifreli parola alışverişini ve sunucu tarafından verilen cihaz kimliğini destekler.",
+      "Mobil senkronizasyon kimlik bilgileri güvenli depolamada tutulur ve erişim belirteci süresi dolduktan sonra eşleme kurtarılır.",
+      "Aktarım kurtarma meta verileri ve sınırlı mobil ileti aktarımı kesintileri ve yeniden denemeleri iyileştirir.",
+    ],
+  },
+
+  {
     "version": "0.15.1",
     "date": "2026-09-19",
     "highlights": [

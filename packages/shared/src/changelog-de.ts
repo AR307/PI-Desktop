@@ -2,6 +2,18 @@ import type { ChangelogEntry } from "./changelog.js";
 
 export const deEntries: ChangelogEntry[] = [
   {
+    "version": "0.15.2",
+    "date": "2026-09-22",
+    "highlights": [
+      "Koppeln Sie PI-Desktop-Projekte und Sitzungen mit der Android-Begleitapp und setzen Sie die Arbeit am Telefon fort.",
+      "Wählen Sie in der mobilen App Modus, Modell, Gruppe, Reasoning-Stufe und Bildeinstellungen für den nächsten Turn.",
+      "MirrorCoding-Mobile-Login unterstützt verschlüsselten Passwortaustausch und eine vom Server vergebene Geräteidentität.",
+      "Mobile Sync-Anmeldedaten bleiben im sicheren Speicher und die Kopplung wird nach einem abgelaufenen Zugriffstoken wiederhergestellt.",
+      "Relay-Wiederherstellungsmetadaten und begrenzter mobiler Nachrichtentransport verbessern Unterbrechungen und Wiederholungen.",
+    ],
+  },
+
+  {
     "version": "0.15.1",
     "date": "2026-09-19",
     "highlights": [

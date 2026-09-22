@@ -2,6 +2,18 @@ import type { ChangelogEntry } from "./changelog.js";
 
 export const frEntries: ChangelogEntry[] = [
   {
+    "version": "0.15.2",
+    "date": "2026-09-22",
+    "highlights": [
+      "Associez les projets et sessions PI-Desktop à l'application Android et poursuivez le travail depuis le téléphone.",
+      "Choisissez dans l'application mobile le mode, le modèle, le groupe, le niveau de raisonnement et les réglages d'image du prochain tour.",
+      "La connexion mobile MirrorCoding prend en charge l'échange de mot de passe chiffré et l'identité d'appareil émise par le serveur.",
+      "Les identifiants de synchronisation mobile restent dans le stockage sécurisé et l'association est récupérée après expiration du jeton.",
+      "Les métadonnées de reprise du relay et le transport mobile borné améliorent les interruptions et les nouvelles tentatives.",
+    ],
+  },
+
+  {
     "version": "0.15.1",
     "date": "2026-09-19",
     "highlights": [
