@@ -327,11 +327,26 @@
 
 .run-activity-retry-reason {
   position: relative;
+  /* The plate hangs this far above the trigger; the bridge below covers it. */
+  --run-activity-error-gap: 8px;
   display: inline-flex;
   min-width: 0;
   align-items: center;
   cursor: help;
   outline: none;
+}
+
+/* The pointer has to cross the gap between the trigger and the plate to reach
+   the plate's scrollbar. That band belongs to the indicator row, not to the
+   trigger, so `:hover` dropped there and the plate closed mid-reach. The bridge
+   is part of the trigger, which keeps the path hovered. */
+.run-activity-retry-reason::before {
+  content: "";
+  position: absolute;
+  top: calc(-1 * var(--run-activity-error-gap));
+  left: 0;
+  right: 0;
+  height: var(--run-activity-error-gap);
 }
 
 .run-activity-retry-reason:focus-visible {
@@ -342,31 +357,54 @@
 /* The retry reason borrows the assistant error card's hierarchy without
    adding a second transcript row. It is hover/focus-only so the active row
    remains compact at rest. The in-flow `.message-error` wash is transparent;
-   this floating tooltip mixes the same tint over an opaque elevated plate. */
+   this floating tooltip mixes the same tint over an opaque elevated plate.
+   The plate hangs above the tail status row inside `.thread-scroll`, whose
+   `overflow: auto` clips it at the scrollport edge, and the conversation bar
+   paints over the same band one stacking level higher, so an unbounded plate
+   lost the first lines of a long provider message (ADR 0196) - the part a
+   reader needs. Cap it to the room the tail row leaves: the window minus the
+   conversation bar, minus the composer reserve `.thread-content` already
+   holds (16px above `--composer-dock-height`), minus the 46px status row and
+   this plate's own 8px gap. The remainder scrolls, the way
+   `.message-error-details pre` already handles long error text. */
 .run-activity-error-popover.message-error {
   position: absolute;
-  bottom: calc(100% + 8px);
+  bottom: calc(100% + var(--run-activity-error-gap));
   left: 0;
   z-index: 8;
   display: block;
   width: min(360px, calc(100vw - 32px));
   padding: 10px 12px;
+  max-height: calc(100vh - var(--ds-toolbar-height, 46px) - var(--composer-dock-height, 228px) - 70px);
+  /* RunActivityIndicator measures the room the tail row actually leaves and
+     publishes it here; the calc is only the first-paint fallback. */
+  max-height: var(--run-activity-error-max-height, calc(100dvh - var(--ds-toolbar-height, 46px) - var(--composer-dock-height, 228px) - 70px));
+  /* The plate itself does not scroll: Chromium paints a scrollbar outside a
+     rounded corner, so the bar crossed the radius. The body below the heading
+     owns the scrolling instead. */
+  overflow: hidden;
   background: color-mix(in oklab, var(--ds-error) 10%, var(--ds-bg-elevated-opaque));
   box-shadow: var(--ds-shadow-dialog);
   opacity: 0;
   pointer-events: none;
   transform: translateY(4px);
   visibility: hidden;
+  /* Leaving the trigger keeps the plate for one short beat, so a reader
+     reaching for the scrollbar is not punished for the trip. */
   transition:
-    opacity var(--motion-duration-fast) var(--motion-ease-out),
-    transform var(--motion-duration-fast) var(--motion-ease-out),
-    visibility 0s linear var(--motion-duration-fast);
+    opacity var(--motion-duration-fast) var(--motion-ease-out) 240ms,
+    transform var(--motion-duration-fast) var(--motion-ease-out) 240ms,
+    visibility 0s linear calc(var(--motion-duration-fast) + 240ms);
 }
 
 .run-activity-retry-reason:hover .run-activity-error-popover,
 .run-activity-retry-reason:focus-visible .run-activity-error-popover {
   opacity: 1;
-  pointer-events: none;
+  /* The capped plate is scrollable, so the revealed state has to take the
+     pointer. Hovering the plate keeps this trigger's `:hover` alive - the
+     plate is its child - so a long provider message can be scrolled and
+     selected instead of losing its first lines above the scrollport. */
+  pointer-events: auto;
   transform: translateY(0);
   visibility: visible;
   transition-delay: 0s;
@@ -380,6 +418,11 @@
   font-size: var(--text-xs);
   line-height: var(--leading-normal);
   overflow-wrap: anywhere;
+  /* Body-only scrolling (measured by RunActivityIndicator): the heading above
+     stays put while a long provider message scrolls inside the plate. */
+  max-height: var(--run-activity-error-body-max-height, none);
+  overflow-y: auto;
+  overscroll-behavior-y: contain;
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -1758,10 +1801,19 @@
   overflow-clip-margin: 8px;
 }
 
+/*
+ * A disclosure header is a row, not a chip. A content-sized `inline-flex`
+ * header (the whole process, an ordinary group, a subagent card) stopped at
+ * its own label, so the tool call never used the conversation width: it stayed
+ * narrow next to full-width prose and did not change when the band was dragged
+ * wider, and a long label overran the chip because only the level-specific
+ * overrides below carried an ellipsis. The row claims the band like every
+ * other transcript row; the label ellipsizes and the caret trails it.
+ */
 .tool-activity-header {
-  display: inline-flex;
+  display: flex;
+  width: 100%;
   min-width: 0;
-  max-width: 100%;
   min-height: 26px;
   align-items: center;
   gap: 5px;
@@ -1784,9 +1836,14 @@
   color: var(--ds-text-muted);
 }
 
+/* Long labels ellipsize inside the band-wide header instead of overrunning it. */
 .tool-activity-label {
-  flex: none;
+  min-width: 0;
+  flex: 0 1 auto;
+  overflow: hidden;
   font-weight: var(--font-weight-medium);
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .tool-activity-count {
@@ -1809,15 +1866,17 @@
   white-space: nowrap;
 }
 
+/* The caret closes the row, so a short label keeps it at the trailing edge. */
 .tool-activity-caret {
   display: inline-flex;
   flex: none;
+  margin-inline-start: auto;
   color: var(--ds-text-muted);
   opacity: 0.65;
   transition: transform var(--motion-duration-fast) var(--motion-ease-out);
 }
 
-.tool-activity-group.open .tool-activity-caret {
+.tool-activity-group.open > .tool-activity-header > .tool-activity-caret {
   transform: rotate(90deg);
 }
 
@@ -1829,7 +1888,7 @@
     opacity var(--motion-duration-fast) var(--motion-ease-out);
 }
 
-.tool-activity-group.open .tool-activity-collapse {
+.tool-activity-group.open > .tool-activity-collapse {
   grid-template-rows: 1fr;
   opacity: 1;
 }
@@ -1863,18 +1922,13 @@
   background: var(--ds-tile);
 }
 
+/* The subagent card only re-dresses the shared header row: its material is the
+   card itself, so the row loses the radius and the bleed. */
 .tool-activity-group.has-subagents .tool-activity-header {
-  display: flex;
-  width: 100%;
-  max-width: none;
   min-height: 42px;
   margin: 0;
   border-radius: 0;
   padding: 10px 16px;
-}
-
-.tool-activity-group.has-subagents .tool-activity-caret {
-  margin-inline-start: auto;
 }
 
 .subagent-activity-metrics {
@@ -2213,7 +2267,11 @@
   }
 }
 
+/* A tool row claims the conversation column whatever its parent displays as:
+   the disclosure header is the row's only width-bearing box. */
 .tool-row {
+  width: 100%;
+  min-width: 0;
   margin: 3px 0;
 }
 
@@ -2402,7 +2460,7 @@
   flex: none;
   margin-left: 2px;
   color: var(--ds-text-muted);
-  opacity: 0;
+  opacity: 0.65;
   transition: transform var(--motion-duration-fast) var(--motion-ease-out);
 }
 
@@ -2414,7 +2472,9 @@
   opacity: 1;
 }
 
-.tool-row.open .tool-row-caret {
+.tool-row.open > .tool-row-header > .tool-row-caret,
+.tool-row.open > .tool-row-head > .tool-row-header > .tool-row-caret,
+.tool-row.open > .tool-row-head > .tool-row-caret {
   transform: rotate(90deg);
 }
 
@@ -2946,14 +3006,15 @@
   font-size: var(--text-xs);
 }
 
-/* One disclosure owns the process; tools retain their own detail controls. */
+/* Process, activity groups and item details own independent disclosure levels. */
 .turn-process {
   width: 100%;
   margin: 0 0 8px;
   min-width: 0;
 }
 
-.turn-process.open > .tool-activity-header > .tool-activity-caret {
+.turn-process.open > .tool-activity-header > .tool-activity-caret,
+.process-activity-group.open > .tool-activity-header > .tool-activity-caret {
   transform: rotate(90deg);
 }
 
@@ -2962,7 +3023,8 @@
   padding-left: 18px;
 }
 
-.turn-process-body[hidden] {
+.turn-process-body[hidden],
+.process-activity-body[hidden] {
   display: none;
 }
 
@@ -2970,6 +3032,26 @@
   color: var(--ds-text-secondary);
   margin-block: 8px;
 }
+
+.process-activity-group {
+  width: 100%;
+  min-width: 0;
+  margin-block: 6px;
+}
+
+.process-activity-body {
+  position: relative;
+  min-width: 0;
+}
+
+.process-activity-group.grouped > .process-activity-body {
+  margin-block: 3px 6px;
+  padding-inline-start: 12px;
+}
+
+/* The nested process levels share the base header row: no level-specific
+   width, label or caret overrides are needed now that the row claims the
+   band itself (see `.tool-activity-header`). */
 
 .thinking-compact {
   display: flex;
@@ -2980,6 +3062,10 @@
 
 .turn-process-error {
   display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex: none;
+  font-size: var(--text-xs-plus);
   color: var(--ds-error);
 }
 
@@ -3017,7 +3103,10 @@
   text-decoration: underline;
 }
 
+/* The title ellipsizes inside the row: an inline-flex anchor would otherwise
+   let a long source name push the host label past the band. */
 .hosted-search-source-title {
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;

@@ -21,6 +21,10 @@ export function ExtensionPromptHost() {
 
   useEffect(() => {
     const offPrompt = api.onExtensionPrompt((prompt) => {
+      if (prompt.cancelled) {
+        setQueue((prev) => prev.filter((item) => item.promptId !== prompt.promptId));
+        return;
+      }
       setQueue((prev) => (prev.some((p) => p.promptId === prompt.promptId) ? prev : [...prev, prompt]));
     });
     const offStatus = api.onExtensionStatus((event) => {
@@ -127,7 +131,7 @@ function ExtensionPromptDialog({
         onClick={(event) => event.stopPropagation()}
       >
         <div className="session-rename-dialog-head">
-          <div>
+          <div className="session-rename-dialog-heading">
             <h2 id={`${dialogId}-title`} className="session-rename-dialog-title">
               <IconPlug size={16} aria-hidden />
               {title}

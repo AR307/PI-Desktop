@@ -28,6 +28,13 @@ const panelSource = await readFile(
 const transcriptSource = await readTranscriptSource();
 const storeSource = await readStoreSource();
 const globalStyles = await loadStyles();
+test("closing a subagent panel restores focus to its transcript trigger", () => {
+  assert.match(panelSource, /const closeSubagentPanelAndFocus = useCallback/);
+  assert.match(panelSource, /data-subagent-trigger/);
+  assert.match(panelSource, /candidate\.dataset\.subagentTrigger === delegationId/);
+  assert.match(panelSource, /trigger\?\.focus\(\{ preventScroll: true \}\)/);
+  assert.match(panelSource, /onClick=\{closeSubagentPanelAndFocus\}/);
+});
 
 test("work panel replaces the context panel overlay", async () => {
   await assert.rejects(
@@ -607,7 +614,12 @@ test("preview mode keeps shell actions and restores routes before navigation", (
   assert.match(appSource, /className=\{cx\([\s\S]*?"window-chrome-row"/);
   assert.match(appSource, /data-nav="new-task"/);
   assert.match(appSource, /<CollapsedTitlebarActions[\s\S]*?onNewTask=/);
-  assert.match(appSource, /\{ready && !showSplash && <WindowControls \/>\}/);
+  // `showSplash` stays true until the shell is ready, so the controls have to
+  // follow the boot surface that is actually up (splash or startup recovery).
+  assert.match(
+    appSource,
+    /\{\(ready && !showSplash\) \|\| startupPhase !== "starting" \? \(\s*<WindowControls \/>/,
+  );
   assert.match(appSource, /const workPanelMaximizedRef = useRef\(false\)/);
   assert.match(
     appSource,

@@ -12,6 +12,7 @@ import type { ModelAuth } from "@earendil-works/pi-ai";
 import { ParentHostProxy } from "./parent-host-proxy.js";
 import { visionFromModelConfig } from "./model-capabilities.js";
 import { classifyAgentError } from "./agent-errors.js";
+import { readLocalRequestErrorDetails } from "./local-request-errors.js";
 import {
   DesktopAgentRuntime,
   type PluginToolDef,
@@ -22,6 +23,7 @@ import {
 import type { PluginSkillDef } from "./plugin-skills-prompt.js";
 import type { SessionMessageOrigin, TrustedExtensionSpec } from "@pi-desktop/shared";
 import type { ProjectInstructions } from "./project-instructions.js";
+import type { CustomSystemPrompt } from "./custom-system-prompt.js";
 import {
   normalizeSupportedThinkingLevels,
   normalizeThinkingLevel,
@@ -96,6 +98,7 @@ type RuntimeParams = {
   /** Durable host turn ID for the prompt currently being executed. */
   turnId?: string;
   thinkingLevel?: SessionThinkingLevel;
+  infiniteProviderRetry?: boolean;
   provider: RuntimeProviderConfig;
   commandShell: CommandShellOption;
   pluginTools?: PluginToolDef[];
@@ -111,6 +114,7 @@ type RuntimeParams = {
   scratchDir?: string;
   /** Session-bound workspace root supplied by Electron main. */
   projectPath?: string;
+  customSystemPrompt?: CustomSystemPrompt;
   projectInstructions?: ProjectInstructions;
   projectMemory?: string;
   compactionSettings?: ContextCompactionSettings;
@@ -335,6 +339,7 @@ async function runtimeFor(
     subagentProviders,
     subagentModelKeys,
     projectInstructions: params.projectInstructions,
+    customSystemPrompt: params.customSystemPrompt,
     projectMemory: params.projectMemory,
     projectPath: params.projectPath,
     commandShell: params.commandShell,
@@ -347,6 +352,7 @@ async function runtimeFor(
   }
   if (reusable) {
     reusable.setCompactionSettings(params.compactionSettings);
+    reusable.setInfiniteProviderRetry(params.infiniteProviderRetry === true);
     reusable.setMode(mode);
     return reusable;
   }
@@ -383,6 +389,7 @@ async function runtimeFor(
     provider,
     commandShell: params.commandShell,
     thinkingLevel,
+    infiniteProviderRetry: params.infiniteProviderRetry === true,
     history,
     compaction,
     compactionSettings: params.compactionSettings,
@@ -393,6 +400,7 @@ async function runtimeFor(
     subagentProviders,
     subagentModelKeys,
     projectPath: params.projectPath,
+    customSystemPrompt: params.customSystemPrompt,
     projectInstructions: params.projectInstructions,
     projectMemory: params.projectMemory,
     scratchDir:
@@ -693,10 +701,15 @@ readNdjsonLines(process.stdin, async (line) => {
     const result = await handle(msg.method, msg.params ?? {});
     respond(msg.id, result);
   } catch (err: any) {
+    // Restore validation can fail before a runtime/stream exists. Preserve its
+    // safe provenance in the existing RPC error data instead of flattening it.
+    const local = readLocalRequestErrorDetails(err) ? classifyAgentError(err) : undefined;
     respond(msg.id, undefined, {
       code: err.rpcCode ?? -32000,
-      message: err instanceof Error ? err.message : String(err),
-      data: { errorCode: err.errorCode ?? "INTERNAL" },
+      message: local?.message ?? (err instanceof Error ? err.message : String(err)),
+      data: local
+        ? { errorCode: local.code, retriable: local.retriable, details: local.details }
+        : { errorCode: err.errorCode ?? "INTERNAL" },
     });
   }
 });

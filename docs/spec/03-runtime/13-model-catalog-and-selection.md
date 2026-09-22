@@ -98,7 +98,12 @@ default. When the edited service or account is the app's default provider,
 saving also synchronizes the app-level default model to that first binding,
 as the existing save flow does. The app default is unchanged when editing
 another provider, and an explicitly bound session keeps its stored model
-choice. No storage schema or IPC contract changes are required.
+choice. Adding a provider is not a way to change either app default: the
+default model, and the default image model when the new service brings image
+models, move to it only while nothing resolves for the app — an empty
+selection, or one whose provider or model is gone. A default the user can
+still run stays where it is until they repoint it. No storage schema or IPC
+contract changes are required.
 
 ### Discovery precedence
 
@@ -334,6 +339,12 @@ models still use the conservative 128k generic window and are never promoted fro
 an ID pattern alone. The marker is optional in the persisted record, so a config
 written by an older version stays readable and a downgrade ignores it.
 
+The configured user value remains persisted and visible in Advanced settings, but
+provider safety does not trust an enlarged override beyond a known published
+window. Outbound output caps, automatic compaction, and overflow classification
+use the smaller of the configured and published windows; a smaller user value
+continues to narrow the runtime budget.
+
 ### 9.2 Conversation Composer scope
 
 The conversation Composer is a configured-model picker, not a raw discovery
@@ -368,9 +379,17 @@ use the configured model alias or published model name.
 App-level default:
 - first successfully tested provider + its default/recommended model
 - the Settings default-model picker lists every configured model under its provider; selecting an entry persists both the owning provider and that exact model ID
+- saving that provider preserves the selected app-default model while it remains configured; removing it falls back to the first remaining binding
 - the picker supports local search across provider name and model ID; its result list scrolls within the floating surface and shows an explicit empty state when no model matches
 - the picker uses concise settings-specific search copy; each result gives visual priority to the model ID and keeps the provider as secondary metadata
 - results are grouped by provider so a provider name is shown once per group rather than repeated on every model row
+- a provider is named the same way here as in the Composer menu: an OAuth row
+  uses its non-secret account label when present, so two accounts of one vendor
+  stay distinguishable in the group heading, in the summary line that reports
+  the current default, and in each option's accessible name. Search matches the
+  account label and the vendor name, so either spelling reaches the row
+- the Settings prompt-enhancement model picker reuses this menu and resolves its
+  provider names the same way
 - if none configured, onboarding checklist requires provider setup before first agent run
 
 Session-level:
@@ -531,3 +550,10 @@ same model to the check mark, the toggle and the duplicate guard.
 - [ ] compact limit text never reads above the published value, keeps the
       neighbouring 1M-line windows apart (`1M` / `1.05M` / `1.1M`), and never
       renders a `K` mantissa at or above 1000
+
+## Image model binding
+
+The default conversation model has a separate **Image generation model** row below
+it. Model Advanced can select that unique binding; provider form Save commits it,
+Cancel discards it, and replacing it leaves the conversation default unchanged.
+See [image generation and editing](21-image-generation.md) for the tool and batch contract.

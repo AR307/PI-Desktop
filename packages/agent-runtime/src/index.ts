@@ -1,4 +1,5 @@
 export * from "./host-client.js";
+export * from "./custom-system-prompt.js";
 export * from "./model-capabilities.js";
 export * from "./mode-prompts.js";
 export * from "./runtime.js";
@@ -22,3 +23,4 @@ export { startAuthenticatedProxyRelay } from "./authenticated-proxy-relay.js";
 export type { AuthenticatedProxyRelay } from "./authenticated-proxy-relay.js";
 
 export * from "./speech/index.js";
+export * from "./image-generation/index.js";

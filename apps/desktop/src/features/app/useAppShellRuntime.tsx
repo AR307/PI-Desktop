@@ -30,6 +30,7 @@ import {
 import { browserPluginTab } from "../../lib/work-panel-tabs";
 import { useAppStore } from "../../stores/app-store";
 import { useSidebarTransition } from "./useSidebarTransition";
+import { useStartupWatchdog } from "./useStartupWatchdog";
 import { useTraySessions } from "./useTraySessions";
 
 const MODIFIER_ONLY_KEYS = new Set([
@@ -552,6 +553,16 @@ export function useAppShellRuntime() {
     });
   }, [bootstrap]);
 
+  // The menu/tray acknowledgement also follows `ready`, not only the first
+  // attempt's `finally`. A startup the watchdog retried is exactly one whose
+  // first attempt never settled, so that `finally` would never run and main
+  // would keep gating menu commands and tray activation on a shell that is
+  // already on screen. Repeating the call is harmless.
+  useEffect(() => {
+    if (!ready) return;
+    void api.menuRendererReady().catch(() => undefined);
+  }, [ready]);
+
   // The Host owns the prompt queue (D375); mirror it whenever the visible
   // session changes so a reload or a switch shows the durable entries.
   useEffect(() => {
@@ -819,8 +830,18 @@ export function useAppShellRuntime() {
     };
   }, [ready]);
 
+  const {
+    phase: startupPhase,
+    waitedMs: startupWaitedMs,
+    retry: retryStartup,
+    retrying: startupRetrying,
+  } = useStartupWatchdog(ready);
   const showSplash = splashPhase !== "done";
-  const splash = showSplash ? (
+  // The splash and the recovery surface answer the same question ("nothing to
+  // show yet"), and on macOS the shell hides every child except the splash while
+  // it animates. Exactly one of them is mounted, so neither has to fight the
+  // other's layering.
+  const splash = showSplash && startupPhase === "starting" ? (
     <StartupSplash exiting={splashPhase === "exiting"} />
   ) : null;
 
@@ -904,6 +925,10 @@ export function useAppShellRuntime() {
     setArchMismatch,
     showSplash,
     splash,
+    startupPhase,
+    startupWaitedMs,
+    retryStartup,
+    startupRetrying,
     sidebarToggleShortcut,
     workPanelToggleTooltip,
   };

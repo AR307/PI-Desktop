@@ -10,6 +10,13 @@ export const frEntries: ChangelogEntry[] = [
       "La connexion mobile MirrorCoding prend en charge l'échange de mot de passe chiffré et l'identité d'appareil émise par le serveur.",
       "Les identifiants de synchronisation mobile restent dans le stockage sécurisé et l'association est récupérée après expiration du jeton.",
       "Les métadonnées de reprise du relay et le transport mobile borné améliorent les interruptions et les nouvelles tentatives.",
+      "Générez et modifiez des images dans le chat, choisissez un modèle et créez des lots avec la compétence intégrée imagegen.",
+      "L'activité des outils suit la largeur de la conversation et contient proprement les libellés longs.",
+      "Les pièces jointes collées sont conservées même si le collage se termine après un changement de session.",
+      "Le modèle par défaut sélectionné est conservé lors de la modification des fournisseurs, avec un repli sûr s'il est supprimé.",
+      "Les sections imbriquées de réflexion et d'activité des outils sont plus faciles à lire, parcourir et restaurer.",
+      "Améliore les mises en page du Composer, les contrôles de raisonnement et la cohérence des thèmes de l'espace de travail.",
+      "Ajoute un interrupteur optionnel dans Réglages pour réessayer les erreurs réseau et temporaires jusqu’à réussite.",
     ],
   },
 

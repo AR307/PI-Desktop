@@ -1,7 +1,5 @@
 # Runtime Core
 
-- [Android companion and scoped desktop sync](23-mobile-companion.md)
-
 | Doc | Description |
 |---|---|
 | [01-ipc-protocol.md](01-ipc-protocol.md) | Electron IPC protocol |
@@ -25,3 +23,7 @@
 | [19-remote-agent-control-protocol.md](19-remote-agent-control-protocol.md) | Remote Agent Control Protocol |
 | [20-speech.md](20-speech.md) | Host speech (ASR/TTS) |
 | [21-mirrorcoding-account.md](21-mirrorcoding-account.md) | MirrorCoding authorization, groups and streaming relay |
+| [21-image-generation.md](21-image-generation.md) | Image generation and editing |
+| [22-image-generation.md](22-image-generation.md) | MirrorCoding image generation |
+| [22-config-sync.md](22-config-sync.md) | Portable configuration sync |
+| [23-mobile-companion.md](23-mobile-companion.md) | Android companion and scoped desktop sync |

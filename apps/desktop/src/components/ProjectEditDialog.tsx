@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useEffectEvent, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useTranslation } from "react-i18next";
 import type { ProjectGroupRecord, ProjectGroupRoot } from "@pi-desktop/shared";
@@ -61,9 +61,12 @@ export function ProjectEditDialog({
   const [primaryPath, setPrimaryPath] = useState(project.path);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
+  const [folderPickerBusy, setFolderPickerBusy] = useState(false);
   const inputRef = useRef<HTMLInputElement | null>(null);
   const dialogRef = useRef<HTMLDivElement | null>(null);
   const busyRef = useRef(false);
+  const folderPickerInFlightRef = useRef(false);
+  const reportLoadError = useEffectEvent((error: unknown) => onError(error));
 
   useEffect(() => {
     let cancelled = false;
@@ -95,13 +98,13 @@ export function ProjectEditDialog({
       .catch((error) => {
         if (!cancelled) {
           setLoading(false);
-          onError(error);
+          reportLoadError(error);
         }
       });
     return () => {
       cancelled = true;
     };
-  }, [onError, project.groupId, project.path, t]);
+  }, [project.groupId, project.path, t]);
 
   useEffect(() => {
     const previouslyFocused = document.activeElement as HTMLElement | null;
@@ -140,7 +143,9 @@ export function ProjectEditDialog({
   }, [onClose]);
 
   const addFolders = async () => {
-    if (busyRef.current) return;
+    if (busyRef.current || folderPickerInFlightRef.current) return;
+    folderPickerInFlightRef.current = true;
+    setFolderPickerBusy(true);
     try {
       const result = await api.pickProjectFolders();
       if (result.canceled || result.folders.length === 0) return;
@@ -152,6 +157,9 @@ export function ProjectEditDialog({
       ]);
     } catch (error) {
       onError(error);
+    } finally {
+      folderPickerInFlightRef.current = false;
+      setFolderPickerBusy(false);
     }
   };
 
@@ -320,7 +328,7 @@ export function ProjectEditDialog({
                 aria-label={t("project.createAddFolder")}
                 className={`project-create-add-folder${folders.length === 0 ? " is-empty" : ""}`}
                 onClick={() => void addFolders()}
-                disabled={loading || busy}
+                disabled={loading || busy || folderPickerBusy}
               >
                 <span className="project-create-add-folder-icon" aria-hidden>
                   <IconNewProject size={18} />

@@ -59,11 +59,15 @@ host-core 之前被解析为绝对路径。
  ├── plugins/             # code + data + registry.json (unchanged, spec 07-11)
  ├── logs/                # NDJSON app/<category>, host/<category>, agent/<category> logs
  ├── cache/               # disposable caches
+ ├── crash-dumps/         # local Crashpad minidumps (never uploaded; D602)
+ ├── crash-dumps.json     # last-reported dump mtime (best-effort marker)
  ├── review-changes/<sessionId>/<snapshotId>/
  │    ├── before          # bounded pre-tool bytes, when reversible
  │    └── meta.json       # path, hashes, diff state, and ownership
  └── scratch/<sessionId>/ # per-session agent temp files (D114), including
                           # composer pasted files under pasted/ — deleted
+                          # with the session; startup sweep removes orphans
+
                           # with the session; startup sweep removes orphans
                           # and stale dirs
 ```
@@ -439,6 +443,11 @@ CREATE INDEX idx_session_import_origins_plugin
   消息。 Assistant Edit 使用该子项并记录 original/edited
   子级现有 `message_revisions` 存储中的响应尾部；来源
   抄本和源版本的修订永远不会被重写。
+- 分支将已有且被引用的 `scratch/<sourceId>/pasted/` 文件复制到
+  `scratch/<childId>/pasted/`，在建立索引前更新消息和检查点中的路径。
+  删除原任务不会删除子任务的副本。未引用文件、截断点之后独有的输入和其他
+  scratch 输出不复制；已过期的文件仍不可用，不新增跨任务读取授权。
+  分支失败时清理已复制的输入及子任务转录本。
 
 ### 4.6 turns — 每次 agent 运行一行
 
@@ -882,7 +891,11 @@ CREATE INDEX idx_task_runs ON task_runs(task_id, started_at DESC);
 ```
 
 生成会话的运行通过 `session_id` 免费获取其转录本。
-更精细的计划 (cron) 无需迁移即可登陆 `config_json`。
+`config_json` 保存 `schedule: {hour, minute, weekday}`、毫秒时间戳 `nextRunAt`
+和 `workspacePath`。每天、每周按宿主本地时区计算。每小时采用 `nextRunAt = now + 3_600_000`，
+忽略日历时间字段。可选 `weekdays` 保存 1–7 个不重复的 0–6 整数，覆盖每周的旧 `weekday`；
+缺失时保留单日语义，空数组、重复或越界值在写入前拒绝。无需表结构迁移。
+无 `schedule` 的旧任务不会自动运行；无需修改表或迁移数据库。
 
 计划任务 `config_json.mode` 是持久操作模式值。有
 故意没有物理 `scheduled_tasks.mode` 列。 v7→v8
@@ -1310,3 +1323,11 @@ UI投影损失
 Host-core owns updates through `providers.reorder`; missing metadata preserves
 creation order, new IDs follow saved IDs, and deleted IDs are ignored. This
 preference does not rewrite provider configuration or require a schema migration.
+
+### 定时任务日历配置来源
+
+可选的 `config_json.calendarConfigured` 布尔值独立记录明确的日历配置意图，
+不与 Hourly 间隔内部需要的 schedule 对象混用。旧版 Daily／Weekly 行只要保存了
+schedule 就推断为日历配置；旧版 Hourly 行保留字段，但转换时需要明确确认日历时间。
+已知意图在周期切换和数据库重开后仍然保留。该新增 JSON 字段不需要表或 schema
+版本迁移；旧版本会忽略它，也无法执行新的转换保护。

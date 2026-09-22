@@ -27,6 +27,7 @@ import { registerPullsIpc } from "./pulls-ipc";
 import { registerScheduledIpc } from "./scheduled-ipc";
 import { registerSessionIpc } from "./session-ipc";
 import { registerSettingsIpc } from "./settings-ipc";
+import { registerConfigSyncIpc } from "./config-sync-ipc";
 import { registerSkillsIpc } from "./skills-ipc";
 import { registerAgentImportIpc } from "./agent-import-ipc";
 import { registerRemoteHostIpc } from "./remote-host-ipc";
@@ -41,6 +42,7 @@ import type { createTraySessions } from "../tray-sessions";
 export type RegisterIpcDependencies = {
   mirrorCoding: MirrorCodingRuntime;
   mobileSync?: MobileSyncService;
+  isQuitting: () => boolean;
   ipcMain: IpcMain;
   getMainWindow: () => BrowserWindow | null;
   getHost: () => HostProcess | null;
@@ -268,6 +270,11 @@ export function registerIpcHandlers(dependencies: RegisterIpcDependencies) {
     applyDeveloperMode,
     resolveEffectiveCommandShell,
   });
+  registerConfigSyncIpc({
+    registrar,
+    getHost,
+    sendToRenderer,
+  });
   registerProviderIpc({
     registrar,
     getHost,
@@ -317,9 +324,16 @@ export function registerIpcHandlers(dependencies: RegisterIpcDependencies) {
     registrar,
     getHost,
     scheduledRunsBySession,
+    isQuitting: dependencies.isQuitting,
+    invoke: async (channel, args) => {
+      const handler = ipcHandlers.get(channel);
+      if (!handler) throw new Error("scheduled prompt handler unavailable");
+      return handler(...args);
+    },
   });
   registerWorkspaceIpc({
     registrar,
+    getMainWindow,
     getHost,
     getSidecar,
     dataDir,

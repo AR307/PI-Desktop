@@ -76,7 +76,9 @@ hand it to the sidecar at launch" pattern was not acceptable for it.
    (`models.getAvailable`, which applies the vendor's own `filterModels`, so
    Copilot shows what the subscription actually includes) instead of probing
    `/models` with a key it does not have, and the connection test proves the
-   account by resolving auth. Login stores a non-secret account label in the row
+   account by resolving auth. xAI is the exception: the resolved account token
+   calls `GET /v1/models`, and that chat-model list replaces the pinned catalog
+   when the request succeeds. Login stores a non-secret account label in the row
    config and picks the row's `apiStyle` from the selected model — a vendor may
    span wire APIs. The original one-row-per-vendor assumption is amended by
    ADR 0098: every login now creates an independent row and credential scope.

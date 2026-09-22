@@ -4,6 +4,11 @@ import { useTranslation } from "react-i18next";
 import { MAX_PROJECT_NAME_CHARS } from "../lib/sidebar-preferences";
 import { api } from "../lib/api";
 import { parseGitCloneUrl } from "../lib/git-clone-url";
+import {
+  defaultProjectName,
+  folderNameFromPath,
+  resolveProjectName,
+} from "../lib/project-name";
 import { useAppStore } from "../stores/app-store";
 import { Button, TooltipButton } from "./ui";
 import {
@@ -21,10 +26,6 @@ type ProjectSource = "local" | "git";
 
 function pathParts(path: string) {
   return path.split(/[\\/]/).filter(Boolean);
-}
-
-function folderName(path: string) {
-  return pathParts(path).at(-1) ?? path;
 }
 
 function folderParent(path: string) {
@@ -52,12 +53,20 @@ export function ProjectCreateDialog() {
   const [gitUrl, setGitUrl] = useState("");
   const [cloneParent, setCloneParent] = useState("");
   const [busy, setBusy] = useState(false);
+  const [folderPickerBusy, setFolderPickerBusy] = useState(false);
   const inputRef = useRef<HTMLInputElement | null>(null);
   const dialogRef = useRef<HTMLDivElement | null>(null);
   const busyRef = useRef(false);
-  // The repository name seeds the project name until the user types their own.
+  const folderPickerInFlightRef = useRef(false);
+  // The picked source seeds the project name until the user types their own.
   const nameTouchedRef = useRef(false);
   const cloneTarget = parseGitCloneUrl(gitUrl);
+  const defaultName = defaultProjectName({
+    source,
+    folders,
+    repositoryName: cloneTarget?.name,
+  });
+  const projectName = resolveProjectName(name, defaultName);
 
   useEffect(() => {
     if (!open) return;
@@ -67,8 +76,10 @@ export function ProjectCreateDialog() {
     setGitUrl("");
     setCloneParent("");
     busyRef.current = false;
+    folderPickerInFlightRef.current = false;
     nameTouchedRef.current = false;
     setBusy(false);
+    setFolderPickerBusy(false);
     const previousOverflow = document.body.style.overflow;
     const previouslyFocused = document.activeElement as HTMLElement | null;
     document.body.style.overflow = "hidden";
@@ -104,16 +115,19 @@ export function ProjectCreateDialog() {
     };
   }, [close, open]);
 
-  // A pasted repository URL names the project without stealing a typed name.
+  // The first folder or the repository name fills the field until the user
+  // types their own name; an emptied field still falls back to it on submit.
   useEffect(() => {
-    if (source !== "git" || nameTouchedRef.current) return;
-    setName(cloneTarget?.name ?? "");
-  }, [cloneTarget?.name, source]);
+    if (nameTouchedRef.current) return;
+    setName(defaultName);
+  }, [defaultName]);
 
   if (!open) return null;
 
   const addFolders = async () => {
-    if (busyRef.current) return;
+    if (busyRef.current || folderPickerInFlightRef.current) return;
+    folderPickerInFlightRef.current = true;
+    setFolderPickerBusy(true);
     try {
       const result = await api.pickProjectFolders();
       if (result.canceled || result.folders.length === 0) return;
@@ -127,11 +141,16 @@ export function ProjectCreateDialog() {
       showToast(error instanceof Error ? error.message : String(error), {
         variant: "error",
       });
+    } finally {
+      folderPickerInFlightRef.current = false;
+      setFolderPickerBusy(false);
     }
   };
 
   const chooseCloneParent = async () => {
-    if (busyRef.current) return;
+    if (busyRef.current || folderPickerInFlightRef.current) return;
+    folderPickerInFlightRef.current = true;
+    setFolderPickerBusy(true);
     try {
       const result = await api.pickProjectFolders();
       if (result.canceled || result.folders.length === 0) return;
@@ -140,12 +159,15 @@ export function ProjectCreateDialog() {
       showToast(error instanceof Error ? error.message : String(error), {
         variant: "error",
       });
+    } finally {
+      folderPickerInFlightRef.current = false;
+      setFolderPickerBusy(false);
     }
   };
 
   const submit = async () => {
-    const trimmedName = name.trim();
-    if (!trimmedName || busyRef.current) return;
+    const projectName = resolveProjectName(name, defaultName);
+    if (!projectName || busyRef.current) return;
     if (source === "git") {
       if (!cloneTarget || !cloneParent) return;
     } else if (folders.length === 0) {
@@ -156,13 +178,13 @@ export function ProjectCreateDialog() {
     try {
       if (source === "git" && cloneTarget) {
         await createProjectFromGit({
-          name: trimmedName,
+          name: projectName,
           url: cloneTarget.url,
           parentPath: cloneParent,
         });
       } else {
         await createProject({
-          name: trimmedName,
+          name: projectName,
           folders,
           primaryPath: folders[0],
         });
@@ -329,7 +351,7 @@ export function ProjectCreateDialog() {
                           <IconFolder size={17} />
                         </span>
                         <span className="project-create-folder-copy" title={path}>
-                          <span className="project-create-folder-name">{folderName(path)}</span>
+                          <span className="project-create-folder-name">{folderNameFromPath(path)}</span>
                           <span className="project-create-folder-path">{folderParent(path)}</span>
                         </span>
                         {index === 0 ? (
@@ -342,7 +364,7 @@ export function ProjectCreateDialog() {
                           type="button"
                           className="project-create-folder-remove"
                           tooltip={t("project.createRemoveFolder")}
-                          ariaLabel={`${t("project.createRemoveFolder")}: ${folderName(path)}`}
+                          ariaLabel={`${t("project.createRemoveFolder")}: ${folderNameFromPath(path)}`}
                           disabled={busy}
                           onClick={() => setFolders((current) => current.filter((item) => item !== path))}
                         >
@@ -358,7 +380,7 @@ export function ProjectCreateDialog() {
                   aria-label={t("project.createAddFolder")}
                   className={`project-create-add-folder${folders.length === 0 ? " is-empty" : ""}`}
                   onClick={() => void addFolders()}
-                  disabled={busy}
+                  disabled={busy || folderPickerBusy}
                 >
                   <span className="project-create-add-folder-icon" aria-hidden>
                     <IconNewProject size={18} />
@@ -406,7 +428,7 @@ export function ProjectCreateDialog() {
                   }`}
                   aria-label={t("project.createChooseLocation")}
                   onClick={() => void chooseCloneParent()}
-                  disabled={busy}
+                  disabled={busy || folderPickerBusy}
                 >
                   <span className="project-create-dialog-location-icon" aria-hidden>
                     <IconFolder size={17} />
@@ -414,7 +436,7 @@ export function ProjectCreateDialog() {
                   <span className="project-create-dialog-location-copy">
                     <span className="project-create-dialog-location-title">
                       {cloneParent
-                        ? folderName(cloneParent)
+                        ? folderNameFromPath(cloneParent)
                         : t("project.createChooseLocation")}
                     </span>
                     <span className="project-create-dialog-location-path">
@@ -443,8 +465,8 @@ export function ProjectCreateDialog() {
               variant="primary"
               disabled={
                 source === "git"
-                  ? !name.trim() || !cloneTarget || !cloneParent || busy
-                  : !name.trim() || folders.length === 0 || busy
+                  ? !projectName || !cloneTarget || !cloneParent || busy
+                  : !projectName || folders.length === 0 || busy
               }
             >
               {busy

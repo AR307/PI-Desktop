@@ -1,3 +1,7 @@
+mod config_sync_rpc;
+mod scheduled_rpc;
+mod scheduled_tools;
+
 use std::io::{self, BufRead, BufReader as StdBufReader, Read, Write};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -19,7 +23,6 @@ use crate::plugin_sessions;
 use crate::plugin_usage;
 use crate::providers::{self, DiscoveredModelInput, ProviderCreateInput, ProviderUpdateInput};
 use crate::review;
-use crate::scheduled;
 use crate::scratch;
 use crate::sessions::{self, UiMessage};
 use crate::state::{AppState, HOST_VERSION, PROTOCOL_VERSION};
@@ -310,6 +313,23 @@ pub async fn serve(state: Arc<Mutex<AppState>>) -> Result<()> {
             return Err(anyhow!("host stdin reader unavailable: {error}"));
         }
     };
+    let config_sync_scheduler = tokio::spawn({
+        let state = state.clone();
+        let tx = tx.clone();
+        async move {
+            // The host owns a short local debounce clock; remote polling is
+            // gated inside the engine to five minutes when no local change is
+            // pending. This lets a quiet app settle filesystem edits without
+            // turning every tick into a WebDAV request.
+            let mut interval = tokio::time::interval(Duration::from_secs(30));
+            interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+            loop {
+                interval.tick().await;
+                let _ =
+                    crate::config_sync::engine::sync_if_enabled(state.clone(), tx.clone()).await;
+            }
+        }
+    });
 
     let mut input_error = None;
     let mut writer_done = false;
@@ -433,6 +453,8 @@ pub async fn serve(state: Arc<Mutex<AppState>>) -> Result<()> {
         }
     }
 
+    config_sync_scheduler.abort();
+    let _ = config_sync_scheduler.await;
     {
         let mut st = state.lock().await;
         st.shutdown();
@@ -469,10 +491,32 @@ fn rpc_err(code: i64, message: impl Into<String>, error_code: &str) -> JsonRpcEr
     }
 }
 
+fn config_sync_rpc_err(error: impl ToString) -> JsonRpcError {
+    let message = error.to_string();
+    let error_code = message
+        .split_once(':')
+        .map(|(code, _)| code.trim())
+        .unwrap_or("INTERNAL")
+        .to_string();
+    let code = match error_code.as_str() {
+        "CONFIG_SYNC_INVALID" | "CONFIG_SYNC_LIMIT_EXCEEDED" => 1002,
+        "CONFIG_SYNC_LOCKED" => 1001,
+        "CONFIG_SYNC_CONFLICT" => 1008,
+        "CONFIG_SYNC_UNSUPPORTED" => 1002,
+        "CONFIG_SYNC_SECURITY" => 1003,
+        "CONFIG_SYNC_CRYPTO" | "CONFIG_SYNC_MAPPING_REQUIRED" => 1002,
+        "CONFIG_SYNC_REMOTE" => 1000,
+        _ => 1000,
+    };
+    rpc_err(code, message, &error_code)
+}
+
 fn provider_rpc_err(error: impl ToString) -> JsonRpcError {
     let message = error.to_string();
-    if message.starts_with("MODEL_ALIAS_TOO_LONG:") {
-        return rpc_err(1002, message, "MODEL_ALIAS_TOO_LONG");
+    for error_code in ["MODEL_ALIAS_TOO_LONG", "MODEL_BINDINGS_DEGRADED"] {
+        if message.starts_with(&format!("{error_code}:")) {
+            return rpc_err(1002, message, error_code);
+        }
     }
     rpc_err(1000, message, "INTERNAL")
 }
@@ -683,11 +727,66 @@ fn validate_settings_value(value: &Value) -> Result<(), JsonRpcError> {
     let Some(object) = value.as_object() else {
         return Ok(());
     };
+    if let Some(binding) = object.get("imageGeneration").filter(|v| !v.is_null()) {
+        for (key, max) in [("providerId", 128), ("modelId", 256)] {
+            if !binding
+                .get(key)
+                .and_then(Value::as_str)
+                .is_some_and(|s| !s.trim().is_empty() && s.len() <= max)
+            {
+                return Err(rpc_err(
+                    1002,
+                    "invalid image generation binding",
+                    "INVALID_PARAMS",
+                ));
+            }
+        }
+    }
+    if let Some(candidates) = object.get("imageGenerationModels").filter(|v| !v.is_null()) {
+        let Some(candidates) = candidates.as_array() else {
+            return Err(rpc_err(
+                1002,
+                "imageGenerationModels must be an array",
+                "INVALID_PARAMS",
+            ));
+        };
+        if candidates.len() > 128 {
+            return Err(rpc_err(
+                1002,
+                "imageGenerationModels contains too many models",
+                "INVALID_PARAMS",
+            ));
+        }
+        for binding in candidates {
+            for (key, max) in [("providerId", 128), ("modelId", 256)] {
+                if !binding
+                    .get(key)
+                    .and_then(Value::as_str)
+                    .is_some_and(|s| !s.trim().is_empty() && s.len() <= max)
+                {
+                    return Err(rpc_err(
+                        1002,
+                        "invalid image generation candidate",
+                        "INVALID_PARAMS",
+                    ));
+                }
+            }
+        }
+    }
     if let Some(template_value) = object.get("promptEnhancementUserTemplate") {
         if let Some(message) =
             prompt_enhancement_template_error("promptEnhancementUserTemplate", template_value)
         {
             return Err(rpc_err(1002, message, "INVALID_PARAMS"));
+        }
+    }
+    if let Some(infinite_retry) = object.get("infiniteProviderRetry") {
+        if !infinite_retry.is_boolean() {
+            return Err(rpc_err(
+                1002,
+                "infiniteProviderRetry must be a boolean",
+                "INVALID_PARAMS",
+            ));
         }
     }
     if let Some(threshold_value) = object.get("largePasteThreshold") {
@@ -1085,7 +1184,7 @@ fn bash_cancellation_requested(receiver: &Option<tokio::sync::watch::Receiver<bo
 }
 
 async fn clear_bash_cancellation(state: &Arc<Mutex<AppState>>, p: &ToolsExecuteParams) {
-    if p.tool_name != "Bash" {
+    if !matches!(p.tool_name.as_str(), "Bash" | "GenerateImages") {
         return;
     }
     let mut st = state.lock().await;
@@ -1362,6 +1461,12 @@ async fn handle_request(
         }
     }
 
+    if method.starts_with("configSync.") {
+        return config_sync_rpc::handle(state, method, params, tx)
+            .await
+            .map_err(config_sync_rpc_err);
+    }
+
     match method {
         method if method.starts_with("session.collaboration.") => {
             let st = state.lock().await;
@@ -1611,6 +1716,15 @@ async fn handle_request(
             let path = crate::db::canonical_project_path(path)
                 .ok_or_else(|| rpc_err(1002, "path required", "INVALID_PARAMS"))?;
             let st = state.lock().await;
+            if crate::scheduled::project::has_running_tasks(&st.db, &path)
+                .map_err(|e| rpc_err(1000, e.to_string(), "INTERNAL"))?
+            {
+                return Err(rpc_err(
+                    1008,
+                    "project has running scheduled tasks",
+                    "CONFLICT",
+                ));
+            }
             // A path that belongs to a multi-folder project group must stay put:
             // deleting one root would orphan the rest of the group, so callers
             // remove the folder from the group first. A single-folder stored
@@ -1646,6 +1760,8 @@ async fn handle_request(
                     return Err(rpc_err(1008, "project has running sessions", "CONFLICT"));
                 }
             }
+            crate::scheduled::project::pause(&st.db, &path)
+                .map_err(|e| rpc_err(1000, e.to_string(), "INTERNAL"))?;
             let mut sessions_removed = 0;
             for id in &session_ids {
                 if sessions::delete_session(&st.db, id)
@@ -3121,126 +3237,18 @@ async fn handle_request(
             Ok(json!({ "ok": true, "changed": changed }))
         }
 
-        "scheduled.list" => {
+        method if method.starts_with("scheduled.") => {
             let st = state.lock().await;
-            let tasks = scheduled::list_tasks(&st.db)
-                .map_err(|e| rpc_err(1000, e.to_string(), "INTERNAL"))?;
-            Ok(json!({ "tasks": tasks }))
-        }
-        "scheduled.create" => {
-            let st = state.lock().await;
-            let task = scheduled::create_task(&st.db, &params)
-                .map_err(|e| rpc_err(1000, e.to_string(), "INTERNAL"))?;
-            Ok(json!({ "task": task }))
-        }
-        "scheduled.update" => {
-            let st = state.lock().await;
-            let task = scheduled::update_task(&st.db, &params)
-                .map_err(|e| rpc_err(1000, e.to_string(), "INTERNAL"))?
-                .ok_or_else(|| rpc_err(1007, "task not found", "NOT_FOUND"))?;
-            Ok(json!({ "task": task }))
-        }
-        "scheduled.delete" => {
-            let id = params
-                .get("id")
-                .and_then(|v| v.as_str())
-                .ok_or_else(|| rpc_err(1002, "id required", "INVALID_PARAMS"))?;
-            let st = state.lock().await;
-            let ok = scheduled::delete_task(&st.db, id)
-                .map_err(|e| rpc_err(1000, e.to_string(), "INTERNAL"))?;
-            Ok(json!({ "ok": ok }))
-        }
-        "scheduled.import" => {
-            let tasks = params
-                .get("tasks")
-                .and_then(|v| v.as_array())
-                .cloned()
-                .unwrap_or_default();
-            let st = state.lock().await;
-            let imported = scheduled::import_tasks(&st.db, &tasks)
-                .map_err(|e| rpc_err(1000, e.to_string(), "INTERNAL"))?;
-            Ok(json!({ "imported": imported }))
-        }
-        "scheduled.run" => {
-            let id = params
-                .get("id")
-                .and_then(|v| v.as_str())
-                .ok_or_else(|| rpc_err(1002, "id required", "INVALID_PARAMS"))?;
-            let st = state.lock().await;
-            let task = scheduled::get_task(&st.db, id)
-                .map_err(|e| rpc_err(1000, e.to_string(), "INTERNAL"))?
-                .ok_or_else(|| rpc_err(1007, "task not found", "NOT_FOUND"))?;
-            // Both contract modes need a human to approve their proposal (D198),
-            // so neither can run unattended.
-            if sessions::is_contract_mode(&task.mode) {
-                return Err(plan_rpc_err("PLAN_REQUIRES_INTERACTIVE_SESSION"));
-            }
-            let settings = st
-                .db
-                .get_setting("app")
-                .map_err(|e| rpc_err(1000, e.to_string(), "INTERNAL"))?
-                .unwrap_or_else(|| json!({}));
-            let session = sessions::create_session(
-                &st.db,
-                Some(task.title.clone()),
-                Some("agent".into()),
-                settings
-                    .get("defaultProviderId")
-                    .and_then(|v| v.as_str())
-                    .map(str::to_string),
-                settings
-                    .get("defaultModelId")
-                    .and_then(|v| v.as_str())
-                    .map(str::to_string),
-                st.workspace.get().map(|w| w.path),
-            )
-            .map_err(|e| rpc_err(1000, e.to_string(), "INTERNAL"))?;
-            let run_id = match scheduled::begin_run(&st.db, id, Some(&session.id)) {
-                Ok(run_id) => run_id,
-                Err(error) => {
-                    let _ = sessions::delete_session(&st.db, &session.id);
-                    return Err(rpc_err(1000, error.to_string(), "INTERNAL"));
-                }
-            };
-            let task = scheduled::get_task(&st.db, id)
-                .map_err(|e| rpc_err(1000, e.to_string(), "INTERNAL"))?
-                .unwrap_or(task);
-            Ok(json!({
-                "sessionId": session.id,
-                "prompt": task.prompt,
-                "task": task,
-                "runId": run_id
-            }))
-        }
-        "scheduled.finishRun" => {
-            let run_id = params
-                .get("runId")
-                .and_then(|v| v.as_str())
-                .ok_or_else(|| rpc_err(1002, "runId required", "INVALID_PARAMS"))?;
-            let status = params
-                .get("status")
-                .and_then(|v| v.as_str())
-                .unwrap_or("completed");
-            let st = state.lock().await;
-            let ok = scheduled::finish_run(
-                &st.db,
-                run_id,
-                status,
-                params.get("errorCode").and_then(|v| v.as_str()),
-            )
-            .map_err(|e| rpc_err(1000, e.to_string(), "INTERNAL"))?;
-            Ok(json!({ "ok": ok }))
-        }
-        "scheduled.listRuns" => {
-            let task_id = params.get("taskId").and_then(|v| v.as_str());
-            let limit = params.get("limit").and_then(|v| v.as_i64()).unwrap_or(50);
-            let st = state.lock().await;
-            let runs = scheduled::list_runs(&st.db, task_id, limit)
-                .map_err(|e| rpc_err(1000, e.to_string(), "INTERNAL"))?;
-            Ok(json!({ "runs": runs }))
+            scheduled_rpc::handle(&st, method, params)
         }
 
-        "tools.list" => Ok(json!({ "tools": tools::builtin_tool_defs() })),
+        "tools.list" => {
+            let mut definitions = tools::builtin_tool_defs();
+            if let Some(items) = definitions.as_array_mut() {
+                items.extend(scheduled_tools::definitions());
+            }
+            Ok(json!({ "tools": definitions }))
+        }
         "tools.execute" => {
             let call_started = std::time::Instant::now();
             let p: ToolsExecuteParams = serde_json::from_value(params.clone())
@@ -3309,7 +3317,8 @@ async fn handle_request(
 
             // Register before permission evaluation so tools.abort can cancel
             // an approval wait as well as an already-spawned process.
-            let cancellation_receiver = if p.tool_name == "Bash" {
+            let cancellation_receiver = if matches!(p.tool_name.as_str(), "Bash" | "GenerateImages")
+            {
                 let mut st = state.lock().await;
                 match st.register_bash_cancellation(&p.session_id, &p.tool_call_id) {
                     Ok(receiver) => Some(receiver),
@@ -3738,6 +3747,9 @@ async fn handle_request(
                         &durable_mode,
                     )
                     .await
+                } else if scheduled_tools::recognizes(&p.tool_name) {
+                    let st = state.lock().await;
+                    scheduled_tools::execute(&st, &p)
                 } else {
                     tools::execute_tool_with_path_access(
                         ws_path.as_deref(),
@@ -6155,6 +6167,29 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(updated["largePasteThreshold"], 801);
+
+        handle_request(
+            state.clone(),
+            "settings.set",
+            json!({ "infiniteProviderRetry": true }),
+            tx.clone(),
+        )
+        .await
+        .unwrap();
+        let retry_settings = handle_request(state.clone(), "settings.get", json!({}), tx.clone())
+            .await
+            .unwrap();
+        assert_eq!(retry_settings["infiniteProviderRetry"], true);
+
+        let invalid_retry = handle_request(
+            state.clone(),
+            "settings.set",
+            json!({ "infiniteProviderRetry": "yes" }),
+            tx.clone(),
+        )
+        .await
+        .unwrap_err();
+        assert_eq!(invalid_retry.data.unwrap()["errorCode"], "INVALID_PARAMS");
 
         let invalid_threshold = handle_request(
             state.clone(),
@@ -8683,5 +8718,40 @@ mod tests {
         }
         let st = state.lock().await;
         assert_eq!(st.plugins.locale(), "en-US");
+    }
+}
+
+#[cfg(test)]
+mod image_generation_settings_tests {
+    use super::*;
+    #[test]
+    fn validates_optional_image_binding() {
+        for value in [
+            json!({}),
+            json!({"imageGeneration": null}),
+            json!({"imageGeneration": {"providerId": "p", "modelId": "image"}}),
+            json!({"imageGenerationModels": null}),
+            json!({"imageGenerationModels": []}),
+            json!({"imageGenerationModels": [
+                {"providerId": "p", "modelId": "image-one"},
+                {"providerId": "q", "modelId": "image-two"}
+            ]}),
+        ] {
+            assert!(validate_settings_value(&value).is_ok());
+        }
+        for value in [
+            json!(false),
+            json!({}),
+            json!({"providerId": "p", "modelId": " "}),
+        ] {
+            assert!(validate_settings_value(&json!({"imageGeneration": value})).is_err());
+        }
+        for value in [
+            json!(false),
+            json!({}),
+            json!([{"providerId": "p", "modelId": " "}]),
+        ] {
+            assert!(validate_settings_value(&json!({"imageGenerationModels": value})).is_err());
+        }
     }
 }

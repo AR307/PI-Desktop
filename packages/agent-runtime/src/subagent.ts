@@ -27,13 +27,16 @@ import {
   type AfterToolCallContext,
   type AfterToolCallResult,
   type AgentEvent,
+  type AgentLoopTurnUpdate,
   type AgentMessage,
   type AgentTool,
+  type PrepareNextTurnContext,
 } from "@earendil-works/pi-agent-core";
 import type { AssistantMessage } from "@earendil-works/pi-ai";
 import {
   addUsage,
   cumulativeDelta,
+  isCertificateVerificationError,
   subagentCanMutate,
   subagentToolsLabel,
   type AgentEventEnvelope,
@@ -44,6 +47,8 @@ import {
   type UiMessage,
 } from "@pi-desktop/shared";
 import { classifyAgentError } from "./agent-errors.js";
+import { readLocalRequestErrorDetails } from "./local-request-errors.js";
+import { withProviderFetchFailure } from "./provider-transport-recovery.js";
 import {
   assistantContent,
   nowIso,
@@ -52,6 +57,17 @@ import {
 import type { RuntimeProviderConfig } from "./provider-binding.js";
 import { clampThinkingLevel } from "./thinking-level.js";
 import { subagentModelBinding, type SubagentProviderRetryState } from "./subagent-model-binding.js";
+import { contextBudgetFor } from "./context-budget.js";
+import {
+  delegateRetentionMode,
+  delegateSummaryModels,
+  prepareDelegateTurnContext,
+  subagentContextOverflowError,
+} from "./subagent-context.js";
+import {
+  dedupeToolCallMessages,
+  reportDuplicateToolCallDrop,
+} from "./tool-call-dedupe.js";
 import {
   classifyProviderError,
   delayWithAbort,
@@ -90,6 +106,10 @@ export type SubagentRunResult = {
   toolCalls: number;
   usage?: MessageUsage;
   modelFailures?: Array<{ model: string; code: string; message: string }>;
+  /** In-memory context compactions the run needed (ADR 0299). */
+  contextCompactions?: number;
+  /** True when the run had to discard working history without a summary. */
+  contextDegraded?: boolean;
   error?: { code: string; message: string };
 };
 
@@ -110,6 +130,8 @@ export type SubagentRunOptions = {
   /** Provider resolved by Electron main (the definition's pin, or the
    * session's provider when the definition pins nothing). */
   provider: RuntimeProviderConfig;
+  /** Inherited session policy for retrying transient provider failures. */
+  infiniteProviderRetry?: boolean;
   thinkingLevel: SubagentThinkingLevel;
   /** User-owned definition pins only, in configured order. Missing bindings fail visibly. */
   fallbackModels?: Array<{ key: string; provider?: RuntimeProviderConfig }>;
@@ -198,6 +220,16 @@ export class SubagentRun {
   private toolCalls = 0;
   private usage?: MessageUsage;
   private streamError?: { code: string; message: string };
+  /** Set when a settled message reads as a cancel — `stopReason: "aborted"`, or
+   * a local marker whose preserved cause name is `AbortError`. pi-ai can wrap
+   * an abort that fired before the parent signal flipped, so this is the only
+   * trace of the Stop and the run has to report `aborted` from it. */
+  private turnAborted = false;
+  private contextCompactions = 0;
+  private contextDegraded = false;
+  /** Set when the turn-boundary guard throws because even the degraded
+   * context does not fit; the synthetic stream error keeps this code. */
+  private pendingContextOverflow?: { code: "SUBAGENT_CONTEXT_OVERFLOW"; message: string };
   private pendingProviderRetry?: ReturnType<typeof classifyAgentError>;
   private providerRetryInProgress = false;
   private providerOutputStarted = false;
@@ -222,7 +254,13 @@ export class SubagentRun {
     this.agent = new Agent({
       streamFn: binding.streamFn,
       getApiKey: binding.getApiKey,
-      convertToLlm,
+      convertToLlm: (messages) =>
+        convertToLlm(this.dedupeToolCalls(messages)),
+      // The same turn-boundary context protection the session has (ADR 0299):
+      // re-estimate at each boundary, compact before the next request, degrade
+      // before failing. The budget derives from this run's resolved model.
+      prepareNextTurnWithContext: (context, signal) =>
+        this.prepareNextTurn(context, signal),
       afterToolCall: async (context) => this.afterToolCall(context),
       initialState: {
         systemPrompt: opts.systemPrompt,
@@ -270,17 +308,22 @@ export class SubagentRun {
     if (signal?.aborted) {
       return this.result("aborted", "The delegated task was aborted.");
     }
+
+    // A cancel the settled message itself reported outranks any failure text:
+    // pi-ai can wrap an AbortError that fired before the parent signal flipped,
+    // and the marker's preserved cause name is the only trace of the Stop. The
+    // session runtime reads that same marker as an aborted turn.
+    if (this.turnAborted) {
+      return this.result("aborted", "The delegated task was aborted.");
+    }
     if (caughtError) {
       if (caughtError.code === "TURN_ABORTED") {
         return this.result("aborted", "The delegated task was aborted.");
       }
-      return this.result("failed", "", {
-        code: caughtError.code,
-        message: caughtError.message,
-      });
+      return this.result("failed", "", this.terminalError(caughtError));
     }
     if (this.streamError) {
-      return this.result("failed", "", this.streamError);
+      return this.result("failed", "", this.terminalError(this.streamError));
     }
     if (!this.lastReportText.trim()) {
       return this.result("failed", "", {
@@ -292,24 +335,104 @@ export class SubagentRun {
   }
 
   private modelBinding() {
+    return this.bindingFor(this.provider, this.thinkingLevel);
+  }
+  private dedupeToolCalls(messages: AgentMessage[]): AgentMessage[] {
+    const drop = dedupeToolCallMessages(messages);
+    reportDuplicateToolCallDrop(this.opts.sessionId, drop);
+    return drop.messages;
+  }
+
+  private bindingFor(
+    provider: RuntimeProviderConfig,
+    thinkingLevel: SubagentThinkingLevel,
+  ) {
     return subagentModelBinding({
-      provider: this.provider,
-      thinkingLevel: this.thinkingLevel,
+      provider,
+      thinkingLevel,
       sessionId: this.opts.sessionId,
       maxTokens: this.opts.definition.maxTokens,
     }, this.retryState);
   }
 
+  /**
+   * Shape the delegate's next in-run turn, mirroring the session's
+   * `prepareNextTurn` (ADR 0299, decisions 2-4). A compaction rewrites only
+   * this agent's in-memory messages; nothing is persisted anywhere.
+   */
+  private async prepareNextTurn(
+    turn: PrepareNextTurnContext,
+    signal?: AbortSignal,
+  ): Promise<AgentLoopTurnUpdate | undefined> {
+    const outcome = await prepareDelegateTurnContext({
+      messages: this.agent.state.messages,
+      model: this.agent.state.model,
+      taskBrief: this.opts.task,
+      retentionMode: delegateRetentionMode(turn),
+      summaryModels: () =>
+        delegateSummaryModels(
+          this.provider,
+          this.agent.state.model,
+          this.opts.sessionId,
+        ),
+      thinkingLevel: this.agent.state.thinkingLevel,
+      signal: signal ?? this.runSignal(),
+    });
+    if (outcome.kind === "unchanged") return undefined;
+    if (outcome.kind === "overflow") {
+      // The Agent wrapper converts this throw into the normal error/agent_end
+      // sequence; `message_end` picks the pending overflow up so the run
+      // surfaces SUBAGENT_CONTEXT_OVERFLOW instead of a classified provider
+      // error, and `useNextModel` still gets its fallback pass first.
+      this.pendingContextOverflow = subagentContextOverflowError(
+        this.provider.modelId,
+      );
+      throw new Error(this.pendingContextOverflow.message);
+    }
+    const systemMessage = this.agent.state.messages.find(
+      (message) => message.role === "system",
+    );
+    this.agent.state.messages = [
+      ...(systemMessage ? [systemMessage] : []),
+      ...outcome.messages.filter((message) => message.role !== "system"),
+    ];
+    if (outcome.kind === "compacted") {
+      this.contextCompactions += 1;
+      const summaryUsage = usageFromPi(outcome.summaryUsage);
+      this.usage = addUsage(this.usage, summaryUsage);
+    } else {
+      this.contextDegraded = true;
+    }
+    return {
+      context: {
+        // The loop owns its context array: pi appends every streamed assistant
+        // message and every tool result to the array it was handed, while its
+        // own `message_end` listener appends the same message to
+        // `state.messages`. Handing over the live array stores each message of
+        // the run's later iterations twice, which doubles the estimate at the
+        // next boundary and leaves `useNextModel` a trailing assistant row it
+        // cannot resume from (D620).
+        messages: [...this.agent.state.messages],
+        tools: this.agent.state.tools,
+      },
+    };
+  }
+
   /** Continue the same agent at the failed request; never replay completed tools. */
   private useNextModel(): boolean {
     if (this.provider.authKind === "mirrorcoding") return false;
-    if (this.runSignal().aborted || !this.streamError || this.streamError.code === "TURN_ABORTED") return false;
+    if (this.runSignal().aborted || this.turnAborted || !this.streamError || this.streamError.code === "TURN_ABORTED") return false;
     if (!this.opts.fallbackModels?.length) return false;
     const failed = this.agent.state.messages.at(-1);
     // Only a provider's terminal assistant error permits fallback. Host/tool
     // failures, cancellation, and unexpected internal exceptions do not.
     if (failed?.role !== "assistant" || failed.stopReason !== "error") return false;
+    if (readLocalRequestErrorDetails(failed)) return false;
     this.recordModelFailure(`${this.provider.id}/${this.provider.modelId}`, this.streamError);
+    // What an alternative would actually carry: the current context minus the
+    // failed assistant row (ADR 0299 decision 6 re-evaluates it against each
+    // alternative's own window before switching).
+    const carried = this.agent.state.messages.slice(0, -1);
     while (this.fallbackIndex < this.opts.fallbackModels.length) {
       const next = this.opts.fallbackModels[this.fallbackIndex++];
       if (!next.provider) {
@@ -322,15 +445,27 @@ export class SubagentRun {
       const identity = `${next.provider.id}/${next.provider.modelId}`;
       if (this.attemptedModels.has(identity)) continue;
       this.attemptedModels.add(identity);
-      this.provider = next.provider;
       const requested = this.opts.definition.thinkingLevel ?? this.opts.inheritedThinkingLevel ?? this.opts.thinkingLevel;
-      this.thinkingLevel = requested === "omit" ? "omit" : clampThinkingLevel(this.provider, requested);
-      const binding = this.modelBinding();
+      const thinking = requested === "omit" ? "omit" : clampThinkingLevel(next.provider, requested);
+      const binding = this.bindingFor(next.provider, thinking);
+      // An alternative whose window cannot hold the carried context would fail
+      // identically to the model it replaces; skip it with the reason recorded
+      // instead of burning the slot on the same overflow.
+      const budget = contextBudgetFor(binding.model, carried);
+      if (budget.tokens >= budget.hardLimit) {
+        this.recordModelFailure(identity, {
+          code: "SUBAGENT_CONTEXT_OVERFLOW",
+          message: `The carried context (~${budget.tokens} tokens) does not fit this model's safe budget (${budget.hardLimit} tokens).`,
+        });
+        continue;
+      }
+      this.provider = next.provider;
+      this.thinkingLevel = thinking;
       this.agent.state.model = binding.model;
       this.agent.state.thinkingLevel = binding.agentThinkingLevel;
       this.agent.streamFunction = binding.streamFn;
       this.agent.getApiKey = binding.getApiKey;
-      this.agent.state.messages = this.agent.state.messages.slice(0, -1);
+      this.agent.state.messages = carried;
       this.streamError = undefined;
       this.providerTransientRetryAttempt = 0;
       this.providerRateLimitRetryAttempt = 0;
@@ -360,8 +495,9 @@ export class SubagentRun {
   ): number | undefined {
     if (this.provider.authKind === "mirrorcoding" && this.providerOutputStarted) return undefined;
     if (!error.retriable) return undefined;
+    const infinite = this.opts.infiniteProviderRetry === true;
     if (error.code === "PROVIDER_RATE_LIMITED") {
-      if (this.providerRateLimitRetryAttempt >= PROVIDER_RATE_LIMIT_MAX_RETRIES) {
+      if (!infinite && this.providerRateLimitRetryAttempt >= PROVIDER_RATE_LIMIT_MAX_RETRIES) {
         return undefined;
       }
       return ++this.providerRateLimitRetryAttempt;
@@ -370,7 +506,7 @@ export class SubagentRun {
     // session does, so a delegate is not abandoned on a single gateway 502.
     void phase;
     if (!isTransientProviderRetryCode(error.code)) return undefined;
-    if (this.providerTransientRetryAttempt >= PROVIDER_TRANSIENT_MAX_RETRIES) {
+    if (!infinite && this.providerTransientRetryAttempt >= PROVIDER_TRANSIENT_MAX_RETRIES) {
       return undefined;
     }
     return ++this.providerTransientRetryAttempt;
@@ -384,7 +520,9 @@ export class SubagentRun {
     if (messages.at(-1)?.role !== "assistant") {
       throw new Error("Cannot retry a subagent provider stream without its failed assistant message");
     }
-    messages.pop();
+    // A failed provider stream can leave more than one assistant row after a
+    // tool round. Remove the entire failed suffix before continuing.
+    while (messages.at(-1)?.role === "assistant") messages.pop();
     this.agent.state.messages = messages;
     this.providerRetryInProgress = true;
     try {
@@ -408,6 +546,19 @@ export class SubagentRun {
     }
   }
 
+  /**
+   * The failure the parent receives once no fallback can proceed. A provider
+   * overflow is remapped to the actionable delegate code (ADR 0299, decision
+   * 5) — but only here, after `useNextModel` had its chance, so a larger
+   * fallback window still rescues the run.
+   */
+  private terminalError(error: { code: string; message: string }): { code: string; message: string } {
+    if (error.code === "CONTEXT_TOO_LARGE" || error.code === "SUBAGENT_CONTEXT_OVERFLOW") {
+      return subagentContextOverflowError(this.provider.modelId);
+    }
+    return error;
+  }
+
   private result(
     status: SubagentRunStatus,
     report: string,
@@ -424,6 +575,11 @@ export class SubagentRun {
               `The ${name} subagent failed after ${this.turns} turn(s): ${error?.message ?? "unknown error"}.`,
               ...(body ? ["Its last output was:", body] : []),
             ].join("\n\n");
+    // A degraded run must say so, or the parent would read a partial answer
+    // as a complete one (ADR 0299, decision 4).
+    const degradationNote = this.contextDegraded
+      ? "Note: this subagent's context exceeded its model's window and older working history was discarded without a summary, so this report may be incomplete."
+      : undefined;
     return {
       agentName: name,
       modelId: this.provider.modelId,
@@ -431,12 +587,15 @@ export class SubagentRun {
       status,
       report: boundedReport([
         ...this.modelFailures.map((failure) => `Model ${failure.model} failed (${failure.code}): ${failure.message}`),
+        ...(degradationNote ? [degradationNote] : []),
         text,
       ].join("\n\n")),
       turns: this.turns,
       toolCalls: this.toolCalls,
       ...(this.usage ? { usage: this.usage } : {}),
       ...(this.modelFailures.length ? { modelFailures: [...this.modelFailures] } : {}),
+      ...(this.contextCompactions > 0 ? { contextCompactions: this.contextCompactions } : {}),
+      ...(this.contextDegraded ? { contextDegraded: true } : {}),
       ...(error ? { error } : {}),
     };
   }
@@ -571,24 +730,45 @@ export class SubagentRun {
         const message = event.message as AssistantMessage;
         const content = assistantContent(message.content);
         const stopReason = message.stopReason as string | undefined;
-        const failed = stopReason === "error";
+        // Read the cancel off the settled message, the same way the session
+        // runtime does: pi-ai wraps an AbortError that fired before the signal
+        // flipped in a local marker whose preserved cause name is the only
+        // trace of the Stop. An abort is not a failure, so it neither retries
+        // nor produces an error row; other local errors stay terminal below.
+        const localError = readLocalRequestErrorDetails(message);
+        const aborted =
+          stopReason === "aborted" || localError?.causeName === "AbortError";
+        if (aborted) this.turnAborted = true;
+        const failed = !aborted && stopReason === "error";
         let classifiedError: ReturnType<typeof classifyAgentError> | undefined;
         let retryAttempt: number | undefined;
         if (failed) {
-          const raw =
-            typeof (message as { errorMessage?: unknown }).errorMessage === "string"
-              ? ((message as { errorMessage?: string }).errorMessage as string)
-              : "provider stream failed";
-          classifiedError = classifyProviderError(raw, this.retryState.status);
-          retryAttempt = this.claimProviderRetry(classifiedError, "stream");
-          if (retryAttempt !== undefined) {
-            this.pendingProviderRetry = classifiedError;
+          const overflow = this.pendingContextOverflow;
+          this.pendingContextOverflow = undefined;
+          if (overflow) {
+            // The boundary guard threw after degradation still did not fit.
+            // The synthetic failure message carries the thrown text; keep the
+            // actionable code instead of classifying it as a provider error.
+            this.streamError = overflow;
           } else {
-            this.streamError = {
-              code: classifiedError.code,
-              message: classifiedError.message,
-            };
+            classifiedError = withProviderFetchFailure(
+              classifyProviderError(message, this.retryState.status),
+              this.retryState.failure,
+            );
+            retryAttempt = classifiedError.details?.origin === "local"
+              ? undefined : this.claimProviderRetry(classifiedError, "stream");
+            if (retryAttempt !== undefined) {
+              this.pendingProviderRetry = classifiedError;
+            } else {
+              this.streamError = classifiedError.details?.origin === "local"
+                ? classifiedError
+                : { code: classifiedError.code, message: classifiedError.message };
+            }
           }
+        }
+        if (!failed && !aborted) {
+          this.providerTransientRetryAttempt = 0;
+          this.providerRateLimitRetryAttempt = 0;
         }
         const messageUsage = usageFromPi(message.usage);
         this.usage = addUsage(this.usage, messageUsage);
@@ -620,9 +800,12 @@ export class SubagentRun {
           ...(content.hasThinking && content.thinking
             ? { thinking: content.thinking }
             : {}),
-          status: failed ? "error" : stopReason === "aborted" ? "aborted" : "complete",
+          status: failed ? "error" : aborted ? "aborted" : "complete",
           ...(messageUsage ? { usage: messageUsage } : {}),
           ...(failed ? { isError: true } : {}),
+          ...(classifiedError?.details?.origin === "local" ||
+              isCertificateVerificationError(classifiedError?.details?.networkCode)
+            ? { error: classifiedError } : {}),
         };
         this.currentAssistant = undefined;
         this.emit({ type: "message_end", message: row });

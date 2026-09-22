@@ -8,12 +8,17 @@
  * "error") and the rejected-promise paths.
  */
 
+import { isCertificateVerificationError } from "@pi-desktop/shared";
+import { readLocalRequestErrorDetails } from "./local-request-errors.js";
+
 export type ClassifiedAgentError = {
   code: string;
   message: string;
   retriable: boolean;
   /** Safe, low-cardinality diagnostics for logs and the error details panel. */
   details?: Record<string, unknown>;
+  /** Local-only original failure; non-enumerable so UI/JSON never receives it. */
+  cause?: unknown;
 };
 
 /** Keep envelopes/persisted rows small; provider bodies can be huge. */
@@ -170,6 +175,7 @@ const NETWORK_CATEGORY_PATTERNS: ReadonlyArray<
 function networkCategoryForCode(
   code: string,
 ): NetworkFailureCategory | undefined {
+  if (isCertificateVerificationError(code)) return "tls";
   for (const [pattern, category] of NETWORK_CATEGORY_PATTERNS) {
     if (pattern.test(code)) return category;
   }
@@ -177,14 +183,15 @@ function networkCategoryForCode(
 }
 
 /**
- * Pick the errno worth reporting and its category. A code naming the proxy wins
- * wherever it sits in the chain, because that is the layer that actually failed
- * — undici reports the proxy's own socket errno as a deeper cause.
+ * A concrete certificate rejection wins over a generic socket/proxy wrapper:
+ * retrying cannot repair trust. Otherwise prefer the proxy layer's own code.
  */
 function pickNetworkCode(codes: readonly string[]): {
   code?: string;
   category?: NetworkFailureCategory;
 } {
+  const certificate = codes.find(isCertificateVerificationError);
+  if (certificate) return { code: certificate, category: "tls" };
   for (const candidate of codes) {
     if (networkCategoryForCode(candidate) === "proxy") {
       return { code: candidate, category: "proxy" };
@@ -292,10 +299,12 @@ export function describeNetworkFailure(
   // errno (bounded, errno-shaped) before it can be reported; the object chain
   // above is probed first and its codes are kept.
   for (const match of message.matchAll(
-    /\b(?:E[A-Z]{3,}|UND_ERR_[A-Z_]+|ERR_[A-Z0-9_]+|HPE_[A-Z_]+)\b/g,
+    /\b[A-Z][A-Z0-9_]{2,63}\b/g,
   )) {
     if (codes.length >= 16) break;
-    if (SAFE_NETWORK_CODE_PATTERN.test(match[0])) codes.push(match[0]);
+    if (networkCategoryForCode(match[0]) !== undefined || NETWORK_PATTERN.test(match[0])) {
+      codes.push(match[0]);
+    }
   }
   if (hostname === undefined) {
     const dnsHost = message.match(
@@ -336,13 +345,45 @@ export function networkFailureDiagnostics(
 }
 
 export function classifyAgentError(err: unknown): ClassifiedAgentError {
+  const envelope = err !== null && typeof err === "object"
+    ? err as Record<string, unknown> : undefined;
+  const local = readLocalRequestErrorDetails(err);
+  // Cancellation outranks local diagnostics: pi-ai wraps a synchronous AbortError
+  // that fired before `signal.aborted` flipped in a LocalRequestError, whose own
+  // name says nothing about it, so the marker's preserved cause name is the only
+  // trace of the user's Stop — the same field the runtime reads off a settled
+  // message.
+  const explicitlyAborted =
+    (err instanceof Error && err.name === "AbortError") ||
+    envelope?.stopReason === "aborted" ||
+    local?.causeName === "AbortError";
+  if (local && !explicitlyAborted) {
+    // Local preparation cannot be repaired by provider retries. Keep the
+    // original chain in-process, but never copy its payload/message/stack to UI.
+    const classified: ClassifiedAgentError = {
+      code: "INTERNAL",
+      message: local.message,
+      retriable: false,
+      details: {
+        origin: "local",
+        phase: local.phase,
+        ...(local.causeName ? { causeName: local.causeName } : {}),
+      },
+    };
+    return Object.defineProperty(classified, "cause", { value: err });
+  }
   const rawMessage =
     typeof err === "string"
       ? err
       : err instanceof Error
         ? err.message
-        : String(err);
-  const safeMessage = redactSensitiveErrorText(rawMessage);
+        : typeof envelope?.errorMessage === "string"
+          ? envelope.errorMessage
+          : envelope?.role === "assistant"
+            ? "provider stream failed"
+            : String(err);
+  const safeMessage = local && explicitlyAborted
+    ? "Request aborted" : redactSensitiveErrorText(rawMessage);
   const message =
     safeMessage.length > MAX_ERROR_MESSAGE_CHARS
       ? `${safeMessage.slice(0, MAX_ERROR_MESSAGE_CHARS)}…`
@@ -381,7 +422,7 @@ export function classifyAgentError(err: unknown): ClassifiedAgentError {
   // while a checkpoint is being summarized fails the compaction with an abort
   // cause, and that turn must read as stopped, not as a compaction failure.
   if (
-    (err instanceof Error && err.name === "AbortError") ||
+    explicitlyAborted ||
     /\babort/i.test(rawMessage)
   ) {
     return result("TURN_ABORTED", false);
@@ -393,11 +434,13 @@ export function classifyAgentError(err: unknown): ClassifiedAgentError {
   // "fetch failed" causes don't fall through to the generic bucket. The cause
   // chain is summarized as a coarse category plus the transport errno, so the
   // failing layer is identifiable without a user-visible code per layer.
-  if (hasNetworkCause(err, rawMessage)) {
+  const network = describeNetworkFailure(err, rawMessage);
+  const certificateFailure = isCertificateVerificationError(network.code);
+  if (hasNetworkCause(err, rawMessage) || (status === undefined && certificateFailure)) {
     return result(
       "NETWORK_ERROR",
-      true,
-      networkDetailFields(describeNetworkFailure(err, rawMessage)),
+      !certificateFailure,
+      networkDetailFields(network),
     );
   }
 

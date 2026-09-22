@@ -9,6 +9,13 @@
 
 ---
 
+### E2E-IMAGES-deselect-default
+
+- **前提：** 只有一个服务商、一个模型，且该模型已标记为生图模型。
+- **步骤：** 在服务商编辑器取消生图勾选，先取消编辑，再重新操作并保存；重新打开设置和编辑器，选择该模型作为默认对话模型。
+- **预期：** 取消编辑保留原绑定；保存清除候选和默认生图绑定。重新打开后摘要行隐藏、复选框未勾选，模型恢复为可选对话模型。
+- **覆盖：** `scripts/e2e-image-generation-ui.mjs` 使用 API 边界 fixture 验证英文与中文交互；不代表真实服务商测试。
+
 ## 1. 目标
 
 - 记录 MVP 必须验证的每个用户可见和协议可见的行为。
@@ -97,7 +104,13 @@ unit/integration 测试；代码 pull request 使用有选择且高价值的 E2E
 
 ## E2E PR 合入门
 
-每个代码 pull request 都必须在合入前通过与其回归面相关的 E2E。代码变更包括渲染器、Electron Main、Preload、Agent Runtime、Rust host-core、会话、转录、计划、插件、MCP、权限、供应商/模型运行时、持久化、进程生命周期、打包/启动，以及影响应用执行的构建或 CI 行为。仅文档更改在不影响可执行行为时可豁免。
+每个代码 pull request 都必须在打开或更新前，在已经包含最新 `origin/main` 的候选上通过与其回归面相关的 E2E（`pnpm check:pr-base`）。不得打开落后于 `origin/main` 的 PR。不要为了跑 E2E 把任务合进本地 `main`。代码变更包括渲染器、Electron Main、Preload、Agent Runtime、Rust host-core、会话、转录、计划、插件、MCP、权限、供应商/模型运行时、持久化、进程生命周期、打包/启动，以及影响应用执行的构建或 CI 行为。仅文档更改在不影响可执行行为时可豁免。
+
+### E2E 环境复用
+
+task-candidate E2E 从请求工作树运行，但使用主工作区已经准备好的宿主开发环境。必要时通过引用或链接复用兼容的 Node/pnpm 工具链、`node_modules`、Electron、Rust/Cargo 目标、包存储、构建缓存和忽略的配置。
+
+不得为了 E2E 单独运行 `pnpm install`、`npm install`，或创建第二套依赖/运行时环境。只隔离可变测试状态：临时 profile、数据目录、socket、端口、日志和工件。仅当宿主环境缺失或不兼容时才安装或重建依赖，并记录原因；干净的 CI 和发布 runner 可以按 lockfile 安装。
 
 根目录 `package.json` 是可执行命令的事实来源。最低选择如下：
 
@@ -239,6 +252,26 @@ unit/integration 测试；代码 pull request 使用有选择且高价值的 E2E
 - **里程碑**：M2
 - **状态**：自动（协议烟雾：提供商创建+秘密，无明文回显）
 
+#### E2E-PROVIDER-defaults-survive-an-added-provider：新增提供商不改写应用默认值
+
+- **前提条件**：应用运行；提供商 A 已保存并设为应用默认模型；另有提供商 B 提供不同的模型；A 上配置了一个图片模型，另一家服务上也配置了一个。
+- **步骤**：1) 打开设置 → 模型配置，新增提供商 B，保存时不动「默认模型」行。2) 确认「默认模型」行仍是提供商 A 与其确切模型，且新建会话使用它。3) 将某个图片模型设为默认画图模型，再新增一个同样提供图片模型的服务并保存。4) 确认「默认画图模型」行仍指向原绑定，而选择器的候选里出现新提供商的图片模型。5) 删除拥有默认值的那家提供商，再新增一个既提供对话模型又提供图片模型的服务并保存。6) 确认两个默认值此时都解析到新增的服务。
+- **预期**：新增提供商保存后不会改写仍然可解析的应用默认值：默认模型保留「默认模型」行已经展示的那对提供商/模型，默认画图模型保留其存储绑定，同时候选列表继续增长。只有已无法解析的默认值（提供商被删除，或其模型已从提供商移除）才会由新增的提供商填补，因此只有在应用否则将无从运行时才会写入设置。显式的「设为默认」操作、编辑路径，以及回落到首个剩余绑定的行为都不变。
+- **链接规格**：`03-runtime/13-model-catalog-and-selection.md`
+- **接受**：B（模型选择）
+- **里程碑**：M6
+- **状态**：已文档化；由 `apps/desktop/test/default-model-display.test.mjs`、`apps/desktop/test/image-generation-default.test.mjs`、`apps/desktop/test/provider-model-config.test.mjs` 覆盖
+
+#### E2E-PROVIDER-custom-model-limits：手输的自定义模型 id 从模型库取限额
+
+- **前提条件**：应用运行；models.dev 快照随构建发布；已打开某个提供商编辑器。
+- **步骤**：1) 在「添加模型」输入框里输入模型库已发布的模型 id 并添加，确认新行的上下文长度、最大输出与思考等级与已发布记录一致，而不是 128,000 / 8,192 且无思考等级。2) 输入模型库未发布的 id 并添加，确认该行沿用通用种子 128,000 / 8,192 且无思考等级。3) 在服务模型列表不可用的状态下添加一个 id，确认该行仍然只出现一次且可编辑。4) 添加一个 id 后立刻修改其限额（此时查询尚未返回），确认手输的值被保留。
+- **预期**：`providers.lookupModel` 只从本地快照回答手输 id —— 不访问提供商网络、不调用主机 —— 命中时按「被勾选的模型」同样的口径播种绑定（已发布的上下文长度、最大输出、思考等级，`contextWindowSource: "catalog"`），而存储的 id 保持用户输入的原样。未命中、调用失败，或该 id 已被本次发现结果描述过时，行为与之前一致：一行可用，通用种子，列表既不卡住也不重复。
+- **链接规格**：`03-runtime/12-provider-config-schema.md`、`03-runtime/13-model-catalog-and-selection.md`
+- **接受**：B（多模型提供商配置）
+- **里程碑**：M2
+- **状态**：已文档化；由 `apps/desktop/test/model-custom-lookup.test.mjs` 与 `apps/desktop/test/provider-lookup-model-handler.test.mjs` 覆盖
+
 #### E2E-005H：从较长的服务模型列表一次全选当前可见模型
 
 - **前提条件**：应用已运行；添加或编辑服务（或厂商账户）对话框已打开，且该服务返回较长的模型列表，其中至少有一个模型 ID 不会匹配稍后的搜索。
@@ -350,8 +383,9 @@ unit/integration 测试；代码 pull request 使用有选择且高价值的 E2E
 - **先决条件**：已配置提供商。
 - **步骤**：1) 创建新会话。 2) 输入消息。 3）发送。
 - **预期**：转录结果立即显示紧凑的本地化 `Working…`
-  发送后、第一个助手或工具事件之前的状态。它产生
-  具体的 thinking/tool/answer 反馈，并在回合结束时消失。
+  发送后、第一个助手或工具事件之前的状态。思考、工具和回答出现后
+  仍保留提示，已知具体阶段时显示对应等待状态。等待用户操作时隐藏，
+  回合结束时消失。
 - **链接规格**：`03-runtime/02-agent-runtime.md`、`03-runtime/10-session-state-machine.md`
 - **接受**：C（新会话，发送消息）
 - **里程碑**：M2
@@ -615,8 +649,9 @@ unit/integration 测试；代码 pull request 使用有选择且高价值的 E2E
 - **预期**：在聊天路径上，对话顶部栏仅显示标题和操作；
   它没有模型或 Agent|Plan|Goal 模式控制。左侧输入 Composer 芯片拥有
   活动会话的 Agent/Plan/Goal 开关，Composer 右侧组合芯片拥有模型和推理选择。的
-  任务标题是唯一可见的标题文本，最多 10 个字符
-  带有省略号；项目范围可通过其工具提示获得。紧凑型
+  任务标题是唯一可见的标题文本，使用可用宽度，仅在溢出时显示省略号。
+  在宽窄布局、侧边栏展开/折叠及工作面板打开/关闭时，检查超过 10 个字符的
+  英文标题，确保标题不会覆盖操作按钮。完整标题和项目范围可通过工具提示获得。紧凑型
   运行时出现状态点。侧边栏
   切换仅在折叠状态下存在（没有
   侧边栏控件的重复）。在所有其他路线上均采用无框拖曳
@@ -1001,8 +1036,8 @@ unit/integration 测试；代码 pull request 使用有选择且高价值的 E2E
 #### E2E-038：设置拥有项目存档目标
 
 - **先决条件**：应用程序运行时至少有一个已配置的提供程序、一个受支持的本地会话存储、一个保留的项目和一个存档的项目。
-- **步骤**：1) 打开设置。 2) 检查完整的设置导轨。 3) 打开Basics 并使用可搜索主题选择器更改其外观卡中的主题。 4) 打开全局 AI 并检查权限和默认项卡，包括命令 Shell 行；确认上下文管理没有设置卡。 5) 打开快捷方式并检查键盘快捷方式卡。 6) 打开指令并保存全局指令。 7) 打开模型配置并检查提供商工作室。 8) 按顺序打开“导入”、“项目存档”和“信息”。 9) 搜索设置“项目”或“存档”。 10) 在项目存档中，将每个分组条的计数与其呈现的行进行比较。 11) 将排序控件从“最近”切换到“名称”。 12) 搜索已知的会话标题，检查其展开的项目行，然后显示八个以上的会话；通过清晰的功能来清除搜索。 13) 打开行菜单，使用 Escape 并按下外部按钮将其关闭。 14) 恢复存档的项目，然后激活它。 15) 返回应用程序外壳并打开插件。
-- **预期**：该导轨按顺序包含基础知识、全局 AI/AI、快捷方式、说明、模型配置、导入、项目存档和信息，每个都有其语义 Lucide 图标（滑块/火花/键盘/文件文本/机器人/下载/存档/信息）；行按四个柔和的非交互标题分组：Personal / 个人包含基础知识、全局 AI 和快捷键，Agent / 智能体包含说明和模型配置，Workspace / 工作区包含导入和项目存档，About / 关于包含信息；分组之间使用留白而不是分割线，搜索保持目的地结果扁平，并将空分组及其标题一起隐藏。外观保留在基础下，权限、默认项和命令 Shell 行位于全局 AI 下；可用的已选 Shell 由选择器表示，不重复显示“已配置”状态；默认、回退和无实际 Shell 状态仍明确展示；上下文管理没有设置卡；键盘快捷键和全局指令都有自己的目的地；开发者生活在 Info 下；项目存档显示活动、关闭和存档的持久行，无需可见性切换，将它们分组在一个面板内始终可见的固定/所有项目/存档分组条 (D168/D267) 下，并带有每个部分的计数。该目的地不呈现英雄区块，也没有页面级计数器串：引导区是一条安静的说明行，每个分组条的计数与其呈现的行一致；按名称排序会重新排序每个部分内的行，而不隐藏任何行；搜索匹配项目字段和会话标题并报告匹配计数，会话标题结果扩展其所属项目，按最新活动和相对更新时间列出会话，并以八个批次显示历史记录；清除搜索将恢复完整索引。行菜单在 Escape 和外部按下时关闭。恢复使存档保持打开状态，激活返回以与侧栏中保留的恢复项目聊天；主页侧边栏和全局页面结果没有独立的项目目标；设置搜索找到项目存档；插件仍然是一个独立的应用程序外壳目的地。
+- **步骤**：1) 打开设置。 2) 检查完整的设置导轨。 3) 打开Basics 并使用可搜索主题选择器更改其外观卡中的主题。 4) 打开全局 AI 并检查权限和默认项卡，包括命令 Shell 行；确认上下文管理没有设置卡。 5) 打开快捷方式并检查键盘快捷方式卡。 6) 打开指令并保存全局指令。 7) 打开模型配置并检查提供商工作室。 8) 按顺序打开“导入”、“项目存档”和“信息”。 9) 搜索设置“项目”或“存档”。 10) 在项目存档中，将每个分组条的计数与其呈现的行进行比较。 11) 将排序控件从“最近”切换到“名称”。 12) 搜索已知的会话标题，检查其展开的项目行，然后显示八个以上的会话；通过清晰的功能来清除搜索。 13) 打开行菜单，使用 Escape 并按下外部按钮将其关闭。 14) 恢复存档的项目，然后激活它。 15) 归档一个项目会话，从项目归档中打开它，然后返回项目归档。 16) 返回应用程序外壳并打开插件。
+- **预期**：该导轨按顺序包含基础知识、全局 AI/AI、快捷方式、说明、模型配置、导入、项目存档和信息，每个都有其语义 Lucide 图标（滑块/火花/键盘/文件文本/机器人/下载/存档/信息）；行按四个柔和的非交互标题分组：Personal / 个人包含基础知识、全局 AI 和快捷键，Agent / 智能体包含说明和模型配置，Workspace / 工作区包含导入和项目存档，About / 关于包含信息；分组之间使用留白而不是分割线，搜索保持目的地结果扁平，并将空分组及其标题一起隐藏。外观保留在基础下，权限、默认项和命令 Shell 行位于全局 AI 下；可用的已选 Shell 由选择器表示，不重复显示“已配置”状态；默认、回退和无实际 Shell 状态仍明确展示；上下文管理没有设置卡；键盘快捷键和全局指令都有自己的目的地；开发者生活在 Info 下；项目存档显示活动、关闭和存档的持久行，无需可见性切换，将它们分组在一个面板内始终可见的固定/所有项目/存档分组条 (D168/D267) 下，并带有每个部分的计数。该目的地不呈现英雄区块，也没有页面级计数器串：引导区是一条安静的说明行，每个分组条的计数与其呈现的行一致；按名称排序会重新排序每个部分内的行，而不隐藏任何行；搜索匹配项目字段和会话标题并报告匹配计数，会话标题结果扩展其所属项目，按最新活动和相对更新时间列出会话，并以八个批次显示历史记录；清除搜索将恢复完整索引。行菜单在 Escape 和外部按下时关闭。恢复使存档保持打开状态，激活返回以与侧栏中保留的恢复项目聊天。打开归档会话时，应用会先成功选择该会话，再清除它的归档状态；聊天页选中该会话，项目侧边栏重新显示它，返回项目归档后它也不再处于归档状态。主页侧边栏和全局页面结果没有独立的项目目标；设置搜索找到项目存档；插件仍然是一个独立的应用程序外壳目的地。
 - **链接规格**：`04-ux/06-settings-ia.md`、`04-ux/01-ui-ia.md`、`03-runtime/11-provider-model-system.md`
 - **接受**：B（模型配置），F（会话导入）
 - **里程碑**：M4
@@ -1060,31 +1095,31 @@ unit/integration 测试；代码 pull request 使用有选择且高价值的 E2E
 - **里程碑**：M5
 - **状态**：单位覆盖（`settings-responsive-layout.test.mjs`）；场景已记录
 
-#### E2E-040：Codex 风格的工具活动在转录本重新加载后仍然存在
-- **先决条件**：已配置提供商；项目开放；一个会话可以运行一个
-  成功的工具和失败或中止的工具。
-- **步骤**：1) 运行代表性读取、搜索和命令工具。 2) 检查
-  处于活动状态时折叠的处理标头。 3）等待完成
-  并扩大加工组。 4) 展开已完成的行并复制其
-  输出。 5) 单击展开行旁边的垂直线，然后单击键盘焦点
-  并激活处理组的垂直规则。 6) 重新加载会话并
-  展开恢复的组。
-- **预期**：连续调用默认折叠在一个本地化版本下
-  处理标头更新然后冻结其经过的时间并显示
-  步数。扩展调用使用透明语义活动行
-  动作图标、自然语言动词、等宽主要参数和安静
-  披露。处理组使用完整的辅助列宽度，因此
-  短标签或有效负载不会将扩展的细节缩小为内容大小
-  芯片。每个扩展内容垂直规则都是一个指针并且可通过键盘聚焦
-  对其自身披露的崩溃控制。嵌套扩展显示输出
-  在夹紧滚动区域中的原始输入之前。实时部分输出更新
-  地方。重新加载的行保留工具名称、参数、结果和状态。
-- **链接规格**：`04-ux/01-ui-ia.md`，
-  `04-ux/07-ui-design-system.md`、`04-ux/08-component-spec.md`、
-  `04-ux/09-interaction-patterns.md`
-- **接受**：C（聊天流）、E（工具）、F（持久性）
+#### E2E-040：嵌套工具活动在转录重新加载后仍然存在
+- **先决条件**：已配置提供商并打开项目；回合可以包含进度文字、多个搜索／工具／思考
+  条目，以及失败或被拒工具。
+- **步骤**：1) 在详细模式流式输出进度段落 A、多项搜索片段、进度段落 B 和多项命令
+  片段。2) 检查已展开的整体过程和活动组；在更多输出到达时手动收起活动组。3) 完成
+  回合并比较未操作与用户接管的组。4) 展开一个已完成组和其中一个条目，复制输出，
+  收起并重新展开该组，再独立打开同级组。5) 分别检查单项片段，以及最后一个活动组的
+  字面最后一项为工具／搜索、思考、失败工具和被拒工具。6) 切换到紧凑模式，检查活动
+  思考、失败后恢复及完成状态。7) 在保留窗格内重新挂载行，然后重载渲染器并重新打开
+  会话。
+- **预期**：两种模式都使用一个整体过程披露，末尾回答位于其外。详细模式的活动中和
+  已完成过程默认展开；活动多项组展开，并且只在用户未操作时于完成后收起。紧凑模式
+  的过程、组和所有载荷默认收起，推理正文隐藏；记录过失败／被拒工具的未操作活动过程
+  会在后续恢复期间保持展开。单项没有组包装。详细模式只在最后一个活动组的字面最后
+  一项是符合条件的工具／搜索时自动展开载荷；不会越过思考向前查找，失败／被拒保护会
+  保持叶子关闭。父级、子级和同级选择彼此独立；收起并重新展开父级会保留下级状态，
+  流式更新和完成不会覆盖用户接管的选择。保留窗格中的重新挂载保留选择；渲染器重启
+  重新应用默认值，但工具名称、参数、结果和状态仍会恢复。组／过程标题显示有界运行和
+  问题摘要，不会把整个回合标记为失败。
+- **链接规格**：`04-ux/01-ui-ia.md`、`04-ux/07-ui-design-system.md`、
+  `04-ux/08-component-spec.md`、`04-ux/09-interaction-patterns.md`
+- **验收**：C（聊天流）、E（工具）、F（持久性）
 - **里程碑**：M3
-- **状态**：草案
+- **状态**：草案。2026-09-20 的嵌套披露变更仅把本场景作为静态源码／设计审查的
+  预期行为；该范围不新增或运行单元、组件、集成、浏览器、Electron 或 E2E 测试。
 
 #### E2E-041：对话小地图导航长记录
 
@@ -1212,6 +1247,8 @@ unit/integration 测试；代码 pull request 使用有选择且高价值的 E2E
 - **规格链接**：`07-plugins/07-plugin-marketplace.md`
 - **接受**：G（市场详细信息用户体验）
 - **状态**：已记录
+
+- **焦点回归**：在浅色和深色主题下打开市场卡片，再按 Escape。与鼠标关闭一样，Escape 关闭后卡片不残留横线或焦点框。再用 Tab 和 Shift+Tab 导航：详情按钮显示完整、未裁剪的焦点框，安装按钮仍可单独获得焦点。 自动化焦点状态回归：`node scripts/e2e-plugin-detail-focus.mjs`；焦点框外观需进行视觉验证。
 
 #### E2E-024W：插件剪贴板历史捕获有界的文本和图片
 
@@ -1787,6 +1824,10 @@ hover/focus 不带移位标签，项目标题 hover/focus 路径显示
 - **步骤**：1) 打开侧边栏项目溢出菜单并选择“编辑项目”。2) 修改名称，移除
   附加文件夹，再通过原生文件夹选择器将其添加回来。3) 确认 Primary 行不能移除。
   4) 保存并检查侧边栏、项目存档中的根目录和当前工作区。5) 重启应用并再次检查项目组。
+- **后台更新回归**：从设置打开编辑项目，修改名称并移除附加文件夹，然后在保存前
+  完成一个后台任务。两项草稿修改必须保留，并一起保存。隔离渲染测试为
+  `node scripts/e2e-project-edit.mjs`；使用真实页面和 store，仅控制 host IPC 边界，
+  不代表已验证磁盘持久化。
 - **预期**：两个项目菜单都提供编辑项目；编辑器保持焦点、去除首尾空格并限制为
   80 个 Unicode 字符，Primary 文件夹始终是第一行，根目录数量更新且不会误删其他行。
   保存后仍是一个逻辑项目组，调整后的根目录会持久化；名称在重启后保留，规范化
@@ -1851,7 +1892,7 @@ hover/focus 不带移位标签，项目标题 hover/focus 路径显示
 #### E2E-050：Composer 模型 × 推理菜单遵循精确能力
 
 - **先决条件**：一种编目推理模型、一种非推理模型，以及一个未知的自由格式模型 ID。
-- **步骤**：1) 打开 Composer 模型 × 推理芯片。2) 确认根层包含带当前值的模型和推理等级条目，以及推理等级条目正下方每个支持等级一个刻度的滑杆。3) 拖动并点击滑杆跨过多档，再点击一个刻度标签，确认芯片更新且菜单留在根层。4) 打开模型，搜索并从一个提供商分组选择模型；确认菜单仍在根层打开。5) 打开推理等级并从单选列表选择一档。6) 对非推理提供商和未知自由格式模型 ID 重复；练习 Escape、外部点击、上/下、Enter、左方向键和滑杆方向键。
+- **步骤**：1) 打开 Composer 模型 × 推理芯片。2) 确认根层包含带当前值的模型和推理等级条目，以及推理等级条目正下方轨道上每个支持等级一个刻度点的滑杆；确认每个等级在轨道下方都保留可见标签、各自对齐到自己的刻度点。3) 拖动并点击滑杆跨过多档，再点击一个刻度标签，确认芯片更新且菜单留在根层、选中档的刻度点位于滑块正下方。4) 打开模型，搜索并从一个提供商分组选择模型；确认菜单仍在根层打开。5) 打开推理等级并从单选列表选择一档。6) 对非推理提供商和未知自由格式模型 ID 重复；练习 Escape、外部点击、上/下、Enter、左方向键和滑杆方向键。
 - **预期**：芯片在右侧工具栏，带 Bot 图标，位于独立提示词增强 Sparkles 动作和发送/中止之前；Off 省略等级文本。单个锚定菜单把根层原地替换成返回行和子菜单，从不打开标签页或第二个弹出层，再打开总是从根层开始。模型搜索过滤粘性提供商分组；推理等级来自 `omit` 然后绑定已启用档位的规范顺序。当列出一个以上等级时，根层在推理等级条目正下方承载拖动滑杆（单档绑定隐藏滑杆）。拖过多个刻度只持久化最后一次待提交的档位；刻度标签不是 Tab 停靠点。滑杆和刻度提交立即更新芯片且菜单留在根层。推理等级条目打开单选列表，使用单选语义、末尾勾选和当前模型支持说明。选择任一值立即更新芯片和根层值、清除模型过滤并保持菜单打开。非推理或未知模型从 `off` 开始，但显式 Settings 绑定可以提供其配置档位；发现不会自动提升。刷新发现的模型数据不能覆盖绑定。第一条消息创建会话之前，Composer 使用模型菜单里选中的精确模型而不是提供商默认模型；物化后仍保持同一精确模型能力。
 - **链接规格**：`03-runtime/11-provider-model-system.md`，
   `03-runtime/12-provider-config-schema.md`，
@@ -2146,6 +2187,34 @@ MainChat 弥补了缺口。 Maximized/fullscreen 调用保留最新的
 - **里程碑**：M5
 - **状态**：草案（手动）
 
+#### E2E-BROWSER-session-preview-race：切换会话不显示过期预览
+
+- **前置条件**：两个会话具有不同 HTML 预览，浏览器面板上下文分别保留。夹具可以独立
+  延迟目录查询和文档加载。
+- **步骤**：预览 A，在后台生成 B 的预览；折叠 A 的面板后打开 B，延迟 B 的目录查询和
+  加载，然后切回 A。快速切换 B → C，最后才完成旧 B 的目录查询。再分别验证已经开始的
+  旧加载、空会话、加载失败和 guest 销毁。
+- **预期**：后台 B 不导航 A。切换后，B 的面板不显示 A 的文档，后续尺寸与可见性更新
+  也不能显示它。只有最新导航可以显示 guest，旧 B 查询迟到不能覆盖 C。切回 A 恢复 A，
+  空会话保持空白。迟到完成不能撤销关闭或销毁。同会话正常导航保留当前页面。
+  非法目标、失败或超时不能把上一个文档报告为目标会话已经就绪。切换导航超过既有
+  15 秒等待上限后保持隐藏，需重试，不承诺迟到完成自动显示。
+- **关联规范**：`04-ux/08-component-spec.md` §5.3；ADR 0028、ADR 0170。
+- **状态**：`browser-host-session.test.mjs` 与 `browser-pane-navigation.test.mjs`
+  覆盖生产 BrowserHost/BrowserPane 服务路径，控制原生浏览器与 Host 边界，采用确定性
+  时钟。尚不覆盖原生 Electron 合成显示或报告者的真实会话。
+
+#### E2E-BROWSER-in-page-navigation：浏览器工具栏跟随同文档导航
+
+- **前置条件**：启用 Browser 插件；本地网页包含锚点链接及 History API 路由控件。
+- **步骤**：打开网页；点击锚点链接；通过 `history.pushState` 切换路由；
+  使用后退、前进和刷新。切换至另一会话，检查旧页面的迟到事件不能更新新预览。
+- **预期**：地址与主文档 URL 一致，历史按钮状态正确；加载结束后恢复刷新按钮。
+  子框架、已替换框架及失效会话的事件不能改变工具栏。
+- **覆盖**：`browser-pane-navigation.test.mjs` 验证状态发布与事件隔离；
+  原生 Electron 操作验证真实同文档导航事件。
+- **关联规范**：`04-ux/08-component-spec.md` §5.3。
+
 #### E2E-060：文件选项卡浏览停留在工作区中
 
 - **先决条件**：具有嵌套源文件工件的工作区，大型
@@ -2195,7 +2264,7 @@ MainChat 弥补了缺口。 Maximized/fullscreen 调用保留最新的
 #### E2E-CHAT-transcript-context-menu：右键消息或记录
 
 - **前提条件**：会话中有一条完成的用户提示和一条完成的助手回答；对话面板已聚焦。
-- **步骤**：1）右键用户板。2）选择复制，再选择选中消息文本。3）在用户板里选中一段文字，再右键该板并选择复制；收起选区后再右键复制一次。4）右键助手回合并选择复制。5）右键最后一回合下方空白处，选择复制整个对话。6）在打开的菜单上按 Escape，再按 Tab。7）右键回答里的 markdown 链接。
+- **步骤**：1）右键用户板。2）选择复制，再选择选中消息文本。3）在用户板里选中一段文字，再右键该板并选择复制；收起选区后再右键复制一次。4）右键助手回合并选择复制。5）右键最后一回合下方空白处，选择复制整个对话。6）在打开的菜单上按 Escape，再按 Tab。7）右键回答里的 markdown 链接。8）编辑用户消息、替换内容、选中一段草稿并右键复制；再验证无选区复制、选中消息文本和取消编辑后的复制。
 - **预期**：用户菜单列出复制、选中消息文本、编辑，以及分隔后的删除；助手菜单列出复制、选中消息文本、重新生成和分叉。复制写入打开菜单时该行内的选中文本；光标折叠或选区在行外时退回整段。复制整个对话仍写入带说话人标签的整段对话。两者都显示 toast。选中文本会高亮气泡。Escape 和 Tab 关闭菜单且不执行项。链接仍提供在默认浏览器打开、在工作面板打开、复制链接地址。引用、批注、打开侧边聊天不出现（ADR 0268）。表面是视口固定的文档级层，不会改变记录高度。
 - **链接规格**：`04-ux/08-component-spec.md` §8.3 / §8.5，
   `04-ux/09-interaction-patterns.md`（浮动下拉表面），
@@ -2205,6 +2274,36 @@ MainChat 弥补了缺口。 Maximized/fullscreen 调用保留最新的
 - **状态**：单位覆盖（`chat-context-menu.test.mjs`、
   `chat-context-menu-items.test.mjs`、`chat-context-menu-surface.test.mjs`）；
   完整 UI 场景草稿
+
+- **完整历史回归**：打开包含 140 条消息的会话，不向上翻页，选择复制整个对话；剪贴板必须包含第 1–140 条消息。从搜索上下文窗口和长消息截断预览重复验证。保留当前可见的生成中文字；读取失败时提示错误，剪贴板保持不变。仅在选择复制后读取完整历史，不改变阅读位置。运行 `node scripts/e2e-copy-conversation.mjs`。
+- 编辑时复制应使用草稿选区，无选区时复制整份草稿；选中消息文本应选中草稿。菜单不提供编辑、删除或版本切换；取消后原消息及其菜单保持不变。自动化验证：`node scripts/e2e-message-edit-copy.mjs`。
+
+#### E2E-CHAT-copy-formula-as-tex：复制渲染后的公式得到源码
+
+复制之后公式的边界仍然可解析：相邻的行内围栏之间补一个分隔符；正文里的每个美元
+符号都会被转义，本会把围栏转义掉的反斜杠串同理。annotation 里的空白原样保留；
+加宽过的多行行内公式用一个字面的 `<span>` 包住，以免它粘在行首时开出块级公式。
+TeX 里的换行不做压平，因为它可能用来终止 `%` 注释。这个包裹是 `text/plain` 里的
+Markdown 源码，不是 `text/html` 负载；对禁用行内 HTML 的外部编辑器不作兼容承诺。
+回归覆盖两个复制入口，以及相邻公式、围栏两侧的正文美元符号、格式化包装、行与块
+的边界、补白，以及含 TeX 注释的多行公式各自的 Markdown 往返。
+含 `- x`、`+ x`、`* x`、`> x` 或内部空行的块级公式，复制之后必须仍是同一个公式
+节点。共享的 remark 语法把尚未闭合的公式留在流式尾块里直到围栏闭合，其后的正文
+及其源码偏移保持不变。脚注定义出现在引用之后——紧随其后，或稍后才流式到达——会
+渲染成真正的引用与脚注区，而不是字面的 `[^1]`；这正是把切片脱离整条消息单独解析
+时，按块切分要付的代价。CRLF、普通列表、引用块、GFM 表格、围栏代码，以及那些
+必须继续切分的源文，由 `markdown-blocks.test.mjs` 覆盖。
+
+
+- **前提条件**：助手回答里既有句中的行内公式，也有独占若干行的块级公式，还有句中的 `\[ … \]` 公式与独占若干行的 `\[ … \]` 公式、一个 `\( … \)` 公式、一个含字面 `$` 的公式、一个值里带换行的行内公式与另一个值的两端各带一个换行的行内公式，以及一段不含公式的正文；另有与公式同处一个选区的：源码跨多行折行的段落、无序列表、表格、一个单元格里放着 `\[ … \]` 公式的表格、内含空行的围栏代码块，以及一个正文被 chrome 打断的回合，该 chrome 仅因继承外壳的 `user-select: none` 而不可选（工具行的分节标题）。
+- **步骤**：1）选中含行内公式的整句并按 Ctrl/Cmd+C。2）选中块级公式并复制。3）从公式中间选到该句末尾并复制。4）把一段正文、一个公式和另一段正文一起选中并复制。5）选中不含公式的正文并复制。6）分别复制折行段落、列表、两个表格和代码块。7）分别复制两个 `\[ … \]` 公式、那个 `\( … \)` 公式、含字面 `$` 的公式，以及值里带换行的那两个公式。8）从句末反向选到句首选中一个公式并复制。9）在公式处于选中状态时右键该回合并选择复制，再右键另一个回合并选择复制。10）按「选中文本」菜单项的方式选中整个回合的内容——选区锚在回合上，而复制事件落在回合内部的某个段落上——并复制。11）选中一个始终不越出该公式的范围——在它的渲染内部拖选——并复制。12）把每次结果重新交给同一个回答渲染器渲染一遍——即粘回输入框并发送后得到的东西——再把它画出的公式与选区覆盖的公式逐一比对。
+- **预期**：每个公式都以它被写下时的 TeX 进入剪贴板——行内 `$…$`，块级 `$$…$$` 独占行——而不是 KaTeX 画出的字形，也不是两棵树带来的同一个表达式的两份。含字面 `$` 的公式会像代码段的围栏那样把定界符加长到盖过它，粘回去仍是公式而不是普通文字；值里带换行的行内公式则保持窄形式，因为 `$$` 落在行首会开出块级公式并吞掉整段；值的两端各带一个换行的那个，复制时会自己补上一对空白，因为语法在这里吃掉一个换行就像吃掉一个空格。从公式中间开始的选区会复制整个公式，而始终不越出某个公式的选区只复制出该公式本身。选区里其余内容与平台原本复制到的逐字节一致：折行段落仍是一整行，列表每项一行，表格单元格之间是制表符、每行一行并保留平台为末行补上的换行，代码块保留自己的空行。复制本就会略过的 chrome 不会进入剪贴板：无论 `base.css` 是按选择器把它标为 `user-select: none`（代码块的语言标签），还是它仅因继承外壳默认值而不可选（工具行的分节标题、紧凑思考行）。不含公式的选区交回平台原样写入；含公式的选区则无论复制事件落在它内部多深的位置，都以源码进入剪贴板——所以锚在整个回合上的选区（即「选中文本」产生的那种）也会复制成 TeX，哪怕 Chromium 把事件抬在了回合内部的某个段落上。右键复制与 Ctrl/Cmd+C 对同一个选区得到同一个字符串，而右键一个并不持有该选区的回合读不到任何摘录，因此复制退回该回合自己的源码。粘回的公式渲染回它来处的那个公式——TeX 相同，块级仍是块级——`\[ … \]` 也不例外：它被画在所属句子的段落里，复制出来时 `$$` 独占一行，足以在粘回去时开出块级公式；`\( … \)` 保持行内。表格单元格同样适用，且这一条是实测而非推断：`.katex-display` 盒子对平台自己的读法同样会断开该行，因此围栏旁边不会出现制表符，公式仍以块级形式复制，相邻单元格完整地落在自己的行上。反向选区在复制之后仍然是反向的。复制只写 `text/plain`——不会把 `text/html` flavour 放上剪贴板。
+- **链接规格**：`04-ux/08-component-spec.md` §8.7，ADR 0268，
+  决策日志 D619，issue #414
+- **验收**：C（聊天流），质量
+- **里程碑**：M5
+- **状态**：已自动化（`pnpm test:e2e:copy-tex`，真实 Chromium），另有
+  `selection-tex.test.mjs`
 
 #### E2E-060b：镀铬中性灰色调
 
@@ -2369,8 +2468,9 @@ MainChat 弥补了缺口。 Maximized/fullscreen 调用保留最新的
   完成。
 - **预期**：没有一般理解、工作、检查或完成
   当回合处于活动状态时，卡片会出现在成绩单下方。助理和
-  工具行保持内联；只有实际的权限请求才会呈现
-  可操作的卡。后台活动永远不会改变可见会话，
+  工具行保持内联；整轮保留一行紧凑底部状态，包括部分回答暂停和工具
+  完成后的空档。具体阶段优先于规划/目标或工作中，等待用户操作时隐藏。
+  只有实际的权限请求才会呈现可操作的权限卡。后台活动永远不会改变可见会话，
   成绩单、输入框焦点或项目。
 - **链接规格**：`04-ux/08-component-spec.md`，
   `04-ux/09-interaction-patterns.md`、`03-runtime/10-session-state-machine.md`
@@ -2654,9 +2754,9 @@ PI-Desktop 图标；两个表面都不会暴露库存 Electron 名称或图标�
   设置 → 信息。
 - **预期**：更新状态报告 `available`（手动平台）或
   通过应用内下载 Windows NSIS / Linux AppImage 取得进展
-  `availableVersion` 等于较新的稳定标签。Windows 便携版运行
-  （`PORTABLE_EXECUTABLE_FILE`）保持手动通知加链接路径，不得下载或运行
-  NSIS 安装程序。客户不得举报
+  `availableVersion` 等于较新的稳定标签。Windows 便携版 ZIP 运行保持手动通知加链接路径，
+  不得下载或运行 NSIS 安装程序；旧便携版 exe 在存在 `PORTABLE_EXECUTABLE_FILE` 时同样
+  保持手动更新。客户不得举报
   最新只是因为没有较新的版本共享相同的 `rc` 预发行版
   频道。
 - **链接规格**：`04-ux/09-interaction-patterns.md`，
@@ -2952,12 +3052,15 @@ PI-Desktop 图标；两个表面都不会暴露库存 Electron 名称或图标�
   确认所有行都恢复默认。9) 在 macOS 上检查每次保存/恢复后的本机菜单加速器。10)
   在 Windows 上禁用插件启动器，确认旧的全局绑定、聚焦窗口后备和 Alt+Space host
   后备都已关闭。11) 单独按下并释放 Ctrl/Command，确认 IME 候选，并长按
-  back/forward 组合以产生重复。
+  back/forward 组合以产生重复。12) 禁用 New task，把其默认组合分配给 Search，
+  再单独恢复 New task；确认出现冲突提示、两项绑定不变，且该组合仍能打开 Search。
+  将 New task 改为自定义绑定后重复测试；恢复 Search 释放组合后，再恢复 New task。
 - **预期**：操作分为导航、Agent 和窗口，并使用平台原生按键标签；录制有可见焦点
   且 `Escape` 取消；自定义 Search 组合立即生效、替换旧组合、跨重启保留并更新
   macOS 菜单；重复、无修饰符和保留组合以内联错误拒绝；“未绑定”是明确的本地化
   状态，不参与冲突、不响应旧或默认组合、可跨重启保存，并会移除 macOS 加速器和
-  Windows 启动器后备层；单项和全局恢复都返回共享默认值。仅修饰符和 IME 按键不
+  Windows 启动器后备层；单项恢复遇到默认组合已被占用时拒绝保存，保留两项绑定；
+  无冲突的单项恢复和全局恢复都返回共享默认值。仅修饰符和 IME 按键不
   会发送命令，长按历史组合每次物理按压只遍历一次。窗口可见性只有一个开关键
   `Alt + Shift + W` —— 可见且在前台的窗口隐藏到托盘，其余情况显示并获得焦点 ——
   且绝不走关闭路径，因此不会弹出关闭行为询问、也不会退出应用；该键刻意避开
@@ -3066,9 +3169,11 @@ IPC 请求无法关闭。
   3. 等待 sessions/settings 引导程序完成。
   4. 如果可用，请对 OS `prefers-reduced-motion: reduce` 重复此操作。
   5. 在 macOS 上，将启动面与 shell 出现后的侧边栏玻璃态对比。
+  6. 在 `bootstrap` 一直被搁置、超过看门狗界限时重复一次，在 30 秒与超过 180 秒时观察启动表面（issue #831）。
 - **预期**：
 - 准备之前：带有品牌标志、外壳名称、标语和可访问的启动状态 (`data-testid="startup-splash"`) 的全窗口启动画面。
   - 准备好后：启动画面会短暂淡出（或立即减少运动）退出，并且主外壳（或设置页面）在下面是交互式的。
+  - 如果初始状态始终没有到达，启动画面不是被一直保留而是被替换：启动表面在 30 秒（`STARTUP_SLOW_HINT_MS`）时加上日志、诊断与退出且不报告失败，在 180 秒（`STARTUP_STALLED_MS`）时变成恢复表面，并额外提供重试（`data-testid="startup-recovery"`）；每个操作都不依赖后端，Windows/Linux 上渲染器绘制的窗口控制按钮保持在该表面之上，退出走 `pi-desktop/app/quit`。
   - macOS 上启动页与侧边栏使用同一套玻璃 tint/sheen，叠在原生 `sidebar` vibrancy 之上；已挂载的 shell 在退出淡出前保持隐藏，再交叉淡入。其他平台仍为不透明的 `--ds-bg-primary`。
   - 没有简单的无品牌“开始...”居中文本作为唯一的启动 UI。
   - Overlay/dialog 输入动作使用共享令牌；减少的运动可以保持状态变化，而无需装饰持续时间。
@@ -3638,34 +3743,35 @@ IPC 请求无法关闭。
 
 - **先决条件**：项目绑定的 Agent 会话使用确定性
   发出部分辅助流的提供商装置，终止一次，
-  然后下一个请求成功；第二场比赛可以终止五次；
+  然后下一个请求成功；第二场比赛可以终止 11 次；
   第三个装置在一次尝试中于标头之前返回
   `OpenAI API error (502)`，并在下一次尝试中于流中返回它；
-  第四个装置返回连续六个 502；第五个装置返回带
+  第四个装置返回连续 11 个 502；第五个装置返回带
   `Retry-After` 的 503。
 - **步骤**：
   1. 使用单端接夹具开始 Agent 转动，并观察
      部分助理回应。
   2. 等待有界重试并检查成绩单、会话状态和
      恢复后的终端诊断。
-  3. 对五端夹具重复并检查端子错误
+  3. 对 11 次终止夹具重复并检查端子错误
      message/event 及其诊断详细信息。
   4. 运行混合阶段 502 装置，并针对标头之前和流中的
      502 检查请求计数与终端诊断。
-  5. 运行持续六次 502 的装置并检查终端错误。
+  5. 运行持续 11 次 502 的装置并检查终端错误。
   6. 运行 503 `Retry-After` 装置并检查观察到的等待。
   7. 重新加载会话并验证是否只有已完成的响应或
      单终端故障助手依然耐用。
+  8. 打开设置中的「无尽重试」后，故障超过默认次数仍继续；停止回合时不再发起后续请求，关闭后恢复有界上限。
 - **预期**：
   - `terminated` 被分类为 `STREAM_FAILED`，上游网关
     `502`/`503`/`504` 被分类为可重试的 `PROVIDER_ERROR`。
   - 非 429 瞬时故障共享一个有界预算：在初始尝试之后最多
-    重试四次，总共五次提供程序尝试，由请求设置和流式传输
+    重试 10 次，总共 11 次提供程序尝试，由请求设置和流式传输
     交付共享。每次重试都等待一个可中止的有界退避，从模型
     上下文中删除失败的助手，并且不产生重复的助手气泡或
     终端错误通知。
   - 流中的 502 会被重试，而不是立即显现。混合阶段装置在两个
-    阶段之间花费同一个计数器，总共进行五次尝试，而不是每个
+    阶段之间花费同一个计数器，总共进行 11 次尝试，而不是每个
     阶段各重试一次。在没有 `Retry-After` 标头时，观察到的等待
     依次为 1 秒、2 秒、4 秒，然后是 8 秒，并且在两个阶段中完全
     相同。
@@ -3674,18 +3780,19 @@ IPC 请求无法关闭。
   - 恢复的回合发出一个终端生命周期并保持相同的可见
     助理消息 ID。时序日志为每次重试记录 `outcome=retry`
     及其尝试编号，以及最终结果。
-  - 第五次终止发出一个终端 `STREAM_FAILED` 辅助错误和
+  - 第 11 次终止发出一个终端 `STREAM_FAILED` 辅助错误和
     生命周期事件；持续 502 的装置发出一个终端
-    `PROVIDER_ERROR`。两者都携带 `retryAttempt: 4`。可用的详细
+    `PROVIDER_ERROR`。两者都携带 `retryAttempt: 10`。可用的详细
     信息包括阶段、流计时和提供商状态，无需凭据或不受限制的
     提供商正文。
   - 503 装置等待服务器的 `Retry-After`，而不是客户端退避。非 429
     的服务器等待和回退等待都以 8 秒为上限。
-  - 流中的 HTTP 429 由 429 预算单独的五次重试路径覆盖；两个
+  - 流中的 HTTP 429 由 429 预算单独的 10 次重试路径覆盖；两个
     预算互不占用。
   - 身份验证、模型选择、上下文和格式错误的请求失败
     不进入任何提供程序重播路径，包括来自格式错误的 400/422
-    请求的不可重试 `PROVIDER_ERROR`。
+    请求的不可重试 `PROVIDER_ERROR`。无尽模式不改变分类，只去掉已准入网络/瞬时故障的次数上限；
+    仍可中止，并以无界重试指示标出。
 - **链接规格**：`03-runtime/01-ipc-protocol.md`，
   `03-runtime/02-agent-runtime.md`、`03-runtime/08-error-codes.md`、
   `08-meta/decisions-log.md`（D186、D259）、ADR 0050、ADR 0128
@@ -3693,6 +3800,20 @@ IPC 请求无法关闭。
 - **里程碑**：M5
 - **状态**：单位覆盖（`agent-errors.test.ts`、`provider-retry.test.ts`、
   `runtime.test.ts`、`subagent.test.ts`）；完整 provider/UI 旅程草案
+
+**Synchronized update (#699, E2E-096 / E2E-149):** Alternate one network
+failure with each of eleven successful Read responses, then fail once before
+the final answer. All twelve independent failures must recover, starting at
+retry 1 each time, with no duplicate tool execution. Complete successful
+responses replenish both budgets; headers, partial output, and phase changes
+do not. A new persistent outage after recovery still gets ten retries and
+reports `retryAttempt: 10`. Restore the provider and verify Continue succeeds.
+The same reset rule applies to rate limits and builtin subagents.
+
+The socket-failure, interrupted-stream, Responses, exhaustion, Continue, and
+eleven-tool-round desktop paths are verified by
+`scripts/e2e-provider-recovery.mjs`; real agent-loop coverage is in
+`provider-recovery-flow.test.ts`. Other scenario variants remain Draft.
 
 ## 7A。 M6 Plan 和 shell 场景
 
@@ -3794,19 +3915,25 @@ IPC 请求无法关闭。
   输入 CDP 或输出。默认无钥匙运行仍为 5/5 与现场案例
   明确跳过。
 
-#### E2E-CHAT-opaque-floating-decision-and-retry-surfaces：Plan 审批条与重试 hover 保持不透明
+#### E2E-CHAT-opaque-floating-decision-and-retry-surfaces：停靠区、Plan 审批条与重试表面遮住正文
 
-- **状态**：已自动化（`apps/desktop/test/plan-mode-source-contract.test.mjs`、`apps/desktop/test/active-turn-surface.test.mjs`）
+- **状态**：已自动化（`pnpm test:e2e:composer-occlusion`、`pnpm test:e2e:theme-surfaces`、`apps/desktop/test/plan-mode-source-contract.test.mjs`、`apps/desktop/test/active-turn-surface.test.mjs`）
 - **优先级**：P2
 - **覆盖**：C、品质 / 浮动 Composer 与重试表面
 - **先决条件**：渲染器 CSS 为 `apps/desktop/src/styles` 下的生产源。
 - **步骤**：
-  1. 检查 Composer 停靠栏样式中的 `.plan-approval-bar`。
-  2. 检查记录样式中的 `.run-activity-error-popover.message-error`。
-  3. 在实时会话中悬停或聚焦正在重试的活动行。
+  1. 在两套内置主题和一套自定义主题中检查 `.composer-dock-docked` 的计算背景。
+  2. 滚动长会话，让一行正文经过悬浮 Composer 下方。
+  3. 检查 Composer 停靠栏样式中的 `.plan-approval-bar`。
+  4. 检查记录样式中的 `.run-activity-error-popover.message-error`。
+  5. 在实时会话中悬停或聚焦正在重试的活动行。
 - **预期**：
+  - 停靠区横跨整个宽度绘制不透明的 `--ds-bg-primary` 工作区表面；正文在
+    Composer 边界处消失，不会留在输入框下方或圆角外侧。
   - Plan/Goal 审批条使用 `--ds-bg-composer` 加 `--ds-shadow-composer`，而不是正文流里的 `--ds-tile` 薄洗，因此在透明停靠栏上仍可读。
   - 重试 hover tooltip 把错误色混在 `--ds-bg-elevated-opaque` 上，记录正文不会透出。
+  - 重试 tooltip 的高度被限制在尾部状态行上方的可用空间内，其余部分可滚动，
+    因此较长的 provider 消息会保留开头几行，不会被记录滚动容器或会话顶栏遮住。
 - **链接规格**：`04-ux/03-permission-ux.md`、`04-ux/08-component-spec.md`
 - **接受**：C、品质
 - **里程碑**：M6
@@ -4275,6 +4402,86 @@ IPC 请求无法关闭。
   `delegation-history.test.ts`、`runtime.test.ts`、
   `apps/desktop/test/assistant-turns.test.mjs`）；桌面旅程需要具备条件的环境。必需套件：
   `test:e2e`、`test:e2e:subagents`、`test:e2e:transcript`。
+
+#### E2E-SUBAGENT-context-overflow-compacts-before-failing
+
+- **先决条件**：一个使用确定性本地传输的 Agent 会话，其模型元数据声明了一个很小的
+  上下文窗口（例如 16,000 个 token），回复也是脚本化的。这个小窗口由注入的伪提供商
+  给出，绝不来自真实提供商：在本仓库里，真实提供商与付费 API 不是默认测试环境。
+  一份用户定义 `~/.agents/subagents/reader.md` 声明 `Read`、`Glob` 与 `Grep`，
+  工作区里的文件大到只需两三次读取就会越过委托的硬边界。
+- **步骤**：
+  1. 委派一个必须按顺序读完这些文件的任务简报，记录传输收到的每一次请求及其
+     估算大小。
+  2. 读取委托越过硬边界之后的那一次请求。
+  3. 让越界发生在仍有待处理工具结果的时刻，再让它发生在一个已完成的回合上，
+     各重复一次。
+  4. 把摘要请求脚本化为失败，再重复一次。
+  5. 用同一套夹具让会话 Agent 跑同样的任务简报，把它的请求与转录行同本次改动
+     之前记录的一次运行作对比。
+  6. 在委托结算后检查委派卡片、转录、上下文检查器，以及父级自己的模型上下文。
+- **预期**：委托继续工作，而不是失败。越界之后的那一次请求低于硬边界，携带摘要
+  加上适用的保留尾部；没有任何请求超出窗口被发出。仍有待处理工具结果时按活动
+  回合保留（只留最新的用户消息），已完成的回合不保留。摘要失败会降级为原始任务
+  简报加最近的若干条消息，该次运行依然完成，报告与生命周期 details 会说明它已被
+  降级，而不是把一个不完整的答案当作完整答案呈现。委托压缩不添加转录行、不写
+  host-core 检查点、不弹警告 toast、也不添加上下文检查器条目；委托自己的行保持
+  完整，父级的模型上下文里依旧只有那份报告。会话 Agent 的行为与改动之前完全一致。
+- **链接规格**：`03-runtime/02-agent-runtime.md` §5.1、§5f、
+  `03-runtime/08-error-codes.md` §3.2、ADR 0299、ADR 0064、ADR 0136
+- **验收**：C — 对话和直播；品质
+- **里程碑**：M6+
+- **状态**：草稿。必需套件：`test:e2e`、`test:e2e:subagents`。
+
+#### E2E-SUBAGENT-context-overflow-reports-actionable-failure
+
+- **先决条件**：同一个注入的小窗口伪提供商，窗口小到连降级后的上下文也放不下。
+  一份定义声明两个有序 `fallbackModels`：一个窗口不比主模型更大，另一个更大。
+  第二份定义不声明任何备选。
+- **步骤**：
+  1. 委派一个会一路越过压缩与降级的任务简报，读取父级收到的工具结果以及生命周期
+     details。
+  2. 对声明了那两个备选定义重复一次，记录传输实际被请求了哪些备选。
+  3. 让每个备选都处在同样的小窗口上，再重复一次。
+  4. 分别在英文与中文下读取委派卡片与报告。
+  5. 继续父级回合，然后发送一条新的提示。
+- **预期**：该次运行以 `SUBAGENT_CONTEXT_OVERFLOW`（不可重试）失败，父级读到的内容
+  点名它可以改变什么 —— 缩小任务范围、改用上下文窗口更大的模型、一次读取更少内容。
+  提供商原始的溢出语句不是父级收到的东西。自身预算装不下已携带上下文的备选永远不会
+  被请求，并以该理由出现在 `modelFailures` 里；窗口更大的那个备选会被尝试，并且可以
+  成功。当没有任何备选装得下时，结果仍是 `SUBAGENT_CONTEXT_OVERFLOW`，而不是最后那个
+  提供商错误。委托的行保持持久且可见，会话回到空闲，下一条提示不会是 `AGENT_BUSY`。
+- **链接规格**：`03-runtime/02-agent-runtime.md` §5f、
+  `03-runtime/08-error-codes.md` §3.2、ADR 0299、
+  ADR subagent-model-fallback
+- **验收**：C — 对话和直播；品质
+- **里程碑**：M6+
+- **状态**：草稿。必需套件：`test:e2e`、`test:e2e:subagents`、
+  `test:e2e:subagent-models`。
+
+#### E2E-SUBAGENT-resume-seeds-within-context-budget
+
+- **先决条件**：同一个注入的小窗口伪提供商。一条已结算的 `reader` 链读取的内容
+  足以超出委托的硬边界，但仍在 `MAX_RESUMABLE_READ_LINES` 以内；第二条已结算的
+  链远远落在预算之内。
+- **步骤**：
+  1. 对超出预算的那条链执行 `Task.resume`，完整捕获它的第一次提供商请求。
+  2. 对落在预算之内的那条链执行 `Task.resume`，捕获同样的请求。
+  3. 向恢复后的运行询问该链在最近一轮得出的结论，再询问它在第一轮得出的结论。
+  4. 重启应用，从转录重建链索引，再次恢复那条超出预算的链。
+  5. 在一条链里累积超过 `MAX_RESUMABLE_READ_LINES` 的只读输出，读取下一条提示给出
+     的可复用清单。
+- **预期**：恢复后运行的第一次请求低于硬边界。它以原始任务简报开头，并保有最近的
+  若干轮；最旧的工具结果优先被丢弃，而丢弃一条助手消息会连同它的工具调用一起丢弃，
+  因此没有孤立的工具调用会到达提供商。落在预算之内的链仍按原样整条播种。最近一轮的
+  结论能从播种的上下文里答出；第一轮的结论可能已经不在，此时该次运行会照实说明，而
+  不是凭空编造。一次恢复绝不会在它的第一次请求上以 `CONTEXT_TOO_LARGE` 或
+  `SUBAGENT_CONTEXT_OVERFLOW` 失败。`MAX_RESUMABLE_READ_LINES` 仍然会把读取过多的链
+  移出可复用清单；裁剪不会让它重新变得可恢复。
+- **链接规格**：`03-runtime/02-agent-runtime.md` §5f、ADR 0299、ADR 0279
+- **验收**：C — 对话和直播；品质
+- **里程碑**：M6+
+- **状态**：草稿。必需套件：`test:e2e`、`test:e2e:subagents`。
 
 #### E2E-145：工具结果读取为结构化块，从不 JSON
 
@@ -5054,8 +5261,13 @@ IPC 请求无法关闭。
 
 
 
+
 | 验收 | 应用场景 |
 |---|---|
+| C / F — Hourly task updates | E2E-SCHEDULED-manual-to-hourly |
+| C / F / Quality — Saved project isolation | E2E-SCHEDULED-manual-workspace-binding |
+| C / F / Quality — 桌面定时任务 | E2E-SCHEDULED-desktop-automation-lifecycle |
+| F / Security / Quality — 便携式配置同步 | E2E-CONFIG-SYNC-webdav-portable-configuration |
 | A / C — Unicode stdio 成帧 | E2E-RPC-unicode-separators |
 | C / G / Quality — Plugins navigation | E2E-NAV-plugins-button-goes-back |
 | C / D / Quality — 侧边栏行状态 | E2E-LAYOUT-sidebar-row-states |
@@ -5064,7 +5276,7 @@ IPC 请求无法关闭。
 | B / F / Quality — 已选模型顺序 | E2E-MODEL-selected-order-persists |
 | A — 应用程序启动 | E2E-001、E2E-002、E2E-003、E2E-004、E2E-067、E2E-076、E2E-079、E2E-092、E2E-097、E2E-143、E2E-150、E2E-168、E2E-204、E2E-217 |
 | B——模型配置 | E2E-005、E2E-005G、E2E-006、E2E-007、E2E-038、E2E-050、E2E-052、E2E-055、E2E-066、E2E-080、E2E-082、E2E-151、E2E-005J、E2E-199、E2E-201、E2E-202、E2E-203、E2E-209、E2E-166 |
-| C — 对话和直播 | E2E-008、E2E-008d、E2E-008a、E2E-009、E2E-010、E2E-011、E2E-011a、E2E-011b、E2E-031、E2E-040、E2E-047、E2E-048、E2E-048A、E2E-049、E2E-052、 E2E-053、E2E-054、E2E-055、E2E-059、E2E-059a、E2E-060c、E2E-060d、E2E-061、E2E-061a、E2E-062、E2E-064、E2E-065、E2E-068、E2E-071、 E2E-073、E2E-074、E2E-075、E2E-081、E2E-083、E2E-084、E2E-086、E2E-087、E2E-088、E2E-088b、E2E-089、E2E-090、E2E-094、E2E-095、E2E-096、 E2E-097、E2E-098、E2E-099、E2E-102、E2E-102a、E2E-102b、E2E-106、E2E-109、E2E-111、E2E-114、E2E-116、E2E-117、E2E-118、E2E-119、 E2E-120、E2E-121、E2E-代理-001、E2E-142、E2E-144、E2E-145、E2E-146、E2E-147、E2E-151、E2E-199、E2E-250、E2E-166、E2E-SUBAGENT-resume-a-settled-delegation |
+| C — 对话和直播 | E2E-CHAT-running-status-survives-output-pauses、E2E-008、E2E-008d、E2E-008a、E2E-009、E2E-010、E2E-011、E2E-011a、E2E-011b、E2E-031、E2E-040、E2E-047、E2E-048、E2E-048A、E2E-049、E2E-052、 E2E-053、E2E-054、E2E-055、E2E-059、E2E-059a、E2E-060c、E2E-060d、E2E-061、E2E-061a、E2E-062、E2E-064、E2E-065、E2E-068、E2E-071、 E2E-073、E2E-074、E2E-075、E2E-081、E2E-083、E2E-084、E2E-086、E2E-087、E2E-088、E2E-088b、E2E-089、E2E-090、E2E-094、E2E-095、E2E-096、 E2E-097、E2E-098、E2E-099、E2E-102、E2E-102a、E2E-102b、E2E-106、E2E-109、E2E-111、E2E-114、E2E-116、E2E-117、E2E-118、E2E-119、 E2E-120、E2E-121、E2E-代理-001、E2E-142、E2E-144、E2E-145、E2E-146、E2E-147、E2E-151、E2E-199、E2E-250、E2E-166、E2E-SUBAGENT-resume-a-settled-delegation |
 | A / C / F / Quality — Tray session navigation | E2E-TRAY-bounded-session-navigation |
 | D——工作区 | E2E-012、E2E-013、E2E-022B、E2E-024I、E2E-047、E2E-049、E2E-057、E2E-058、E2E-060、E2E-068、E2E-075、E2E-078、E2E-153 |
 | D——工作区（项目排序） | E2E-253 |
@@ -5074,7 +5286,7 @@ IPC 请求无法关闭。
 | G——插件 | E2E-022、E2E-022A、E2E-022B、E2E-022C、E2E-023、E2E-024、E2E-024B、E2E-024C、E2E-024D、E2E-024AA、E2E-024E、E2E-024W、E2E-024F、E2E-024G、E2E-024H、 E2E-024I、E2E-024J、E2E-024K、E2E-024L、E2E-024M、E2E-024N、E2E-024O、E2E-024P、E2E-025、E2E-026、E2E-105、E2E-117、E2E-120、E2E-122、E2E-123、E2E-148、E2E-153、E2E-PLUGIN-imported-pi-package-skills、E2E-PLUGIN-imported-pi-package-wrapper、E2E-PLUGIN-import-extension-installs-dependencies、E2E-PLUGIN-import-extension-reports-missing-dependency、E2E-PLUGIN-global-shortcut-owns-only-its-own-command、E2E-PLUGIN-permission-gate-for-real-time-capabilities、E2E-PLUGIN-background-audio-and-realtime-connection |
 | H——诊断 | E2E-027、E2E-031、E2E-034、E2E-042、E2E-096、E2E-098、E2E-104、E2E-107、E2E-108、E2E-109、E2E-110、E2E-113、E2E-115、E2E-116、 E2E-118、E2E-121、E2E-146、E2E-194、E2E-195 |
 | 安全性 | E2E-028、E2E-029、E2E-030、E2E-024J、E2E-024K、E2E-024M、E2E-049、E2E-068、E2E-086、E2E-105、E2E-106、E2E-107、E2E-108、E2E-109、 E2E-110、E2E-112、E2E-113、E2E-115、E2E-116、E2E-117、E2E-119、E2E-121、E2E-122、E2E-123、E2E-142、E2E-148、E2E-151、E2E-153 |
-| 品质 | E2E-032、E2E-033、E2E-039、E2E-043、E2E-044、E2E-045、E2E-046、E2E-047、E2E-048、E2E-048A、E2E-049、E2E-050、E2E-053、E2E-055、 E2E-056、E2E-057、E2E-058、E2E-059、E2E-060、E2E-061、E2E-062、E2E-063、E2E-064、E2E-065、E2E-066、E2E-067、E2E-068、E2E-069、 E2E-070、E2E-071、E2E-072、E2E-073、E2E-074、E2E-075、E2E-076、E2E-077、E2E-078、E2E-079、E2E-080、E2E-081、E2E-082、E2E-083、 E2E-084、E2E-085、E2E-086、E2E-092、E2E-093、E2E-094、E2E-095、E2E-096、E2E-097、E2E-098、E2E-099、E2E-100、E2E-101、E2E-102、 E2E-102a、E2E-102b、E2E-103、E2E-AGENTS-001、E2E-024N、E2E-024O、E2E-059a、E2E-060b、E2E-060c、E2E-060d、E2E-061a、E2E-073a、E2E-111、 E2E-114、E2E-117、E2E-118、E2E-119、E2E-120、E2E-122、E2E-123、E2E-142、E2E-143、E2E-144、E2E-145、E2E-146、E2E-147、E2E-148、E2E-150、E2E-151、E2E-153、E2E-194、E2E-195、E2E-199、E2E-200、E2E-201、E2E-202、E2E-203、E2E-204、E2E-209、E2E-210、E2E-250、E2E-PLUGIN-imported-pi-package-skills、E2E-SUBAGENT-resume-a-settled-delegation |
+| 品质 | E2E-CHAT-running-status-survives-output-pauses、E2E-032、E2E-033、E2E-039、E2E-043、E2E-044、E2E-045、E2E-046、E2E-047、E2E-048、E2E-048A、E2E-049、E2E-050、E2E-053、E2E-055、 E2E-056、E2E-057、E2E-058、E2E-059、E2E-060、E2E-061、E2E-062、E2E-063、E2E-064、E2E-065、E2E-066、E2E-067、E2E-068、E2E-069、 E2E-070、E2E-071、E2E-072、E2E-073、E2E-074、E2E-075、E2E-076、E2E-077、E2E-078、E2E-079、E2E-080、E2E-081、E2E-082、E2E-083、 E2E-084、E2E-085、E2E-086、E2E-092、E2E-093、E2E-094、E2E-095、E2E-096、E2E-097、E2E-098、E2E-099、E2E-100、E2E-101、E2E-102、 E2E-102a、E2E-102b、E2E-103、E2E-AGENTS-001、E2E-024N、E2E-024O、E2E-059a、E2E-060b、E2E-060c、E2E-060d、E2E-061a、E2E-073a、E2E-111、 E2E-114、E2E-117、E2E-118、E2E-119、E2E-120、E2E-122、E2E-123、E2E-142、E2E-143、E2E-144、E2E-145、E2E-146、E2E-147、E2E-148、E2E-150、E2E-151、E2E-153、E2E-194、E2E-195、E2E-199、E2E-200、E2E-201、E2E-202、E2E-203、E2E-204、E2E-209、E2E-210、E2E-250、E2E-PLUGIN-imported-pi-package-skills、E2E-SUBAGENT-resume-a-settled-delegation |
 | 品质（项目排序） | E2E-253 |
 | C — 对话和直播（输入法斜杠别名） | E2E-255 |
 | E——工具和权限（Skill 常驻） | E2E-254 |
@@ -5120,7 +5332,7 @@ IPC 请求无法关闭。
 | M2 | E2E-004、E2E-005、E2E-006、E2E-007、E2E-008、E2E-008d、E2E-009、E2E-010、E2E-011、E2E-011a、E2E-011b、E2E-020、E2E-021、E2E-027、E2E-031、 E2E-036、E2E-037、E2E-042、E2E-087、E2E-088、E2E-088b、E2E-089、E2E-090、E2E-144、E2E-005J、E2E-201 |
 | M3 | E2E-012、E2E-013、E2E-014、E2E-015、E2E-016、E2E-017、E2E-018、E2E-019、E2E-040 |
 | M4 | E2E-022、E2E-023、E2E-024、E2E-025、E2E-026、E2E-030、E2E-038 |
-| M5 | E2E-008a、E2E-032、E2E-033、E2E-034、E2E-039、E2E-043、E2E-044、E2E-045、E2E-046、E2E-047、E2E-048、E2E-048A、E2E-049、E2E-050、 E2E-051、E2E-052、E2E-053、E2E-054、E2E-055、E2E-056、E2E-057、E2E-058、E2E-059、E2E-060、E2E-061、E2E-062、E2E-063、E2E-064、 E2E-065、E2E-066、E2E-067、E2E-068、E2E-069、E2E-070、E2E-071、E2E-072、E2E-073、E2E-074、E2E-075、E2E-076、E2E-077、E2E-078、 E2E-079、E2E-080、E2E-081、E2E-082、E2E-083、E2E-084、E2E-085、E2E-086、E2E-092、E2E-093、E2E-096、E2E-097、E2E-098、E2E-099、 E2E-100、E2E-101、E2E-102、E2E-102a、E2E-102b、E2E-AGENTS-001、E2E-059a、E2E-060b、E2E-060c、E2E-061a、E2E-073a、E2E-094、E2E-095、E2E-143、E2E-145、E2E-146、E2E-147、E2E-194、E2E-195、E2E-204、E2E-250 |
+| M5 | E2E-CHAT-running-status-survives-output-pauses、E2E-008a、E2E-032、E2E-033、E2E-034、E2E-039、E2E-043、E2E-044、E2E-045、E2E-046、E2E-047、E2E-048、E2E-048A、E2E-049、E2E-050、 E2E-051、E2E-052、E2E-053、E2E-054、E2E-055、E2E-056、E2E-057、E2E-058、E2E-059、E2E-060、E2E-061、E2E-062、E2E-063、E2E-064、 E2E-065、E2E-066、E2E-067、E2E-068、E2E-069、E2E-070、E2E-071、E2E-072、E2E-073、E2E-074、E2E-075、E2E-076、E2E-077、E2E-078、 E2E-079、E2E-080、E2E-081、E2E-082、E2E-083、E2E-084、E2E-085、E2E-086、E2E-092、E2E-093、E2E-096、E2E-097、E2E-098、E2E-099、 E2E-100、E2E-101、E2E-102、E2E-102a、E2E-102b、E2E-AGENTS-001、E2E-059a、E2E-060b、E2E-060c、E2E-061a、E2E-073a、E2E-094、E2E-095、E2E-143、E2E-145、E2E-146、E2E-147、E2E-194、E2E-195、E2E-204、E2E-250 |
 | M5（项目排序） | E2E-253 |
 | M2（输入法斜杠别名） | E2E-255 |
 | M5（Skill 常驻） | E2E-254 |
@@ -5136,7 +5348,7 @@ IPC 请求无法关闭。
 | 后MVP | E2E-022A、E2E-022B、E2E-022C、E2E-024I、E2E-024J、E2E-024K、E2E-024L、E2E-024M（插件路线图 R2/R3/R6） |
 | 基线后本地自动化 | E2E-220 |
 | MVP 后远程控制 | E2E-221、E2E-222、E2E-223、E2E-224、E2E-225、E2E-226、E2E-227、E2E-228、E2E-229、E2E-230、E2E-231、E2E-232 |
-| 受信任扩展（R7 v1） | E2E-241、E2E-242、E2E-243、E2E-244、E2E-245、E2E-PLUGIN-imported-pi-package-skills、E2E-PLUGIN-import-extension-installs-dependencies、E2E-PLUGIN-import-extension-reports-missing-dependency、E2E-PLUGIN-declared-provider-appears-in-the-native-provider-list |
+| 受信任扩展（R7 v1） | E2E-DIALOG-long-text-boundaries、E2E-241、E2E-242、E2E-HOOKS-cancel-and-dispose、E2E-243、E2E-244、E2E-245、E2E-PLUGIN-imported-pi-package-skills、E2E-PLUGIN-import-extension-installs-dependencies、E2E-PLUGIN-import-extension-reports-missing-dependency、E2E-PLUGIN-declared-provider-appears-in-the-native-provider-list |
 | 受信任扩展（R7 v1 npm 恢复） | E2E-PLUGIN-import-extension-recovers-missing-npm |
 | Post-MVP 回归覆盖（插件工具调度） | E2E-PLUGIN-slow-tool-is-not-cut-off-by-host-dispatch |
 | M6+（删除项目） | E2E-PROJECT-delete-removes-project-and-owned-sessions |
@@ -5156,6 +5368,18 @@ IPC 请求无法关闭。
 | F — 持久化（目录窗口来源） | E2E-MODEL-catalog-window-correction-reaches-saved-bindings |
 | 品质（目录窗口来源） | E2E-MODEL-catalog-window-correction-reaches-saved-bindings |
 | M6+（目录窗口来源） | E2E-MODEL-catalog-window-correction-reaches-saved-bindings |
+| C — 对话和直播（委托上下文预算） | E2E-SUBAGENT-context-overflow-compacts-before-failing、E2E-SUBAGENT-context-overflow-reports-actionable-failure、E2E-SUBAGENT-resume-seeds-within-context-budget |
+| 品质（委托上下文预算） | E2E-SUBAGENT-context-overflow-compacts-before-failing、E2E-SUBAGENT-context-overflow-reports-actionable-failure、E2E-SUBAGENT-resume-seeds-within-context-budget |
+| M6+（委托上下文预算） | E2E-SUBAGENT-context-overflow-compacts-before-failing、E2E-SUBAGENT-context-overflow-reports-actionable-failure、E2E-SUBAGENT-resume-seeds-within-context-budget |
+| C / F / 品质 —— 上下文估算保持安全（校准） | E2E-CONTEXT-estimate-calibration-stays-safe |
+| C — 对话与流式（工具调用 id 唯一） | E2E-RUNTIME-unique-tool-call-ids-per-request |
+| 品质（工具调用 id 唯一） | E2E-RUNTIME-unique-tool-call-ids-per-request |
+| C — 对话与流式（循环上下文归属） | E2E-RUNTIME-loop-context-ownership |
+| 品质（循环上下文归属） | E2E-RUNTIME-loop-context-ownership |
+| G — 插件宿主生命周期（崩溃上报） | E2E-PLUGIN-crash-report-names-the-exit-code |
+| 品质（崩溃上报） | E2E-PLUGIN-crash-report-names-the-exit-code |
+| F — 持久化（存储的模型绑定数组） | E2E-PROVIDER-stored-binding-array-reads-entry-by-entry |
+| 品质（存储的模型绑定数组） | E2E-PROVIDER-stored-binding-array-reads-entry-by-entry |
 
 `US-UI-*` 视觉场景（§UI shell 视觉场景）追踪到
 [决策日志 §D](/zh-CN/spec/08-meta/decisions-log) 中的法典平价决策
@@ -6436,6 +6660,14 @@ IPC 请求无法关闭。
   验证独立许可、撤销和多账号别名冲突，连接测试检查按需唯一匹配。设置复选框 UI/持久化旅程及外部真实提供商执行仍需手动验证；
   此夹具不代表完整原生 UI 旅程已通过。
 
+- **Authorization regression coverage (#841)**: `pnpm test:e2e:subagent-models`
+  grants a model on demand, reuses the runtime, then revokes it without changing
+  the launch catalog. The next prompt must reauthorize and issue no child request.
+  A transcript-restored resume with a colliding model id must use the session
+  binding rather than another definition's private account. Runtime tests also
+  cover own pins/fallbacks, opted-in bindings, visible fallback metadata, live-key
+  reauthorization, and late RPC responses crossing parent turns.
+
 #### E2E-167：原生边缘调整大小保持流畅并保存稳定边界
 
 - **前置条件**：PI-Desktop 在 macOS、Windows 或 Linux 上以普通、未最大化
@@ -6491,7 +6723,7 @@ IPC 请求无法关闭。
   编辑器不再缺少高级设置。在账户模型上启用的等级会持久化，并在重新打开编辑器后
   依然存在。OpenAI Codex 的 `openai-codex` 适配器键会解析匹配的 `openai`
   models.dev 记录，因此 `gpt-6-astra` 不会显示为通用的 128,000 / 8,192 /
-  无推理默认值。已认证的 ChatGPT 列表本身来自已固定的 pi-ai 目录（0.85.1
+  无推理默认值。已认证的 ChatGPT 列表本身来自已固定的 pi-ai 目录（0.86.1
   包含 `gpt-6-astra`）；models.dev 不能补上缺失的 OAuth ID。没有已发布记录
   的模型则保留其已存等级不变。账户的默认模型仍是首个绑定。
 - **链接规格**：`04-ux/06-settings-ia.md`、`04-ux/08-component-spec.md` §19、
@@ -6895,21 +7127,22 @@ IPC 请求无法关闭。
 - **验收**：A（应用启动）、质量（全新安装打包）
 - **里程碑**：M6+
 - **状态**：源码契约已覆盖；全新 Windows x64 与 ARM64 资格验证仍需运行器验证（适用变更合入前需在具备条件的环境中运行 E2E）
-#### E2E-211：Windows 便携版 exe 无需安装即可启动（D364）
+#### E2E-211：Windows 便携版 ZIP 解压后即可启动（D603）
 
 - **前提条件**：Windows x64 标签或 `dist:win` 包已从共享 electron-builder 配置
-  产出 `PI-Desktop-Setup-<version>.exe` 和 `PI-Desktop-Portable-<version>.exe`；
+  产出 `PI-Desktop-Setup-<version>.exe` 和 `PI-Desktop-Portable-<version>.zip`；
   有干净用户配置；账户是无需管理员提升的标准用户。
-- **步骤**：1) 检查发布目录和 `latest.yml`。2) 不运行 NSIS 安装程序，直接启动
-  便携版 exe。3) 确认进程环境包含 `PORTABLE_EXECUTABLE_FILE`。4) 调用检查更新。
-  5) 确认设置 → 信息提供发布页而不是“重启以更新”。6) 退出并再次启动同一便携文件。
+- **步骤**：1) 检查发布目录和 `latest.yml`。2) 将便携版 ZIP 解压到用户可写目录，
+  不运行 NSIS 安装程序。3) 启动解压后的 `PI-Desktop.exe`。4) 确认没有管理员提示，
+  且运行中的应用显示 PI-Desktop 图标和任务栏入口。5) 调用检查更新。6) 确认设置 → 信息
+  提供发布页而不是“重启以更新”。7) 退出并再次启动解压后的可执行文件。
 - **预期**：两个 Windows 工件都无空格并已上传。`latest.yml` 只指向 NSIS 安装程序。
-  便携版 exe 无需安装向导或管理员提示即可启动，使用现有应用数据目录，
-  并报告更新模式 `manual`。可用更新不会下载或运行
+  ZIP 解压后的应用无需安装向导或管理员提示即可启动，保持正常的 PI-Desktop 任务栏
+  标识和图标，使用现有应用数据目录，并报告更新模式 `manual`。可用更新不会下载或运行
   `PI-Desktop-Setup-<version>.exe`。再次启动从同一配置恢复会话。
 - **链接规格**：`01-product/01-product-scope.md`、
   `06-delivery/06-release-runbook.md`、`03-runtime/07-process-model.md`、
-  ADR 0197 / D364
+  ADR 0197 / D603
 - **验收**：质量（发布打包）
 - **里程碑**：M6+
 - **状态**：单元/源合同已覆盖（`auto-update.test.mjs`）；本机 Windows 启动仍为
@@ -7766,9 +7999,11 @@ runner 会在运行时的隔离临时目录中生成六个插件形态 fixture�
 
 | ID | 场景 | 验证 |
 |---|---|---|
-| E2E-MCP-MARKET-NET-BOUNDARY | URL guard 拒绝凭据、回环、私网、special-use IPv4、v4-mapped、ULA、site-local 和 link-local 及尾点绕过形态；Main 固定已检查的公网地址并逐跳复核 HTTPS 重定向 | 确定性 guard 断言；DNS pin 与响应上限 source-contract 覆盖 |
-| E2E-MCP-MARKET-SEMANTICS | Registry 记录映射为安装模板时保留包版本、named/positional runtime/package 参数与 required/optional 环境变量语义 | 确定性映射断言 |
+| E2E-MCP-MARKET-NET-BOUNDARY | URL guard 拒绝凭据、回环、私网、special-use IPv4、v4-mapped、ULA、site-local 和 link-local 及尾点绕过形态；direct/unknown 默认固定已检查的公网地址，完整 proxied 线路使用 session 传输，显式 `allowFakeIp` 可覆盖透明路由器 fake-IP 源但不允许真实私网答案 | 确定性 guard 断言；DNS pin、代理线路选择、fake-IP 选项范围与响应上限 source-contract 覆盖 |
+| E2E-MCP-MARKET-SEMANTICS | Registry 记录映射为安装模板时保留包版本、named/positional runtime/package 参数与 required/optional 环境变量语义；远端 header 变量同时识别注册表的 `{name}` 与目录的 `${NAME}` 两种写法，仅为已声明的可编辑值显示输入，保留未声明花括号字面量，并按各 header 的作用域处理默认值、固定值与可选标记，不合并不同 header 的同名输入（ADR registry-header-variable-spelling） | 确定性映射断言 |
 | E2E-MCP-MARKET-INSTALL | 内置目录条目经 `resolveCatalogEntry` 解析并通过宿主 `mcp.upsert` RPC 安装；记录落盘 `~/.agents/servers/` | 真实宿主二进制，隔离临时 HOME |
+| E2E-MCP-MARKET-HEADER-SCOPE | Registry header-local `{token}` resolves only in its header; same-named URL path/query tokens remain literal through mapping, resolution, host upsert/list and persistence. URL templates retain only legacy `${NAME}` substitution. When `headerBindings` exists (even empty or partial), unbound tokens in every header stay literal and never consume another header's input or default | shared regressions plus real host binary with isolated temporary storage; remote entry disabled, no network call |
+| E2E-MCP-MARKET-partial-header-bindings-stay-literal | Resolve a catalog with only Authorization bound and another header using the same `{token}` / `${token}`; an undeclared `${UNBOUND}` in a third header also remains literal through host upsert/list and disk persistence | real host binary, disabled remote entry, synthetic input and isolated temporary storage; no network call |
 
 
 #### E2E-SKILL-MARKET-NET-BOUNDARY：技能源公网 HTTPS 策略拒绝私网与回环
@@ -7835,6 +8070,25 @@ runner 会在运行时的隔离临时目录中生成六个插件形态 fixture�
 - **验收**：C（对话与流式）、E（工具与权限）、品质
 - **里程碑**：M6+
 - **状态**：部分自动化。`pnpm test:e2e:transcript-disclosure` 在真实的 600 CSS px Electron 视口中挂载真实的转录滚动 hook 与真实的工具行，用真实 DOM 点击标题，并对转录以及嵌套跟随滚动器断言标题相对滚动器顶边的偏移与滚动偏移；没有该修复时，同一个夹具会报告标题移动了整个展开详情的高度。夹具未链接应用样式表，因此高度来自内联填充与组件自身的固有尺寸。`disclosure-anchor.test.mjs` 覆盖纯锚点与输入归属数学，`transcript-disclosure-reading.test.mjs` 覆盖接线。键盘、滚轮与活动组动画路径仍属补充验证。
+#### E2E-CHAT-running-status-survives-output-pauses
+
+- **先决条件**：Electron 中的生产 `ChatTranscript`、真实 store 和 React DOM，使用确定性消息/状态转换，无需模型凭据。
+- **步骤**：发送一轮，输出部分文字后停止增量，开始并完成工具，切换和清空具体阶段，恢复文字后完成、停止或失败。在详细与紧凑模式重复；验证规划、权限、提问与提案等待、历史阅读及会话切换。
+- **预期**：输出暂停和工具完成后仍有且仅有一行本地化、可访问的底部状态。具体阶段优先于规划/目标或工作中。等待用户操作时隐藏；回合结束与历史阅读时移除。会话切换只使用对应会话的状态；已有内容与权限操作保持可用。运行中与含助手错误的回合不挂载空操作栏；默认字号下，部分回答的片段盒底部到状态文字顶部为 24 CSS px。结束后的无错误正文保留复制、分支与重新生成。详细和紧凑模式均需验证。历史阅读和权限卡保留正常消息间距；回合结束后贴底模式继续跟随底部，恢复正常操作栏高度；向上阅读时正文位置和滚动偏移保持不变。
+- **链接规格**：`04-ux/08-component-spec.md`、`04-ux/09-interaction-patterns.md`
+- **验收**：C（对话与流式）、品质（交互和可访问性）
+- **里程碑**：M5
+- **状态**：`pnpm test:e2e:transcript` 自动化（`scripts/e2e/transcript-status.tsx`）。上游 `ecece8f570fc0c18f21e4941eafe52244a7c6e5f` 可复现 #669；不代表真实模型验证。
+
+#### E2E-CHAT-initial-wait-spacing
+
+- 发送用户消息且助手尚未输出：保留原有用户操作栏和间距，默认纯文字用例气泡到状态文字为 52px。
+- 宽窗口和窄窗口下复制可聚焦、可命中；编辑、删除、版本按钮保持运行中禁用。
+  含版本分页时，状态与所有操作按钮的命中区域也不重叠。
+- 状态/底部空白右键打开会话菜单，消息右键打开消息菜单。阶段变化、首次输出或输出前停止，
+  运行状态始终只有一处，结束后恢复消息操作。
+- 覆盖：`scripts/e2e/transcript-status.tsx`，`pnpm test:e2e:transcript`。
+
 #### E2E-CHAT-runtime-status-keeps-row-position
 
 - **先决条件**：一个活动会话，其转录高于对话视口，且尾部由一行已完成的工具占用；窗格已构建（`pnpm build:js`）并已安装 Electron。
@@ -7845,9 +8099,9 @@ runner 会在运行时的隔离临时目录中生成六个插件形态 fixture�
   4. 再次清空运行时活动，让布局稳定下来。
   5. 结束该轮（`isRunning` 为 false），检查尾部。
 - **预期**：
-  - 等待行占用预留的状态通道：在状态出现期间以及清空之后，内容高度、滚动高度、滚动偏移，以及每一个已渲染行的位置都保持不变（误差在 0.01px 以内）。
-  - 空通道在深色与浅色两种主题下都保持已预留且不可见 —— 没有背景、边框或阴影。
-  - 状态行保持其活动区域语义（`role="status"`、`aria-live="polite"`），而空通道不携带任何可供播报的文本。
+  - 等待行占用预留的状态通道：在 Working 切换到具体等待状态再恢复时，内容高度、滚动高度、滚动偏移，以及每一个已渲染行的位置都保持不变（误差在 0.01px 以内）。
+  - 通道在深色与浅色两种主题下都保持预留和透明，没有背景、边框或阴影；清空具体阶段后恢复 Working。
+  - 状态行保持其活动区域语义（`role="status"`、`aria-live="polite"`），等待用户操作时预留通道为空，不携带可供播报的文本。
   - 已结束的空闲转录完全不渲染状态通道，因此其布局不变。
 - **链接规格**：`04-ux/08-component-spec.md`
 - **验收**：C（对话与流式）、品质
@@ -7991,6 +8245,12 @@ runner 会在运行时的隔离临时目录中生成六个插件形态 fixture�
 - **里程碑**：M6+
 - **状态**：草稿
 
+- **Local fallback regression**: Set the process default data directory to a
+  different temporary root, then create a plugin manager with its own root.
+  All bundled fallback package URLs must stay beneath the manager's root;
+  installing the bundled package must still report byte progress, validate its
+  size and checksum, and preserve cancellation behavior.
+
 #### E2E-PLUGIN-cancel-during-download-installs-nothing：在下载期间取消会停止安装、不留下任何已安装内容，并让对话框静默关闭
 
 - **先决条件**：一次官方渠道安装，其安装包足够大或镜像足够慢，使下载阶段持续一段时间；能够应答 `market.cancelInstall`；同时可以查看插件目录、安装缓存与已安装列表。
@@ -8098,3 +8358,409 @@ the latest destination. These assertions measure work counts, not device FPS.
   `desktop_dispatch_outlasts_every_electron_budget_it_wraps` covers the dispatch
   default.
 - **Status:** Contract-covered; no end-to-end driver waits out a real 70s call.
+
+### E2E-IMAGES-desktop-conversation
+
+- **Preconditions:** Isolated desktop profile and workspace, built image feature,
+  local chat and OpenAI Images HTTP fixtures; no live provider credentials.
+- **Steps:** Open Models settings with no image model configured; verify the image
+  summary row is absent. Open a provider's Advanced model settings and verify
+  **Set as image model** is grouped with the image/document attachment
+  capabilities and can be checked for multiple models. Save, use the image
+  summary menu to choose one marked model as the default, then submit a
+  two-image request through the composer and edit the first output through a
+  follow-up message. Collapse tool details.
+- **Expected:** After saving, the image summary appears with a 12px default-row
+  gap and lists all marked candidates, the selected default is changeable
+  without changing the chat default, decoded image previews stay outside
+  collapsed process details, multipart source upload is used for editing,
+  originals are preserved, and no image HTTP request occurs while unconfigured.
+- **Settings interactions:** The unconfigured state renders no image summary.
+  Mark candidates in the attachment capability group, save, and select one
+  from the summary menu. An existing missing/disabled candidate shows only
+  Currently unavailable. Covered in `scripts/e2e-image-generation-ui.mjs`.
+- **Conversation selection:** Every marked image provider/model is absent from
+  default and Composer candidates. Other providers retain same-ID models. An
+  existing session pinned to any marked image binding is rejected before
+  inference.
+- **Transport contracts:** Real stdio reverse RPC retains a thrown local image
+  error's stable code in the production ParentHostProxy. Local HTTP tests check
+  single/multiple binary multipart fields and boundaries, DALL-E `b64_json`
+  requests, GPT Image parameter omission, bounded responses, and rejection of
+  more than four references before I/O. These are protocol tests, not official
+  provider account/live compatibility certification.
+- **Status:** Automated in `node scripts/e2e-image-chat.mjs`; optional screenshots
+  use `PI_IMAGE_CHAT_EVIDENCE_DIR`. The images are deterministic raster fixtures,
+  not evidence of real-model quality or provider compatibility.
+
+
+### E2E-SCHEDULED-desktop-automation-lifecycle
+
+- **前提：** 独立桌面配置、构建后的任务候选版本、本地 SSE 模拟模型；不使用真实
+  服务凭据或付费 API。
+- **步骤：** 点击页脚时钟；创建每天上午 09:00 的任务；编辑名称；暂停／启用；立即运行；
+  打开结果会话；验证周期／四个时段主题下拉菜单、星期多选及选中标记、保存回显、空选择与固定时间；
+  验证方向键、Home/End、Enter、Escape／Tab 和外部点击关闭；
+  验证每小时无时间输入且首次等待一小时；设置每天任务在下一个真实分钟执行；
+  观察自动完成；删除已结束的任务。普通 Agent 对话经模型工具调用发现、创建、查询、
+  修改任务到 15:30，再删除；验证页面显示具体时间，改名保存不覆盖。模型为本地确定性夹具。
+- **预期：** 配置持久化并显示下次时间；暂停后不触发；手动与自动入口均调用真实
+  Agent sidecar；历史记录链接到持久化会话；自动执行不依赖渲染器发送提示词。
+  宿主测试补充验证重复准入、错过时段、无效输入和重启恢复。
+- **规格：** 04-ux/01-ui-ia §3.4；03-runtime/04-data-storage §4.11；
+  ADR scheduled-desktop-automations。
+- **验收：** 定时执行与可恢复的运行历史。
+- **里程碑：** MVP 后的桌面自动化。
+- **状态：** `node scripts/e2e-scheduled.mjs` 自动化覆盖；按 AGENTS.md 在任务候选
+  版本上运行，并记录已测提交与基线。
+
+### E2E-CONFIG-SYNC-webdav-portable-configuration
+
+- **前提：** 已构建的任务候选版本、隔离的 Host 配置，以及支持 strong ETag 和条件 PUT 的本地 WebDAV fixture。不使用真实 WebDAV 账户、provider 或生产桌面。
+- **步骤：** 1）打开设置 → 云同步，填写 fixture URL、设备标签、目录和备份密码。2）运行能力测试，确认使用临时对象。3）选择 provider/MCP/skill 类别，保持凭据和 memory 未选中；在第二次预览中启用凭据，确认只显示脱敏计数。4）配置设备 A，创建 user provider 和 MCP 定义并同步。5）让设备 B 连接同一 vault，同步后检查待激活/映射，并验证审批前不会运行命令或任务。6）批准一个变更后的安全实体，拒绝一个暂存实体，在两台设备上编辑不相交设置并再次同步。7）测试并发 head writer、错误密码、weak ETag、密文损坏、redirect、归档路径穿越和网络中断。8）使用回环／私有地址的 fixture 勾选“允许在受信任的内网地址使用 HTTP”，确认刷新状态后仍保留；即使勾选，公网 HTTP 地址也必须被拒绝。
+- **预期：** 测试拒绝不可靠的条件写入。HTTP 默认关闭，仅允许 localhost、`.local` 或私有／链路本地地址；公网 HTTP 地址会被拒绝，界面会提示凭据暴露风险。若 fixture 探测到该 endpoint 对不存在对象返回 502，后续只兼容该 endpoint 的这一行为；忽略条件头的服务器仍必须标记为不受支持。WebDAV 只能看到已认证的密文和不透明对象名；原始秘密不会出现在 Renderer 状态或日志中。相同和不相交的编辑会收敛，冲突保持可审查，明确删除使用 tombstone，类别退出不是删除，可执行导入在本地审批和映射前保持不激活。恢复不会暴露部分应用的本地配置。
+- **规格：** `03-runtime/22-config-sync.md`、`03-runtime/14-secrets-storage.md`、`05-security/01-security.md`、ADR 0300。
+- **验收：** F（持久化）、Security、Quality。
+- **里程碑：** M6+。
+- **状态：** Draft；合并/密码学和进程内 WebDAV 条件写入覆盖已存在。完整双设备进程路径和逐检查点本地恢复故障注入仍待自动化。
+
+### E2E-DIALOG-long-text-boundaries
+
+- **前提：** 已构建渲染器，使用隔离的 Electron 组件测试窗口。组件、状态、翻译
+  和样式均为生产实现，只在 preload IPC 边界提供确定性宿主回复。
+- **步骤：** 用长 Windows 路径打开扩展输入框，输入、提交、重新打开并关闭；在
+  520×480 下测试明暗主题及中文的长标题、确认文本、选项；检查重命名、项目
+  指令、记忆、删除、插件安装、设置、权限确认与 OAuth 弹窗，并操作关闭按钮。
+- **预期：** 来源路径与其他长文本完整换行显示，不截断，无横向溢出，保留 420px 提示框宽度；
+  高内容在框内滚动，关闭、Escape、输入提交、单选操作正常。
+- **规格：** `04-ux/08-component-spec.md`，弹窗长文本边界。
+- **验收：** 文字保持在边界内，弹窗操作可达。
+- **阶段：** 发布后维护。
+- **自动化：** `pnpm test:e2e:dialog-overflow`；源代码检查不能替代实际布局验证。
+- **状态：** 已实现，原生 Windows 已验证，macOS/Linux 尚未实机验证。
+
+### E2E-PROVIDER-certificate-trust-and-terminal-errors
+
+- **前提：** 已构建、包含当前 `origin/main` 的任务候选版本，已安装 Electron，使用
+  隔离的测试进程／配置和回环 HTTPS 夹具。不使用真实 provider、凭据或用户配置，
+  也不写入操作系统证书库。
+- **步骤：** 运行 `node scripts/e2e-provider-certificates.mjs`。启动真实桌面
+  sidecar，使用不受信任的 localhost 证书提交聊天提示。再将其 CA 放入
+  `NODE_EXTRA_CA_CERTS` 后重启，并通过 SAN 中不存在的主机名请求同一证书。
+- **预期：** 子进程默认 CA 集合包含系统根证书和额外 CA。首次请求只失败一次，
+  返回不可重试的证书错误且没有重试状态；信任 CA 后请求返回文本；主机名不匹配
+  仍只失败一次。TLS 和主机名校验始终保持启用。
+- **UI：** 运行 `node scripts/e2e-provider-certificate-ui.mjs`，在隔离 Chromium
+  中验证真实错误组件。证书错误显示本地化指引；DNS 和协议错误保留通用摘要。
+  errno／原始 details 仍可见，详情可以关闭并重新打开。可选的
+  `PI_CERTIFICATE_EVIDENCE_DIR` 会记录截图；`--baseline` 使用相同夹具和样式的
+  upstream 错误组件。
+- **低层覆盖：** `provider-certificate-flow.test.ts` 通过真实 Agent/pi-ai wiring
+  进入主 session 的 `prompt()` 和 delegate 的 `run()`，仅 mock 外部 fetch。两条
+  路径都只请求一次并保留证书原因；错误分类和恢复测试覆盖直接、嵌套、扁平化、
+  非证书以及包装后的证书错误。
+- **限制：** OS 根证书的纳入在不安装根证书的条件下检查。TLS 成功夹具只使用
+  子进程额外 CA，不复现某个具体杀毒软件安装，也不宣称已完成 macOS/Linux 实机验证。
+
+### E2E-CHAT-turn-process-and-thinking-display
+
+- **先决条件：** 一个回合包含进度段落 A、多次搜索及思考、进度段落 B、多条命令及
+  思考和最终回答；详细与紧凑显示模式。
+- **步骤：** 在详细模式静态审查嵌套披露路径，包括相互独立的组／条目切换、父级收起
+  与恢复、单项片段、字面最后一项选择、失败／被拒／恢复和保留窗格重新挂载。
+  随后在紧凑模式重复，并覆盖权限／提问／计划／目标操作卡、中止的部分回答、
+  助手错误和委派子任务。
+- **预期：** 两种模式都使用一个整体过程披露，并把最终回答、助手错误、中止后的末尾
+  文字和待处理操作留在过程之外。详细模式的活动中／已完成过程默认展开；活动多项组
+  展开，未操作组在完成时收起。紧凑模式的过程、组和载荷默认收起，隐藏推理；记录过
+  失败／被拒工具的未操作活动过程会在恢复期间保持展开，并在完成后收起。单项没有组。
+  详细模式只自动展开最后一个活动组中符合条件的字面最后工具／搜索项；不会越过思考
+  向前查找，失败／被拒叶子保持关闭。父级、子级和同级状态相互独立；窗格拥有的用户
+  选择跨更新、模式切换和重新挂载保留，渲染器重启后重新应用默认值。已保存模式跨重启
+  保留，缺失或未知设置按详细模式处理。
+- **2026-09-20 变更的验证范围：** 本次变更只包含多级折叠与活动组呈现；精确转录搜索
+  定位不在本次范围内，保持原有搜索行为。
+- **规格：** 04-ux/06-settings-ia、04-ux/08-component-spec、
+  04-ux/09-interaction-patterns；ADR turn-process-and-thinking-display。
+
+### E2E-CONTEXT-estimate-calibration-stays-safe
+
+- **先决条件：** 可脚本化上报用量的确定性提供商夹具；占用接近硬边界的会话；不使用真实凭据。
+- **步骤：** 连续上报低于预测的用量，确认显示占用不低于下限且压缩仍然触发；上报远离合理区间的用量，确认数值不动；跑一个
+  中文为主的会话，比较显示占用与上报用量。
+- **预期：** 校准后的占用保持在原始估算的 0.85×–6× 之内；有证据即上调；只有方向一致的样本才下调；处在硬限制 1.18× 的
+  投影仍触发压缩；误报不产生任何方向的移动；中文文本不再只有实测成本的四分之一。
+- **规格：** 03-runtime/02-agent-runtime §5.1、08-meta/decisions-log D606。**验收：** C（对话与流）、F（持久化）、品质。
+  **状态：** 单元测试覆盖（含中文与边界用例）；桌面 E2E 待补。
+
+### E2E-RUNTIME-unique-tool-call-ids-per-request
+
+- **先决条件：** 一份把同一次工具调用携带两次的会话转录（重试追加让该调用落在第二个行 id 上），在确定性提供商夹具下加载进
+  重新创建的运行时；不使用真实凭据。
+- **步骤：** 发一条提示，使运行时组装并发出请求。读取夹具收到的出站请求与 `agent` 日志通道。再用工具调用本就唯一的转录重复一次。
+- **预期：** 出站请求对那个 id 只携带一个 `toolCall` 与恰好一个对应结果，因此提供商不可能回 `tool_use ids must be unique`；
+  日志通道出现一行，带会话与 id。唯一转录的请求逐字不变，且不产生任何日志。
+- **规格：** 03-runtime/02-agent-runtime §5、08-meta/decisions-log D608。**验收：** C（对话与流）、品质。
+  **里程碑：** Post-MVP 回归覆盖。
+- **自动化：** `packages/agent-runtime/src/runtime.test.ts` 用真实的运行时覆盖两半：重复历史（丢弃 + 一行日志）与唯一历史
+  （同一对象、无日志）。
+
+- **状态：** 单元测试覆盖；没有端到端驱动对重复转录发出真实提供商请求。
+
+### E2E-RUNTIME-loop-context-ownership
+
+- **先决条件：** 一个确定性提供商夹具：前两轮各回一次工具调用，并在第二轮之后像用户 Stop 那样结束回合；不使用真实凭据。
+- **步骤：** 发一条提示，让运行时跑完两轮工具调用并在工具轮上结束回合；再发第二条提示。读取运行时保留的状态与夹具收到的出站请求。
+- **预期：** 保留的状态里每个流式辅助消息与每个工具结果都只有一份；没有结果与它回答的调用被隔开；夹具收到的请求对每次调用只带一个结果。
+  不产生去重日志行，因为请求守卫没有任何东西需要丢弃。
+- **规格：** 03-runtime/02-agent-runtime §5c、08-meta/decisions-log D620。**验收：** C（对话与流）、品质。
+  **里程碑：** Post-MVP 回归覆盖。
+- **自动化：** `packages/agent-runtime/src/runtime.test.ts`（loop context ownership）通过 `runtime.prompt()` 驱动真实 pi 循环，
+  并读取 `convertToLlm` 交给提供商的视图；`subagent-loop-context.test.ts` 覆盖委托侧的回合边界。两者都到不了适配器自身的输出，
+  因此由 `tool-call-dedupe.test.ts`（request wire contract）直接驱动 pi-ai 的消息变换，固定「请求把调用与结果隔开时同一个 call id
+  会拿到两条输出」这一机制。
+- **状态：** 单元测试覆盖；没有端到端驱动从「循环追加过的上下文」构建新回合的请求。
+
+### E2E-MCP-HTTP-ACK — HTTP acknowledgement and authorization status
+
+- **Preconditions**: A local mock Streamable HTTP server returns JSON for
+  initialize, `202` with plain-text `Accepted` for notifications/initialized,
+  SSE for tools/list, and JSON for tools/call. No provider credentials needed.
+- **Steps**: Connect, discover a tool, and call it. Render the MCP settings row
+  with idle, connecting, ready, non-authentication failure, and authentication
+  failure statuses, including an expired stored OAuth credential.
+- **Expected**: The acknowledgement does not enter the JSON parser; discovery,
+  calls, and session headers remain functional. Only explicit authRequired
+  status shows the authorization-required badge. Non-authentication failures
+  retain their original error. Authentication failures remain actionable.
+- **Specs**: 07-plugins/01-plugin-system §12.2; ADR 0038; ADR 0283.
+- **Acceptance**: HTTP client integration and settings component rendering.
+- **Milestone**: Maintenance.
+- **Status**: Covered by the existing HTTP client integration fixture and a
+  focused component-render validation; no live IDA process required.
+
+### E2E-PLUGIN-crash-report-names-the-exit-code
+
+- **先决条件：** 已加载的插件宿主进程自行死亡——夹具为写一行 stderr 后 `process.exit(7)`——并带一个常驻服务，使监督器路径也被覆盖。
+  隔离的桌面配置；不访问市场或网络。
+- **步骤：** 加载插件并让宿主进程死亡。读取加载错误、`failed` 服务状态、`plugin.crash` 审计记录与 `plugin` 日志通道。若有条件，
+  再用一次硬故障（Windows `0xC0000005` 一类退出）重复；最后在插件宿主存活时退出应用。
+- **预期：** 上述每一处都给出退出码（`exit code 7`；硬故障为 `exit code 3221225477 (0xC0000005)`），而夹具的 stderr 行不会出现在
+  加载错误或崩溃审计记录中。干净退出完全不上报崩溃：退出是关闭而不是崩溃。
+- **规格：** 07-plugins/05-plugin-lifecycle §3.1 / §8、08-meta/decisions-log D607。
+- **验收：** G（插件宿主生命周期）、品质（可诊断性）。**里程碑：** Post-MVP 回归覆盖。
+- **自动化：** `apps/desktop/test/plugin-services.test.mjs` 真实 fork 宿主进程、以夹具退出码杀死它，并断言服务状态与审计记录上的
+  退出码及原始 stderr 缺失；`plugin-isolation.test.mjs` 与关闭用例覆盖"退出不是崩溃"那一半。
+- **状态：** 运行时层已自动化；无 UI 驱动读取插件页的错误文本。
+
+
+### E2E-IMAGE-generation-and-editing
+
+- **Preconditions:** Built task candidate containing latest origin/main; isolated
+  host data directory, local image HTTP fixture, no production credentials.
+- **Steps:** Choose a model in Advanced, cancel and verify no change; save and
+  replace it through another provider's Advanced settings. Clear the binding via
+  the test settings API to verify recovery. Generate same-prompt variants and distinct images,
+  edit a generated image, inspect partial failures, then restart the host/session.
+  Attempt the tool in a durable Plan session and verify no HTTP request occurs.
+- **Expected:** One image binding persists without changing the chat default;
+  generated files, edit sources and transcript references survive restart.
+  Images render in chat; unconfigured errors navigate to Models settings.
+- **Specs:** 03-runtime/21-image-generation; 03-runtime/13-model-catalog-and-selection.
+- **Acceptance:** Configured image generation/editing, safe cancellation and persistence.
+- **Milestone:** Post-MVP.
+- **Status:** Automated by `scripts/e2e-image-generation.mjs` and
+  `scripts/e2e-image-generation-ui.mjs`; backend test uses real Rust/stdio/HTTP/files,
+  UI test uses real Chromium and production components with API-boundary fixtures.
+
+| Scenario | Acceptance | Specification | Automation |
+| --- | --- | --- | --- |
+| E2E-IMAGE-generation-and-editing | Image capability and recovery | 03-runtime/21-image-generation | Host and UI suites above |
+
+#### E2E-CHAT-parenthesized-url：用户消息中的完整网址
+
+- **步骤**：在用户消息中发送 `https://en.wikipedia.org/wiki/React_(software)` 并点击链接，再验证正文用圆括号包裹该网址、网址后跟句号及紧接另一链接或文件引用的情况。
+- **预期**：打开包含 `(software)` 的完整网址，进入 React 软件词条；正文外层的右括号和紧跟 URL 右括号的句末标点不属于链接，相邻引用仍能独立点击。嵌套圆括号、查询和片段内的圆括号、百分号编码的圆括号均保持完整。
+- **覆盖**：`chat-links.test.mjs`；桌面端通过正常浏览器目标实际点击验证。
+- **链接规格**：`04-ux/08-component-spec.md` §8.3。
+
+#### E2E-IME-escape: 取消组词保留草稿
+
+- **步骤**：编辑用户消息并输入草稿，派发组词中的 Escape 和 Cmd/Ctrl+Enter；打开全局搜索，从输入框派发组词中的 Escape。对 legacy keyCode 229 重复检查，再验证普通 Escape 和重试快捷键。
+- **预期**：组词事件不会丢弃编辑、关闭搜索或重试发送；普通 Escape 仍取消或关闭（包括搜索输入框之外的焦点），普通 Cmd/Ctrl+Enter 仍重试。
+- **覆盖**：`node scripts/e2e-ime-escape.mjs` 使用真实组件、冒泡 DOM 键盘事件及宿主边界测试数据；不代表已验证操作系统输入法候选窗口。
+
+### E2E-SCHEDULED-manual-to-hourly
+
+- **Preconditions:** Built host candidate, isolated data directory, no provider.
+- **Steps:** Through `tools.execute`, create a paused Manual task, update only
+  its id and cadence to Hourly, rename it, restart, and list tasks again.
+- **Expected:** Update succeeds without calendar fields; the next occurrence is
+  one hour away. Prompt, paused state and saved configuration survive. Rename
+  does not reset the interval. RPC tests also cover required Daily/Weekly times
+  and retention of an existing custom schedule.
+- **Specs:** 04-ux/01-ui-ia §3.4.
+- **Acceptance:** C / F — task configuration and persistence.
+- **Milestone:** Maintenance.
+- **Status:** `node scripts/e2e-scheduled-hourly-update.mjs` exercises the real
+  Rust host, permission path, stdio and SQLite; no model inference or desktop UI.
+
+### E2E-SCHEDULED-manual-workspace-binding
+
+- **Preconditions:** Built request candidate; isolated host data and two project
+  directories. No provider credentials or paid API.
+- **Steps:** Create Manual and Hourly tasks in project A and without a project;
+  restart the host, switch to B, Run now, rename through the editor payload,
+  and Run now again.
+- **Expected:** Each result session and edited task retain the original binding,
+  including no-project tasks. Legacy cadence-only tasks keep their previous
+  fallback until explicitly configured (covered by host RPC tests).
+- **Specs:** 04-ux/01-ui-ia §3.4.
+- **Acceptance:** Saved workspace binding across run, edit and restart.
+- **Milestone:** Maintenance.
+- **Status:** Automated by `node --experimental-strip-types
+  scripts/e2e-scheduled-workspace.mjs`, using production Electron dispatch and
+  real Rust/stdio/SQLite. Only external inference is replaced with an observer.
+
+#### E2E-PROVIDER-stored-binding-array-reads-entry-by-entry：存储的模型绑定数组逐条读取
+
+- **前置条件**：一次性数据目录与 host-core 可执行文件；通过 `providers.create`
+  建立一个至少含三条完整绑定的提供商；不使用真实提供商或凭据。
+- **步骤**：调用 `providers.list`，确认全部绑定都返回。编辑存储的
+  `config_json`，删掉其中一个绑定的 `maxTokens`，再次 list。补回该字段后再
+  list。最后把某个绑定的 `contextWindow` 改成字符串，再 list 一次；用可读子集
+  携带一个无关字段变更调用 `providers.update`。
+- **预期**：除损坏条目外，三条绑定都按存储顺序返回。丢失 `maxTokens` 的绑定以
+  通用默认输出上限读出，补回字段后数值恢复。宿主日志为无法解码的条目带上提供商
+  id、条目下标与原因。显式模型数组更新返回 `MODEL_BINDINGS_DEGRADED`，而存储的
+  `config_json` 保持不变。
+- **链接规格**：`03-runtime/12-provider-config-schema.md` §2、
+  `08-meta/decisions-log.md` D610
+- **验收**：F（持久化）、品质
+- **状态**：单元覆盖（`providers::catalog::tests`、
+  `providers::tests::a_stored_array_survives_an_entry_that_lost_a_field`）；
+  宿主 RPC 路径由 `scripts/e2e-smoke.mjs` 覆盖提供商的创建与列举，但没有套件
+  驱动手工编辑的 `config_json`。
+
+### E2E-SESSION-temporary-attachment-fork：临时任务预览与独立分支附件
+
+- **步骤**：在没有项目的任务中粘贴超过长文本阈值的内容并发送，点击对话中的附件。
+  返回后创建分支并打开同一附件；删除原任务，再打开分支附件，并继续创建分支。
+- **预期**：每次预览均显示原始文件内容；各分支引用自身的 scratch 输入目录，
+  不需要打开项目，也不授予跨任务读取权限。按消息截断的分支不复制后续消息独有
+  或未引用的输入文件。
+- **自动化**：`scripts/e2e-composer-paste.mjs` 覆盖长文本保存、真实 Electron
+  文件读取、临时任务预览及返回。主机测试
+  `fork_preserves_referenced_pasted_files_independently` 和 `sessions::fork_files`
+  覆盖附件归属、删除、重复与截断分支、保留的压缩检查点引用、过期输入、失败回滚
+  及符号链接拒绝。
+
+### E2E-011f 补充：入队确认前的操作锁定
+
+- **前提**：会话正在回复，可控制 Host 入队请求的完成时刻。
+- **步骤**：发送一条后续消息，暂停入队；尝试编辑或删除；释放入队后再次编辑或删除，
+  然后刷新队列。用带文件引用的草稿重复；让本地 Host 入队请求超过现有 RPC 超时后重试。
+- **预期**：未确认时五个行操作都禁用且提示正在保存，立即发送按钮也显示正在保存，
+  条目不消失，也不回填第二份草稿；
+  确认后删除能移除持久化条目，编辑完整回填草稿及文件引用，刷新不会恢复已移除条目。
+  本地 Host 超时后移除未确认行、显示错误并恢复被拒绝的草稿，重试可正常入队。
+- **规格**：`04-ux/08-component-spec.md`、`04-ux/09-interaction-patterns.md`。
+- **验收 / 里程碑**：C、Quality / M6+。
+- **状态**：组件与状态层用户路径由 `queue-pending-actions.test.mjs` 覆盖。
+
+### E2E-SCHEDULED-dispatch
+
+- **场景**：独立分发到期任务。
+- **预期**：Electron runner 无需等待其他任务的提示词准备即可准入彼此独立的
+  到期任务；本地所有权按任务 ID 和 Host 实例保留，Host 继续负责 enabled、
+  due 和重叠检查。停止只阻止新轮询，错误仍可观察，迟到 90 秒的规则不变。
+- **自动化**：`node --experimental-strip-types scripts/e2e-scheduled-dispatch.mjs`
+### E2E-SCHEDULED-project-removal
+
+- **场景**：删除项目与自动任务。
+- **预期**：删除项目会暂停其绑定任务，并保留任务定义、schedule、工作区绑定和
+  运行历史；已准入的任务会阻止删除。其他项目和未绑定旧任务不受影响。用户显式
+  恢复或 Run now 可以重新创建项目，暂停状态下的自动轮询不会这样做。
+- **自动化**：`node --experimental-strip-types scripts/e2e-scheduled-project-removal.mjs`
+### E2E-SCHEDULED-legacy-pause
+
+- **场景**：旧任务维护。
+- **预期**：Agent 工具可对缺少 schedule 的旧版自动任务修改标题、提示词或暂停，
+  包括回传未变化的 cadence；维护不会启用任务或捕获前台工作区。显式启用、改变
+  cadence 或提供 schedule 时仍执行校验，Manual 转 Hourly 的默认间隔行为不变。
+- **自动化**：`node --experimental-strip-types scripts/e2e-scheduled-legacy-maintenance.mjs`
+### E2E-SCHEDULED-calendar-intent
+
+- **场景**：日历配置意图。
+- **预期**：可选的 `config_json.calendarConfigured` 区分明确设置的每日／每周
+  日历时间与 Hourly 内部占位 schedule。旧版 Daily／Weekly 保留日历语义；
+  旧版 Hourly 转换时必须明确提供 schedule。已知配置可跨 Hourly 与重启保留，
+  包括午夜；仅修改元数据以及 Manual 转 Hourly 的行为不变。
+- **自动化**：`node --experimental-strip-types scripts/e2e-scheduled-calendar-intent.mjs`
+### E2E-SCHEDULED-paths
+
+- **场景**：工作区身份。
+- **预期**：保存和读取工作区绑定时统一使用现有项目路径规范化规则。Windows
+  路径的斜杠方向、大小写、末尾分隔符和扩展路径前缀差异不影响同项目会话；
+  缺失的旧版绑定与显式 null 保持不同语义，其他项目不能查询或修改绑定任务。
+- **自动化**：`node --experimental-strip-types scripts/e2e-scheduled-paths.mjs`
+  使用隔离的真实 Host 与 SQLite 配置，不向真实提供商发送推理请求。
+
+## 原生搜索续跑契约（离线 sidecar）
+
+**范围：** ADR 0297；供应商原生搜索内容、估算、本地工具、Task 委派及历史恢复。不调用真实模型或搜索服务。
+
+**入口：** `pnpm test:e2e:hosted-search` 自行重建 shared 与 agent-runtime sidecar。
+通过普通 stdio RPC 驱动该产物，使用隔离数据目录、合成 Host 与仅回环地址的 Responses 服务。
+只测源码或使用已有桌面安装包不满足本测试。
+
+| 场景 | 必须观察到的结果 |
+| --- | --- |
+| 搜索后新用户消息 | 合法搜索项被回放，第二轮正常结束。 |
+| 搜索后普通本地工具 | 真实工具轮完成，下一模型请求准备无类型或估算错误。 |
+| 搜索后 Task | 实际委派流程使用合成模型，父代理继续且不重复报告本地错误。 |
+| 保存搜索历史后恢复 | 新运行时保留搜索回放，不添加假工具字段或改写原记录。 |
+| 真实前缀变化使 usage 失效 | 隔离 sidecar 在真实 Read 轮中更新指令；此前非零 usage 不再覆盖该前缀，续跑正常结束。 |
+| 非法历史回放容器 | 恢复返回安全的 INTERNAL/context-validation；不发送模型请求或持久化 Host RPC，进程仍健康。内存中输入不变性由回放单元测试验证。 |
+| 未知历史搜索阶段 | 明确拒绝该记录，而不是静默丢弃搜索内容；其余断言同上。 |
+
+**配套检查：** Responses/Azure/Anthropic 请求契约、搜索阶段类型、有效/零/失效 usage、
+真实与无变化的系统前缀及工具增删、搜索数据增长、中文输出预算；结构化本地准备失败不重试、不 fetch，普通传输重试与取消保持正确。依赖升级必须对锁定版本运行这些检查，记录测试的 bundle。
+
+**证据：** 记录构建和测试退出码、基线 SHA、依赖版本、产物标识及独立评审，报告位于
+`docs/project/hosted-search-contract-verification.md`。不得记录真实会话或凭据。未执行明确标为 NOT RUN，不得标为 PASS。
+
+### E2E-HOOKS-cancel-and-dispose
+
+- **#816 扩展验收：** 命令弹窗显示期间 Stop，真实渲染层移除弹窗，后续弹窗和 exec
+  不再发生，下一命令或回合正常。Electron 驱动通过 CDP 检查 DOM；Runner 测试覆盖
+  长命令、上下文等待取消、工具进度退役及头部副本；进程测试通过就绪信号同步真实父子进程。
+
+- **前置条件：** 隔离 Desktop 配置、本地确定性模型，以及含等待型请求前处理器的可信插件。
+- **步骤：** 发送消息，在处理器等待时停止，释放旧处理器后再次发送。另测等待时销毁
+  Runtime，并加载启动/关闭挂起以及注册未接通事件的夹具。
+- **预期：** 被停止或销毁的请求不调用模型，后续消息正常完成。迟到结果不能重启工作。
+  关闭只执行一次，各处理器等待有界，未接通事件产生诊断但不禁用正常处理器。
+- **规范：** 07-plugins/16 §6。
+- **验收：** 取消及时生效，扩展生命周期等待有界。
+- **里程碑：** Hooks P0。
+- **状态：** Runner 与真实 Runtime/本地 HTTP 集成通过
+  `extensions/runner.test.ts`、`extensions/runtime-lifecycle.test.ts` 自动验证。
+  可信扩展 Electron 驱动通过 CDP 在真实渲染层执行 Stop 路径，并记录弹窗显示和
+  退役后的状态。
+## Composer 指令源、手动压缩与空记录读取（#795）
+
+**范围：** composer 的斜杠分发、手动压缩 RPC，以及渲染层的持久化记录读取。不调用真实模型或
+提供商。
+
+| 场景 | 必须观察到的结果 |
+| --- | --- |
+| `composer/commands` 失败时输入 `/compact` | 提交被拒绝并显示 `chat.slashCommandSourceUnavailable`，草稿保留，没有任何提示词进入会话。失败的读取不入缓存，因此下一次发送会重试。 |
+| 指令源缓存仍热 | 内置指令仍在本地分发；模板与未知别名仍走提示词路径。 |
+| 手动压缩超过其传输超时 | 宿主重新读取持久化压缩记录：发现新检查点已落盘就报告成功并记录该不一致，未落盘则原样抛出超时。sidecar 自己报告的判定绝不被改写。 |
+| 有历史的会话读到空记录窗口 | 选择流程再读一次，随后保留用户已有的快照，否则显示 `chat.sessionTranscriptEmpty`；这类空页绝不入缓存，因此悬停预取不会反复提供它。 |
+
+**自动化：** `node --test apps/desktop/test/slash-command-source.test.mjs`、
+`node --test apps/desktop/test/session-transcript-empty-read.test.mjs`、
+`node --test apps/desktop/test/plugin-timeout-budgets.test.mjs`、
+`pnpm --filter @pi-desktop/shared test`、`pnpm --filter @pi-desktop/host-runtime test`。

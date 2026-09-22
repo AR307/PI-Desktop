@@ -99,12 +99,13 @@ export const MessageRow = memo(function MessageRow({
       label: t("chat.messageMenu"),
       items: userMessageMenuItems({
         t,
-        text: message.content || "",
-        selectTarget:
-          event.currentTarget.querySelector<HTMLElement>(".message-bubble"),
-        editable: editableUserMessage,
+        text: editing ? editValue : message.content || "",
+        selectTarget: event.currentTarget.querySelector<HTMLElement>(
+          editing ? ".message-edit-input" : ".message-bubble",
+        ),
+        editable: editableUserMessage && !editing,
         running: isRunning,
-        revision: showRevisionPager
+        revision: !editing && showRevisionPager
           ? { count: revisionCount, active: activeRevision }
           : null,
         actions: { copyText, selectText },
@@ -153,6 +154,7 @@ export const MessageRow = memo(function MessageRow({
                   disabled={retryingEdit}
                   onChange={(event) => setEditValue(event.target.value)}
                   onKeyDown={(event) => {
+                    if (event.nativeEvent.isComposing || event.keyCode === 229) return;
                     if (event.key === "Escape") {
                       cancelEdit();
                     } else if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) {

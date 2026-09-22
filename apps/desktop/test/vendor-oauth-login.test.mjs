@@ -4,6 +4,7 @@ import test from "node:test";
 import {
   VendorOAuth,
   apiStyleForWireApi,
+  isXaiConversationModel,
   protocolForApiStyle,
   secretRefForProviderOauth,
 } from "../electron/main/oauth.ts";
@@ -66,8 +67,8 @@ function fakeHost() {
  * fall back to a pasted code — and persists through the injected store, so the
  * test exercises the credential path rather than mocking it away.
  */
-function fakeModels(credentials, { login, models: configuredModels } = {}) {
-  const provider = {
+function fakeModels(credentials, { login, models: configuredModels, provider: providerOverride } = {}) {
+  const provider = providerOverride ?? {
     id: "anthropic",
     name: "Anthropic",
     baseUrl: "https://api.anthropic.com",
@@ -138,7 +139,7 @@ function fakeModels(credentials, { login, models: configuredModels } = {}) {
           access: `access-for-${code}`,
           expires: 4102444800000,
         };
-        await credentials.modify("anthropic", async () => credential);
+        await credentials.modify(provider.id, async () => credential);
         return credential;
       }),
     logout: async (id) => credentials.delete(id),
@@ -181,8 +182,8 @@ function harness(options = {}) {
 }
 
 /** Wait until an event of this kind shows up, so tests never poll blindly. */
-async function waitFor(events, kind) {
-  for (let attempt = 0; attempt < 200; attempt++) {
+async function waitFor(events, kind, maxAttempts = 200) {
+  for (let attempt = 0; attempt < maxAttempts; attempt++) {
     const found = events.find((event) => event.kind === kind);
     if (found) return found;
     await new Promise((resolve) => setTimeout(resolve, 5));
@@ -434,6 +435,86 @@ test("a second attempt waits for the first to let go of its callback port", asyn
   oauth.cancel(second.loginId);
 });
 
+function metaFetchMock({ mintStatus = 200 } = {}) {
+  const requests = [];
+  let tokenPolls = 0;
+  const fetch = async (input, init = {}) => {
+    const url = String(input);
+    requests.push({ url, init });
+    if (url === "https://auth.meta.com/oidc/device/authorization/") {
+      return new Response(JSON.stringify({
+        device_code: "device-code",
+        user_code: "ABCD-EFGH",
+        verification_uri_complete: "https://auth.meta.com/device/verify",
+        interval: 0.001,
+        expires_in: 30,
+      }), { status: 200, headers: { "content-type": "application/json" } });
+    }
+    if (url === "https://auth.meta.com/oidc/device/token/") {
+      tokenPolls += 1;
+      return tokenPolls === 1
+        ? new Response(JSON.stringify({ error: "authorization_pending" }), { status: 400 })
+        : new Response(JSON.stringify({ access_token: "meta-identity-token" }), { status: 200 });
+    }
+    if (url === "https://api.meta.ai/muse-code/key") {
+      return new Response(
+        JSON.stringify(mintStatus === 200 ? { api_key: "muse-api-key" } : { message: "expired" }),
+        { status: mintStatus, headers: { "content-type": "application/json" } },
+      );
+    }
+    throw new Error(`unexpected Meta request: ${url}`);
+  };
+  return { fetch, requests };
+}
+
+test("Meta device-code OAuth stores the identity refresh token and resolves the Muse API key", async () => {
+  const host = fakeHost();
+  const events = [];
+  const meta = metaFetchMock();
+  const previousFetch = globalThis.fetch;
+  globalThis.fetch = meta.fetch;
+  const oauth = new VendorOAuth({ call: host.call, emit: (event) => events.push(event), openExternal: async () => {} });
+  try {
+    const { loginId } = await oauth.start("meta");
+    const device = await waitFor(events, "deviceCode");
+    assert.equal(device.userCode, "ABCD-EFGH");
+    assert.equal(device.verificationUri, "https://auth.meta.com/device/verify");
+    const done = await waitFor(events, "done", 1200);
+    const row = host.providers.get(done.providerId);
+    assert.equal(row.vendorKey, "meta");
+    assert.equal(row.apiStyle, "responses");
+    assert.equal(row.protocol, "openai");
+    assert.equal(row.baseUrl, "https://api.meta.ai/v1");
+    assert.ok(row.models.some((model) => model.id === "muse-spark-1.3"));
+    assert.deepEqual(await oauth.resolveAuth(row.id), { apiKey: "muse-api-key" });
+    const stored = JSON.parse(host.secrets.get(secretRefForProviderOauth(row.id)));
+    assert.equal(stored.refresh, "meta-identity-token");
+    assert.equal(stored.access, "muse-api-key");
+    assert.equal(meta.requests.filter((request) => request.url.includes("meta.com")).length, 3);
+    assert.equal(loginId, done.loginId);
+  } finally {
+    globalThis.fetch = previousFetch;
+  }
+});
+
+test("Meta OAuth removes the provider row when API-key minting reports an expired session", async () => {
+  const host = fakeHost();
+  const events = [];
+  const meta = metaFetchMock({ mintStatus: 401 });
+  const previousFetch = globalThis.fetch;
+  globalThis.fetch = meta.fetch;
+  const oauth = new VendorOAuth({ call: host.call, emit: (event) => events.push(event), openExternal: async () => {} });
+  try {
+    await oauth.start("meta");
+    const error = await waitFor(events, "error", 1200);
+    assert.match(error.message, /Meta session expired/);
+    assert.equal(host.providers.size, 0);
+    assert.equal(host.secrets.size, 0);
+  } finally {
+    globalThis.fetch = previousFetch;
+  }
+});
+
 test("the real pi-ai catalog offers every vendor account we ship", async () => {
   const host = fakeHost();
   // No createModels seam here: this exercises registerBunOAuthFlows() plus the
@@ -450,6 +531,7 @@ test("the real pi-ai catalog offers every vendor account we ship", async () => {
       "anthropic",
       "github-copilot",
       "kimi-coding",
+      "meta",
       "openai-codex",
       "openrouter",
       "radius",
@@ -457,6 +539,15 @@ test("the real pi-ai catalog offers every vendor account we ship", async () => {
     ],
   );
   assert.ok(vendors.every((vendor) => vendor.name && vendor.accounts.length === 0));
+});
+
+test("the Meta OAuth catalog includes Muse Spark 1.3", async () => {
+  const { META_MODELS } = await import("@earendil-works/pi-ai/providers/meta.models");
+  const model = META_MODELS["muse-spark-1.3"];
+  assert.ok(model, "Meta catalog must include muse-spark-1.3");
+  assert.equal(model.api, "openai-responses");
+  assert.equal(model.provider, "meta");
+  assert.equal(model.baseUrl, "https://api.meta.ai/v1");
 });
 
 test("the ChatGPT OAuth catalog includes GPT-6 Astra", async () => {
@@ -499,4 +590,88 @@ test("credential writes for one account run one at a time", async () => {
   assert.equal(overlapped, false);
   assert.deepEqual(seen, ["access-for-abc", "rotated-1"]);
   assert.equal(host.secrets.size, 1);
+});
+
+test("conversation-model filter drops xAI image and video ids", () => {
+  assert.equal(isXaiConversationModel("grok-4.7"), true);
+  assert.equal(isXaiConversationModel("grok-4.7-build-fast"), true);
+  assert.equal(isXaiConversationModel("grok-imagine-image"), false);
+  assert.equal(isXaiConversationModel("grok-imagine-video-1.5"), false);
+  assert.equal(isXaiConversationModel("  "), false);
+});
+
+test("an xAI account offers the chat models its /models endpoint returns", async () => {
+  const seen = [];
+  const previousFetch = globalThis.fetch;
+  globalThis.fetch = async (url, init) => {
+    seen.push({
+      url: String(url),
+      authorization: init?.headers?.Authorization,
+    });
+    return new Response(JSON.stringify({
+      data: [
+        { id: "grok-4.6" },
+        { id: "grok-4.7" },
+        { id: "grok-imagine-image" },
+      ],
+    }), { status: 200, headers: { "content-type": "application/json" } });
+  };
+  const xaiModel = {
+    id: "grok-4.6",
+    name: "Grok 4.6",
+    api: "openai-responses",
+    provider: "xai",
+    baseUrl: "https://api.x.ai/v1",
+    input: ["text", "image"],
+    reasoning: true,
+    thinkingLevelMap: {
+      off: null,
+      minimal: null,
+      low: "low",
+      medium: "medium",
+      high: "high",
+      xhigh: "xhigh",
+      max: null,
+    },
+    cost: { input: 2, output: 6, cacheRead: 0.5, cacheWrite: 0 },
+    contextWindow: 500_000,
+    maxTokens: 500_000,
+  };
+  try {
+    const { host, events, oauth } = harness({
+      provider: {
+        id: "xai",
+        name: "xAI",
+        baseUrl: "https://api.x.ai/v1",
+        auth: {
+          oauth: {
+            name: "xAI (Grok/X subscription)",
+            isSubscription: true,
+            loginLabel: "Sign in with SuperGrok or X Premium",
+          },
+        },
+      },
+      models: [
+        xaiModel,
+        { ...xaiModel, id: "grok-2", name: "Grok 2" },
+      ],
+    });
+    const { loginId } = await oauth.start("xai");
+    const prompt = await waitFor(events, "prompt");
+    oauth.respond({ loginId, promptId: prompt.request.promptId, value: "abc" });
+    const done = await waitFor(events, "done");
+    const row = host.providers.get(done.providerId);
+    assert.deepEqual(row.models.map((model) => model.id), ["grok-4.6", "grok-4.7"]);
+    const offered = row.models.find((model) => model.id === "grok-4.7");
+    assert.equal(offered.contextWindow, 500_000);
+    assert.deepEqual(offered.thinkingLevels, ["low", "medium", "high", "xhigh"]);
+    assert.equal(await oauth.bindingFor(done.providerId, "grok-2"), undefined);
+    const binding = await oauth.bindingFor(done.providerId, "grok-4.7");
+    assert.equal(binding.apiStyle, "responses");
+    assert.equal(binding.baseUrl, "https://api.x.ai/v1");
+    assert.equal(seen[0].url, "https://api.x.ai/v1/models");
+    assert.equal(seen[0].authorization, "Bearer access-for-abc");
+  } finally {
+    globalThis.fetch = previousFetch;
+  }
 });

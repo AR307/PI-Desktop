@@ -2,6 +2,7 @@ import {
   createAssistantMessageEventStream,
   type Api,
   type AssistantMessage,
+  type AssistantMessageEvent,
   type AssistantMessageEventStream,
   type Context,
   type FetchFunction,
@@ -14,6 +15,7 @@ import {
   classifyAgentError,
   type ClassifiedAgentError,
 } from "./agent-errors.js";
+import { readLocalRequestErrorDetails } from "./local-request-errors.js";
 import {
   describeProviderFetchFailure,
   type ProviderFetchFailure,
@@ -35,7 +37,7 @@ export const PROVIDER_SETUP_MAX_RETRY_DELAY_MS = 8_000;
  * Retries allowed after the first non-rate-limit transient failure. Upstream
  * gateway faults (502/503/504, dropped
  * sockets) routinely need more than one attempt, so they share one bounded
- * logical-turn budget the way rate limits do instead of getting a single retry
+ * response-recovery budget the way rate limits do instead of getting a single retry
  * per phase.
  */
 export const PROVIDER_TRANSIENT_MAX_RETRIES = PROVIDER_RETRY_MAX_RETRIES;
@@ -128,7 +130,7 @@ export type ProviderResponseSnapshot = {
 };
 
 export type ProviderRetryController = {
-  /** Claim one retry in the shared logical-turn budget. */
+  /** Claim one retry across setup/stream failures of the current response. */
   claim: (
     error: ClassifiedAgentError,
     phase: ProviderRetryPhase,
@@ -367,6 +369,8 @@ export function captureProviderResponse(
 }
 
 function normalizeRateLimitMessage(message: AssistantMessage): AssistantMessage {
+  // A previous HTTP response is not evidence about a later local failure.
+  if (readLocalRequestErrorDetails(message)) return message;
   const errorMessage = message.errorMessage ?? "";
   if (/^\s*429\b/.test(errorMessage)) return message;
   return {
@@ -380,7 +384,8 @@ function setupErrorMessage(
   error: unknown,
   aborted: boolean,
 ): AssistantMessage {
-  return {
+  const local = readLocalRequestErrorDetails(error);
+  const message: AssistantMessage = {
     role: "assistant",
     content: [],
     api: model.api,
@@ -395,9 +400,14 @@ function setupErrorMessage(
       cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
     },
     stopReason: aborted ? "aborted" : "error",
-    errorMessage: error instanceof Error ? error.message : String(error),
+    errorMessage: local
+      ? (aborted ? "Request aborted" : local.message)
+      : error instanceof Error ? error.message : String(error),
+    ...(!aborted && local ? { errorDetails: local } : {}),
     timestamp: Date.now(),
   };
+  // Preserve the original exception for local diagnostics, not JSON/UI events.
+  return local ? Object.defineProperty(message, "cause", { value: error }) : message;
 }
 
 type StreamFactory = (
@@ -450,23 +460,20 @@ export function createProviderRetryStream(
           event.type === "error" &&
           event.reason === "error"
         ) {
-          const errorMessage =
-            typeof event.error.errorMessage === "string"
-              ? event.error.errorMessage
-              : event.error;
           // Fold in the cause the fetch wrapper captured for this attempt: the
           // message pi-ai hands over is already flattened, so without it the
           // retry indicator and the terminal error read `fetch failed` with no
           // errno (issue #234).
           const error = withProviderFetchFailure(
-            classifyProviderError(errorMessage, controller.status?.()),
+            classifyProviderError(event.error, controller.status?.()),
             controller.failure?.(),
           );
           if (!limitRepairTried && isOpaqueBadRequest(error)) {
             opaqueLimitRejection = error;
             break;
           }
-          const attempt = controller.claim(error, "request");
+          const attempt = error.details?.origin === "local"
+            ? undefined : controller.claim(error, "request");
           if (attempt !== undefined) {
             retry = { error, attempt };
             break;
@@ -536,4 +543,137 @@ export function createProviderRetryStream(
   });
 
   return outer;
+}
+
+/**
+ * Default zero-event idle budget for a provider stream: a stream that emits
+ * nothing for this long is ended as a retriable stream failure so the shared
+ * transient retry path re-runs the request instead of leaving the turn hung on
+ * a connection the provider never closes.
+ */
+export const STREAM_IDLE_TIMEOUT_DEFAULT_MS = 180_000;
+
+/**
+ * The smallest idle budget a positive override may set. The watchdog wraps the
+ * whole retry adapter, so the backoff wait between two attempts is zero-event
+ * time to it: a budget below the largest retry delay would end a turn that is
+ * pacing exactly as the provider asked it to. `0` still disables the watchdog
+ * outright — this floor only clamps a positive override.
+ */
+export const STREAM_IDLE_TIMEOUT_FLOOR_MS = PROVIDER_RATE_LIMIT_MAX_DELAY_MS;
+
+/**
+ * `PI_DESKTOP_STREAM_IDLE_TIMEOUT_MS` overrides the zero-event idle budget;
+ * `0` disables the watchdog, and any other override is clamped up to
+ * `STREAM_IDLE_TIMEOUT_FLOOR_MS` (see above). A value that is not a number, or
+ * is negative, keeps the default.
+ */
+export function streamIdleTimeoutMs(): number {
+  const raw = process.env.PI_DESKTOP_STREAM_IDLE_TIMEOUT_MS;
+  if (raw === undefined || raw.trim() === "") {
+    return STREAM_IDLE_TIMEOUT_DEFAULT_MS;
+  }
+  const value = Number(raw);
+  if (!Number.isFinite(value) || value < 0) {
+    return STREAM_IDLE_TIMEOUT_DEFAULT_MS;
+  }
+  if (value === 0) return 0;
+  return Math.max(STREAM_IDLE_TIMEOUT_FLOOR_MS, Math.floor(value));
+}
+
+function streamIdleTimeoutMessage(timeoutMs: number): string {
+  return `stream stalled: no provider events for ${timeoutMs}ms`;
+}
+
+/**
+ * Zero-event idle watchdog around a provider stream. Every event resets the
+ * timer and total stream duration is never limited, so a long but productive
+ * stream is forwarded unchanged. A stream that stays silent for `timeoutMs` is
+ * ended as a `STREAM_FAILED`-classified error result — the same shape a dropped
+ * socket produces — so the existing transient retry budget picks it up instead
+ * of adding a second recovery path.
+ *
+ * `onStall` is the caller's chance to *stop* what this watchdog abandons, and a
+ * caller that can must pass it. The wrapper sits outside the retry adapter, so
+ * `inner` is that adapter: draining it without aborting it lets it wake from a
+ * backoff and open a second request for the same turn while the runtime is
+ * already re-running the turn — two provider requests and two bills for one
+ * answer. Aborting the request's own signal is what makes the adapter's next
+ * attempt refuse to start and its backoff sleep reject. The abandoned stream is
+ * drained either way, so its queued events are released rather than left to
+ * pile up behind a consumer that has stopped reading.
+ */
+export function withStreamIdleTimeout(
+  inner: AssistantMessageEventStream,
+  model: Model<Api>,
+  timeoutMs: number,
+  onStall?: () => void,
+): AssistantMessageEventStream {
+  if (timeoutMs <= 0) return inner;
+  const outer = createAssistantMessageEventStream();
+
+  void (async () => {
+    const iterator = inner[Symbol.asyncIterator]();
+    for (;;) {
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      const idle = new Promise<never>((_, reject) => {
+        timer = setTimeout(
+          () => reject(new Error(streamIdleTimeoutMessage(timeoutMs))),
+          timeoutMs,
+        );
+      });
+      let step: IteratorResult<AssistantMessageEvent>;
+      try {
+        step = await Promise.race([iterator.next(), idle]);
+      } catch {
+        clearTimeout(timer);
+        // Stop before draining: the abort is what keeps the adapter from
+        // starting another request behind the retry the runtime is already
+        // running (see the doc comment above).
+        onStall?.();
+        drainAbandonedStream(iterator);
+        const message = setupErrorMessage(
+          model,
+          new Error(streamIdleTimeoutMessage(timeoutMs)),
+          false,
+        );
+        outer.push({ type: "error", reason: "error", error: message });
+        outer.end(message);
+        return;
+      }
+      clearTimeout(timer);
+      if (step.done) {
+        outer.end(await inner.result());
+        return;
+      }
+      outer.push(step.value);
+      if (step.value.type === "done" || step.value.type === "error") {
+        return;
+      }
+    }
+  })().catch((error) => {
+    // The driver only rejects on a programming error; surface it the way the
+    // retry adapter does so a consumer never waits on a dead wrapper.
+    const message = setupErrorMessage(model, error, false);
+    outer.push({ type: "error", reason: "error", error: message });
+    outer.end(message);
+  });
+
+  return outer;
+}
+
+/** Keep consuming an abandoned stream so its queued events are released. */
+function drainAbandonedStream(
+  iterator: AsyncIterator<AssistantMessageEvent>,
+): void {
+  void (async () => {
+    try {
+      for (;;) {
+        const step = await iterator.next();
+        if (step.done) return;
+      }
+    } catch {
+      // The stalled stream's own late failures are not ours to surface.
+    }
+  })();
 }

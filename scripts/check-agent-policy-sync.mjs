@@ -92,8 +92,19 @@ const REQUIRED_ANCHORS = [
     anyOf: ["merge task → local main"],
   },
   {
+    id: "pr-contains-latest-main",
+    anyOf: ["do not open or update a PR that is behind `origin/main`"],
+  },
+  {
     id: "task-candidate-e2e",
     anyOf: ["task-candidate e2e"],
+  },
+  {
+    id: "host-e2e-environment",
+    anyOf: [
+      "do not run `pnpm install`, `npm install`, or create a second dependency or runtime environment solely to execute e2e",
+      "never run `pnpm install` or `npm install`, or create a second dependency or runtime environment, solely for e2e",
+    ],
   },
   {
     id: "architecture-ratchet-hotspots",

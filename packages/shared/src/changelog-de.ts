@@ -10,6 +10,13 @@ export const deEntries: ChangelogEntry[] = [
       "MirrorCoding-Mobile-Login unterstützt verschlüsselten Passwortaustausch und eine vom Server vergebene Geräteidentität.",
       "Mobile Sync-Anmeldedaten bleiben im sicheren Speicher und die Kopplung wird nach einem abgelaufenen Zugriffstoken wiederhergestellt.",
       "Relay-Wiederherstellungsmetadaten und begrenzter mobiler Nachrichtentransport verbessern Unterbrechungen und Wiederholungen.",
+      "Bilder im Chat generieren und bearbeiten, ein Bildmodell wählen und mit dem integrierten imagegen-Skill Stapel erstellen.",
+      "Werkzeugaktivitäten folgen der Gesprächsbreite; lange Aktivitätsnamen werden sauber begrenzt.",
+      "Dateianhänge aus dem Einfügen bleiben erhalten, auch wenn der Vorgang nach einem Sitzungswechsel endet.",
+      "Das ausgewählte Standardmodell bleibt beim Bearbeiten von Anbietern erhalten und fällt sicher zurück, wenn es entfernt wird.",
+      "Verschachtelte Denk- und Werkzeugaktivitäten lassen sich leichter lesen, navigieren und wiederherstellen.",
+      "Composer-Layouts, Reasoning-Steuerung und die Theme-Konsistenz im Arbeitsbereich wurden verbessert.",
+      "Optionale Einstellung, Netzwerk- und vorübergehende Anbieterfehler bis zum Erfolg zu wiederholen.",
     ],
   },
 

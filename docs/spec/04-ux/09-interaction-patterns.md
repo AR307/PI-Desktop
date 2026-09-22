@@ -293,6 +293,12 @@ may be retained while exactly one workspace supplies the visible shell context.
   pointer hover or keyboard focus may prefetch its transcript; duplicate reads
   share one in-flight request and the renderer retains at most five recent
   transcript snapshots.
+- A transcript window that reports no messages for a session the sidebar counts
+  as having history is read as unreadable, not as empty (**D615**, issue #795):
+  the selection asks once more, then keeps the snapshot the user already has,
+  and otherwise reports `chat.sessionTranscriptEmpty` instead of committing an
+  empty transcript. Such a page is never cached, so a hover prefetch cannot
+  re-serve emptiness on every later open.
 - Transcript loading starts without waiting for an older superseded selection.
   When session summary metadata is available, project activation/clearing and
   transcript IO run in parallel. A monotonic navigation generation permits only
@@ -555,8 +561,8 @@ may be retained while exactly one workspace supplies the visible shell context.
 - Settings → Info and application-menu checks share one typed update state.
   Manual checks expose up-to-date or error feedback; automatic failures do not
   open a toast or ambient banner.
-- Manual delivery (non-AppImage Linux and Windows portable runs
-  with `PORTABLE_EXECUTABLE_FILE`) stops at `available` and
+- Manual delivery (non-AppImage Linux and Windows ZIP runs, or legacy Windows
+  portable runs with `PORTABLE_EXECUTABLE_FILE`) stops at `available` and
   offers the fixed GitHub Releases page. In-app delivery (packaged macOS,
   Windows NSIS, and Linux AppImage) automatically advances through
   `downloading` to the stable `downloaded` state.
@@ -583,7 +589,7 @@ may be retained while exactly one workspace supplies the visible shell context.
   Escape, or the backdrop, and restores focus to the invoking control.
 - D126 tag releases publish all platform manifests and installers. Packaged
   macOS, Windows NSIS, and Linux AppImage use the in-app lane; Linux deb/rpm
-  and Windows portable remain notify-and-link delivery modes.
+  and Windows ZIP remain notify-and-link delivery modes.
 
 ## 2. Streaming message behavior
 
@@ -611,9 +617,10 @@ may be retained while exactly one workspace supplies the visible shell context.
   quiet interval, that same row names the wait: starting, waiting for the
   model, preparing the next request, compacting context, recovering an empty
   response, retrying a provider request, or waiting for delegated work (with
-  each running subagent's latest coarse action). It is replaced by concrete
-  thinking/tool/answer feedback or the inline permission card as soon as one of
-  those states exists.
+  each running subagent's latest coarse action). Existing thinking, tool, or
+  answer output does not hide the row: the running turn keeps one tail status
+  through output pauses. Pending permissions, questions, and plan/goal
+  approvals suppress it; terminal turns and history reading have no live row.
 - When stream completes: cursor indicator replaced by success state (2s fade)
 
 ### 2.2 Auto-scroll
@@ -650,10 +657,10 @@ may be retained while exactly one workspace supplies the visible shell context.
 - An active turn keeps the lower transcript surface clear. Streamed assistant
   and tool rows remain inline with the transcript; no generic understanding,
   working, or checking card is rendered underneath them. A compact runtime
-  status row is the only exception, and appears only when it explains a quiet
-  interval that has no transcript row of its own: a provider wait or retry,
-  context compaction, silent-turn recovery, the gap before the next request,
-  or a delegated-work wait.
+  status row remains in the reserved tail lane for the running turn. It shows
+  the runtime phase when known, otherwise Planning/Goal or Working. Text and
+  tool rows can stop changing while the turn remains active; their presence
+  must not suppress that feedback. User-interaction waits suppress the row.
 - A permission card remains visible only when the agent is blocked on an
   explicit approval. It is an actionable interruption, not a progress status
   card.
@@ -723,7 +730,10 @@ may be retained while exactly one workspace supplies the visible shell context.
   append to that session's Host-owned, persisted FIFO queue; session switching
   never moves or clears another session's queue.
 - The queue renders above the composer. Each row has an independently
-  keyboard-reachable Remove action and a Send now action.
+  keyboard-reachable Remove action and a Send now action once Host admission
+  returns a durable id. While admission is pending, row actions are disabled
+  with Saving tooltips and a Saving label on Send now; edit/remove leave both
+  the queue and composer draft unchanged.
 - Send now moves its row to the head and requests the new `agent/stop` channel.
   The current assistant response and completed tool batch finish normally;
   after `agent_end` and durable turn finalization, the promoted row is
@@ -807,34 +817,41 @@ may be retained while exactly one workspace supplies the visible shell context.
 
 ### 4.2 Collapse indicator
 
-- Tool activity starts as a lightweight collapsed row. Failed calls keep their
-  error in the row header; they do not auto-expand.
-- Compact mode gives one assistant turn one process disclosure containing
-  thinking, tool calls and intermediate progress text. The trailing answer
-  streams outside it; later activity moves that text into the process. The
-  header updates elapsed time once per second while active and shows the
-  visible step count.
-- Detailed mode does not wrap a process. Its last tool-call or hosted-search
-  row of the last activity group starts expanded; earlier tool details stay
-  collapsed. Compact completed process areas collapse unless a click, keyboard
-  activation or search reveal has taken ownership. Tool details keep their
-  individual controls. Failed tool calls open an unclaimed active process so
-  their errors stay visible even in compact mode.
-- Compact thinking mode shows only a status indicator while reasoning streams;
-  when answer text starts or reasoning ends, the thought row disappears. Tools
-  and progress text remain accessible, and a completed thinking-only process
-  leaves no header. Neither mode changes stored reasoning.
-- A failed row is invocation-local truth and remains visible immediately. The
-  containing group reports processing duration only and settles as processed,
-  even when a later call recovers. Terminal turn failure is derived only from
-  the terminal agent event and appears through either the assistant error or
-  TurnOutcomeCard surface, plus sidebar state and notification surfaces.
-- Expanding the processing group reveals the ordered rows; each row retains its
-  own nested disclosure for output and input.
-- Activating the row reveals clamped output first and raw input second.
-- Each section scrolls internally and exposes its own copy action.
-- The disclosure chevron rotates on expansion. Reduced-motion disables
-  non-essential running-marker pulse and rotation animation.
+- Tool activity starts as a lightweight collapsed item row. Failed and denied
+  calls keep their issue in the row header and do not auto-expand their payload.
+- Both modes give each loaded assistant turn one whole-process disclosure. It
+  contains thinking, tools, hosted searches and intermediate progress text; the
+  trailing answer, assistant errors and stopped trailing text remain outside it.
+- A contiguous activity segment receives a group disclosure only when it has at
+  least two mode-visible items. Progress text ends the segment, a singleton uses
+  its item disclosure directly, and compact-hidden thinking does not create a
+  redundant group. Existing Task topology remains separate.
+- Detailed starts active and completed whole processes open. Its active ordinary
+  group starts open and closes when it completes only if untouched; completed
+  groups otherwise start closed. Compact starts the process and groups closed,
+  except an untouched active process with any recorded failed/denied tool remains
+  open through recovery and closes on completion.
+- In Detailed, leaf auto-open applies only when the literal final item of the last
+  activity group is an eligible tool-call or hosted-search row. Failed/denied
+  items stay closed, and a final thinking item never causes a backward scan.
+  Compact keeps every item payload closed and hides reasoning text/excerpts while
+  retaining its active thinking indicator.
+- Activating a process, group or item header toggles only that level. Closing a
+  parent preserves child state, reopening restores it, and sibling groups remain
+  independent. Opening a parent is never an expand-all action.
+- A manual item action claims its group and process as user-owned without toggling
+  them. Streaming and completion cannot reopen a manual close or close around
+  content the user opened, focused or selected. Choices survive mode changes,
+  singleton-to-group growth and remounts while the retained session pane lives.
+- Search/navigation opens the process and activity group that own the named
+  message, once per reveal request. Item-level targeting is not part of this
+  change. Compact reasoning requires an explicit switch to Detailed. Closing
+  search does not collapse the revealed path.
+- Pending permission, question, plan/goal approval and other action cards remain
+  reachable outside hidden process content.
+- Each disclosure uses its own button, `aria-expanded` and `aria-controls`; closed
+  descendants leave the tab and accessibility order. Reduced-motion disables
+  non-essential marker and chevron animation.
 
 ### 4.3 Tool result truncation
 
@@ -885,8 +902,9 @@ Agent calls a permission-gated tool (including Plan/Goal Bash under Ask or Accep
    BrowserPreview are allowed; Bash follows the visible permission mode. A
    contract-mode Bash command may mutate under Auto, so the mode chip remains visible.
    While that turn is live `planning`, the Composer mode chip pulses and a compact
-   Planning row occupies the same pre-stream slot as Working; tool or answer rows
-   replace that transcript row so it does not sit orphaned above the composer.
+   Planning row occupies the same reserved tail slot as Working until completion
+   or pending user interaction. A known runtime phase takes precedence; tool
+   and answer output do not hide the running status.
 3. The Agent calls `SubmitPlan` or `SubmitGoal` alone in its tool batch.
    Host-core preserves the exact Markdown bytes in a new immutable
    `.pi/plan/*.md` or `.pi/goal/*.md` artifact, records its path/hash/size and structured
@@ -1307,19 +1325,19 @@ Project drag/drop follows these patterns:
   a multi-line draft: the bottom reserve is padding on the transcript content, so
   the content is observed on its border box and the newest turn moves up with
   the composer instead of sliding behind it (D287).
-- A manual disclosure — a tool, thinking or activity title, a delegate's brief
-  toggle, or an error-detail toggle — holds the reading position of the scroller
-  that owns it (issue #324). The title is handed to that scroller before the
-  expansion state changes, follow mode is left, and the scroller restores the
-  title's viewport offset from its own resize observer for every frame of the
-  height change, so an animated activity group cannot drag the clicked title out
-  of view. A scroller nested inside another one (the delegate run dock, D302)
-  holds its own position and passes the hold outward, because growing it grows
-  the outer content too.
-- Leaving follow for a disclosure is not a re-pin: after a toggle the transcript
-  stays where the reader put it, with the jump-to-latest control visible, until
-  real scroll input, that control, a new turn or a navigation releases the hold.
-  There is no delayed "take the bottom back" correction (D430).
+- A manual disclosure — whole process, activity group, tool/search/thinking item,
+  delegate brief, or error detail — holds the reading position of the scroller
+  that owns it (issue #324). Only the initiating level claims the anchor; marking
+  ancestors user-owned does not claim their scroll positions. The title is handed
+  to the scroller before the state changes, follow mode is left, and the scroller
+  restores the title's viewport offset for every frame of the height change. A
+  nested scroller (the delegate run dock, D302) holds its own position and passes
+  the hold outward because growing it also grows the outer content.
+  Search reveal opens the required ancestors at message precision and uses the
+  Search reveal opens the required ancestors and uses the precise target as the
+  final anchor. Leaving follow for any disclosure is not a re-pin: the transcript
+  stays where the reader put it, with jump-to-latest visible, until real scroll
+  input, that control, a new turn or navigation releases the hold (D430).
 - Scroll input is attributed to the scroller that can consume it. A press on a
   row, a control or an editable field is an ordinary click rather than the start
   of a scroll; a keystroke inside a text field belongs to that field; and input a

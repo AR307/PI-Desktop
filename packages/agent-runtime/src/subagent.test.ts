@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import type { AgentEventEnvelope, SubagentDefinition } from "@pi-desktop/shared";
+import type { Message } from "@earendil-works/pi-ai";
 import {
   composeSubagentSystemPrompt,
   MAX_SUBAGENT_REPORT_CHARS,
@@ -135,6 +136,59 @@ describe("SubagentRun event forwarding", () => {
     expect(run.agent.streamFunction.toString()).toContain(
       "models.stream(omitThinkingModel, context, retryOptions)",
     );
+  });
+  it("deduplicates repeated tool calls before a subagent request", () => {
+    const stderr = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
+    try {
+      const { run } = createRun({
+        initialMessages: [
+          assistantMessage({
+            content: [
+              { type: "toolCall", id: "child-read", name: "Read", arguments: {} },
+            ],
+          }),
+          {
+            role: "toolResult",
+            toolCallId: "child-read",
+            toolName: "Read",
+            content: [{ type: "text", text: "first" }],
+            isError: false,
+            timestamp: 2,
+          },
+          assistantMessage({
+            content: [
+              { type: "toolCall", id: "child-read", name: "Read", arguments: {} },
+            ],
+          }),
+          {
+            role: "toolResult",
+            toolCallId: "child-read",
+            toolName: "Read",
+            content: [{ type: "text", text: "retry" }],
+            isError: false,
+            timestamp: 3,
+          },
+        ] as unknown as NonNullable<SubagentRunOptions["initialMessages"]>,
+      });
+      const outgoing = run.agent.convertToLlm(run.agent.state.messages) as Message[];
+      const toolCalls = outgoing.flatMap((message) =>
+        message.role === "assistant"
+          ? message.content.filter((block) => block.type === "toolCall")
+          : [],
+      );
+
+      expect(toolCalls.map((call) => call.id)).toEqual(["child-read"]);
+      expect(outgoing.filter((message) => message.role === "toolResult")).toHaveLength(1);
+      expect(
+        outgoing.filter(
+          (message) => message.role === "assistant" && message.content.length === 0,
+        ),
+      ).toHaveLength(0);
+      expect(stderr.mock.calls.map(([chunk]) => String(chunk)).join(""))
+        .toContain("session=session-1");
+    } finally {
+      stderr.mockRestore();
+    }
   });
 
   it("does not synthesize a Responses reasoning setting when omitted", async () => {
@@ -327,6 +381,124 @@ describe("SubagentRun reporting", () => {
 });
 
 describe("SubagentRun provider rate-limit recovery", () => {
+  it("does not switch models or continue after an explicitly local failure", async () => {
+    const { run } = createRun({ fallbackModels: [{
+      key: "fallback/model", provider: { ...provider, id: "fallback", modelId: "model" },
+    }] });
+    const failure = {
+      ...assistantMessage({ content: [], stopReason: "error" }),
+      errorMessage: "local preparation failed",
+      errorDetails: {
+        code: "LOCAL_REQUEST_ERROR", phase: "request-preparation", message: "failed",
+      },
+    };
+    const continueRun = vi.fn(async () => undefined);
+    run.agent = {
+      state: { messages: [failure] },
+      prompt: vi.fn(async () => {
+        run.handleEvent({ type: "message_start", message: failure });
+        run.handleEvent({ type: "message_end", message: failure });
+      }),
+      waitForIdle: vi.fn(async () => undefined), continue: continueRun, abort: vi.fn(),
+    };
+    // Isolate fallback from the retry check covered below.
+    vi.spyOn(run, "claimProviderRetry").mockReturnValue(undefined);
+    const result = await run.run();
+    expect(continueRun).not.toHaveBeenCalled();
+    expect(result).toMatchObject({ status: "failed", error: { code: "INTERNAL" } });
+    expect(run.provider.id).toBe("local");
+  });
+
+  it("keeps local message metadata terminal even with infinite retries and stale 429 state", () => {
+    const { run, events } = createRun({ infiniteProviderRetry: true });
+    const failure = {
+      ...assistantMessage({ content: [], stopReason: "error" }),
+      errorMessage: "fetch failed: private prompt api_key=test-secret",
+      errorDetails: {
+        code: "LOCAL_REQUEST_ERROR", phase: "context-estimation",
+        message: "private payload", causeName: "TypeError",
+      },
+    };
+    run.retryState.status = 429;
+    const claim = vi.spyOn(run, "claimProviderRetry");
+    run.handleEvent({ type: "message_start", message: failure });
+    run.handleEvent({ type: "message_end", message: failure });
+    expect(claim).not.toHaveBeenCalled();
+    expect(run.pendingProviderRetry).toBeUndefined();
+    expect(run.providerTransientRetryAttempt).toBe(0);
+    expect(run.providerRateLimitRetryAttempt).toBe(0);
+    expect(run.streamError).toMatchObject({ code: "INTERNAL" });
+    expect(events.at(-1)?.event).toMatchObject({
+      type: "message_end",
+      message: {
+        status: "error", isError: true,
+        error: {
+          code: "INTERNAL", retriable: false,
+          details: { origin: "local", phase: "context-estimation", causeName: "TypeError" },
+        },
+      },
+    });
+    expect(JSON.stringify(events)).not.toMatch(/private|test-secret|stack/);
+  });
+
+  it("reads a local AbortError marker as an abort without retrying or an error row", async () => {
+    // pi-ai wraps an AbortError that fired before the parent signal flipped in
+    // a local marker; the preserved cause name is the only trace of the Stop,
+    // so the run has to report the same abort the session runtime would.
+    const controller = new AbortController();
+    const { run, events } = createRun({
+      signal: controller.signal,
+      infiniteProviderRetry: true,
+      fallbackModels: [{
+        key: "fallback/model",
+        provider: { ...provider, id: "fallback", modelId: "model" },
+      }],
+    });
+    const failure = {
+      ...assistantMessage({ content: [], stopReason: "error" }),
+      errorMessage: "local request preparation failed",
+      errorDetails: {
+        code: "LOCAL_REQUEST_ERROR",
+        phase: "request-preparation",
+        causeName: "AbortError",
+      },
+    };
+    const continueRun = vi.fn(async () => undefined);
+    run.agent = {
+      state: { messages: [failure] },
+      prompt: vi.fn(async () => {
+        run.handleEvent({ type: "message_start", message: failure });
+        run.handleEvent({ type: "message_end", message: failure });
+      }),
+      waitForIdle: vi.fn(async () => undefined),
+      continue: continueRun,
+      abort: vi.fn(),
+    };
+    const claim = vi.spyOn(run, "claimProviderRetry");
+
+    const result = await run.run();
+
+    // The synthetic message reports the abort while the parent signal is still
+    // open, so nothing but the marker can explain the terminal status.
+    expect(controller.signal.aborted).toBe(false);
+    expect(result.status).toBe("aborted");
+    expect(result.error).toBeUndefined();
+    expect(claim).not.toHaveBeenCalled();
+    expect(run.pendingProviderRetry).toBeUndefined();
+    expect(run.streamError).toBeUndefined();
+    expect(continueRun).not.toHaveBeenCalled();
+    expect(run.provider.id).toBe("local");
+    expect(events.map((event) => event.event.type)).toEqual([
+      "message_start",
+      "message_end",
+    ]);
+    const row = (events[1].event as { message: Record<string, unknown> }).message;
+    expect(row.status).toBe("aborted");
+    expect(row.isError).toBeUndefined();
+    expect(row.error).toBeUndefined();
+  });
+
+
   it("retries ten 429s silently and reuses one assistant row", async () => {
     const { run, events } = createRun();
     const failure = {
@@ -521,6 +693,13 @@ describe("SubagentRun watchdogs", () => {
     expect(freshClaim(rateLimited, "stream")).toBeUndefined();
     // Permanent failures stay terminal.
     expect(freshClaim(classifyAgentError("401: invalid api key"), "request")).toBeUndefined();
+
+    const { run: infinite } = createRun({ infiniteProviderRetry: true });
+    const infiniteClaim = (error: unknown, phase: string) =>
+      (infinite as any).claimProviderRetry(error, phase);
+    for (let attempt = 1; attempt <= PROVIDER_TRANSIENT_MAX_RETRIES + 2; attempt += 1) {
+      expect(infiniteClaim(gateway502, "stream")).toBe(attempt);
+    }
   });
 
   it("never terminates the delegate on a turn count", async () => {
@@ -536,8 +715,198 @@ describe("SubagentRun watchdogs", () => {
   });
 });
 
+describe("SubagentRun context budget (ADR 0299)", () => {
+  it("wires the delegate's turn boundary through prepareNextTurnWithContext", () => {
+    const { run } = createRun();
+
+    expect(typeof run.agent.prepareNextTurnWithContext).toBe("function");
+  });
+
+  it("remaps a provider context overflow no fallback could absorb", async () => {
+    const { run } = createRun();
+    const failure = {
+      ...assistantMessage({ content: [], stopReason: "error" }),
+      errorMessage: "prompt is too long: 300000 tokens",
+    };
+    const state = { messages: [] as Array<Record<string, unknown>> };
+    run.agent = {
+      state,
+      prompt: vi.fn(async () => {
+        state.messages = [{ role: "user", content: "task" }, failure];
+        run.handleEvent({ type: "message_start", message: failure });
+        run.handleEvent({ type: "message_end", message: failure });
+      }),
+      waitForIdle: vi.fn(async () => undefined),
+      abort: vi.fn(),
+    };
+
+    const result = await (run as unknown as SubagentRun).run();
+
+    expect(result.status).toBe("failed");
+    expect(result.error?.code).toBe("SUBAGENT_CONTEXT_OVERFLOW");
+    expect(result.error?.message).toContain("larger context window");
+    expect(result.error?.message).not.toContain("prompt is too long");
+    expect(result.report).toContain("Narrow the task");
+  });
+
+  it("keeps the boundary guard's overflow code instead of classifying its thrown text", () => {
+    const { run } = createRun();
+    run.pendingContextOverflow = {
+      code: "SUBAGENT_CONTEXT_OVERFLOW",
+      message: "degraded context still does not fit",
+    };
+
+    run.handleEvent({
+      type: "message_end",
+      message: {
+        ...assistantMessage({ content: [], stopReason: "error" }),
+        errorMessage: "degraded context still does not fit",
+      },
+    });
+
+    expect(run.streamError).toEqual({
+      code: "SUBAGENT_CONTEXT_OVERFLOW",
+      message: "degraded context still does not fit",
+    });
+    expect(run.pendingContextOverflow).toBeUndefined();
+  });
+
+  it("skips a fallback whose window cannot hold the carried context", () => {
+    const small: RuntimeProviderConfig = {
+      ...provider,
+      id: "small",
+      modelId: "small-model",
+      modelConfig: {
+        source: "generic",
+        name: "small-model",
+        baseUrl: provider.baseUrl ?? "",
+        reasoning: false,
+        input: ["text"],
+        contextWindow: 4_096,
+        maxTokens: 1_024,
+      },
+    };
+    const { run } = createRun({
+      fallbackModels: [{ key: "small/small-model", provider: small }],
+    });
+    const brief = { role: "user", content: "y".repeat(12_000), timestamp: 1 };
+    const failure = {
+      ...assistantMessage({ content: [], stopReason: "error" }),
+      errorMessage: "prompt is too long",
+    };
+    run.agent.state.messages = [brief, failure];
+    run.streamError = { code: "CONTEXT_TOO_LARGE", message: "prompt is too long" };
+
+    const switched = run.useNextModel();
+
+    expect(switched).toBe(false);
+    expect(run.agent.state.model.id).toBe("local-model");
+    expect(run.modelFailures).toEqual([
+      expect.objectContaining({
+        model: "local/local-model",
+        code: "CONTEXT_TOO_LARGE",
+      }),
+      expect.objectContaining({
+        model: "small/small-model",
+        code: "SUBAGENT_CONTEXT_OVERFLOW",
+      }),
+    ]);
+  });
+
+  it("carries the uncompacted context onto a fallback whose window fits", () => {
+    const big: RuntimeProviderConfig = {
+      ...provider,
+      id: "big",
+      modelId: "big-model",
+    };
+    const { run, events } = createRun({
+      fallbackModels: [{ key: "big/big-model", provider: big }],
+    });
+    const brief = { role: "user", content: "y".repeat(12_000), timestamp: 1 };
+    const failure = {
+      ...assistantMessage({ content: [], stopReason: "error" }),
+      errorMessage: "prompt is too long",
+    };
+    run.agent.state.messages = [brief, failure];
+    run.streamError = { code: "CONTEXT_TOO_LARGE", message: "prompt is too long" };
+
+    const switched = run.useNextModel();
+
+    expect(switched).toBe(true);
+    expect(run.agent.state.model.id).toBe("big-model");
+    // Only the failed assistant row is dropped; nothing is compacted away.
+    expect(run.agent.state.messages).toEqual([brief]);
+    expect(run.streamError).toBeUndefined();
+    expect(events.some((event) => event.event.type === "message_end")).toBe(true);
+  });
+
+  it("reports compactions and degradation on the run result", () => {
+    const { run } = createRun();
+    run.contextCompactions = 2;
+    run.contextDegraded = true;
+
+    const result = run.result("completed", "Done.");
+
+    expect(result.contextCompactions).toBe(2);
+    expect(result.contextDegraded).toBe(true);
+    expect(result.report).toContain("older working history was discarded");
+
+    const clean = createRun();
+    const cleanResult = clean.run.result("completed", "Done.");
+    expect(cleanResult.contextCompactions).toBeUndefined();
+    expect(cleanResult.contextDegraded).toBeUndefined();
+    expect(cleanResult.report).toBe("Done.");
+  });
+});
 
 describe("SubagentRun retries before fallback", () => {
+  it("removes every trailing failed assistant before retrying", async () => {
+    const { run } = createRun();
+    const user = { role: "user", content: "task", timestamp: 1 };
+    const toolUse = {
+      ...assistantMessage({ content: [{ type: "toolCall", id: "call-1", name: "Read", arguments: {} }], stopReason: "toolUse" }),
+    };
+    const toolResult = {
+      role: "toolResult",
+      toolCallId: "call-1",
+      content: [{ type: "text", text: "result" }],
+      isError: false,
+      timestamp: 2,
+    };
+    const failed = {
+      ...assistantMessage({ content: [{ type: "text", text: "partial" }], stopReason: "error" }),
+      errorMessage: "stream terminated",
+    };
+    const continued = vi.fn(async () => {
+      if (run.agent.state.messages.at(-1)?.role === "assistant") {
+        throw new Error("Cannot continue from message role: assistant");
+      }
+    });
+    run.agent = {
+      state: { ...run.agent.state, messages: [user, toolUse, toolResult, failed, failed] },
+      continue: continued,
+      waitForIdle: async () => {},
+    };
+    run.pendingProviderRetry = {
+      code: "PROVIDER_ERROR",
+      message: "stream terminated",
+      retriable: true,
+    };
+    run.providerTransientRetryAttempt = 1;
+
+    vi.useFakeTimers();
+    try {
+      const retry = run.retryPendingProviderFailure();
+      await vi.runAllTimersAsync();
+      await retry;
+    } finally {
+      vi.useRealTimers();
+    }
+
+    expect(run.agent.state.messages).toEqual([user, toolUse, toolResult]);
+    expect(continued).toHaveBeenCalledOnce();
+  });
+
   it.each([429, 503])("exhausts the shared retry budget before switching after HTTP %s", async (status) => {
     const fallback = { ...provider, id: "backup", modelId: "backup-model" };
     const { run } = createRun({ fallbackModels: [{ key: "backup/backup-model", provider: fallback }] });
@@ -557,7 +926,11 @@ describe("SubagentRun retries before fallback", () => {
     };
     run.agent = {
       state,
-      prompt: async () => { state.messages = [{ role: "user", content: "task" }]; await attempt(); },
+      prompt: async () => {
+        const user: Message = { role: "user", content: "task", timestamp: 1 };
+        state.messages = [user];
+        await attempt();
+      },
       continue: attempt,
       waitForIdle: async () => {},
       abort: () => {},

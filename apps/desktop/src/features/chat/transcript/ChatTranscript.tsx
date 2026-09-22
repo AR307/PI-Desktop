@@ -20,6 +20,8 @@ import { useTranscriptScroll } from "./hooks/useTranscriptScroll";
 import type { TranscriptSearchTarget } from "../../../lib/transcript-reading";
 import { TranscriptSearchContext } from "../../../lib/transcript-search-context";
 import { DisclosureAnchorContext } from "../../../lib/disclosure-anchor-context";
+import { api } from "../../../lib/api";
+import { mergeLiveSessionMessages } from "../../../lib/session-transcript";
 import { conversationPlainText } from "../../../lib/chat-transcript-text";
 import {
   TranscriptMenuProvider,
@@ -89,6 +91,7 @@ function TranscriptBody({
   const { t } = useTranslation();
   const openTranscriptMenu = useTranscriptMenu();
   const { copyText, selectText } = useChatTextActions();
+  const showToast = useAppStore((state) => state.showToast);
   const transcriptRunning = isRunning && !readingWindow;
   const latestTurnResult = useAppStore((state) =>
     sessionId ? state.latestTurnResults[sessionId] : undefined,
@@ -147,45 +150,24 @@ function TranscriptBody({
     readingWindow,
   });
 
-  const lastEntry = tailEntry;
-  const lastTurnPart =
-    lastEntry?.kind === "assistant-turn" ? lastEntry.parts.at(-1) : undefined;
-  const activeToolGroup = transcriptRunning && lastTurnPart?.kind === "activity";
-  const assistantIsAnswering =
-    lastTurnPart?.kind === "message" &&
-    lastTurnPart.message.status === "streaming" &&
-    Boolean((lastTurnPart.message.content || "").trim());
   const specializedActivity = agentActivity;
   const hasSpecializedActivity = specializedActivity !== undefined;
-  const showRunActivity =
+  // Existing output does not mean the turn has finished: a text stream can
+  // pause, and completed tool rows can outlive their activity. Keep one tail
+  // status until the turn ends or a user interaction owns the pending state.
+  const showStatus =
     transcriptRunning &&
     !pendingPermission &&
     !askPending &&
-    !approvalPending &&
-    !assistantIsAnswering &&
-    hasSpecializedActivity;
-  // Show immediate feedback after send, then let the concrete activity row
-  // (thinking/tool/answer) take over so the transcript never duplicates state.
+    !approvalPending;
+  const showRunActivity = showStatus && hasSpecializedActivity;
   const showWorking =
-    transcriptRunning &&
-    !pendingPermission &&
-    !askPending &&
-    !approvalPending &&
+    showStatus &&
     planningState !== "planning" &&
-    !activeToolGroup &&
-    !assistantIsAnswering &&
     !hasSpecializedActivity;
-  // Same pre-stream slot as Working: once tools or an answer exist, activity
-  // rows carry the live state so a Planning label does not sit orphaned above
-  // the composer. The Composer mode chip keeps pulsing for the turn.
   const showPlanning =
-    transcriptRunning &&
+    showStatus &&
     planningState === "planning" &&
-    !approvalPending &&
-    !pendingPermission &&
-    !askPending &&
-    !activeToolGroup &&
-    !assistantIsAnswering &&
     !hasSpecializedActivity;
 
   // The tail status lane is part of the layout for the whole running turn: the
@@ -201,15 +183,30 @@ function TranscriptBody({
     conversation rather than one message, so it is the only surface that can
     copy the whole thread.
   */
+  const copyConversation = async () => {
+    if (!sessionId) return;
+    try {
+      // Explicit copy reads the full session without changing the reading window.
+      const { session } = await api.getSession(sessionId);
+      if (!session) throw new Error("Session unavailable");
+      await copyText(conversationPlainText(
+        mergeLiveSessionMessages(session.messages ?? [], messages),
+        { user: t("chat.speakerYou"), assistant: t("chat.speakerAssistant") },
+      ));
+    } catch {
+      showToast(t("chat.copyFailed"), { variant: "error" });
+    }
+  };
+
   const onContextMenu = (event: ReactMouseEvent<HTMLDivElement>) => {
     openTranscriptMenu(event, {
       label: t("chat.conversationMenu"),
       items: conversationMenuItems({
         t,
-        conversation: conversationPlainText(messages, {
-          user: t("chat.speakerYou"),
-          assistant: t("chat.speakerAssistant"),
-        }),
+        canCopy: Boolean(sessionId) && (hasMoreBefore || hasMoreAfter || messages.some(
+          (message) => (message.role === "user" || message.role === "assistant") && message.content.trim(),
+        )),
+        onCopyConversation: () => void copyConversation(),
         scrollRef,
         contentRef,
         actions: { copyText, selectText },

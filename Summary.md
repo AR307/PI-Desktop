@@ -1,5 +1,17 @@
 # PI-Desktop project summary
 
+## 2026-09-22 — Sync upstream/main and keep the fork
+
+- Merged `upstream/main` (`b10325837`) into `sync/upstream-main` from
+  `origin/main` (`351d30831`). The fork point remains `996922fa`.
+- Kept the local MirrorCoding account and grouped models, MirrorCoding image
+  generation, the Android companion and MC relay, work-panel browser drag and
+  resize, and pending Plan/Goal approvals after planning finishes.
+- Kept upstream image generation (`packages/agent-runtime/src/image-generation`)
+  beside the MirrorCoding image path. The two pipelines stay separate.
+- Upstream since the fork is now the baseline: encrypted config sync, scheduled
+  automations, crash reports, transcript disclosure, and the 0.15.2 fixes.
+
 ## 2026-09-21 — Android companion implementation
 
 - Created the independent `codex/mobile-companion` worktree from current

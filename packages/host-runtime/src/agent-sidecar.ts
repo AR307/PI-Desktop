@@ -1,6 +1,6 @@
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { readNdjsonLines, rpcTimeoutMs } from "@pi-desktop/shared";
+import { DEFAULT_RPC_TIMEOUT_MS, IMAGE_BATCH_TIMEOUT_MS, imageGenerationPrompts, readNdjsonLines, rpcTimeoutMs, rpcErrorFromWire, rpcErrorToWire } from "@pi-desktop/shared";
 import type { ProcessExitHandler, StderrHandler } from "./host-process.js";
 
 // stderr lines kept per sidecar so an unexpected exit can be reported with the
@@ -144,6 +144,7 @@ export class AgentSidecar {
   private stdoutReader?: ReturnType<typeof readNdjsonLines>;
   // Tools served by the embedding host itself (e.g. BrowserPreview drives the
   // work panel's WebContentsView) — host-core never sees these.
+  private localToolControllers = new Map<string, AbortController>();
   private localTools = new Map<string, LocalToolHandler>();
   private localToolTimers = new Set<ReturnType<typeof setTimeout>>();
   private projectInstructionResolver: ProjectInstructionResolver | null = null;
@@ -214,6 +215,8 @@ export class AgentSidecar {
     this.localToolControllers.clear();
     for (const timer of this.localToolTimers) clearTimeout(timer);
     this.localToolTimers.clear();
+    for (const controller of this.localToolControllers.values()) controller.abort();
+    this.localToolControllers.clear();
     this.handlers.clear();
     this.stdoutReader?.close();
     this.stdoutReader = undefined;
@@ -263,29 +266,43 @@ export class AgentSidecar {
   private async runLocalTool(
     handler: LocalToolHandler,
     input: Omit<Parameters<LocalToolHandler>[0], "signal">,
-    toolName: string,
+    params: Record<string, unknown>,
   ): Promise<LocalToolResult> {
-    let timer: ReturnType<typeof setTimeout> | undefined;
     const key = `${input.sessionId}:${input.toolCallId}`;
+    if (this.localToolControllers.has(key)) throw new Error("duplicate local tool call");
     const controller = new AbortController();
     this.localToolControllers.set(key, controller);
+    const toolName = typeof params.toolName === "string" ? params.toolName : "";
+    const batchImages = toolName === "GenerateImages";
+    let timer: ReturnType<typeof setTimeout> | undefined;
     try {
       return await Promise.race([
-        handler({ ...input, signal: controller.signal }),
+        (async () => {
+          if (batchImages) {
+            imageGenerationPrompts(input.args);
+            if (!this.host) throw new Error("host unavailable");
+            const gate = await this.host.call<LocalToolResult>("tools.execute", params);
+            if (!gate.ok) return gate;
+            controller.signal.throwIfAborted();
+          }
+          return handler({ ...input, signal: controller.signal });
+        })(),
         new Promise<LocalToolResult>((_, reject) => {
           timer = setTimeout(() => {
             controller.abort();
             reject(new Error("host-local tool timeout"));
-          }, rpcTimeoutMs("tools.execute", { toolName }));
+          }, batchImages
+            ? IMAGE_BATCH_TIMEOUT_MS + 130_000
+            : toolName === "GenerateImage"
+              ? rpcTimeoutMs("tools.execute", { toolName })
+              : DEFAULT_RPC_TIMEOUT_MS);
           this.localToolTimers.add(timer);
         }),
       ]);
     } finally {
+      controller.abort();
       this.localToolControllers.delete(key);
-      if (timer) {
-        clearTimeout(timer);
-        this.localToolTimers.delete(timer);
-      }
+      if (timer) { clearTimeout(timer); this.localToolTimers.delete(timer); }
     }
   }
 
@@ -350,6 +367,9 @@ export class AgentSidecar {
 
   setHost(host: SidecarHostLink) {
     if (this.closed) return;
+    if (this.host && this.host !== host) {
+      for (const controller of this.localToolControllers.values()) controller.abort();
+    }
     this.host = host;
     this.unsubscribeHost?.();
     this.unsubscribeHostExit?.();
@@ -368,6 +388,7 @@ export class AgentSidecar {
       this.writeToChild(payload);
     });
     this.unsubscribeHostExit = host.onExit(() => {
+      for (const controller of this.localToolControllers.values()) controller.abort();
       this.unsubscribeHost?.();
       this.unsubscribeHost = null;
       this.unsubscribeHostExit = null;
@@ -472,6 +493,9 @@ export class AgentSidecar {
             { code: -32000, data: { errorCode: "TOOL_DISABLED_IN_PLAN" } },
           );
         }
+        if (method === "tools.abort") {
+          this.localToolControllers.get(`${params.sessionId}:${params.toolCallId}`)?.abort();
+        }
         if (method === "project.instructions.resolve") {
           if (!this.projectInstructionResolver) {
             throw new Error("project instruction resolver unavailable");
@@ -547,7 +571,7 @@ export class AgentSidecar {
                   sessionId: String(params.sessionId ?? ""),
                   toolCallId: String(params.toolCallId ?? ""),
                   args: params.args,
-                }, toolName);
+                }, params);
           this.writeToChild(
             JSON.stringify({ jsonrpc: "2.0", id: msg.id, result }) + "\n",
           );
@@ -558,16 +582,12 @@ export class AgentSidecar {
         this.writeToChild(
           JSON.stringify({ jsonrpc: "2.0", id: msg.id, result }) + "\n",
         );
-      } catch (e: any) {
+      } catch (e: unknown) {
         this.writeToChild(
           JSON.stringify({
             jsonrpc: "2.0",
             id: msg.id,
-            error: {
-              code: e?.code ?? -32000,
-              message: e instanceof Error ? e.message : String(e),
-              data: e?.data,
-            },
+            error: rpcErrorToWire(e),
           }) + "\n",
         );
       }
@@ -580,13 +600,7 @@ export class AgentSidecar {
         this.pending.delete(String(msg.id));
         if (pending.timer) clearTimeout(pending.timer);
         if (msg.error) {
-          const err = new Error(msg.error.message) as Error & {
-            code?: number;
-            data?: unknown;
-          };
-          err.code = msg.error.code;
-          err.data = msg.error.data;
-          pending.reject(err);
+          pending.reject(rpcErrorFromWire(msg.error));
         } else {
           pending.resolve(msg.result);
         }

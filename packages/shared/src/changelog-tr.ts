@@ -10,6 +10,13 @@ export const trEntries: ChangelogEntry[] = [
       "MirrorCoding mobil oturumu şifreli parola alışverişini ve sunucu tarafından verilen cihaz kimliğini destekler.",
       "Mobil senkronizasyon kimlik bilgileri güvenli depolamada tutulur ve erişim belirteci süresi dolduktan sonra eşleme kurtarılır.",
       "Aktarım kurtarma meta verileri ve sınırlı mobil ileti aktarımı kesintileri ve yeniden denemeleri iyileştirir.",
+      "Sohbette görsel oluşturun ve düzenleyin; tek bir görsel modeli ve yerleşik imagegen becerisiyle toplu üretim yapın.",
+      "Araç etkinlikleri konuşma genişliğini izler ve uzun etkinlik etiketleri düzgünce sığdırılır.",
+      "Oturum değiştirdikten sonra yapıştırma tamamlansa bile yapıştırılan dosya ekleri korunur.",
+      "Sağlayıcıları düzenlerken seçili varsayılan model korunur; model kaldırılırsa güvenli bir yedek kullanılır.",
+      "İç içe düşünme ve araç etkinliği bölümlerini okumak, gezinmek ve kurtarmak kolaylaşır.",
+      "Composer düzenleri, akıl yürütme kontrolleri ve çalışma alanı tema tutarlılığı iyileştirilir.",
+      "Ayarlara, ağ ve geçici sağlayıcı hatalarını başarılı olana kadar yeniden deneyen isteğe bağlı bir anahtar ekler.",
     ],
   },
 

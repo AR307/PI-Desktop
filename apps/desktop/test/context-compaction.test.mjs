@@ -30,6 +30,11 @@ const [
   turns,
   styles,
   enLocale,
+  subagent,
+  subagentContext,
+  contextBudget,
+  delegationHistory,
+  compactionTail,
 ] = await Promise.all([
   read("../../../packages/shared/src/protocol.ts"),
   readSharedTypesSource(),
@@ -48,6 +53,11 @@ const [
   read("../src/lib/assistant-turns.ts"),
   loadStyles(),
   read("../../../packages/i18n/src/locales/en/index.ts"),
+  read("../../../packages/agent-runtime/src/subagent.ts"),
+  read("../../../packages/agent-runtime/src/subagent-context.ts"),
+  read("../../../packages/agent-runtime/src/context-budget.ts"),
+  read("../../../packages/agent-runtime/src/delegation-history.ts"),
+  read("../../../packages/agent-runtime/src/compaction-tail.ts"),
 ]);
 
 test("context compaction is wired through protocol v12 and the manual IPC path", () => {
@@ -85,7 +95,11 @@ test("the hard boundary is enforced by the host, with a model-side escape hatch"
   assert.match(runtime, /prepareNextTurnWithContext/);
   assert.match(runtime, /budget\.tokens >= budget\.hardLimit/);
   assert.match(runtime, /CONTEXT_COMPACTION_FAILED: unable to create a checkpoint/);
-  assert.match(runtime, /checkpoint truncated: this message crossed the retained context budget/);
+  assert.match(runtime, /CHECKPOINT_TRUNCATION_MARKER/);
+  assert.match(
+    compactionTail,
+    /checkpoint truncated: this message crossed the retained context budget/,
+  );
   assert.match(runtime, /pendingOverflow/);
   assert.match(runtime, /runCompaction\(\s*"overflow",\s*true,\s*"active_turn",?\s*\)/);
   assert.match(runtime, /fallback: "retained_tail"/);
@@ -100,12 +114,56 @@ test("the hard boundary is enforced by the host, with a model-side escape hatch"
   assert.match(runtime, /function contextFallbackReminder\(/);
   assert.match(runtime, /contextReminderClaimed/);
   assert.match(runtime, /contextFallbackReminderClaimed/);
-  // The reminder is a per-turn append, so it never reaches the transcript.
+  // pi 0.86 carries the canonical system prompt in the transcript. The
+  // reminder is appended as a per-turn system message, not only as the legacy
+  // AgentContext.systemPrompt field.
   assert.match(
     runtime,
-    /systemPrompt: `\$\{context\.systemPrompt\}\\n\\n\$\{reminder\}`/,
+    /messages: \[\s*\.\.\.context\.messages,\s*\{\s*role: "system",\s*content: reminder,/,
   );
   assert.match(hostPermissions, /"new_context"/);
+});
+
+test("a delegate gets the session's turn-boundary budget protection (ADR 0299)", () => {
+  // The delegate Agent wires the same hook the session does, and the budget
+  // comes from the shared module evaluated against the run's resolved model.
+  assert.match(subagent, /prepareNextTurnWithContext:\s*\(context, signal\)\s*=>/);
+  assert.match(subagent, /from "\.\/context-budget\.js"/);
+  assert.match(subagent, /contextBudgetFor\(/);
+  // Terminal failure is the actionable delegate code, never the provider's
+  // raw overflow text; the remap happens only after fallback had its chance.
+  assert.match(subagent, /"SUBAGENT_CONTEXT_OVERFLOW"/);
+  assert.match(subagent, /subagentContextOverflowError\(this\.provider\.modelId\)/);
+  assert.match(subagent, /error\.code === "CONTEXT_TOO_LARGE"/);
+  // Fallback alternatives are re-evaluated against their own window before
+  // switching; one that cannot fit is skipped with the reason recorded.
+  assert.match(subagent, /contextBudgetFor\(binding\.model, carried\)/);
+  assert.match(
+    subagent,
+    /budget\.tokens >= budget\.hardLimit[\s\S]*?recordModelFailure\(identity/,
+  );
+  // The run result reports compaction and degradation additively, and the
+  // lifecycle details the parent sees carry both flags (ADR 0299 decision 4).
+  assert.match(subagent, /contextCompactions\?: number/);
+  assert.match(subagent, /contextDegraded\?: boolean/);
+  assert.match(runtime, /contextCompactions: record\.result\.contextCompactions/);
+  assert.match(runtime, /contextDegraded: record\.result\.contextDegraded/);
+  // A resumed chain is seeded within the delegate's own budget (decision 7):
+  // the oldest tool call/result pairs leave first, and a stripped carrier
+  // stops claiming "toolUse".
+  assert.match(runtime, /budget: contextBudgetLimitsFor\(model\)/);
+  assert.match(delegationHistory, /truncateSeededMessages/);
+  assert.match(delegationHistory, /\.\.\.message, content, stopReason: "stop"/);
+  // The compaction itself uses pi-agent-core's primitives, the session's
+  // retention rule, and the degradation ladder of decision 4.
+  assert.match(subagentContext, /prepareCompaction\(/);
+  assert.match(subagentContext, /generateSummaryWithUsage\(/);
+  assert.match(subagentContext, /contextBudgetFor\(input\.model/);
+  assert.match(subagentContext, /delegateRetentionMode/);
+  assert.match(subagentContext, /\? "active_turn"\s*: "completed_turn"/);
+  assert.match(subagentContext, /degradedDelegateMessages/);
+  // Delegate compaction is in-memory only: no host persistence, no transcript.
+  assert.doesNotMatch(subagentContext, /appendCompaction|host\.call/);
 });
 
 test("every checkpoint is durable, not just the newest one", () => {
@@ -131,7 +189,7 @@ test("a checkpoint carries only the active user message past the boundary", () =
   // The summary covers the whole boundary range. An in-progress turn carries
   // only its latest user message, while a completed turn carries no naked
   // historical user messages into the next task.
-  assert.match(runtime, /COMPACTION_RETAINED_USER_MESSAGE_MAX_TOKENS = 20_000/);
+  assert.match(contextBudget, /COMPACTION_RETAINED_USER_MESSAGE_MAX_TOKENS = 20_000/);
   assert.match(runtime, /type CompactionRetentionMode = "active_turn" \| "completed_turn"/);
   assert.match(runtime, /retainedTailMode: retentionMode/);
   assert.match(runtime, /private codexShapedPreparation\(/);
@@ -240,14 +298,33 @@ test("every compaction announces itself once, on top of the specific toasts", ()
 });
 
 test("a failed compaction checkpoint still restores a non-empty context", () => {
-  // A retained-tail fallback must not persist an empty tail on a completed
-  // turn: with no real summary to carry the boundary, an empty tail restores
-  // as an empty context after a runtime rebuild (model switch / restart) —
-  // the session reads as if it had just started (#224).
+  // A retained-tail fallback must not persist an empty tail: with no real
+  // summary to carry the boundary, an empty tail restores as an empty context
+  // after a runtime rebuild (model switch / restart) — the session reads as if
+  // it had just started (#224). It must not persist one user line either: a
+  // failed summary is the only record of the range behind it, so the tail is the
+  // recent window itself (#827).
+  assert.match(runtime, /const retainedTail = this\.fallbackRetainedTail\(/);
   assert.match(
     runtime,
-    /const retainedTail =\s*preparation\.retainedTail\.length > 0\s*\? preparation\.retainedTail\s*: selectRetainedUserMessages\(/,
+    /return selectRecentTail\(\s*preparation\.messagesToSummarize,/,
   );
+  assert.match(compactionTail, /export function selectRecentTail\(/);
+  assert.match(compactionTail, /export function replayRetainedTail\(/);
+  assert.match(
+    compactionTail,
+    /COMPACTION_RETAINED_TAIL_SHAPE = "recent_window"/,
+  );
+  // The shape marker is what keeps a rebuild from narrowing the window back to
+  // one user message, so the read gate has to test it.
+  assert.match(
+    runtime,
+    /details\.retainedTailShape === COMPACTION_RETAINED_TAIL_SHAPE/,
+  );
+  // Only a range the planner cannot split falls back at all; a prompt that is
+  // merely too large is summarized in chunks (#827).
+  assert.match(runtime, /private planSummaryRequests\(/);
+  assert.match(runtime, /private async generateChunkedCompaction\(/);
   assert.match(
     runtime,
     /fallback: "retained_tail" satisfies ContextCompactionFallback,/,

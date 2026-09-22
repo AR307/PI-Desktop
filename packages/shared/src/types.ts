@@ -25,3 +25,4 @@ export * from "./types/filesystem.js";
 export * from "./types/speech.js";
 export * from "./types/remote-host.js";
 export * from "./types/mobile-sync.js";
+export * from "./types/config-sync.js";

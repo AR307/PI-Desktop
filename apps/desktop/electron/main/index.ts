@@ -112,7 +112,6 @@ import {
 } from "./ipc/composer-ipc";
 import { registerWindowIpc } from "./ipc/window-ipc";
 import { registerPullsIpc } from "./ipc/pulls-ipc";
-import { registerScheduledIpc } from "./ipc/scheduled-ipc";
 import { registerAgentIpc } from "./ipc/agent-ipc";
 import { registerIpcHandlers } from "./ipc/register";
 import {
@@ -1328,6 +1327,7 @@ function registerIpc() {
     markMenuRendererReady,
     executeNativeMenuAction,
     scheduledRunsBySession,
+    isQuitting: () => quitting,
     isDevelopmentBuild,
     browserHost,
     clipboardHistory,

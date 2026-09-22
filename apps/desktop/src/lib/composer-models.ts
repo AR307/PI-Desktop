@@ -1,5 +1,7 @@
 import {
   bindingSupportsImages,
+  isImageGenerationModel,
+  type ImageGenerationBindings,
   modelIdsMatch,
   modelMatchesFilter,
   type ModelBinding,
@@ -8,30 +10,6 @@ import {
 } from "@pi-desktop/shared";
 
 type ConfiguredProvider = Pick<ProviderPublic, "id" | "models" | "defaultModelId" | "mirrorCoding">;
-
-/**
- * Resolve the provider heading shown in the Composer model menu.
- *
- * OAuth rows keep the vendor name as `provider.name` for runtime identity, but
- * the account-specific display label lives in `oauthAccountLabel`. Prefer that
- * label so duplicate accounts from one vendor remain distinguishable.
- */
-export function composerProviderDisplayName(
-  provider: Pick<ProviderPublic, "name" | "oauthAccountLabel">,
-): string {
-  return provider.oauthAccountLabel?.trim() || provider.name.trim();
-}
-
-/** Keep both the account label and vendor name searchable in the Composer. */
-export function composerProviderSearchText(
-  provider: Pick<ProviderPublic, "name" | "oauthAccountLabel">,
-): string {
-  const displayName = composerProviderDisplayName(provider);
-  const providerName = provider.name.trim();
-  return displayName === providerName
-    ? displayName
-    : `${displayName} ${providerName}`;
-}
 
 function configuredModelIds(provider: ConfiguredProvider): string[] {
   const ids = (provider.models ?? [])
@@ -51,13 +29,17 @@ function configuredModelIds(provider: ConfiguredProvider): string[] {
 export function composerModelsForProvider(
   provider: ConfiguredProvider,
   discovered: readonly ModelInfo[] | undefined,
+  imageGeneration?: ImageGenerationBindings | "chat" | "image" | null,
   task: "chat" | "image" = "chat",
 ): ModelInfo[] {
+  const resolvedTask = imageGeneration === "chat" || imageGeneration === "image" ? imageGeneration : task;
+  const imageBindings = imageGeneration === "chat" || imageGeneration === "image" ? null : imageGeneration;
   return configuredModelIds(provider).filter((modelId) => {
-    if (provider.mirrorCoding) return task === "image"
+    if (provider.mirrorCoding) return resolvedTask === "image"
       ? Boolean(provider.mirrorCoding.imageModels?.[modelId])
       : Boolean(provider.mirrorCoding.routes[modelId]);
-    if (task === "image") return false;
+    if (resolvedTask === "image") return false;
+    if (isImageGenerationModel(imageBindings, provider.id, modelId)) return false;
     const metadata = discovered?.find((row) => modelIdsMatch(row.modelId, modelId));
     return !metadata?.modalities || metadata.modalities.output.includes("text");
   }).map((modelId) => {

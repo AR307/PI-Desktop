@@ -10,6 +10,13 @@ export const esEntries: ChangelogEntry[] = [
       "El inicio de sesión móvil de MirrorCoding admite intercambio de contraseña cifrado e identidad de dispositivo emitida por el servidor.",
       "Las credenciales de sincronización móvil se guardan de forma segura y el emparejamiento se recupera tras caducar el token.",
       "Mejora los metadatos de recuperación del relay y el transporte móvil acotado para interrupciones y reintentos.",
+      "Genera y edita imágenes en el chat, elige un modelo y crea lotes con la habilidad integrada imagegen.",
+      "La actividad de herramientas sigue el ancho de la conversación y contiene correctamente las etiquetas largas.",
+      "Los archivos adjuntos pegados se conservan aunque el pegado termine después de cambiar de sesión.",
+      "El modelo predeterminado seleccionado se conserva al editar proveedores y se aplica un respaldo seguro si se elimina.",
+      "Las secciones anidadas de pensamiento y actividad de herramientas son más fáciles de leer, recorrer y recuperar.",
+      "Mejora los diseños del Composer, los controles de razonamiento y la coherencia de temas del espacio de trabajo.",
+      "Añade un interruptor opcional en Ajustes para reintentar fallos de red y temporales del proveedor hasta que tengan éxito.",
     ],
   },
 

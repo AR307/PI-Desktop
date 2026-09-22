@@ -25,7 +25,8 @@ export function resetUserLoginPathCacheForTests(): void {
 function defaultProbe(): string | undefined {
   if (process.platform === "win32") return undefined;
   const shell = [process.env.SHELL, "/bin/zsh", "/bin/bash", "/bin/sh"].find(
-    (candidate): candidate is string => typeof candidate === "string" && candidate.length > 0 && existsSync(candidate),
+    (candidate): candidate is string =>
+      typeof candidate === "string" && candidate.length > 0 && existsSync(candidate),
   );
   if (!shell) return undefined;
   try {

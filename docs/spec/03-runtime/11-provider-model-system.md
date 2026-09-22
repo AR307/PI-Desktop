@@ -196,7 +196,7 @@ PI-Desktop must not permanently restrict users to a short fixed model list.
    preserving all raw records in the file for future surfaces. Image input is
    sent as a transient image content block only when the model accepts image
    input. PDF capability is surfaced and retained in model metadata; because
-   pi-ai 0.85 has no native PDF content block, PDF attachments remain bounded
+   pi-ai 0.86.1 has no native PDF content block, PDF attachments remain bounded
    file references rather than being incorrectly encoded as images.
 7. User-edited `ModelBinding` values remain explicit provider configuration:
    they control selected request limits, enabled thinking levels, the default
@@ -223,7 +223,7 @@ PI-Desktop must not permanently restrict users to a short fixed model list.
    self-hosted endpoint routinely accepts input its catalog entry omits.
    Enabling image input turns on the transient image content block; enabling PDF
    input records the capability but does not change the encoding, since pi-ai
-   0.85 has no PDF content block and PDFs stay bounded file references.
+   0.86.1 has no PDF content block and PDFs stay bounded file references.
 10. The settings checkboxes show the effective answer against the published
     baseline, and setting one back to the published value stores "follow the
     catalog" rather than an equal-valued override. Agreeing with models.dev is
@@ -241,7 +241,9 @@ PI-Desktop must not permanently restrict users to a short fixed model list.
     when the provider's API style is neither of those two. Gateways that do
     not support the tool surface the provider error; the remedy is unchecking.
     Search runs on the provider: there is no local fetch and no permission
-    prompt. Compaction still drops search blocks.
+    prompt. Compaction keeps its existing prefix/tail retention strategy. The
+    summary request includes search replay data from the compacted prefix; the
+    generated text summary is not a lossless copy of raw provider search blocks.
 11. `ModelInfo` is the published record the settings surface compares against,
     so a stored binding must not shape its capabilities or reasoning fields.
     Effective limits, reasoning and thinking levels are resolved through the
@@ -262,6 +264,30 @@ Catalog and custom model entry must support common capability classes:
 - vision / multimodal input models
 - tool-calling capable models
 - JSON/structured output capable models (where provider supports)
+
+### Hosted-search message and budget contract
+
+- Search content and progress events are declared adapter types, not disguised
+  client tool calls. A search result or Responses search item does not require
+  `name` or `arguments`. Existing replay records remain compatible: a stored
+  record this app wrote without replay ids degrades to "no replay" for that
+  message instead of failing the turn, so pre-upgrade history stays usable.
+- Replay and token estimation share the search-phase interpretation. Valid
+  usage covers its prefix once; zero or invalidated usage triggers a complete
+  estimate which includes search replay data. Display rounds and streaming
+  scratch must not duplicate that data. Estimates are not billing guarantees.
+  This applies to main-agent and native pi-session compaction as well as output
+  budgets. When a target model is known, estimates follow that adapter's existing
+  model-switch replay boundary. Compaction serialization includes search replay
+  projections in the summary request, without treating them as client tool calls.
+  The compacted prefix becomes a generated text summary; raw search in the
+  retained tail follows the existing replay policy. No lossless summary is promised.
+- Rebuilding an unchanged context must preserve system-prefix semantics.
+  Actual instruction or tool-declaration changes remain visible to usage
+  validation. System sections and tool additions/removals cannot be discarded.
+- Search followed by a local tool, Task, a new user prompt, or restart recovery
+  must exercise the same contract. Dependency upgrades must run the offline
+  adapter and bundled-sidecar continuation regressions, not only UI tests.
 
 ## 7. Configuration schema
 
@@ -431,8 +457,13 @@ than probing `/models`, and the connection test proves the account by resolving
 auth. For static OAuth vendors such as ChatGPT Plus/Pro (`openai-codex`), that
 catalog is the pinned pi-ai model list rather than a live vendor `/models`
 probe, so a newly published account model such as `gpt-6-astra` appears only
-after the pin includes it. models.dev still supplies metadata once the ID is
-available, but it cannot add the ID to the authenticated list. A vendor may
+after the pin includes it. xAI (`xai`, the Grok/X subscription) is the
+exception: a successful `GET /v1/models` with the resolved account token is the
+list of conversation models the account may use, including an id the pinned
+pi-ai catalog does not know yet. Image and video generators in that payload
+are dropped. When the request fails, the pinned catalog remains the fallback.
+models.dev still supplies metadata once the ID is available, but it cannot add
+the ID to the authenticated list. A vendor may
 span wire APIs — Copilot serves Anthropic, Chat Completions and Responses
 models — so the row's `apiStyle` follows the selected model.
 Deleting a row calls the normal host `providers.delete` path, which removes its
@@ -441,7 +472,7 @@ same vendor key.
 
 ### Anthropic token endpoint rate limits
 
-The pinned pi-ai 0.85.1 patch gives Anthropic authorization-code exchange and
+The pinned pi-ai 0.86.1 patch gives Anthropic authorization-code exchange and
 refresh a shared, bounded token-request policy: retry only an explicit HTTP
 429, at most three total requests. Wait at least 1 s then 2 s, or longer when
 `Retry-After` gives delta seconds or an HTTP date. A server delay beyond the
@@ -681,7 +712,7 @@ response, it stops consuming the stream instead of awaiting the server's
 TCP FIN. Upstream pi-ai keeps iterating until the server closes the
 connection, which hangs the turn behind reverse proxies that hold the idle
 connection open. Until the fix ships upstream, `patches/` carries a pnpm
-patch on `@earendil-works/pi-ai@0.85.1` that breaks the event loop on the
+patch on `@earendil-works/pi-ai@0.86.1` that breaks the event loop on the
 terminal event (the OpenAI SDK aborts the underlying request when the
 consumer stops iterating). Drop the patch once a pi-ai release includes the
 fix.

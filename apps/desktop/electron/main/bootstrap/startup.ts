@@ -1,4 +1,5 @@
-import { app, BrowserWindow, Menu, safeStorage } from "electron";
+import { app, BrowserWindow, crashReporter, Menu, safeStorage } from "electron";
+import { createScheduledRunner } from "../runtime/scheduled-runner";
 import {
   APP_NAME,
   APP_VERSION,
@@ -34,6 +35,10 @@ import type { HostProcess } from "../host-process";
 import type { Logger } from "../logger";
 import type { PluginRuntime } from "../plugin-runtime";
 import { runSessionListProbe } from "../session-list-probe";
+import {
+  ensureCrashDumpsDirectory,
+  reportPreviousCrashDumps,
+} from "../crash-report";
 
 type IpcInvoker = (
   channel: string,
@@ -120,6 +125,22 @@ export function registerApplicationStartup(deps: StartupDependencies): void {
   // Electron only accepts scheme privileges before the app is ready, and this
   // runs from the composition root, before the `whenReady` promise can settle.
   registerPluginAssetScheme();
+  // Crashpad ships with Electron, so the reporter needs no native dependency.
+  // Dumps stay local (`uploadToServer: false`) under the installation data
+  // directory so a `PI_DESKTOP_DATA_DIR` profile does not share them. Started
+  // before `ready`, so no crash can happen ahead of the handler. A failure
+  // here is a warning: it never blocks boot.
+  try {
+    app.setPath("crashDumps", ensureCrashDumpsDirectory(deps.dataDir));
+    crashReporter.start({ uploadToServer: false, productName: APP_NAME });
+  } catch (error) {
+    deps.logger.app("diagnostics", "warn", "crash reporter failed to start", {
+      event: "crashReporterStartFailed",
+      data: String(error),
+    });
+  }
+
+
   void app.whenReady().then(async () => {
     const {
       hasSingleInstanceLock,
@@ -155,6 +176,18 @@ export function registerApplicationStartup(deps: StartupDependencies): void {
     // create a window, a tray, or a child process on top of the running app.
     if (!hasSingleInstanceLock) return;
     applyDevelopmentBranding();
+
+    // A Chromium-process crash from a previous run left a minidump, and nothing
+    // else would ever mention it. Report one durable line per new dump set,
+    // classified by process type, then advance the marker. Reporting is
+    // diagnostics: a failure warns and is dropped rather than holding up the
+    // first window.
+    reportPreviousCrashDumps({
+      dataDir,
+      crashDumpsDirectory: app.getPath("crashDumps"),
+      logger,
+    });
+
     // Serve declared theme assets before the renderer can ask for one; the
     // scheme itself was reserved in `registerApplicationStartup`.
     installPluginAssetProtocol((pluginId, assetPath) =>
@@ -257,6 +290,13 @@ export function registerApplicationStartup(deps: StartupDependencies): void {
       });
     }
     if (!bootError) planUiProbe.install();
+    const scheduledRunner = createScheduledRunner({
+      getHost,
+      execute: (id) => invokeIpc(IPC.invoke.scheduledExecute, [id, true]),
+      report: (error) => logger.app("runtime", "warn", "scheduled task dispatch failed", { data: String(error) }),
+    });
+    scheduledRunner.start();
+    app.once("before-quit", () => scheduledRunner.stop());
     if (!bootError && state.agentHostBridge) {
       // Restore the persisted turn queue now that host-core answers. Restored
       // entries stay held until a controller attaches (D375).

@@ -71,6 +71,14 @@ registered; reserved codes in §3.7 remain intentionally absent from
 | `HOST_SHUTTING_DOWN` | yes | the host received EOF and is draining; the call was refused rather than started |
 | `RATE_LIMITED` | yes | a per-caller host budget (plugin session import, batch operations) was exceeded inside its window |
 | `LIMIT_EXCEEDED` | no | a payload exceeded a fixed host bound (item count, byte size, or a 64 MiB NDJSON request line) and was refused |
+| `CONFIG_SYNC_INVALID` | no | invalid sync configuration, password, path, request, or approval input |
+| `CONFIG_SYNC_LOCKED` | no | the local encrypted sync vault is not unlocked |
+| `CONFIG_SYNC_UNSUPPORTED` | no | the vault format or WebDAV server capability is unsupported |
+| `CONFIG_SYNC_REMOTE` | maybe | remote WebDAV object, authentication, quota, or availability failure |
+| `CONFIG_SYNC_CONFLICT` | maybe | remote head, vault identity, or approval digest conflict |
+| `CONFIG_SYNC_CRYPTO` | no | authenticated encryption, object identity, or ciphertext validation failed |
+| `CONFIG_SYNC_MAPPING_REQUIRED` | no | imported project-scoped configuration needs an explicit local folder/group mapping |
+| `CONFIG_SYNC_LIMIT_EXCEEDED` | no | encrypted sync state exceeded an entity, object, resource, archive, or decompression bound |
 
 
 `HOST_UNAVAILABLE` is reserved for a missing or broken host process/transport,
@@ -102,6 +110,7 @@ does not turn temporary thread pressure into a host process exit.
 | `SPEECH_INPUT_TOO_LARGE` | no | speech input exceeds 25 MB |
 | `SUBAGENT_IDLE_TIMEOUT` | no | withdrawn (D328): idle watchdogs are not armed; the code remains for stored results |
 | `SUBAGENT_DURATION_TIMEOUT` | no | withdrawn (D328): duration watchdogs are not armed; the code remains for stored results |
+| `SUBAGENT_CONTEXT_OVERFLOW` | no | a delegate's own model context exceeded its safe budget and neither automatic turn-boundary compaction nor the degraded retry that keeps only the task brief and the most recent messages brought it back below the limit; the failure names the actionable recovery instead of the provider's overflow text |
 ### 3.3 Workspace / tools / permissions
 
 | code | retriable | meaning |
@@ -215,6 +224,7 @@ malformed.
 |---|---|---|
 | `PROVIDER_SECRET_MISSING` | no | enabled provider requires an API key |
 | `MODEL_ALIAS_TOO_LONG` | no | configured model alias exceeds 60 Unicode characters |
+| `MODEL_BINDINGS_DEGRADED` | no | stored model bindings are unreadable; explicit model-array replacement is blocked to prevent data loss |
 | `SECRET_STORE_UNAVAILABLE` | maybe | OS secure storage unavailable (reserved) |
 | `SETTINGS_INVALID` | no | settings payload invalid (reserved) |
 
@@ -321,13 +331,21 @@ transient failures — `STREAM_FAILED`, `NETWORK_ERROR`, `TIMEOUT`, and retryabl
 `PROVIDER_ERROR` such as an upstream gateway 502/503/504 — share their own
 bounded budget of ten retries after the initial attempt, also counted together
 across setup and stream, and separate from the 429 budget. Both budgets are
-abortable. The 429 path honors `retry-after-ms`, `retry-after` seconds, and
+abortable and reset after a complete successful model response, including a
+tool-call response, in both the main session and builtin subagents. Headers,
+partial output, and phase changes do not replenish them. Terminal exhaustion
+reports `retryAttempt: 10` from the applicable budget even after retry activity
+cleanup. The 429 path honors `retry-after-ms`, `retry-after` seconds, and
 HTTP-date headers before client backoff and caps a wait at 30 seconds; the
 non-429 path applies the same precedence with an 8-second cap and otherwise
 waits 1, 2, 4, then remains at 8 seconds for later retries. Only the failed
 request is replayed; the session and its tool state are untouched. A
 non-retryable `PROVIDER_ERROR` from a
-malformed 400/422 request never enters either budget.
+malformed 400/422 request never enters either budget. The persisted
+`infiniteProviderRetry` setting is false by default; when true it removes only
+the retry-count ceiling for the admitted transient/network classes (including
+429). Backoff, `Retry-After`, cancellation, and terminal classification remain
+unchanged, and the setting may continue API usage until the user stops the turn.
 
 A `NETWORK_ERROR` carries the failing transport layer as bounded `details`:
 `networkCategory` (`dns`, `tls`, `timeout`, `refused`, `unreachable`, `reset`,
@@ -376,6 +394,29 @@ absolute pending deadline;
 execution interrupted by abort or host recovery. `PLAN_KIND_MISMATCH` is a
 terminating tool error like `PLAN_NOT_ACTIVE`: the submit tool ran against the
 wrong contract, so no artifact is written and no approval row is created.
+
+### Local request preparation failures
+
+A structured `LOCAL_REQUEST_ERROR` from context validation, context estimation,
+or request preparation maps to the existing `INTERNAL` code with
+`retriable: false`. Preserve its local origin and phase before adapter errors
+are flattened to text. Diagnostics may retain the cause type, but must not
+copy request content, search results, credentials or arbitrary cause messages
+into the UI. Do not identify these failures by matching an exception sentence
+or by treating all JavaScript `TypeError`s alike: fetch transport failures
+retain the existing network/retry and cancellation behavior.
+
+Restored-history validation may fail before a runtime stream exists. In that case
+the existing RPC error `data` carries `errorCode`, `retriable: false`, and safe
+`details` (`origin`, `phase`, optional cause type). No provider request is made,
+the sidecar stays available, and a stored record is never rewritten. A container
+that is not a stored block list still fails this way.
+
+A single stored block that cannot be replayed is a different case: this app itself
+stores display-only blocks when a gateway drops ids, so the whole stored replay for
+that message degrades to "no replay" instead of failing every later turn. The turn
+continues, display rounds are unchanged, and the diagnostic records the block count
+and phases without copying search content, results or credentials.
 
 ## 5. UI handling guidelines
 
@@ -436,3 +477,20 @@ Examples:
    expiry, scheduled-rejection, and restart-interruption paths map to stable
    codes; only the documented pre-turn catalog fallback is allowed and no work
    is replayed
+
+### Certificate verification failures (issue #714)
+
+`NETWORK_ERROR` is non-retriable when `details.networkCode` is a recognized
+certificate verification failure, including an untrusted/self-signed chain,
+an expired/not-yet-valid certificate, or `ERR_TLS_CERT_ALTNAME_INVALID`.
+A concrete certificate cause takes precedence over generic socket/proxy
+wrapper codes. Captured fetch causes apply this policy after adapter error
+flattening as well as during direct classification. Unknown and non-certificate
+TLS/protocol errors retain existing recovery behavior.
+
+The transcript keeps the stable error code, transport errno and raw details,
+but uses localized certificate guidance instead of the generic connectivity
+summary. It asks the user to check the certificate, clock, and trusted roots
+used by security software/proxies, then restart after changing trust. It does
+not claim that interception is the only possible cause or offer a TLS bypass.
+Manual Continue remains available after the cause is corrected.
