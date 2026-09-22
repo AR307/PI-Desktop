@@ -529,3 +529,13 @@ needed by an actual request rather than starting a repository-wide rewrite.
 - Bumped all workspace and host surfaces to `0.15.2`, added shipped-locale
   release notes, advanced the Android package to version code 2, and refreshed
   the bundled models.dev snapshot for the release.
+- Candidate validation used base `996922fa729870e88ed9e439aa6959e388c12f91`
+  and candidate `d04b8538522733e3e313f812f6c3492604706e20`: JS workspace build,
+  Android tests/build, desktop typecheck, Rust 1.90 host build, secure-device
+  tests, MirrorCoding recovery (including relay headers), and the full mobile
+  Electron/browser acceptance all passed.
+- Published tag `v0.15.2` and GitHub Release with Windows NSIS/portable
+  artifacts, updater metadata, blockmap, and a v2/v3-verified debug-signed
+  Android preview APK. Windows artifacts are intentionally unsigned because no
+  local Authenticode certificate was available; Android native emulator E2E was
+  not rerun because WHPX reported too many emulator instances.
