@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { generateKeyPairSync, privateDecrypt } from "node:crypto";
 import { MobileAccount, type MobileAuthSession } from "../src/services/account";
 import type { CredentialStore } from "../src/services/storage";
 
@@ -19,9 +20,10 @@ describe("mobile account user path", () => {
       const body = init?.body ? JSON.parse(String(init.body)) as Record<string, unknown> : {};
       const authorization = new Headers(init?.headers).get("Authorization"); requested.push({ path, body, authorization });
       switch (path) {
+        case "/api/pi-mobile/auth/encryption-key": return response({ enabled: false });
         case "/api/pi-mobile/auth/login": return response({ challenge: { challengeId: "challenge-one", type: "totp" } });
         case "/api/pi-mobile/auth/challenge": return response({ session: session() });
-        case "/api/pi-sync/devices/register": return response({ deviceId: "phone-one" });
+        case "/api/pi-sync/devices/register": return response({ deviceId: "phone-one", deviceSecret: "phone-secret" });
         case "/api/pi-sync/pairings/claim": return response({ grant: { id: "grant-one", scope: { kind: "session", id: "session-one", label: "Build app" } } });
         case "/api/pi-sync/grants": return response({ grants: [{ id: "grant-one" }] });
         case "/api/pi-mobile/auth/logout": return response({});
@@ -49,7 +51,10 @@ describe("mobile account user path", () => {
 
   it("shares one refresh between simultaneous foreground requests and stores both rotated tokens", async () => {
     const credentials = store();
-    credentials.value = JSON.stringify(session({ expiresAt: new Date(0).toISOString(), deviceId: "phone-one" }));
+    credentials.value = JSON.stringify({
+      session: session({ expiresAt: new Date(0).toISOString() }),
+      device: { accountId: "fixture-user", deviceId: "phone-one", deviceSecret: "phone-secret" },
+    });
     let refreshCount = 0;
     let release!: () => void;
     const wait = new Promise<void>((resolve) => { release = resolve; });
@@ -66,13 +71,57 @@ describe("mobile account user path", () => {
     release();
     expect(await restoring).toBe(true); await Promise.all([first, second]);
     expect(refreshCount).toBe(1);
-    expect(JSON.parse(credentials.value!)).toMatchObject({ accessToken: "rotated-access", refreshToken: "rotated-refresh", deviceId: "phone-one" });
+    const saved = JSON.parse(credentials.value!);
+    expect(saved.session).toMatchObject({ accessToken: "rotated-access", refreshToken: "rotated-refresh" });
+    expect(saved.device).toEqual({ accountId: "fixture-user", deviceId: "phone-one", deviceSecret: "phone-secret" });
+  });
+
+  it("encrypts the password when MC enables the RSA policy", async () => {
+    const credentials = store();
+    const { publicKey, privateKey } = generateKeyPairSync("rsa", { modulusLength: 2048, publicKeyEncoding: { type: "spki", format: "pem" }, privateKeyEncoding: { type: "pkcs8", format: "pem" } });
+    let loginBody: Record<string, unknown> | undefined;
+    const fetcher: typeof fetch = async (input, init) => {
+      const path = new URL(String(input)).pathname;
+      if (path.endsWith("encryption-key")) return response({ enabled: true, encryptionKeyId: "key-1", publicKey, algorithm: "RSA-OAEP-256" });
+      if (path.endsWith("/login")) { loginBody = JSON.parse(String(init?.body)); return response({ session: session() }); }
+      throw new Error(`Unexpected path ${path}`);
+    };
+    const account = new MobileAccount("https://fixture.invalid", credentials, fetcher);
+    await account.login("fixture", "test-only-password");
+    expect(loginBody?.password).toBeUndefined();
+    expect(typeof loginBody?.passwordEncrypted).toBe("string");
+    const decrypted = privateDecrypt({ key: privateKey, oaepHash: "sha256" }, Buffer.from(String(loginBody?.passwordEncrypted), "base64")).toString("utf8");
+    expect(decrypted).toBe("test-only-password");
   });
 
   it("clears local credentials when the phone signs out without network", async () => {
-    const credentials = store(); credentials.value = JSON.stringify(session());
+    const credentials = store(); credentials.value = JSON.stringify({ session: session(), device: { accountId: "fixture-user", deviceId: "phone-one", deviceSecret: "phone-secret" } });
     const account = new MobileAccount("https://fixture.invalid", credentials, async () => { throw new TypeError("Network unavailable"); });
     await account.restore(); expect(await account.logout()).toBe(false);
     expect(credentials.value).toBeNull();
+  });
+
+  it("retains the device identity when an expired session is replaced", async () => {
+    const credentials = store();
+    credentials.value = JSON.stringify({
+      session: session({ expiresAt: new Date(0).toISOString() }),
+      device: { accountId: "fixture-user", deviceId: "phone-one", deviceSecret: "phone-secret" },
+    });
+    const registrations: Record<string, unknown>[] = [];
+    const fetcher: typeof fetch = async (input, init) => {
+      const path = new URL(String(input)).pathname;
+      const body = init?.body ? JSON.parse(String(init.body)) as Record<string, unknown> : {};
+      if (path.endsWith("/refresh")) return new Response(JSON.stringify({ success: false, error: { code: "UNAUTHORIZED", message: "expired" } }), { status: 401, headers: { "Content-Type": "application/json" } });
+      if (path.endsWith("/encryption-key")) return response({ enabled: false });
+      if (path.endsWith("/login")) return response({ session: session({ accessToken: "new-access", refreshToken: "new-refresh" }) });
+      if (path.endsWith("/devices/register")) { registrations.push(body); return response({ deviceId: "phone-one" }); }
+      throw new Error(`Unexpected path ${path}`);
+    };
+    const account = new MobileAccount("https://fixture.invalid", credentials, fetcher);
+    expect(await account.restore()).toBe(false);
+    expect(JSON.parse(credentials.value!).device).toEqual({ accountId: "fixture-user", deviceId: "phone-one", deviceSecret: "phone-secret" });
+    await account.login("fixture", "test-only-password");
+    await account.register();
+    expect(registrations).toEqual([{ deviceId: "phone-one", deviceSecret: "phone-secret", kind: "mobile", name: "PI Android" }]);
   });
 });

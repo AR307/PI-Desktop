@@ -1,4 +1,3 @@
-import { randomUUID } from "node:crypto";
 import { hostname } from "node:os";
 import WebSocket from "ws";
 import { IPC, type AppSettings, type MobileGrant, type MobilePairing, type MobileRelayEnvelope, type MobileRelayTicket, type MobileSyncScope, type MobileSyncScopeInput, type MobileSyncSettings, type MobileSyncStatus } from "@pi-desktop/shared";
@@ -9,10 +8,11 @@ import type { ImageService } from "../images/service";
 import { MobilePeer } from "./peer";
 import { MobileScopeAccess } from "./scope";
 import { openMobileRelay } from "./transport";
+import type { MobileDeviceCredentials } from "./device-credentials";
 import { object, string } from "./validation";
 
 type Dependencies = {
-  dataDir: string; account: MirrorCodingAccount; images: ImageService;
+  dataDir: string; account: MirrorCodingAccount; images: ImageService; deviceCredentials: MobileDeviceCredentials;
   host(): HostRpc; agent(): AgentHost;
   send(channel: string, state: unknown): void;
   log(message: string, error?: unknown): void;
@@ -53,9 +53,13 @@ export class MobileSyncService {
   accountChanged() {
     if (!this.started || this.disposed) return;
     const account = this.deps.account.snapshot();
-    if (account.status !== "connected" || String(account.account?.id ?? "") !== this.settings?.accountId) {
+    const accountChanged = !!this.settings && String(account.account?.id ?? "") !== this.settings.accountId;
+    if (account.status !== "connected" || accountChanged) {
       this.epoch += 1; this.disconnect(); this.settings = undefined;
       this.publish({ status: "signed_out", deviceId: undefined, grants: [], pairings: [], error: undefined });
+      if (account.status === "signed_out" || accountChanged) {
+        void this.deps.deviceCredentials.clear().catch((error) => this.deps.log("mobile device credential cleanup failed", error));
+      }
     }
     if (account.status === "connected" && account.account && this.active) void this.refresh(false);
   }
@@ -68,7 +72,7 @@ export class MobileSyncService {
       if (!settings.scopes.some((item) => sameScope(item, scope))) settings.scopes.push(scope);
       await this.persist();
     });
-    const raw = await this.request("/pairings", { deviceId: this.settings.deviceId, scope });
+    const raw = await this.request("/pairings", { deviceId: this.requireDeviceId(), scope });
     const row = object(object(raw).pairing);
     const pairing: MobilePairing = { id: string(row.id, "pairing_id"), code: string(row.code, "pairing_code"), expiresAt: string(row.expiresAt, "expires_at"), scope };
     this.publish({ pairings: [...this.state.pairings.filter((item) => !sameScope(item.scope, scope)), pairing] });
@@ -109,14 +113,16 @@ export class MobileSyncService {
       const accountId = String(account.account.id);
       if (!this.settings) {
         const saved = (await this.deps.host().call<AppSettings>("settings.get")).mobileSync;
-        this.settings = saved?.accountId === accountId ? saved : { deviceId: randomUUID(), accountId, scopes: [], revokedGrantIds: [] };
+        this.settings = saved?.accountId === accountId ? saved : { accountId, scopes: [], revokedGrantIds: [] };
+        if (this.settings.deviceId && !(await this.deps.deviceCredentials.load(accountId))) {
+          // A legacy record has no server-issued secret and cannot restore the identity.
+          this.settings.deviceId = undefined;
+        }
         await this.persist();
       }
       this.publish({ status: this.socket?.readyState === WebSocket.OPEN ? "online" : "connecting", deviceId: this.settings.deviceId, error: undefined });
-      const registration = object(await this.request("/devices/register", { deviceId: this.settings.deviceId, kind: "desktop", name: hostname() }));
+      const deviceId = await this.registerDevice(accountId);
       if (epoch !== this.epoch) return this.status();
-      const deviceId = string(registration.deviceId, "device_id");
-      if (deviceId !== this.settings.deviceId) { this.settings.deviceId = deviceId; await this.persist(); }
       for (const id of [...this.settings.revokedGrantIds]) {
         try { await this.request(`/grants/${encodeURIComponent(id)}/revoke`, {}); this.settings.revokedGrantIds = this.settings.revokedGrantIds.filter((item) => item !== id); await this.persist(); }
         catch { /* Keep the local denial and retry on the next connection. */ }
@@ -173,15 +179,53 @@ export class MobileSyncService {
       await this.refresh();
       if (accountId !== this.settings?.accountId || !this.grantsFor(deviceId).length) { this.send({ type: "peer.close", peerId, reason: "share_not_authorized" }); return; }
       this.removePeer(peerId);
-      const peer = new MobilePeer({ ...this.deps, peerId, deviceId, desktopDeviceId: this.settings.deviceId, scope: this.scope,
+      const peer = new MobilePeer({ ...this.deps, peerId, deviceId, desktopDeviceId: this.requireDeviceId(), scope: this.scope,
         grants: () => this.grantsFor(deviceId), send: (value) => this.send({ type: "peer.frame", peerId, frame: value }),
         close: (reason) => { this.send({ type: "peer.close", peerId, reason }); this.removePeer(peerId); } });
       this.peers.set(peerId, { deviceId, peer });
     } catch (error) { this.deps.log("mobile relay frame rejected", error); }
   }
   private grantsFor(deviceId: string) { return this.state.grants.filter((grant) => grant.mobileDeviceId === deviceId && this.accepts(grant)); }
-  private accepts(grant: MobileGrant) { return !!this.settings && grant.accountId === this.settings.accountId && grant.desktopDeviceId === this.settings.deviceId && !this.settings.revokedGrantIds.includes(grant.id) && this.settings.scopes.some((scope) => sameScope(scope, grant.scope)); }
-  private reconcilePeers() { for (const [id, entry] of this.peers) if (!this.grantsFor(entry.deviceId).length) { this.send({ type: "peer.close", peerId: id, reason: "share_revoked" }); this.removePeer(id); } }
+  private accepts(grant: MobileGrant) { return !!this.settings && !!this.settings.deviceId && grant.accountId === this.settings.accountId && grant.desktopDeviceId === this.settings.deviceId && !this.settings.revokedGrantIds.includes(grant.id) && this.settings.scopes.some((scope) => sameScope(scope, grant.scope)); }
+  private requireDeviceId(): string {
+    const value = this.settings?.deviceId;
+    if (!value) throw new Error("mobile_device_not_registered");
+    return value;
+  }
+  private async registerDevice(accountId: string): Promise<string> {
+    let saved = await this.deps.deviceCredentials.load(accountId);
+    if (saved) this.settings!.deviceId = saved.deviceId;
+    else if (this.settings?.deviceId) {
+      this.settings.deviceId = undefined;
+      await this.persist();
+    }
+    const register = async () => {
+      const body = saved
+        ? { deviceId: saved.deviceId, deviceSecret: saved.deviceSecret, kind: "desktop", name: hostname() }
+        : { kind: "desktop", name: hostname() };
+      const data = object(await this.request("/devices/register", body));
+      const deviceId = string(data.deviceId, "device_id");
+      const deviceSecret = typeof data.deviceSecret === "string" && data.deviceSecret ? data.deviceSecret : saved?.deviceSecret;
+      if (!deviceSecret) throw new Error("invalid_device_registration");
+      await this.deps.deviceCredentials.save({ accountId, deviceId, deviceSecret });
+      this.settings!.deviceId = deviceId;
+      await this.persist();
+      saved = { accountId, deviceId, deviceSecret };
+      return deviceId;
+    };
+    try {
+      return await register();
+    } catch (error) {
+      if (!saved || !(error instanceof Error) || error.message !== "DEVICE_MISMATCH") throw error;
+      // A lost/invalid secret becomes a new installation identity and requires fresh pairing.
+      await this.deps.deviceCredentials.clear();
+      saved = undefined;
+      this.settings!.deviceId = undefined;
+      await this.persist();
+      return register();
+    }
+  }
+  private reconcilePeers() { for (const [id, entry] of this.peers) if (!this.grantsFor(entry.deviceId).length) { this.send({ type: "peer.close", peerId: id, reason: "GRANT_REVOKED" }); this.removePeer(id); } }
   private removePeer(id: string) { this.peers.get(id)?.peer.dispose(); this.peers.delete(id); }
   private closePeers() { for (const id of this.peers.keys()) this.removePeer(id); }
   private send(frame: MobileRelayEnvelope) {

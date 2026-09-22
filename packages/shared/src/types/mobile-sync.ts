@@ -25,7 +25,8 @@ export type MobileSyncStatus = {
 };
 /** Stored by Rust through the existing settings boundary. No account tokens. */
 export type MobileSyncSettings = {
-  deviceId: string;
+  /** Display/persistence hint only; the authoritative identity is encrypted in Electron main. */
+  deviceId?: string;
   accountId: string;
   scopes: MobileSyncScope[];
   revokedGrantIds: string[];

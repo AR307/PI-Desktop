@@ -66,7 +66,8 @@ account/password checks, optional password-encryption policy, risk checks and
 
 | Method and path | Request | Successful data |
 | --- | --- | --- |
-| POST `/api/pi-mobile/auth/login` | `{username,password}` | `{session}` or `{challenge}` |
+| GET `/api/pi-mobile/auth/encryption-key` | `{}` | `{enabled:false}` or `{enabled:true,encryptionKeyId,publicKey,algorithm:"RSA-OAEP-256"}` |
+| POST `/api/pi-mobile/auth/login` | `{username,password}` or, when enabled, `{username,passwordEncrypted,encryptionKeyId}` | `{session}` or `{challenge}` |
 | POST `/api/pi-mobile/auth/challenge` | `{challengeId,code}` | `{session}` or another `{challenge}` |
 | POST `/api/pi-mobile/auth/refresh` | `{refreshToken}` | `{session}` |
 | POST `/api/pi-mobile/auth/logout` | `{refreshToken}` | `{}` |
@@ -93,10 +94,10 @@ account/password checks, optional password-encryption policy, risk checks and
 }
 ```
 
-Challenge types are `totp`, `email`, and `captcha`. A captcha challenge includes
-an MC-hosted HTTPS `url`; completion supplies a one-use result as `code` to the
-challenge endpoint. Define this handoff explicitly if the deployment enables
-captcha. It must not silently disable the existing verification policy.
+Challenge types are `totp` and `captcha`. A captcha challenge includes an
+MC-hosted HTTPS `url`; completion supplies a one-use result as `code` to the
+challenge endpoint. The mobile client must not invent an email challenge when
+the current MC policy does not provide one.
 
 Return both replacement credentials on refresh. Keep the existing MC rotation
 and concurrent-refresh behavior and document session expiry. Logout invalidates
@@ -108,11 +109,15 @@ can inspect and revoke old mobile grants without granting a newly registered
 device access to their scopes.
 Another device does not gain access merely by claiming an identifier.
 
+When password encryption is enabled, the client uses the returned PEM public
+key with RSA-OAEP, SHA-256 for both the digest and MGF1, UTF-8 password bytes,
+and standard Base64. The server must reject a plaintext `password` in that mode.
+
 ## Devices, pairing and grants
 
 | Method and path | Request / result |
 | --- | --- |
-| POST `/api/pi-sync/devices/register` | `{deviceId?,kind:"desktop"\|"mobile",name}` → `{deviceId}` |
+| POST `/api/pi-sync/devices/register` | First registration `{kind:"desktop"\|"mobile",name}` → `{deviceId,deviceSecret}`; recovery `{deviceId,deviceSecret,kind,name}` → `{deviceId}` |
 | GET `/api/pi-sync/devices` | `{devices:[{deviceId,name,kind,online}]}`; visible paired desktops only for mobile |
 | POST `/api/pi-sync/pairings` | `{deviceId,scope}` → `{pairing}` |
 | POST `/api/pi-sync/pairings/{id}/cancel` | `{}` → `{}`; desktop owner only |
@@ -150,7 +155,9 @@ Another device does not gain access merely by claiming an identifier.
 - On claim, require a mobile device owned by the same authenticated account.
   A failed wrong-account claim must not consume a valid owner's code.
 - Device registration must not let one installation impersonate a paired device
-  merely by submitting a caller-selected `deviceId`.
+  merely by submitting a caller-selected `deviceId`. The server generates both
+  `deviceId` and a one-time `deviceSecret`; the secret is returned only on the
+  first registration and is required together with the ID for recovery.
 - Scope IDs are opaque MC metadata, not filesystem paths. MC must not expand
   project membership or interpret the RACP payload as a filesystem request.
 - Persist grants across client/server restarts. Repeated revoke is successful.

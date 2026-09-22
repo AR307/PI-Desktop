@@ -499,3 +499,32 @@ needed by an actual request rather than starting a repository-wide rewrite.
   `peer.frame` envelope and JSON escaping overhead.
 - Linked the delta from the authoritative MC contract and local delivery guide.
   This is documentation-only and does not change the verified client executable.
+
+### 2026-09-22 - MirrorCoding contract alignment
+
+- Replaced caller-generated desktop mobile-sync identities with server-issued
+  device ID plus one-time secret stored only in an Electron `safeStorage`
+  encrypted record. Legacy ID-only settings are re-registered and account
+  changes clear the local device credential tombstone.
+- Updated Android login to honor MC's encryption-key endpoint and RSA-OAEP
+  SHA-256 password exchange, preserve device secrets across refresh, require a
+  complete identity for pairing/tickets, and accept only `totp`/`captcha`
+  challenges.
+- Raised the desktop and controlled relay outer-envelope limit to 8 MiB,
+  preserved the 1 MiB inner RACP limit, forwarded all required request IDs and
+  `Retry-After` headers, and standardized grant revocation close frames to
+  `GRANT_REVOKED`.
+
+### 2026-09-22 - Mobile identity recovery and 0.15.2 release preparation
+
+- Kept Android device identity independent from the short-lived login session;
+  expired sessions can be replaced without losing the server-issued secret, and
+  explicit logout clears both persisted and in-memory identity state.
+- Desktop mobile-sync now clears the encrypted device credential on explicit
+  MirrorCoding sign-out or account switch, while reauthorization keeps the
+  identity available for existing pairing recovery.
+- Added regression coverage for encrypted identity storage, rotated-token
+  persistence, encrypted password login, identity reuse after session expiry,
+  and relay request-id plus `Retry-After` forwarding.
+- Bumped all workspace and host surfaces to `0.15.2`, added shipped-locale
+  release notes, and refreshed the bundled models.dev snapshot for the release.

@@ -81,7 +81,15 @@ const server = createServer(async (request, response) => {
   }
   requests.push({ path: request.url, group: request.headers["x-mirrorcoding-group"], sdkAuth: Boolean(request.headers["x-api-key"] || request.headers["x-goog-api-key"] || request.url.includes("key=")), body: JSON.parse(body) });
   if (denyGroup) { json(403, { error: { message: "The selected group is not available to this account" } }); return; }
-  if (nextFailure) { const status = nextFailure; nextFailure = undefined; json(status, { error: { message: "Temporary failure" } }, { "retry-after": "2" }); return; }
+  if (nextFailure) {
+    const status = nextFailure; nextFailure = undefined;
+    json(status, { error: { message: "Temporary failure" } }, {
+      "retry-after": "2", "x-oneapi-request-id": "oneapi-fixture",
+      "x-upstream-request-id": "upstream-fixture", "x-request-id": "request-fixture",
+      "request-id": "generic-fixture",
+    });
+    return;
+  }
   if (streaming) {
     response.writeHead(200, { "content-type": "text/event-stream" });
     response.write('data: {"text":"partial"}\n\n');
@@ -136,7 +144,7 @@ try {
   const send = (signal) => fetch(`${local.baseUrl}/responses`, { method: "POST", headers: local.headers, body: JSON.stringify({ model: "gpt-5", stream: true }), signal });
   for (const status of [429, 503]) {
     nextFailure = status; const response = await send();
-    check(`${status} and Retry-After preserved`, response.status === status && response.headers.get("retry-after") === "2" && account.snapshot().status === "connected");
+    check(`${status} and relay headers preserved`, response.status === status && response.headers.get("retry-after") === "2" && response.headers.get("x-oneapi-request-id") === "oneapi-fixture" && response.headers.get("x-upstream-request-id") === "upstream-fixture" && response.headers.get("x-request-id") === "request-fixture" && response.headers.get("request-id") === "generic-fixture" && account.snapshot().status === "connected");
   }
   denyGroup = true; const denied = await send();
   await until(() => account.snapshot().error === "model_or_group_unavailable", "permission refresh notice");

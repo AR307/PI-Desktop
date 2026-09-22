@@ -21,7 +21,9 @@ export async function openMobileRelay(ticket: MobileRelayTicket, origin: string)
       agent = new SocksProxyAgent(`${kind === "SOCKS5" ? "socks5h" : "socks4a"}://${address}`);
     } else throw new Error("unsupported_relay_proxy");
   }
-  const socket = new WebSocket(url, { agent, handshakeTimeout: 15_000, maxPayload: 2 * 1024 * 1024 });
+  // MC envelopes may contain several bounded RACP frames; the outer JSON
+  // contract allows up to 8 MiB while RACP itself remains capped at 1 MiB.
+  const socket = new WebSocket(url, { agent, handshakeTimeout: 15_000, maxPayload: 8 * 1024 * 1024 });
   socket.once("close", () => agent?.destroy());
   return socket;
 }

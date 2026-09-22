@@ -3,6 +3,7 @@ import {
   BrowserWindow,
   ipcMain,
   nativeTheme,
+  safeStorage,
   screen,
   Tray,
 } from "electron";
@@ -130,6 +131,7 @@ import {
 import { createSessionLaunchRuntime } from "./runtime/session-launch";
 import { createMirrorCodingRuntime } from "./mirrorcoding/runtime";
 import { MobileSyncService } from "./mobile-sync/service";
+import { MobileDeviceCredentials } from "./mobile-sync/device-credentials";
 import { createSessionCoordination } from "./runtime/session-coordination";
 import { createScheduledRuntime } from "./runtime/scheduled";
 import { createDesktopServices } from "./services/desktop-services";
@@ -692,6 +694,7 @@ const mirrorCoding = createMirrorCodingRuntime({
 
 const mobileSync = new MobileSyncService({
   dataDir, account: mirrorCoding.account, images: mirrorCoding.images,
+  deviceCredentials: new MobileDeviceCredentials(join(dataDir, "mobile-device.enc"), safeStorage),
   host: () => { if (!host) throw new Error("host_unavailable"); return host; },
   agent: () => { if (!agentHostBridge) throw new Error("agent_unavailable"); return agentHostBridge.agentHost; },
   send: sendToRenderer,

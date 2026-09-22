@@ -16,7 +16,7 @@ export async function mobileFixture({ port = 0 } = {}) {
   let origin, serial = 0;
   const send = (socket, frame) => {
     if (socket?.readyState !== WebSocket.OPEN) return;
-    if (socket.bufferedAmount > 4 * 1024 * 1024) { socket.close(1013, "RELAY_UNAVAILABLE"); return; }
+    if (socket.bufferedAmount > 8 * 1024 * 1024) { socket.close(1013, "RELAY_UNAVAILABLE"); return; }
     socket.send(typeof frame === "string" ? frame : JSON.stringify(frame));
   };
   const grantList = (auth) => [...grants.values()].filter((grant) => grant.accountId === auth.accountId &&
@@ -93,6 +93,7 @@ export async function mobileFixture({ port = 0 } = {}) {
         if (control.challenge) { json({ challenge: { challengeId: body.username, type: "totp" } }); return; }
         json({ session: issue(account(body.username)) }); return;
       }
+      if (url.pathname === "/api/pi-mobile/auth/encryption-key") { json({ enabled: false }); return; }
       if (url.pathname === "/api/pi-mobile/auth/challenge") {
         if (body.code !== "123456") { fail("INVALID_CHALLENGE", 400); return; }
         json({ session: issue(account(body.challengeId)) }); return;
@@ -113,11 +114,13 @@ export async function mobileFixture({ port = 0 } = {}) {
       }
       if (url.pathname === "/api/pi-sync/devices/register") {
         const current = body.deviceId ? devices.get(body.deviceId) : undefined;
-        if (current && current.accountId !== auth.accountId) { fail("ACCOUNT_MISMATCH", 403); return; }
+        if (current && (current.accountId !== auth.accountId || current.deviceSecret !== body.deviceSecret)) { fail("DEVICE_MISMATCH", 403); return; }
+        if (body.deviceId && !current) { fail("DEVICE_MISMATCH", 403); return; }
         if (body.kind !== auth.kind) { fail("ACCOUNT_MISMATCH", 403); return; }
         const deviceId = current?.deviceId ?? `${auth.kind}-${randomUUID()}`;
-        devices.set(deviceId, { deviceId, name: body.name, kind: body.kind, accountId: auth.accountId }); auth.deviceId = deviceId;
-        json({ deviceId }); return;
+        const deviceSecret = current?.deviceSecret ?? `device-secret-${randomUUID()}`;
+        devices.set(deviceId, { deviceId, deviceSecret, name: body.name, kind: body.kind, accountId: auth.accountId }); auth.deviceId = deviceId;
+        json(current ? { deviceId } : { deviceId, deviceSecret }); return;
       }
       if (url.pathname === "/api/pi-sync/devices") {
         const visible = new Set(grantList(auth).map((grant) => grant.desktopDeviceId));
@@ -169,7 +172,7 @@ export async function mobileFixture({ port = 0 } = {}) {
       fail("NOT_FOUND", 404);
     } catch (error) { if (!res.headersSent) fail("FIXTURE_ERROR", 500); else res.end(); console.error("Fixture boundary failed:", error.message); }
   });
-  const wss = new WebSocketServer({ noServer: true, maxPayload: 2 * 1024 * 1024 });
+  const wss = new WebSocketServer({ noServer: true, maxPayload: 8 * 1024 * 1024 });
   server.on("upgrade", (req, socket, head) => {
     const url = new URL(req.url, origin), ticket = tickets.get(url.searchParams.get("ticket"));
     if (!ticket || Date.parse(ticket.expiresAt) <= Date.now() || control.relayUnavailable) { socket.end("HTTP/1.1 401 Unauthorized\r\n\r\n"); return; }

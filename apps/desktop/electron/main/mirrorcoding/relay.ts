@@ -123,7 +123,7 @@ export class MirrorCodingRelay {
         }
       }
       const outputHeaders: Record<string, string> = {};
-      for (const name of ["content-type", "retry-after", "x-request-id", "request-id"]) {
+      for (const name of ["content-type", "retry-after", "x-oneapi-request-id", "x-upstream-request-id", "x-request-id", "request-id"]) {
         const value = upstream.headers.get(name);
         if (value) outputHeaders[name] = value;
       }

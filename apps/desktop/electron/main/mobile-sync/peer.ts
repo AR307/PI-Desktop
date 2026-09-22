@@ -344,7 +344,7 @@ export class MobilePeer {
           if (event.turnId) this.queuedConfigurations.delete(event.turnId);
         }
       }
-      catch { this.deps.close("share_revoked"); return; }
+      catch { this.deps.close("GRANT_REVOKED"); return; }
       if (!this.closed) {
         if (["turn.completed", "turn.interrupted", "turn.failed", "turn.canceled"].includes(event.kind)) {
           this.activeConfigurations.delete(event.sessionId);
@@ -360,7 +360,7 @@ export class MobilePeer {
       const snapshot = await this.deps.agent().snapshot(sessionId);
       this.deliver({ eventId: randomUUID(), scope: "session", sessionId, epoch: snapshot.cursor.epoch, afterSequence: snapshot.cursor.sequence,
         revision: snapshot.revision, kind: "turn.activity", occurredAt: new Date().toISOString(), payload });
-    } catch { this.deps.close("share_revoked"); }
+    } catch { this.deps.close("GRANT_REVOKED"); }
   }
 }
 
