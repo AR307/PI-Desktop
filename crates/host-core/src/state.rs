@@ -14,7 +14,7 @@ use crate::user_skills::UserSkillRegistry;
 use crate::user_subagents::UserSubagentRegistry;
 use crate::workspace::WorkspaceState;
 
-pub const PROTOCOL_VERSION: u32 = 11;
+pub const PROTOCOL_VERSION: u32 = 12;
 pub const HOST_VERSION: &str = env!("CARGO_PKG_VERSION");
 const BASH_ABORT_TOMBSTONE_TTL: Duration = Duration::from_secs(60);
 const MAX_BASH_ABORT_TOMBSTONES: usize = 1024;

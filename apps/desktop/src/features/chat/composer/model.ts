@@ -6,6 +6,7 @@ import type {
   SessionThinkingLevel,
   ThinkingLevel,
 } from "@pi-desktop/shared";
+
 import {
   isSessionThinkingLevel,
   modelIdsMatch,
@@ -31,6 +32,8 @@ export const PLACEHOLDER_KEYS = {
 } as const;
 
 export const MODE_CYCLE: readonly Mode[] = ["agent", "plan", "goal"];
+
+export type ComposerTask = "chat" | "image";
 
 export const MODE_LABEL_KEYS: Record<Mode, string> = {
   agent: "settings.modeAgent",
@@ -70,7 +73,7 @@ export type ComposerFileReference = {
   token?: string;
 };
 
-export type ComposerMenuView = "root" | "model" | "thinking";
+export type ComposerMenuView = "root" | "model" | "group" | "thinking";
 
 export type PromptEnhancementError = {
   message: string;
@@ -131,11 +134,11 @@ export function thinkingProviderForModel(
   modelCatalog: readonly ModelInfo[] | undefined,
 ): ProviderPublic | null | undefined {
   if (!provider || !modelId) return provider;
-  const model = modelCatalog?.find((candidate) => modelIdsMatch(candidate.modelId, modelId));
+  const model = modelCatalog?.find((candidate) => provider.mirrorCoding ? candidate.modelId === modelId : modelIdsMatch(candidate.modelId, modelId));
   if (!model) return provider;
 
   const binding = provider.models.find((candidate) =>
-    modelIdsMatch(candidate.id, model.modelId),
+    provider.mirrorCoding ? candidate.id === model.modelId : modelIdsMatch(candidate.id, model.modelId),
   );
   const configuredLevels = binding
     ? THINKING_LEVELS.filter((level) => binding.thinkingLevels.includes(level))

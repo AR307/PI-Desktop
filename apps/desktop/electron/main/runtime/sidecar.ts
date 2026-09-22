@@ -1,3 +1,4 @@
+import { registerImageTools } from "../images/tools";
 import { IPC, type AgentEventEnvelope, type UiMessage } from "@pi-desktop/shared";
 import {
   findSubagentProviderSource,
@@ -21,8 +22,10 @@ import type { PluginRuntime } from "../plugin-runtime";
 import type { UserMcpRuntime } from "../user-mcp";
 import type { RuntimeState } from "./context";
 import type { FinishTurn } from "./plans";
+import type { MirrorCodingRuntime } from "../mirrorcoding/runtime";
 
 export type SidecarRuntimeDependencies = {
+  mirrorCoding: MirrorCodingRuntime;
   runtimeState: RuntimeState;
   steeringReplies: Set<string>;
   logger: Logger;
@@ -58,6 +61,7 @@ export type SidecarRuntimeDependencies = {
 };
 
 export function createSidecarRuntime({
+  mirrorCoding,
   runtimeState,
   steeringReplies,
   logger,
@@ -301,6 +305,7 @@ export function createSidecarRuntime({
 
   const s = new AgentSidecar((text) => logger.child("agent", text));
   wireSidecar(s);
+  registerImageTools(s, mirrorCoding.images, () => runtimeState.host);
   s.setProjectInstructionResolver(async ({ projectPath, path }) => {
     // The root is registered by Electron main from the host-owned session
     // record. The sidecar can provide a target path, never an arbitrary root.
@@ -396,7 +401,7 @@ export function createSidecarRuntime({
   s.setVendorAuthResolver(async ({ providerId }) =>
     vendorOAuth.resolveAuth(providerId),
   );
-  s.setSubagentModelResolver(async (key: string) => {
+  s.setSubagentModelResolver(async (key: string, sessionId: string) => {
     const slash = key.indexOf("/");
     if (slash < 1) throw new Error("invalid model key");
     const providerPart = key.slice(0, slash);
@@ -419,6 +424,7 @@ export function createSidecarRuntime({
       );
     }
 
+    if (provider.authKind === "mirrorcoding") return mirrorCoding.bindingFor(provider.id, modelId, sessionId);
     const isVendorAccount = provider.authKind === OAUTH_AUTH_KIND;
     let apiKey = "";
     if (!isVendorAccount && provider.authKind !== "none") {

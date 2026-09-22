@@ -1,6 +1,6 @@
 {
   "name": "@pi-desktop/racp",
-  "version": "0.15.1",
+  "version": "0.15.2",
   "private": true,
   "type": "module",
   "main": "./dist/index.js",
@@ -9,6 +9,14 @@
     ".": {
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js"
+    },
+    "./client": {
+      "types": "./dist/client.d.ts",
+      "import": "./dist/client.js"
+    },
+    "./framing": {
+      "types": "./dist/jsonrpc.d.ts",
+      "import": "./dist/jsonrpc.js"
     },
     "./test-harness": {
       "types": "./dist/test-harness.d.ts",

@@ -1357,7 +1357,7 @@ above.
 
 ## 11. Version Compatibility
 
-- IPC/host contract version field: `protocolVersion: 11`
+- IPC/host contract version field: `protocolVersion: 12`
 - Breaking changes must bump the version and record an ADR
 - renderer and main validate the version at startup; on mismatch, prompt to upgrade/reinstall
 - Protocol v4 adds notification records, channels, and the

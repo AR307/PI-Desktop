@@ -18,6 +18,7 @@ import { WorkPanel } from "../../components/workpanel/WorkPanel";
 import { api } from "../../lib/api";
 import { CollapsedTitlebarActions, RoutePending } from "./chrome";
 import { useAppShellRuntime } from "./useAppShellRuntime";
+import { MirrorCodingWelcome } from "../account/MirrorCodingWelcome";
 
 const SettingsPage = lazy(() =>
   import("../../pages/SettingsPage").then((module) => ({
@@ -310,6 +311,7 @@ export function AppShell() {
       {shell}
       {/* Outside pane stacking; skip splash so the band cannot cover boot chrome. */}
       {ready && !showSplash && <WindowControls />}
+      {ready && !showSplash && <MirrorCodingWelcome />}
       <ProjectCreateDialog />
       {splash}
     </div>

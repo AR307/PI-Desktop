@@ -107,7 +107,7 @@ function isImagePromptAttachment(
   );
 }
 
-function resolvePromptPath(
+export function resolvePromptPath(
   dataRoot: string,
   sessionId: string,
   projectPath: string | undefined,
@@ -157,7 +157,7 @@ function displayPromptPath(
     : promptPath.absolute;
 }
 
-function ensureAttachmentBlob(dataRoot: string, bytes: Buffer): string {
+export function ensureAttachmentBlob(dataRoot: string, bytes: Buffer): string {
   const hash = createHash("sha256").update(bytes).digest("hex");
   const root = join(dataRoot, "attachments");
   mkdirSync(root, { recursive: true });

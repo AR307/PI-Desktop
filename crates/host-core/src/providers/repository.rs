@@ -12,6 +12,9 @@ pub(crate) fn provider_from_row(
     let has_api_key = secret_ref.as_ref().map(|r| secrets.has(r)).unwrap_or(false);
     let has_oauth = secrets.has(&secret_ref_for_provider_oauth(&id));
     Ok(ProviderPublic {
+        mirror_coding: serde_json::from_str::<serde_json::Value>(&config_raw)
+            .ok()
+            .and_then(|value| serde_json::from_value(value["mirrorCoding"].clone()).ok()),
         id,
         name: row.get(1)?,
         vendor_key: row.get(2)?,
@@ -85,6 +88,9 @@ pub fn create_provider(
     input: ProviderCreateInput,
 ) -> Result<ProviderPublic> {
     let id = Uuid::new_v4().to_string();
+    if input.auth_kind.as_deref() == Some("mirrorcoding") {
+        bail!("MirrorCoding providers are managed by the account");
+    }
     let now = now_ms();
     // Validate before any side effect: a rejected alias must not leave a
     // stored secret behind.
@@ -168,6 +174,9 @@ pub fn update_provider(
     let Some(current) = get_provider(db, secrets, &input.id)? else {
         return Ok(None);
     };
+    if current.auth_kind == "mirrorcoding" || input.auth_kind.as_deref() == Some("mirrorcoding") {
+        bail!("MirrorCoding providers are managed by the account");
+    }
     // A plugin-declared row is refreshed from its manifest on every load, so a
     // generic edit would be silently reverted. The plugin path owns it.
     if let Some(owner) = current.owner_plugin_id.as_deref() {
@@ -275,6 +284,9 @@ pub fn update_provider(
 /// Delete a user-owned provider row. A plugin-declared row is refused here:
 /// only its plugin (or the user disabling/uninstalling it) may remove it.
 pub fn delete_provider(db: &Database, secrets: &SecretStore, id: &str) -> Result<bool> {
+    if get_provider(db, secrets, id)?.is_some_and(|row| row.auth_kind == "mirrorcoding") {
+        bail!("MirrorCoding providers are managed by the account");
+    }
     if let Some(owner) = provider_owner_plugin(db, id)? {
         bail!("PROVIDER_OWNED_BY_PLUGIN: provider {id} belongs to plugin {owner}");
     }
@@ -334,6 +346,9 @@ pub fn set_provider_secret(
     id: &str,
     secret_value: Option<&str>,
 ) -> Result<Option<ProviderPublic>> {
+    if get_provider(db, secrets, id)?.is_some_and(|row| row.auth_kind == "mirrorcoding") {
+        bail!("MirrorCoding credentials are managed by the account");
+    }
     if get_provider(db, secrets, id)?.is_none() {
         return Ok(None);
     }

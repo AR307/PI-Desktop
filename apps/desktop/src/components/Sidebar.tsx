@@ -16,6 +16,7 @@ import { TooltipButton, cx } from "./ui";
 const MAX_VISIBLE_SESSIONS = 10;
 import { createPortal } from "react-dom";
 import { useTranslation } from "react-i18next";
+import { Smartphone } from "lucide-react";
 import { api } from "../lib/api";
 import { SessionHoverCard } from "../features/sessions/SessionHoverCard";
 import { useSessionHoverCard } from "../features/sessions/useSessionHoverCard";
@@ -65,6 +66,7 @@ import { useArmedDelete } from "../hooks/use-armed-delete";
 import { ProjectDeleteDialog } from "./ProjectDeleteDialog";
 import { SessionRenameDialog } from "./SessionRenameDialog";
 import { useUpdateState } from "../hooks/use-update-state";
+import { MobilePairingDialog, type MobilePairingTarget } from "../features/mobile-sync/MobilePairingDialog";
 import {
   IconArchive,
   IconArchiveRestore,
@@ -275,6 +277,7 @@ export function Sidebar({
   const [sortOpen, setSortOpen] = useState(false);
   const [sessionMenu, setSessionMenu] = useState<string | null>(null);
   const [renameFor, setRenameFor] = useState<SessionSummary | null>(null);
+  const [mobilePairingTarget, setMobilePairingTarget] = useState<MobilePairingTarget>();
   const [editProjectFor, setEditProjectFor] = useState<ProjectEntry | null>(null);
   const [deleteProjectFor, setDeleteProjectFor] = useState<ProjectEntry | null>(null);
   // Which row menu item is armed for its second, confirming click.
@@ -1925,9 +1928,12 @@ export function Sidebar({
       >
         {session ? (
           <>
+            <button ref={menuFirstItemRef} type="button" role="menuitem" data-action="sync-session-mobile" onClick={() => {
+              closeMenus(false);
+              setMobilePairingTarget({ scope: { kind: "session", sessionId: session.id }, label: session.title });
+            }}><Smartphone size={14} aria-hidden />{t("mobileSync.title")}</button>
             {session.source !== "pi-native" ? (
               <button
-                ref={menuFirstItemRef}
                 type="button"
                 role="menuitem"
                 data-action="rename-session"
@@ -2019,8 +2025,11 @@ export function Sidebar({
         ) : null}
         {entry ? (
           <>
+            <button ref={menuFirstItemRef} type="button" role="menuitem" data-action="sync-project-mobile" onClick={() => {
+              closeMenus(false);
+              setMobilePairingTarget({ scope: { kind: "project", projectPath: entry.path }, label: entry.name });
+            }}><Smartphone size={14} aria-hidden />{t("mobileSync.title")}</button>
             <button
-              ref={menuFirstItemRef}
               type="button"
               role="menuitem"
               data-action="open-project-folder"
@@ -2345,6 +2354,7 @@ export function Sidebar({
         </div>
       </div>
       {renderFloatingMenu()}
+      {mobilePairingTarget && <MobilePairingDialog target={mobilePairingTarget} onClose={() => setMobilePairingTarget(undefined)} />}
       {sessionHoverCard ? (
         <SessionHoverCard
           key={sessionHoverCard.session.id}

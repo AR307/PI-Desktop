@@ -1081,6 +1081,14 @@ Work-panel and application-window resizing are implemented in MVP:
   it is detached before collapse motion because it cannot participate in
   renderer CSS animation. Native bounds recovery and persistence continue to
   apply to ordinary window resize/move gestures without panel-specific deltas.
+- Browser screenshot capture retains a stable native viewport until Chromium
+  finishes restoring it. Panel changes during capture apply the latest bounds
+  immediately afterwards, including after a failed capture. Full-page and raw
+  CDP captures use the same queue; a screenshot must not leave the page at an
+  old width after the dock or window has resized.
+- Empty space in the work-panel tab strip is native window drag space. Only
+  actual tabs, close buttons, and panel actions opt out, including in preview
+  mode; the flexible strip wrapper must not consume the empty drag area.
 
 - Preview mode unmounts MainChat and lets the work panel fill the client area
   beside the sidebar. A window-level 46px chrome row keeps New Task, sidebar,

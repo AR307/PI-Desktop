@@ -79,6 +79,7 @@ export function subagentModelPinParts(
 export function pinMatchesChoice(pin: string, choice: SubagentModelChoice): boolean {
   const parts = subagentModelPinParts(pin);
   if (!parts) return false;
+  if (choice.vendorKey === "mirrorcoding") return parts.providerPart === choice.providerId && parts.modelId === choice.modelId;
   if (!modelIdsMatch(parts.modelId, choice.modelId)) return false;
   if (parts.providerPart === choice.providerId) return true;
   const alias = providerAlias(parts.providerPart);
@@ -100,6 +101,7 @@ function uniqueProviderPart(
   provider: ProviderPublic,
   providers: readonly ProviderPublic[],
 ): string {
+  if (provider.mirrorCoding) return provider.id;
   const vendorKey = provider.vendorKey.trim();
   const vendorAlias = providerAlias(vendorKey);
   const vendorIsUsable = Boolean(vendorAlias) && vendorAlias !== "custom";

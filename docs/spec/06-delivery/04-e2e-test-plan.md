@@ -1,5 +1,57 @@
 # 04. E2E Test Plan
 
+## Mobile companion acceptance
+
+Validate this opt-in post-baseline feature on the dedicated request candidate
+containing the latest applicable `origin/main`, per root AGENTS.md. Do not merge
+into local main to prepare validation. Historical main-integration instructions
+below do not govern the current delivery workflow.
+
+| ID | User sequence and expected result |
+| --- | --- |
+| E2E-MOBILE-01 | Desktop context menu → pairing code → same-account Android login/claim → only the selected project/session appears. Wrong account, expired/cancelled/reused code and unpaired device are refused. |
+| E2E-MOBILE-02 | Open a running session, page history, observe streamed text/thinking/tool details and send from phone. Desktop receives the same durable message once and uses its current model/mode. |
+| E2E-MOBILE-03 | Send while busy, stop, answer an Agent question and resolve tool/plan approval from either surface. Queue and completion are shared; stale responses cannot execute twice. |
+| E2E-MOBILE-04 | Upload a selected image/file, send it, reopen history and save an attachment. Continue image mode with reference images; retry a failed download without regenerating. |
+| E2E-MOBILE-05 | Background/reopen Android, change network, restart desktop/app, expire credentials and revoke a grant. Snapshots recover display; drafts survive; uncertain sends never replay automatically; revocation removes access without stopping desktop work. |
+| E2E-MOBILE-06 | Inspect actual Electron and Android light/dark EN/ZH screens, small viewport, soft keyboard, Back and attachment picker/save. No clipped input or inaccessible approval controls. |
+| E2E-MOBILE-07 | Open a shared conversation, choose Agent/Plan/Goal/Image and select desktop chat/image models. MC follows model → group and shows actual billing; ordinary providers retain source labels. Change reasoning/image options, apply, and verify desktop and phone show the same persisted selection. While a task runs, model/reasoning changes affect the next turn only; mode changes remain blocked. Switching between chat and image restores each saved selection. |
+
+Use isolated profiles, actual Electron, an Android emulator/device and controlled
+model upstream. The PI MC relay fixture is an external-boundary test service;
+record MC-team service acceptance separately after that implementation arrives.
+Keep APKs, screenshots, profiles and reports outside Git. Record the executable
+candidate, base main, commands, evidence directory and any unverified scenarios.
+
+Executable suites and prerequisites are documented in
+`apps/desktop/test/e2e/mobile/README.md`.
+`acceptance.mjs` uses actual Electron and a touch browser; `android.mjs` uses
+actual Capacitor secure storage, Android picker/share, Back, IME and app restart.
+Full desktop restart retains the existing interrupted-plan semantics; mobile
+reconnect while desktop remains running restores actionable pending plans.
+
+## MirrorCoding local acceptance
+
+Run the MirrorCoding suites on the dedicated task candidate incorporating the
+latest `origin/main`; record candidate/base revisions and the artifact directory.
+Do not merge into local main for validation.
+
+- `apps/desktop/test/e2e/mirrorcoding/acceptance.mjs`: actual Electron window,
+  Edge consent against a local MirrorCoding server, actual Rust/Node runtime,
+  controlled HTTP/SSE upstream. Covers centered welcome/confirmation, skip and
+  restart, Account settings, model→group selection/prices, four protocols with
+  reasoning parameters, tool continuation, inherited subagent, auxiliary calls,
+  429/503, interrupted output/Continue and scoped logout.
+- `apps/desktop/test/e2e/mirrorcoding/recovery.mjs`: account/relay service workflow
+  with real Rust persistence and controlled local OAuth/HTTP faults. Covers
+  concurrent rotation, PKCE, cancellation/timeout, network/empty catalogs,
+  permission refresh, group encoding, SDK auth stripping, stop propagation,
+  account reuse/switch and offline revocation retry.
+
+Keep screenshots, reports and isolated profiles outside Git. Production origin
+verification requires a separately authorized run; local acceptance is not
+production deployment evidence. See the suite README for prerequisites.
+
 > Scope: MVP acceptance scenarios plus current shipped product increments for PI-Desktop
 > Status: Accepted (protocol/Electron automation is active; full desktop Playwright remains planned)
 > Cross-references: [acceptance-criteria](02-acceptance-criteria.md) · [milestones](01-mvp-milestones.md) · [ai-development-workflow](03-ai-development-workflow.md) · [change-checklist](05-change-checklist.md)
@@ -954,6 +1006,30 @@ identify the platform validation still needed.
 - **Milestone**: M5
 - **Status**: Unit-covered (`bundled-plugins`, `browser-cdp`,
   `browser-preview-tool`); full Electron journey pending
+
+#### E2E-008b-layout: Browser resizing and work-panel header dragging
+
+- **Preconditions**: Built Electron app, isolated profile, bundled Browser, and
+  a local responsive page with a tall document and a 600px media breakpoint.
+- **Steps**: Open Browser from the work-panel launcher. Drag the divider from
+  360px to 650px and back while taking full-page and raw CDP screenshots. Run
+  two concurrent captures; reject an invalid capture and resize again. Maximize
+  the panel, resize the native window, restore, collapse, and reopen. Click the
+  new-tab and close buttons with an overflowing tab strip. With actual OS mouse
+  input, drag blank header space in docked and preview modes, then click tabs
+  and panel buttons.
+- **Expected**: Native guest bounds, page viewport, and responsive columns
+  follow the final panel size without reload. Captures preserve their image
+  result or error and never overwrite a newer viewport. Guest content remains
+  inside its chrome. Empty header space moves the native window; tabs and
+  buttons remain interactive.
+- **Automation**: `node scripts/e2e-browser-layout.mjs` runs the real desktop
+  and loopback fixture, retaining profile, geometry results, and separate shell
+  and guest screenshots. `PI_DESKTOP_HOST_BIN` and `PI_DESKTOP_ELECTRON_BIN`
+  can select built binaries; `PI_DESKTOP_LAYOUT_ARTIFACT_DIR` selects output.
+  Native titlebar dragging also requires an OS-input check, not a DOM click.
+- **Specs linked**: `04-ux/09-interaction-patterns.md`, ADR 0170
+- **Acceptance**: Electron + local HTTP fixture + native mouse + visual review
 
 #### E2E-008c: Quiet intervals explain active work
 
@@ -13737,3 +13813,27 @@ the latest destination. These assertions measure work counts, not device FPS.
   `desktop_dispatch_outlasts_every_electron_budget_it_wraps` covers the dispatch
   default.
 - **Status:** Contract-covered; no end-to-end driver waits out a real 70s call.
+
+
+### E2E-IMAGE-direct-and-agent-generation
+
+- Preconditions: isolated Electron profile, Rust host binary, current JS build,
+  local MirrorCoding protocol fixture, controlled image and chat responses.
+- Steps: authorize, cycle modes, select model then group, submit prompt, preview
+  and save base64/URL images, reuse two references, switch among GPT Image,
+  Gemini and Seedream, reject unsupported references, and return to chat.
+- Expected: correct endpoint, group and declared parameters; separate manual
+  chat/image selections; chat reasoning preserved; no implicit image history.
+- Agent path: a chat model calls ListImageModels, autonomously chooses another
+  image model/group, generates and continues its reply; image cards appear for
+  a text-only chat model without changing the manual image selection.
+- Recovery: download-only retry, Stop during generation and download, 401 refresh,
+  429/503 without replay, catalog network error, removed-group permissions and
+  empty success, account sign-out during generation, ordinary chat after sign-out,
+  restart with durable images. Plan/Goal expose directory lookup only.
+- Visual: image preview, both themes, English/Chinese, keyboard mode menu;
+  600px viewport with collapsed sidebar and regular viewport with sidebar open.
+- Driver: `apps/desktop/test/e2e/images/acceptance.mjs`. Set PI_TEST_PLAYWRIGHT
+  to the installed Playwright module path if needed; PI_TEST_OUTPUT selects the
+  isolated artifact/profile folder. This is PI-side protocol acceptance only;
+  real MirrorCoding channel conversion and deployment are server-team work.

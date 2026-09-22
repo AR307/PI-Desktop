@@ -3,6 +3,7 @@ import {
   BrowserWindow,
   ipcMain,
   nativeTheme,
+  safeStorage,
   screen,
   Tray,
 } from "electron";
@@ -128,6 +129,9 @@ import {
   createProviderCatalogRuntime,
 } from "./runtime/provider-catalog";
 import { createSessionLaunchRuntime } from "./runtime/session-launch";
+import { createMirrorCodingRuntime } from "./mirrorcoding/runtime";
+import { MobileSyncService } from "./mobile-sync/service";
+import { MobileDeviceCredentials } from "./mobile-sync/device-credentials";
 import { createSessionCoordination } from "./runtime/session-coordination";
 import { createScheduledRuntime } from "./runtime/scheduled";
 import { createDesktopServices } from "./services/desktop-services";
@@ -681,9 +685,26 @@ const {
   speech,
 } = pluginServices;
 
+const mirrorCoding = createMirrorCodingRuntime({
+  getSidecar: () => sidecar, getActiveTurns: () => activeTurns,
+  acquireSessionOperation: (id) => acquireSessionOperation(id), emit: (envelope) => emitAgentEvent(envelope),
+  dataDir, getHost: () => host, modelsDev: modelsDevCatalog,
+  openExternal: safeOpenExternal, send: sendToRenderer,
+});
+
+const mobileSync = new MobileSyncService({
+  dataDir, account: mirrorCoding.account, images: mirrorCoding.images,
+  deviceCredentials: new MobileDeviceCredentials(join(dataDir, "mobile-device.enc"), safeStorage),
+  host: () => { if (!host) throw new Error("host_unavailable"); return host; },
+  agent: () => { if (!agentHostBridge) throw new Error("agent_unavailable"); return agentHostBridge.agentHost; },
+  send: sendToRenderer,
+  log: (message, error) => logger.app("runtime", "warn", message, { data: String(error ?? "") }),
+});
+
 const providerCatalogRuntime = createProviderCatalogRuntime({
   getHost: () => host,
   modelsDevCatalog,
+  mirrorCoding,
 });
 const {
   bindingForModel,
@@ -700,6 +721,7 @@ const {
 } = providerCatalogRuntime;
 
 const createdSessionLaunchRuntime = createSessionLaunchRuntime({
+  mirrorCoding,
   runtimeState,
   logger,
   userMcp,
@@ -812,6 +834,7 @@ function isHostUnavailable(error: unknown): boolean {
 
 /** Pull the user's MCP server records from host-core into the local runtime. */
 function sendToRenderer(channel: string, payload: unknown) {
+  if (channel === IPC.event.mirrorCodingChanged) mobileSync.accountChanged();
   applicationLifecycle?.traySessions.observeEvent(channel, payload);
   if (channel === IPC.event.pluginChanged) {
     applicationLifecycle?.applyNativeThemeSource({
@@ -1169,6 +1192,7 @@ const eventPersistence = createEventPersistence({
 const { persistAgentEvent } = eventPersistence;
 
 const sidecarRuntime = createSidecarRuntime({
+  mirrorCoding,
   runtimeState,
   steeringReplies,
   logger,
@@ -1245,6 +1269,8 @@ const { bootHostStatus, runtimeArch, bootBackends } = runtimeLifecycle;
 
 function registerIpc() {
   return registerIpcHandlers({
+    mobileSync,
+    mirrorCoding,
     traySessions: applicationLifecycle!.traySessions,
     ipcMain,
     getMainWindow: () => mainWindow,
@@ -1382,6 +1408,8 @@ const startupState: StartupState = {
 };
 
 registerApplicationStartup({
+  mobileSync,
+  mirrorCoding,
   hasSingleInstanceLock,
   state: startupState,
   dataDir,
@@ -1469,6 +1497,8 @@ const shutdownState: ShutdownState = {
 };
 
 registerShutdownHandlers({
+  mobileSync,
+  mirrorCoding,
   hasSingleInstanceLock,
   state: shutdownState,
   getHost: () => host,

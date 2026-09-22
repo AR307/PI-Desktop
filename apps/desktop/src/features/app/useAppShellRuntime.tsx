@@ -1,3 +1,4 @@
+import { startImageEvents } from "../images/state";
 import {
   type AppMenuCommand,
   isActiveInProject,
@@ -42,6 +43,7 @@ const MODIFIER_ONLY_KEYS = new Set([
 const PLUGIN_THEME_STYLE_ID = "pi-plugin-theme";
 
 export function useAppShellRuntime() {
+  useEffect(startImageEvents, []);
   const { t } = useTranslation();
   const platform = window.piDesktop?.platform ?? "darwin";
   const bootstrap = useAppStore((s) => s.bootstrap);

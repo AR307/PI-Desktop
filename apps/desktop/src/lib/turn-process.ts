@@ -84,7 +84,7 @@ export function shouldAutoOpenTurnProcess(
  * Only a trailing assistant text can be the answer: text followed by tools is
  * progress. The stream carries no final-answer marker, so a live trailing text
  * remains visible until a later activity establishes that it was intermediate.
- * Errors remain outside the disclosure even when more activity follows them.
+ * Errors and image results stay visible even when more activity follows them.
  */
 export function projectTurnProcess(entry: AssistantTurnEntry) {
   const last = entry.parts.at(-1);
@@ -93,7 +93,7 @@ export function projectTurnProcess(entry: AssistantTurnEntry) {
   const process: AssistantTurnPart[] = [];
   const responses: Extract<AssistantTurnPart, { kind: "message" }>[] = [];
   for (const part of entry.parts) {
-    if (part.kind === "message" && (part === answer || part.message.error)) {
+    if (part.kind === "message" && (part === answer || part.message.error || part.message.imageGeneration)) {
       responses.push(part);
     } else {
       process.push(part);

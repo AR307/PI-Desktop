@@ -114,7 +114,7 @@ export function ModelConfigPage() {
     (provider.hasSecret || provider.hasOauth || provider.authKind === "none");
 
   const aiProviders = useMemo(
-    () => providers.filter((provider) => provider.authKind !== OAUTH_AUTH_KIND),
+    () => providers.filter((provider) => provider.authKind !== OAUTH_AUTH_KIND && provider.authKind !== "mirrorcoding"),
     [providers],
   );
   const reorder = useProviderReorder(aiProviders, busyId !== null || testingId !== null || setupFor !== null);

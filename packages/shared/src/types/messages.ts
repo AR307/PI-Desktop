@@ -1,6 +1,7 @@
 /** Shared public types grouped by the owning application domain. */
 import type { SessionMessageOrigin } from "../session-collaboration.js";
 import type { AppError } from "../errors.js";
+import type { ImageGenerationResult } from "./images.js";
 
 export type UiMessageRole = "user" | "assistant" | "system" | "tool";
 
@@ -73,6 +74,7 @@ export type UiMessage = {
   sessionMessage?: SessionMessageOrigin;
   /** Files or images associated with a user turn, kept separate from text. */
   attachments?: MessageAttachment[];
+  imageGeneration?: ImageGenerationResult;
   /** Accepted input to an existing turn; Stop must preserve it after reload. */
   steering?: boolean;
   /** Model reasoning kept separate from the answer text. */

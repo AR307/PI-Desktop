@@ -107,7 +107,7 @@ export function createCatalogSlice({
           if (generation !== catalogRuntime.providerGeneration()) return;
           if (
             (refreshed.source === "remote" || refreshed.source === "catalog") &&
-            refreshed.models.length > 0
+            (refreshed.models.length > 0 || get().providers.find((provider) => provider.id === providerId)?.authKind === "mirrorcoding")
           ) {
             set((state) => ({
               providerModels: {

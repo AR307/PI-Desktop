@@ -3,6 +3,7 @@ import type {
   AgentEvent,
   AgentEventEnvelope,
   AskToolResolution,
+  PlanProposal,
   RacpEventEnvelope,
   RacpItemSummary,
   UiMessage,
@@ -90,6 +91,7 @@ class FakeApprovals implements ApprovalPort {
   tool: Array<{ requestId: string; decision: string }> = [];
   contract: Array<Record<string, unknown>> = [];
   pending: PendingToolRequest[] = [];
+  plans: PlanProposal[] = [];
   async resolveTool(requestId: string, decision: "allow-once" | "allow-session" | "deny"): Promise<void> {
     this.tool.push({ requestId, decision });
   }
@@ -98,6 +100,9 @@ class FakeApprovals implements ApprovalPort {
   }
   async listPendingTools(sessionId?: string): Promise<PendingToolRequest[]> {
     return this.pending.filter((request) => !sessionId || request.sessionId === sessionId);
+  }
+  async listPendingContracts(sessionId: string): Promise<PlanProposal[]> {
+    return this.plans.filter((proposal) => proposal.sessionId === sessionId);
   }
 }
 
@@ -467,6 +472,7 @@ describe("AgentHost turns", () => {
       principalSubject: "phone",
       content: "after reboot",
       sessionMessageId: "restored-message",
+      userMessageId: "mobile-restored-message",
       effectivePermissionMode: "ask",
       inputHash: "h",
       createdAt: 1,
@@ -481,6 +487,7 @@ describe("AgentHost turns", () => {
     await new Promise((resolve) => setTimeout(resolve, 0));
     expect(runtime.prompts.map((prompt) => prompt.content)).toEqual(["after reboot"]);
     expect(runtime.prompts[0]?.sessionMessageId).toBe("restored-message");
+    expect(runtime.prompts[0]?.userMessageId).toBe("mobile-restored-message");
   });
 });
 
@@ -559,11 +566,35 @@ describe("AgentHost approvals and inputs", () => {
     );
     expect((await host.snapshot("s1")).session.planningState).toBe("awaiting_approval");
     expect(received.filter((event) => event.kind === "approval.requested")).toHaveLength(1);
+    host.ingest(envelope("s1", "rt_1", { type: "agent_end", messageIds: [] }));
+    expect((await host.snapshot("s1")).pendingApprovals.map((approval) => approval.id)).toEqual(["prop_1"]);
     await expect(
       host.respondApproval(owner, { approvalId: "prop_1", decision: "approve", context: { requestId: "r" } }),
     ).rejects.toMatchObject({ code: "INVALID_ARGUMENT" });
     await host.respondApproval(owner, { approvalId: "prop_1", decision: "approve", permissionMode: "accept-edits", context: { requestId: "r" } });
     expect(approvals.contract).toEqual([{ proposalId: "prop_1", sessionId: "s1", action: "approve", permissionMode: "accept-edits", version: 3 }]);
+  });
+
+  it("restores a pending host proposal for a phone after AgentHost recreation", async () => {
+    const { host, approvals, sessions } = build();
+    sessions.summaries.set("s1", { ...summary("s1"), mode: "plan", planningState: "awaiting_approval" });
+    approvals.plans = [{
+      id: "persisted-plan", sessionId: "s1", turnId: "finished-turn", toolCallId: "submit-plan",
+      kind: "plan", title: "Review this plan", markdown: "1. Implement the feature", plan: "1. Implement the feature",
+      question: "Proceed?", version: 1, status: "pending",
+      createdAt: "2026-09-09T23:59:00.000Z", updatedAt: "2026-09-09T23:59:00.000Z",
+      expiresAt: "2026-09-11T00:00:00.000Z",
+    }];
+    await host.start();
+    const attached = await host.attach(controller, { sessionId: "s1" });
+    expect(attached.snapshot?.activeTurn).toBeUndefined();
+    expect(attached.snapshot?.pendingApprovals).toEqual([expect.objectContaining({
+      id: "persisted-plan", kind: "plan", title: "Review this plan", expiresAt: "2026-09-11T00:00:00.000Z",
+    })]);
+    await host.respondApproval(owner, { approvalId: "persisted-plan", decision: "approve", permissionMode: "ask", context: { requestId: "phone-approve" } });
+    expect(approvals.contract).toEqual([{ proposalId: "persisted-plan", sessionId: "s1", action: "approve", permissionMode: "ask", version: 1 }]);
+    // A snapshot racing the host's next state read cannot resurrect the resolved approval.
+    expect((await host.snapshot("s1")).pendingApprovals).toEqual([]);
   });
 
   it("relays asktool answers with skip semantics", async () => {

@@ -50,8 +50,8 @@ const [
   read("../../../packages/i18n/src/locales/en/index.ts"),
 ]);
 
-test("context compaction is wired through protocol v11 and the manual IPC path", () => {
-  assert.match(protocol, /PROTOCOL_VERSION = 11/);
+test("context compaction is wired through protocol v12 and the manual IPC path", () => {
+  assert.match(protocol, /PROTOCOL_VERSION = 12/);
   assert.match(protocol, /agentCompact:\s*"pi-desktop\/agent\/compact"/);
   assert.match(types, /type ContextCompactionRecord/);
   assert.match(types, /type: "compaction_start"/);

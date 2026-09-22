@@ -1,3 +1,4 @@
+import { registerImageIpc } from "../images/ipc";
 import { join } from "node:path";
 import { dialog, type BrowserWindow, type IpcMain, type IpcMainInvokeEvent } from "electron";
 import { err, ErrorCodes, IPC, ok, type Result } from "@pi-desktop/shared";
@@ -18,6 +19,10 @@ import { registerNotificationIpc } from "./notification-ipc";
 import { registerPluginIpc } from "./plugin-ipc";
 import { registerPluginUiIpc } from "./plugin-ui-ipc";
 import { registerProviderIpc } from "./provider-ipc";
+import { registerMirrorCodingIpc } from "../mirrorcoding/ipc";
+import type { MirrorCodingRuntime } from "../mirrorcoding/runtime";
+import { registerMobileSyncIpc } from "../mobile-sync/ipc";
+import type { MobileSyncService } from "../mobile-sync/service";
 import { registerPullsIpc } from "./pulls-ipc";
 import { registerScheduledIpc } from "./scheduled-ipc";
 import { registerSessionIpc } from "./session-ipc";
@@ -34,6 +39,8 @@ import type { IpcRegistrar } from "./types";
 import type { createTraySessions } from "../tray-sessions";
 
 export type RegisterIpcDependencies = {
+  mirrorCoding: MirrorCodingRuntime;
+  mobileSync?: MobileSyncService;
   ipcMain: IpcMain;
   getMainWindow: () => BrowserWindow | null;
   getHost: () => HostProcess | null;
@@ -69,6 +76,7 @@ function wrap<T>(fn: () => Promise<T>): Promise<Result<T>> {
 
 export function registerIpcHandlers(dependencies: RegisterIpcDependencies) {
   const {
+    mirrorCoding,
     ipcMain,
     getMainWindow,
     getHost,
@@ -159,6 +167,7 @@ export function registerIpcHandlers(dependencies: RegisterIpcDependencies) {
     const handler = async (...args: any[]) => {
       const result = await fn(...args);
       traySessions.observeInvoke(channel);
+      dependencies.mobileSync?.observeInvoke(channel);
       return result;
     };
     ipcHandlers.set(channel, handler);
@@ -214,6 +223,7 @@ export function registerIpcHandlers(dependencies: RegisterIpcDependencies) {
   };
 
   registerAppIpc({
+    mirrorCoding,
     registrar,
     getHost,
     getPluginLauncherWindow,
@@ -268,6 +278,16 @@ export function registerIpcHandlers(dependencies: RegisterIpcDependencies) {
     listRuntimeProviders,
     enrichProviderList,
     bindingForModel,
+  });
+  registerImageIpc(registrar, mirrorCoding.images);
+  if (dependencies.mobileSync) registerMobileSyncIpc(registrar, dependencies.mobileSync);
+  registerMirrorCodingIpc({
+    registrar, runtime: mirrorCoding, activeTurns,
+    abort: async (sessionId) => {
+      const handler = ipcHandlers.get(IPC.invoke.agentAbort);
+      if (!handler) throw new Error("agent unavailable");
+      return handler({ sessionId });
+    },
   });
   const loadComposerTemplatesCached = createComposerTemplateLoader(logger);
   const composerCommandService = registerComposerIpc({
@@ -340,6 +360,7 @@ export function registerIpcHandlers(dependencies: RegisterIpcDependencies) {
     },
   });
   registerAgentIpc({
+    images: mirrorCoding.images,
     registrar,
     getHost,
     getSidecar,

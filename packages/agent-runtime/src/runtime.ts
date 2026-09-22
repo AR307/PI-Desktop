@@ -1,4 +1,6 @@
+import { IMAGE_TOOL_DESCRIPTIONS, IMAGE_TOOL_PARAMETERS } from "./image-tools.js";
 import { randomUUID } from "node:crypto";
+import { hasAssistantOutput } from "./provider-output.js";
 import {
   settledDelegationMessage,
   taskMessageSnapshot,
@@ -1558,6 +1560,7 @@ export class DesktopAgentRuntime {
   /** Targets of the in-flight parent wait; live snapshots refresh this set. */
   private delegationWaitTargets?: DelegationRecord[];
   private providerResponseStatus?: number;
+  private providerOutputStarted = false;
   private providerRetryHeaders?: Record<string, string>;
   /**
    * Size and message count of the provider attempt in flight. A failed request
@@ -1784,6 +1787,7 @@ Delegation rules:
       streamFn: (m, context, options) => {
         this.setAgentActivity({ phase: "waiting-model", since: Date.now() });
         this.providerResponseStatus = undefined;
+        this.providerOutputStarted = false;
         this.providerRetryHeaders = undefined;
         this.providerRequestBytes = undefined;
         this.providerRequestMessages = context.messages?.length;
@@ -2670,6 +2674,7 @@ Delegation rules:
     const externalPathHint =
       " An explicit path outside the workspace and session scratch roots requires permission unless the effective mode is Auto.";
     const describe = (toolName: string): string => {
+      if (IMAGE_TOOL_DESCRIPTIONS[toolName]) return IMAGE_TOOL_DESCRIPTIONS[toolName];
       switch (toolName) {
         case "BrowserPreview":
           return "Open a workspace HTML file in PI-Desktop's built-in browser panel. `path` is workspace-relative (e.g. \"demo/index.html\"). The preview live-reloads on later edits to the file or its sibling assets, so call once per page.";
@@ -2721,6 +2726,7 @@ Delegation rules:
     // One entry per tool: the shapes diverge enough that a chain of ternaries
     // stopped being readable.
     const parameters: Record<string, Parameters<typeof Type.Object>[0]> = {
+      ...IMAGE_TOOL_PARAMETERS,
       Read: {
         path: pathParam(
           "Existing regular file only, never a directory; workspace-relative or explicitly approved.",
@@ -2867,7 +2873,7 @@ Delegation rules:
             })
           : undefined;
         const abort = () => {
-          if (!isBash || abortRequested || settled) return;
+          if ((!isBash && toolName !== "GenerateImage") || abortRequested || settled) return;
           abortRequested = true;
           abortPromise = this.host
             .call("tools.abort", {
@@ -3053,6 +3059,8 @@ Delegation rules:
         let details: unknown = rawContent;
         if (typeof rawContent === "string") {
           text = rawContent;
+        } else if (isRecord(rawContent) && rawContent.kind === "image-generation") {
+          text = JSON.stringify(rawContent);
         } else if (isRecord(rawContent) && Array.isArray(rawContent.images)) {
           text =
             typeof rawContent.text === "string"
@@ -3182,6 +3190,8 @@ Delegation rules:
     if (this.mode === "agent") {
       tools.push("PluginScaffold", "PluginPack");
     }
+    tools.push("ListImageModels");
+    if (this.mode === "agent") tools.push("GenerateImage");
     const builtins = tools.map(exec);
 
     // Plugins contribute Agent tools by default. Plan/Goal modes only
@@ -3322,7 +3332,7 @@ Delegation rules:
     if (!kind) return true;
     // Contract modes are read-only: inspection tools, plan-safe plugin
     // actions (ADR 0211), and the one submit tool that belongs to this kind.
-    if (this.isPlanSafePluginTool(name)) return true;
+    if (this.isPlanSafePluginTool(name) || name === "ListImageModels") return true;
     return new Set([
       "Read",
       "Glob",
@@ -3337,6 +3347,7 @@ Delegation rules:
 
   private isCoreTool(name: string): boolean {
     return (
+      name === "ListImageModels" || (name === "GenerateImage" && this.mode === "agent") ||
       name === CONTEXT_COMPACTION_TOOL_NAME ||
       MODE_TRANSITION_TOOL_NAMES.has(name) ||
       // The whole delegation lifecycle stays in the core set rather than the
@@ -3578,7 +3589,7 @@ Delegation rules:
     try {
       const result = await (this.host as any).call(
         "provider.resolveSubagentModel",
-        { key },
+        { key, sessionId: this.sessionId },
       );
       if (result && typeof result === "object" && "modelId" in result) {
         const provider = result as RuntimeProviderConfig;
@@ -5258,6 +5269,7 @@ Delegation rules:
     error: ReturnType<typeof classifyAgentError>,
     phase: "request" | "stream",
   ): number | undefined {
+    if (this.provider.authKind === "mirrorcoding" && this.providerOutputStarted) return undefined;
     if (!error.retriable) return undefined;
     if (error.code === "PROVIDER_RATE_LIMITED") {
       if (
@@ -6706,6 +6718,7 @@ Delegation rules:
         break;
       }
       case "message_update": {
+        if (event.message.role === "assistant" && hasAssistantOutput(event.message.content)) this.providerOutputStarted = true;
         if (this.currentAssistant && event.message.role === "assistant") {
           this.applyHostedSearch(event.message);
           const content = assistantContent((event.message as any).content);
@@ -6875,7 +6888,7 @@ Delegation rules:
           const exemptSilence = silence && this.allowSilentCompletion;
           if (!failed && !aborted) this.allowSilentCompletion = false;
           const silentTurn = silence && !exemptSilence;
-          if (silentTurn && !this.silentTurnRerunAttempted) {
+          if (silentTurn && !this.silentTurnRerunAttempted && !(this.provider.authKind === "mirrorcoding" && this.providerOutputStarted)) {
             this.silentTurnRerunAttempted = true;
             this.pendingSilentTurnRerun = true;
             this.suppressSilentTurnRunEnd = true;
@@ -6924,6 +6937,7 @@ Delegation rules:
             this.autonomousExecution &&
             !this.silentTurnRerunAttempted &&
             !this.progressTurnRerunAttempted &&
+            !(this.provider.authKind === "mirrorcoding" && this.providerOutputStarted) &&
             isProgressOnlyAssistantTurn(event.message);
           if (progressOnlyTurn) {
             this.progressTurnRerunAttempted = true;
@@ -7018,6 +7032,7 @@ Delegation rules:
           this.currentAssistant = undefined;
           const canRecoverOverflow =
             this.compactionEnabled &&
+            !(this.provider.authKind === "mirrorcoding" && this.providerOutputStarted) &&
             overflow &&
             !this.overflowRecoveryAttempted;
           if (exemptSilence) {

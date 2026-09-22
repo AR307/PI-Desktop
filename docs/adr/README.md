@@ -18,6 +18,8 @@ Each ADR includes:
 
 ## Index
 
+- [Scoped MC relay for the Android companion](mobile-companion-relay.md)
+
 | ID | Title | Status |
 |---|---|---|
 | subagent-model-fallback | [Ordered subagent model fallback](subagent-model-fallback.md) | Accepted for implementation |
@@ -326,5 +328,6 @@ Each ADR includes:
 | 0296 | [Signed macOS DMG is a two-icon install](0296-macos-signed-dmg-two-icon-install.md) | Accepted (D457; amends ADR 0232 / ADR 0204) |
 | 0297 | [Provider-hosted web search as an adapter capability](0297-provider-hosted-web-search-adapter-capability.md) | Accepted |
 | 0298 | [The app ships no fonts](0298-remove-bundled-fonts.md) | Accepted (D598; amends ADR 0083 / D232) |
+| 0299 | [Main-owned MirrorCoding authorization and group relay](0299-mirrorcoding-account-relay.md) | Accepted |
 | turn-process-and-thinking-display | [Turn process and thinking presentation](turn-process-and-thinking-display.md) | Accepted |
 | provider-display-order | [Provider display order](provider-display-order.md) | Accepted |

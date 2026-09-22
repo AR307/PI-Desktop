@@ -1,4 +1,13 @@
+import { mobileSyncEn } from "../mobile-sync.js";
+import { mobileEn } from "../mobile.js";
+import { imagesEn } from "../images.js";
+import { mirrorCodingEn } from "../mirrorcoding.js";
+
 export const en = {
+  mobileSync: mobileSyncEn,
+  mobile: mobileEn,
+  images: imagesEn,
+  mirrorCoding: mirrorCodingEn,
   app: {
     shellName: "PI-Desktop",
     tagline: "Local AI coding partner",

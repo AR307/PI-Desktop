@@ -7,7 +7,7 @@ import {
   type ProviderPublic,
 } from "@pi-desktop/shared";
 
-type ConfiguredProvider = Pick<ProviderPublic, "id" | "models" | "defaultModelId">;
+type ConfiguredProvider = Pick<ProviderPublic, "id" | "models" | "defaultModelId" | "mirrorCoding">;
 
 /**
  * Resolve the provider heading shown in the Composer model menu.
@@ -51,10 +51,18 @@ function configuredModelIds(provider: ConfiguredProvider): string[] {
 export function composerModelsForProvider(
   provider: ConfiguredProvider,
   discovered: readonly ModelInfo[] | undefined,
+  task: "chat" | "image" = "chat",
 ): ModelInfo[] {
-  return configuredModelIds(provider).map((modelId) => {
+  return configuredModelIds(provider).filter((modelId) => {
+    if (provider.mirrorCoding) return task === "image"
+      ? Boolean(provider.mirrorCoding.imageModels?.[modelId])
+      : Boolean(provider.mirrorCoding.routes[modelId]);
+    if (task === "image") return false;
+    const metadata = discovered?.find((row) => modelIdsMatch(row.modelId, modelId));
+    return !metadata?.modalities || metadata.modalities.output.includes("text");
+  }).map((modelId) => {
     const metadata = (discovered ?? []).find((model) =>
-      modelIdsMatch(model.modelId, modelId),
+      provider.mirrorCoding ? model.modelId === modelId : modelIdsMatch(model.modelId, modelId),
     );
     const row: ModelInfo = metadata
       ? { ...metadata, modelId, providerId: provider.id }
@@ -94,6 +102,7 @@ export function composerModelBinding(
   provider: ConfiguredProvider,
   modelId: string,
 ): ModelBinding | undefined {
+  if (provider.mirrorCoding) return provider.models.find((model) => model.id === modelId);
   const normalizedModelId = modelId.trim().toLowerCase();
   const bindings = provider.models ?? [];
   return (

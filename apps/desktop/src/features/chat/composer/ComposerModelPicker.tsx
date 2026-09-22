@@ -8,6 +8,7 @@ import {
   IconChevronDown,
   IconChevronLeft,
   IconChevronRight,
+  IconImage,
   IconSearch,
   IconSparkles,
 } from "../../../components/icons";
@@ -59,6 +60,7 @@ export function ComposerModelPicker({
   onCloseOtherMenus,
 }: ComposerModelPickerProps) {
   const {
+    task,
     open,
     setOpen,
     view,
@@ -81,6 +83,7 @@ export function ComposerModelPicker({
     selectThinkingLevel,
     onMenuKeyDown,
   } = controller;
+  const imageMode = task === "image";
 
   // Slider geometry: one stop per available level, with the fill carried as
   // a CSS custom property so the accent track can follow the native input.
@@ -114,7 +117,7 @@ export function ComposerModelPicker({
       open={open}
       onClose={() => setOpen(false)}
       menuClassName="composer-model-menu composer-model-thinking-menu"
-      label={`${t("chat.model")} ${t("chat.reasoningLevel")}`}
+      label={imageMode ? t("images.mode") : `${t("chat.model")} ${t("chat.reasoningLevel")}`}
       role="menu"
       align="end"
       side="top"
@@ -125,8 +128,8 @@ export function ComposerModelPicker({
           ref={ref}
           type="button"
           className={`icon-btn composer-model-thinking-chip ${open ? "active" : ""}`}
-          tooltip={`${modelLabel} · ${t("chat.reasoningLevel")}: ${thinkingLabel}`}
-          ariaLabel={`${t("chat.model")}: ${modelLabel}. ${t("chat.reasoningLevel")}: ${thinkingLabel}`}
+          tooltip={imageMode ? `${t("images.mode")}: ${modelLabel}` : `${modelLabel} · ${t("chat.reasoningLevel")}: ${thinkingLabel}`}
+          ariaLabel={imageMode ? `${t("images.mode")}: ${modelLabel}` : `${t("chat.model")}: ${modelLabel}. ${t("chat.reasoningLevel")}: ${thinkingLabel}`}
           aria-haspopup="menu"
           aria-expanded={open}
           disabled={controlsBlocked}
@@ -142,10 +145,10 @@ export function ComposerModelPicker({
           }}
         >
           <span className="composer-model-thinking-icon" aria-hidden="true">
-            <IconBot size={14} />
+            {imageMode ? <IconImage size={14} /> : <IconBot size={14} />}
           </span>
           <span className="composer-model-thinking-model">{modelLabel}</span>
-          {thinkingLevel !== "off" ? (
+          {!imageMode && thinkingLevel !== "off" ? (
             <>
               <span className="composer-model-thinking-dot" aria-hidden="true">·</span>
               <span className="composer-model-thinking-level">{thinkingLabel}</span>
@@ -164,12 +167,12 @@ export function ComposerModelPicker({
             aria-haspopup="menu"
             onClick={() => showView("model")}
           >
-            <IconBot size={14} aria-hidden="true" />
-            <span className="composer-menu-entry-label">{t("chat.model")}</span>
+            {imageMode ? <IconImage size={14} aria-hidden="true" /> : <IconBot size={14} aria-hidden="true" />}
+            <span className="composer-menu-entry-label">{imageMode ? t("images.model") : t("chat.model")}</span>
             <span className="composer-menu-entry-value" title={modelLabel}>{modelLabel}</span>
             <IconChevronRight size={14} aria-hidden="true" />
           </button>
-          <button
+          {!imageMode ? <button
             type="button"
             className="composer-menu-entry"
             role="menuitem"
@@ -180,11 +183,11 @@ export function ComposerModelPicker({
             <span className="composer-menu-entry-label">{t("chat.reasoningLevel")}</span>
             <span className="composer-menu-entry-value">{thinkingLabel}</span>
             <IconChevronRight size={14} aria-hidden="true" />
-          </button>
+          </button> : null}
           {/* The slider sits directly under the Reasoning level entry
               (issue #417): one drag adjusts the level without entering the
               submenu, while the entry itself opens the classic radio list. */}
-          {thinkingMenuLevels.length > 1 ? (
+          {!imageMode && thinkingMenuLevels.length > 1 ? (
             <div className="composer-thinking-slider">
               <input
                 type="range"
@@ -237,10 +240,10 @@ export function ComposerModelPicker({
             type="button"
             className="composer-menu-back"
             role="menuitem"
-            onClick={() => showView("root")}
+            onClick={() => showView(view === "group" ? "model" : "root")}
           >
             <IconChevronLeft size={14} aria-hidden="true" />
-            <span>{view === "model" ? t("chat.model") : t("chat.reasoningLevel")}</span>
+              <span>{view === "model" ? (imageMode ? t("images.model") : t("chat.model")) : view === "group" ? controller.pendingMirrorModel : t("chat.reasoningLevel")}</span>
           </button>
           <div className="composer-menu-separator" />
           {view === "model" ? (
@@ -273,10 +276,10 @@ export function ComposerModelPicker({
                       <div className="composer-model-group-label">{group.providerDisplayName}</div>
                       {group.models.map((model) => {
                         const index = flatIndex++;
-                        const active =
-                          selectedProviderId === group.provider.id &&
-                          modelIdsMatch(selectedModelId ?? "", model.modelId);
-                        const optionTitle = model.displayName || model.modelId;
+                        const active = group.provider.mirrorCoding
+                          ? (imageMode || controller.mirrorCodingSelected) && selectedModelId === model.modelId
+                          : selectedProviderId === group.provider.id && modelIdsMatch(selectedModelId ?? "", model.modelId);
+                        const optionTitle = group.provider.mirrorCoding ? model.modelId : model.displayName || model.modelId;
                         return (
                           <button
                             key={`${group.provider.id}:${model.modelId}`}
@@ -284,15 +287,16 @@ export function ComposerModelPicker({
                             data-model-index={index}
                             title={optionTitle}
                             className={`composer-plus-item composer-model-option ${active ? "active" : ""} ${modelHighlight === index ? "kb-active" : ""}`}
-                            role="menuitemradio"
-                            aria-checked={active}
+                            role={group.provider.mirrorCoding ? "menuitem" : "menuitemradio"}
+                            aria-haspopup={group.provider.mirrorCoding ? "menu" : undefined}
+                            aria-checked={group.provider.mirrorCoding ? undefined : active}
                             onMouseMove={() => setModelHighlight(index)}
                             onClick={() => void selectModel(group.provider, model.modelId)}
                           >
                             <span className="composer-model-option-main">
                               <span className="truncate">{optionTitle}</span>
                               <span className="composer-model-option-meta">
-                                {composerModelBadges(model, group.provider).map((badge) => (
+                                {(imageMode ? [] : composerModelBadges(model, group.provider)).map((badge) => (
                                   <span
                                     key={badge}
                                     className="composer-model-option-badge"
@@ -301,7 +305,7 @@ export function ComposerModelPicker({
                                     {t(badge === "reasoning" ? "chat.modelBadgeReasoning" : "chat.modelBadgeVision")}
                                   </span>
                                 ))}
-                                {model.contextWindow ? (
+                                {!imageMode && model.contextWindow ? (
                                   <span className="composer-model-option-ctx">
                                     {formatTokenCount(model.contextWindow)}
                                   </span>
@@ -309,6 +313,7 @@ export function ComposerModelPicker({
                               </span>
                             </span>
                             {active ? <IconCheck size={14} className="composer-model-check" aria-hidden="true" /> : null}
+                            {group.provider.mirrorCoding ? <IconChevronRight size={14} aria-hidden="true" /> : null}
                           </button>
                         );
                       })}
@@ -320,6 +325,21 @@ export function ComposerModelPicker({
                 ) : null}
               </div>
             </>
+          ) : view === "group" ? (
+            <div className="composer-model-list" ref={controller.groupListRef} aria-label={t("mirrorCoding.chooseGroup")}>
+              {controller.mirrorGroups.map(({ provider }) => {
+                const group = provider.mirrorCoding!;
+                const model = provider.models.find((entry) => entry.id === controller.pendingMirrorModel);
+                const active = provider.id === selectedProviderId && controller.pendingMirrorModel === selectedModelId;
+                return <button type="button" role="menuitemradio" aria-checked={active} className={`composer-plus-item mirrorcoding-group-option ${active ? "active" : ""}`} key={provider.id} onClick={() => void selectModel(provider, controller.pendingMirrorModel!, true)}>
+                  <strong className="mirrorcoding-group-name">{group.groupName}</strong>
+                  <span className="mirrorcoding-group-rate">{group.dynamicBilling ? t("mirrorCoding.dynamic") : `${group.ratio}×`}</span>
+                  {group.description && <span className="mirrorcoding-group-detail">{group.description}</span>}
+                  {!imageMode ? <span className="mirrorcoding-group-detail">{t("mirrorCoding.reasoning", { levels: model?.thinkingLevels.join(" / ") || "off" })}</span> : <span className="mirrorcoding-group-detail">{t(group.imageModels?.[controller.pendingMirrorModel!]?.reference_path ? "images.referencesSupported" : "images.noReferences")}</span>}
+                </button>;
+              })}
+              {controller.mirrorGroups.length === 0 && <p role="status">{t("mirrorCoding.model_or_group_unavailable")}</p>}
+            </div>
           ) : (
             <>
               <div className="composer-thinking-heading">

@@ -8,6 +8,8 @@ import type { GlobalPermissionMode } from "./permissions.js";
 import type { PluginMarketSource } from "./plugins.js";
 import type { SpeechSettings } from "./speech.js";
 import type { ThinkingLevel } from "./models.js";
+import type { ImageSessionConfig } from "./images.js";
+import type { MobileSyncSettings } from "./mobile-sync.js";
 
 export type ThemePreference = "system" | "light" | "dark" | `plugin:${string}`;
 
@@ -22,6 +24,9 @@ export type ThemePreference = "system" | "light" | "dark" | `plugin:${string}`;
 export type CloseBehavior = "ask" | "tray" | "quit";
 
 export type AppSettings = {
+  mobileSync?: MobileSyncSettings;
+  imageSessions?: Record<string, ImageSessionConfig>;
+  mirrorCodingWelcomeCompleted?: boolean;
   defaultProviderId?: string;
   defaultModelId?: string;
   /** Host speech bindings. Absent means voice actions stay disabled. */

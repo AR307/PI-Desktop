@@ -2,6 +2,18 @@ import type { ChangelogEntry } from "./changelog.js";
 
 export const koEntries: ChangelogEntry[] = [
   {
+    version: "0.15.2",
+    date: "2026-09-22",
+    highlights: [
+      "PI-Desktop 프로젝트와 세션을 Android 동반 앱에 페어링하고 휴대폰에서 작업을 계속합니다.",
+      "모바일 앱에서 다음 턴의 모드, 모델, 그룹, 추론 단계와 이미지 설정을 선택합니다.",
+      "MirrorCoding 모바일 로그인에서 암호화된 비밀번호 교환과 서버 발급 기기 ID를 지원합니다.",
+      "모바일 동기화 자격 증명을 보안 저장소에 보관하고 액세스 토큰 만료 후 페어링을 복구합니다.",
+      "릴레이 복구 메타데이터와 제한된 모바일 메시지 전송을 개선해 중단과 재시도를 처리합니다.",
+    ],
+  },
+
+  {
     version: "0.15.1",
     date: "2026-09-19",
     highlights: [

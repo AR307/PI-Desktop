@@ -20,13 +20,12 @@ import {
   IconStop,
   IconUndo2,
 } from "../../../components/icons";
-import { ModeIcon } from "./ComposerModeIcon";
+import { ComposerModePicker, type ComposerMode } from "./ComposerModePicker";
 import { ComposerModelPicker } from "./ComposerModelPicker";
 import {
-  MODE_LABEL_KEYS,
   PERMISSION_MODE_I18N_KEYS,
-  nextMode,
 } from "./model";
+import type { ComposerTask } from "./model";
 import type { useComposerModelMenu } from "./hooks/useComposerModelMenu";
 
 type ModelMenuController = ReturnType<typeof useComposerModelMenu>;
@@ -35,6 +34,7 @@ type ContextUsage = Parameters<typeof ContextUsageInspector>[0];
 export type ComposerToolbarProps = {
   t: TFunction;
   mode: Mode;
+  task: ComposerTask;
   planningLive: boolean;
   providerId?: string;
   modelId?: string;
@@ -64,13 +64,15 @@ export type ComposerToolbarProps = {
   hasDraftContent: boolean;
   abort: AppState["abort"];
   submit: () => Promise<void>;
+  onModeChange: (mode: ComposerMode) => Promise<void>;
+  modeBlocked: boolean;
 };
 
 /** Composer controls: mode, permission, model, enhancement, and send/stop. */
 export function ComposerToolbar({
   t,
   mode,
-  planningLive,
+  task,
   providerId,
   modelId,
   thinkingLevel,
@@ -99,6 +101,8 @@ export function ComposerToolbar({
   hasDraftContent,
   abort,
   submit,
+  onModeChange,
+  modeBlocked,
 }: ComposerToolbarProps) {
   const platform = (window.piDesktop?.platform ?? "darwin") as ShortcutPlatform;
   const steeringShortcut = keybindingDisplayParts("Alt+Enter", platform).join("+");
@@ -120,40 +124,9 @@ export function ComposerToolbar({
             <IconPlus size={15} aria-hidden="true" />
           </TooltipButton>
         </div>
-        <TooltipButton
-          type="button"
-          className="icon-btn mode-chip composer-mode-chip"
-          data-mode={mode}
-          data-planning={planningLive ? "true" : undefined}
-          tooltip={planningLive ? t(`${mode}.planning`) : t("settings.mode")}
-          ariaLabel={planningLive ? t(`${mode}.planning`) : t("settings.mode")}
-          disabled={controlsBlocked}
-          onClick={async () => {
-            modelMenu.setOpen(false);
-            setPermissionOpen(false);
-            const next: Mode = nextMode(mode);
-            try {
-              await configureActiveSession({
-                mode: next,
-                providerId,
-                modelId,
-                thinkingLevel,
-              });
-            } catch (error) {
-              showToast(error instanceof Error ? error.message : String(error), {
-                variant: "error",
-              });
-            }
-          }}
-        >
-          <span className="composer-mode-chip-face" key={mode}>
-            <ModeIcon mode={mode} />
-            <span className="composer-mode-chip-label text-sm">
-              {t(MODE_LABEL_KEYS[mode])}
-            </span>
-          </span>
-        </TooltipButton>
-        <AnchoredMenu
+        <ComposerModePicker mode={task === "image" ? "image" : mode} blocked={controlsBlocked || modeBlocked}
+          onSelect={onModeChange} onOpen={() => { modelMenu.setOpen(false); setPermissionOpen(false); }} />
+        {task === "chat" ? <AnchoredMenu
           className="composer-permission"
           open={permissionOpen && mode !== "goal"}
           onClose={() => setPermissionOpen(false)}
@@ -227,23 +200,23 @@ export function ComposerToolbar({
               {composerPermissionMode === candidate ? <IconCheck size={13} /> : null}
             </button>
           ))}
-        </AnchoredMenu>
+        </AnchoredMenu> : null}
       </div>
 
       <div className="composer-right">
-        {contextUsage ? <ContextUsageInspector {...contextUsage} /> : null}
+        {task === "chat" && contextUsage ? <ContextUsageInspector {...contextUsage} /> : null}
         <ComposerModelPicker
           t={t}
           controller={modelMenu}
           modelLabel={modelLabel}
           thinkingLabel={thinkingLabel}
           thinkingLevel={thinkingLevel}
-          selectedProviderId={providerId}
-          selectedModelId={modelId}
+          selectedProviderId={task === "image" ? modelMenu.selectedImage?.providerId : providerId}
+          selectedModelId={task === "image" ? modelMenu.selectedImage?.modelId : modelId}
           controlsBlocked={controlsBlocked}
           onCloseOtherMenus={() => setPermissionOpen(false)}
         />
-        <TooltipButton
+        {task === "chat" ? <TooltipButton
           type="button"
           className={`icon-btn icon-btn-square composer-enhance-btn${enhancingPrompt ? " is-loading" : ""}`}
           tooltip={t("chat.enhancePrompt")}
@@ -266,8 +239,8 @@ export function ComposerToolbar({
           ) : (
             <IconSparkles size={15} aria-hidden="true" />
           )}
-        </TooltipButton>
-        {enhancementUndoText !== null ? (
+        </TooltipButton> : null}
+        {task === "chat" && enhancementUndoText !== null ? (
           <TooltipButton
             type="button"
             className="icon-btn icon-btn-square composer-enhance-undo"
@@ -279,7 +252,7 @@ export function ComposerToolbar({
             <IconUndo2 size={15} aria-hidden="true" />
           </TooltipButton>
         ) : null}
-        {runActive && !hasDraftContent ? (
+        {runActive && (task === "image" || !hasDraftContent) ? (
           <TooltipButton
             type="button"
             className="stop-btn"

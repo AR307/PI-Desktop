@@ -9,6 +9,7 @@ import {
   type SimpleStreamOptions,
 } from "@earendil-works/pi-ai";
 import { PROVIDER_RETRY_MAX_RETRIES } from "@pi-desktop/shared";
+import { withGoogleTransport } from "./provider-sdk-transport.js";
 import {
   classifyAgentError,
   type ClassifiedAgentError,
@@ -429,10 +430,13 @@ export function createProviderRetryStream(
     let limitRepairTried = false;
     for (;;) {
       if (options.signal?.aborted) throw requestAbortedError();
-      const inner = createStream({
+      const attemptOptions = {
         ...(limitRepairTried ? withoutDerivedOutputLimit(options) : options),
         maxRetries: 0,
-      });
+      };
+      const inner = model.api === "google-generative-ai"
+        ? withGoogleTransport(attemptOptions, createStream)
+        : createStream(attemptOptions);
       let sawStart = false;
       let retry:
         | { error: ClassifiedAgentError; attempt: number }

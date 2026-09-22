@@ -1,4 +1,11 @@
+import type { ImageGenerationState, ImageModelInfo, ImageSessionConfig } from "@pi-desktop/shared";
 import type {
+  MobilePairing,
+  MobileSyncScopeInput,
+  MobileSyncStatus,
+  MirrorCodingAccountState,
+  ImageGenerationRequest,
+  ImageGenerationResult,
   ActivationScope,
   AgentCapabilityMove,
   AgentCapabilityQuery,
@@ -468,6 +475,34 @@ function normalizePlansChangedEvent(value: unknown): PlanningStateEvent {
 }
 
 export const api = {
+  mobileSync: {
+    status: () => invoke<MobileSyncStatus>(IPC.invoke.mobileSyncStatus),
+    createPairing: (scope: MobileSyncScopeInput) => invoke<MobilePairing>(IPC.invoke.mobileSyncCreatePairing, scope),
+    cancelPairing: (pairingId: string) => invoke<MobileSyncStatus>(IPC.invoke.mobileSyncCancelPairing, pairingId),
+    revoke: (grantId: string) => invoke<MobileSyncStatus>(IPC.invoke.mobileSyncRevoke, grantId),
+    refresh: () => invoke<MobileSyncStatus>(IPC.invoke.mobileSyncRefresh),
+    onChanged: (listener: (state: MobileSyncStatus) => void): (() => void) =>
+      window.piDesktop!.on(IPC.event.mobileSyncChanged, (value) => listener(value as MobileSyncStatus)),
+  },
+  mirrorCodingState: () => invoke<MirrorCodingAccountState>(IPC.invoke.mirrorCodingGetState),
+  mirrorCodingLogin: (confirmed = false) => invoke<{ state?: MirrorCodingAccountState; confirmationRequired?: boolean }>(IPC.invoke.mirrorCodingLogin, confirmed),
+  mirrorCodingCancel: () => invoke<MirrorCodingAccountState>(IPC.invoke.mirrorCodingCancelLogin),
+  mirrorCodingRefresh: () => invoke<MirrorCodingAccountState>(IPC.invoke.mirrorCodingRefresh),
+  mirrorCodingLogout: (confirmed = false) => invoke<{ state?: MirrorCodingAccountState; confirmationRequired?: boolean }>(IPC.invoke.mirrorCodingLogout, confirmed),
+  mirrorCodingRetryRevocation: () => invoke<MirrorCodingAccountState>(IPC.invoke.mirrorCodingRetryRevocation),
+  mirrorCodingCompleteWelcome: () => invoke<{ ok: boolean }>(IPC.invoke.mirrorCodingCompleteWelcome),
+  generateImage: (request: ImageGenerationRequest) =>
+    invoke<{ jobId: string; result: ImageGenerationResult }>(IPC.invoke.imageGenerate, request),
+  configureImage: (key: string, config: ImageSessionConfig) => invoke<ImageSessionConfig>(IPC.invoke.imageConfigure, { key, config }),
+  imageJobs: () => invoke<ImageGenerationState[]>(IPC.invoke.imageJobs),
+  imageModels: () => invoke<ImageModelInfo[]>(IPC.invoke.imageModels),
+  retryImageDownload: (sessionId: string, messageId: string, imageId: string) => invoke<UiMessage>(IPC.invoke.imageRetryDownload, { sessionId, messageId, imageId }),
+  onImageState: (listener: (state: ImageGenerationState) => void): (() => void) => window.piDesktop!.on(IPC.event.imageState, (value) => listener(value as ImageGenerationState)),
+  abortImage: (jobId: string) => invoke<{ aborted: boolean }>(IPC.invoke.imageAbort, jobId),
+  onMirrorCodingChanged: (listener: (state: MirrorCodingAccountState) => void) => {
+    if (!window.piDesktop?.on) return () => undefined;
+    return window.piDesktop.on(IPC.event.mirrorCodingChanged, (value) => listener(value as MirrorCodingAccountState));
+  },
   getVersion: () => invoke<AppVersionInfo>(IPC.invoke.appGetVersion),
   health: () => invoke<HostHealth>(IPC.invoke.appHealth),
   getOnboarding: () => invoke<OnboardingState>(IPC.invoke.appGetOnboarding),

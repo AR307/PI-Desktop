@@ -1,5 +1,9 @@
 # 11. Provider & Model System
 
+MirrorCoding account providers follow the additional
+[account/group contract](21-mirrorcoding-account.md). They are synchronized,
+main-authenticated providers rather than manually configured API-key rows.
+
 ## 1. Goal
 
 PI-Desktop must support **all major market model vendors and models** that users commonly need, without hardcoding a tiny allowlist as product ceiling.

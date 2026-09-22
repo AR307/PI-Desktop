@@ -29,6 +29,18 @@ export type ChangelogEntry = {
 
 const enEntries: ChangelogEntry[] = [
   {
+    version: "0.15.2",
+    date: "2026-09-22",
+    highlights: [
+      "Pair PI-Desktop projects and sessions with the Android companion and continue work from your phone.",
+      "Choose the session mode, model, group, reasoning level, and image settings from the mobile app for the next turn.",
+      "Complete MirrorCoding mobile login with encrypted password exchange and server-issued device identity.",
+      "Keep mobile sync credentials in secure storage and recover pairing after an expired access token.",
+      "Improve relay recovery metadata and bounded mobile message transport for interrupted or retried requests.",
+    ],
+  },
+
+  {
     version: "0.15.1",
     date: "2026-09-19",
     highlights: [
@@ -811,6 +823,18 @@ const enEntries: ChangelogEntry[] = [
 
 const zhCNEntries: ChangelogEntry[] = [
   {
+    version: "0.15.2",
+    date: "2026-09-22",
+    highlights: [
+      "可将 PI-Desktop 项目和会话配对到 Android companion，并在手机上继续工作。",
+      "可在移动端为下一轮选择会话模式、模型、分组、推理等级和生图参数。",
+      "MirrorCoding 移动登录支持加密密码交换和服务端签发的设备身份。",
+      "移动同步凭据改用安全存储，并可在访问令牌过期后恢复配对。",
+      "增强 relay 恢复元数据和有界移动消息传输，便于处理中断与重试请求。",
+    ],
+  },
+
+  {
     version: "0.15.1",
     date: "2026-09-19",
     highlights: [
@@ -1592,6 +1616,18 @@ const zhCNEntries: ChangelogEntry[] = [
 ];
 
 const zhTWEntries: ChangelogEntry[] = [
+  {
+    version: "0.15.2",
+    date: "2026-09-22",
+    highlights: [
+      "可將 PI-Desktop 專案和工作階段配對到 Android companion，並在手機上繼續工作。",
+      "可在行動端為下一輪選擇工作階段模式、模型、分組、推理層級和生圖參數。",
+      "MirrorCoding 行動登入支援加密密碼交換和伺服器簽發的裝置身分。",
+      "行動同步憑據改用安全儲存，並可在存取權杖過期後恢復配對。",
+      "增強 relay 恢復中繼資料和有界行動訊息傳輸，便於處理中斷與重試請求。",
+    ],
+  },
+
   {
     version: "0.15.1",
     date: "2026-09-19",

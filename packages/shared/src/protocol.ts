@@ -1,8 +1,8 @@
-export const PROTOCOL_VERSION = 11 as const;
+export const PROTOCOL_VERSION = 12 as const;
 export const SCHEMA_VERSION = 16 as const;
 export const APP_ID = "net.aiuo.pi-desktop";
 export const APP_NAME = "PI-Desktop";
-export const APP_VERSION = "0.15.1";
+export const APP_VERSION = "0.15.2";
 
 export const APP_MENU_COMMANDS = [
   "newTask",
@@ -50,6 +50,24 @@ export type WindowControlAction = (typeof WINDOW_CONTROL_ACTIONS)[number];
 
 export const IPC = {
   invoke: {
+    mobileSyncStatus: "pi-desktop/mobile-sync/status",
+    mobileSyncCreatePairing: "pi-desktop/mobile-sync/createPairing",
+    mobileSyncCancelPairing: "pi-desktop/mobile-sync/cancelPairing",
+    mobileSyncRevoke: "pi-desktop/mobile-sync/revoke",
+    mobileSyncRefresh: "pi-desktop/mobile-sync/refresh",
+    mirrorCodingGetState: "pi-desktop/mirrorcoding/getState",
+    mirrorCodingLogin: "pi-desktop/mirrorcoding/login",
+    mirrorCodingCancelLogin: "pi-desktop/mirrorcoding/cancelLogin",
+    mirrorCodingRefresh: "pi-desktop/mirrorcoding/refresh",
+    mirrorCodingLogout: "pi-desktop/mirrorcoding/logout",
+    mirrorCodingRetryRevocation: "pi-desktop/mirrorcoding/retryRevocation",
+    mirrorCodingCompleteWelcome: "pi-desktop/mirrorcoding/completeWelcome",
+    imageGenerate: "pi-desktop/image/generate",
+    imageConfigure: "pi-desktop/image/configure",
+    imageJobs: "pi-desktop/image/jobs",
+    imageModels: "pi-desktop/image/models",
+    imageRetryDownload: "pi-desktop/image/retryDownload",
+    imageAbort: "pi-desktop/image/abort",
     appGetVersion: "pi-desktop/app/getVersion",
     appOpenFeedback: "pi-desktop/app/openFeedback",
     appHealth: "pi-desktop/app/health",
@@ -305,6 +323,9 @@ export const IPC = {
     nativeMenuAction: "pi-desktop/menu/nativeAction",
   },
   event: {
+    mobileSyncChanged: "pi-desktop/mobile-sync/changed",
+    imageState: "pi-desktop/image/state",
+    mirrorCodingChanged: "pi-desktop/mirrorcoding/changed",
     pluginChanged: "pi-desktop/event/pluginChanged",
     /** Progress of an install or update, while it is still running. */
     pluginInstallProgress: "pi-desktop/plugin/event/installProgress",

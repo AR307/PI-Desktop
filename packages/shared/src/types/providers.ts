@@ -1,9 +1,11 @@
 /** Shared public types grouped by the owning application domain. */
 import type { ModelBinding, ThinkingLevel } from "./models.js";
+import type { MirrorCodingProvider } from "./mirrorcoding.js";
 
 export const OAUTH_AUTH_KIND = "oauth";
 
 export type ProviderPublic = {
+  mirrorCoding?: MirrorCodingProvider;
   id: string;
   name: string;
   vendorKey: string;

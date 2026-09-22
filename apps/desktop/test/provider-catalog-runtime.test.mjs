@@ -8,8 +8,11 @@ const runtimeModule = new URL("../electron/main/runtime/provider-catalog.ts", im
 // The production bundler resolves this extensionless TypeScript import.
 const resolution = registerHooks({
   resolve(specifier, context, nextResolve) {
-    if (context.parentURL === runtimeModule.href && specifier === "../models-dev-catalog") {
+    if (specifier === "../models-dev-catalog") {
       return nextResolve("../models-dev-catalog.ts", context);
+    }
+    if (context.parentURL === runtimeModule.href && specifier === "../mirrorcoding/catalog") {
+      return nextResolve("../mirrorcoding/catalog.ts", context);
     }
     return nextResolve(specifier, context);
   },

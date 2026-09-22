@@ -1,5 +1,12 @@
 # 12. Provider Config Schema
 
+MirrorCoding uses the existing provider table with `auth_kind = mirrorcoding`.
+Its `config_json` contains public `mirrorCoding` account/group metadata, exact
+model routes and model bindings. Host-only `providers.syncMirrorCoding` owns
+these rows; generic create/update/delete/setSecret rejects managed rows.
+Credentials live only in main's encrypted storage. See
+[MirrorCoding account](21-mirrorcoding-account.md) for the protocol-12 contract.
+
 ## 1. Storage location
 
 Owned by Rust host DB/settings store.

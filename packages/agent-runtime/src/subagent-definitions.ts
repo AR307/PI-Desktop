@@ -432,6 +432,7 @@ export function subagentProviderLookupError(
  * the missing entry into a tool error naming the pin.
  */
 export async function resolveSubagentProviders(input: {
+  resolveManagedBinding?: (provider: SubagentProviderSource, modelId: string) => Promise<RuntimeProviderConfig>;
   definitions: readonly SubagentDefinition[];
   providers: readonly SubagentProviderSource[];
   getSecret: (providerId: string) => Promise<string | undefined>;
@@ -472,6 +473,16 @@ export async function resolveSubagentProviders(input: {
       diagnostics.push(
         `${name}: no enabled provider matches "${pin.providerId}"`,
       );
+      continue;
+    }
+    if (provider.authKind === "mirrorcoding") {
+      try {
+        const managed = await input.resolveManagedBinding?.(provider, pin.modelId);
+        if (!managed) throw new Error("Managed account unavailable");
+        resolved[key] = managed;
+      } catch {
+        diagnostics.push(`${name}: MirrorCoding model or group unavailable: "${key}"`);
+      }
       continue;
     }
     const isVendorAccount = provider.authKind === OAUTH_AUTH_KIND;

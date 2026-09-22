@@ -174,8 +174,7 @@ export class BrowserHost {
     input: { fullPage?: boolean } = {},
     sessionId?: string,
   ): Promise<{ mimeType: string; data: string; path?: string }> {
-    const wc = this.requireWebContents();
-    const shot = await this.cdp.screenshot(wc, input);
+    const shot = await this.pane.captureScreenshot((wc) => this.cdp.screenshot(wc, input));
     const scratch = this.deps.getScratchDir?.(sessionId ?? this.chromeSessionId ?? undefined);
     if (!scratch) return shot;
     try {
@@ -206,6 +205,9 @@ export class BrowserHost {
   }
 
   async cdpCommand(method: string, params?: unknown): Promise<unknown> {
+    if (method.trim() === "Page.captureScreenshot") {
+      return this.pane.captureScreenshot((wc) => this.cdp.send(wc, method, params));
+    }
     return this.cdp.send(this.requireWebContents(), method, params);
   }
 

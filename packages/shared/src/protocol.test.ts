@@ -24,8 +24,11 @@ import {
 } from "./index.js";
 
 describe("Plan protocol contracts", () => {
-  it("uses protocol v11/schema v16 and exposes the plan, schedule, and shell channels", () => {
-    expect(PROTOCOL_VERSION).toBe(11);
+  it("uses protocol v12/schema v16 and exposes account, plan, schedule, and shell channels", () => {
+    expect(PROTOCOL_VERSION).toBe(12);
+    expect(IPC_WHITELIST.has(IPC.invoke.mirrorCodingLogin)).toBe(true);
+    expect(IPC_WHITELIST.has(IPC.invoke.mirrorCodingLogout)).toBe(true);
+    expect(IPC_WHITELIST.has(IPC.event.mirrorCodingChanged)).toBe(true);
     expect(SCHEMA_VERSION).toBe(16);
     expect(IPC_WHITELIST.has(IPC.invoke.plansPending)).toBe(true);
     expect(IPC_WHITELIST.has(IPC.invoke.plansResolve)).toBe(true);

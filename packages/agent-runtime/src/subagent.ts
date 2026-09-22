@@ -20,6 +20,7 @@
  */
 
 import { randomUUID } from "node:crypto";
+import { hasAssistantOutput } from "./provider-output.js";
 import {
   Agent,
   convertToLlm,
@@ -199,6 +200,7 @@ export class SubagentRun {
   private streamError?: { code: string; message: string };
   private pendingProviderRetry?: ReturnType<typeof classifyAgentError>;
   private providerRetryInProgress = false;
+  private providerOutputStarted = false;
   private providerTransientRetryAttempt = 0;
   private providerRateLimitRetryAttempt = 0;
   private provider: RuntimeProviderConfig;
@@ -300,6 +302,7 @@ export class SubagentRun {
 
   /** Continue the same agent at the failed request; never replay completed tools. */
   private useNextModel(): boolean {
+    if (this.provider.authKind === "mirrorcoding") return false;
     if (this.runSignal().aborted || !this.streamError || this.streamError.code === "TURN_ABORTED") return false;
     if (!this.opts.fallbackModels?.length) return false;
     const failed = this.agent.state.messages.at(-1);
@@ -355,6 +358,7 @@ export class SubagentRun {
     error: ReturnType<typeof classifyAgentError>,
     phase: "request" | "stream",
   ): number | undefined {
+    if (this.provider.authKind === "mirrorcoding" && this.providerOutputStarted) return undefined;
     if (!error.retriable) return undefined;
     if (error.code === "PROVIDER_RATE_LIMITED") {
       if (this.providerRateLimitRetryAttempt >= PROVIDER_RATE_LIMIT_MAX_RETRIES) {
@@ -502,6 +506,7 @@ export class SubagentRun {
         break;
       case "message_start": {
         if (event.message.role !== "assistant") break;
+        this.providerOutputStarted = hasAssistantOutput(event.message.content);
         const content = assistantContent((event.message as AssistantMessage).content);
         const retryingAssistant = this.providerRetryInProgress
           ? this.currentAssistant
@@ -523,6 +528,7 @@ export class SubagentRun {
         break;
       }
       case "message_update": {
+        if (event.message.role === "assistant" && hasAssistantOutput(event.message.content)) this.providerOutputStarted = true;
         if (!this.currentAssistant || event.message.role !== "assistant") break;
         const content = assistantContent((event.message as AssistantMessage).content);
         const previousText = this.currentAssistant.content;
