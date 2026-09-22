@@ -122,7 +122,6 @@ export type AgentSidecarOptions = {
  * extensions).
  */
 export class AgentSidecar {
-  private localToolControllers = new Map<string, AbortController>();
   private child: ChildProcessWithoutNullStreams;
   private pending = new Map<
     string,
@@ -215,8 +214,6 @@ export class AgentSidecar {
     this.localToolControllers.clear();
     for (const timer of this.localToolTimers) clearTimeout(timer);
     this.localToolTimers.clear();
-    for (const controller of this.localToolControllers.values()) controller.abort();
-    this.localToolControllers.clear();
     this.handlers.clear();
     this.stdoutReader?.close();
     this.stdoutReader = undefined;

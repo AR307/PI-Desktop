@@ -1,6 +1,6 @@
 import { IMAGE_BATCH_TIMEOUT_MS } from "./image-generation.js";
 
-export const IMAGE_GENERATION_TIMEOUT_MS = 10 * 60_000;
+export const MIRROR_IMAGE_GENERATION_TIMEOUT_MS = 10 * 60_000;
 export const DEFAULT_RPC_TIMEOUT_MS = 130_000;
 export const PERMISSION_TIMEOUT_MS = 120_000;
 export const DEFAULT_COMMAND_TIMEOUT_MS = 60_000;
@@ -115,7 +115,7 @@ export function rpcTimeoutMs(
   method: string,
   params: unknown,
 ): number {
-  if (method === "image.generate" || (method === "tools.execute" && isRecord(params) && params.toolName === "GenerateImage")) return IMAGE_GENERATION_TIMEOUT_MS + COMMAND_RPC_BUFFER_MS;
+  if (method === "image.generate" || (method === "tools.execute" && isRecord(params) && params.toolName === "GenerateImage")) return MIRROR_IMAGE_GENERATION_TIMEOUT_MS + COMMAND_RPC_BUFFER_MS;
   if (method === "agent.compact") return AGENT_COMPACT_RPC_TIMEOUT_MS;
   if (method === "configSync.syncNow") return CONFIG_SYNC_RPC_TIMEOUT_MS;
   if (method !== "tools.execute") return DEFAULT_RPC_TIMEOUT_MS;

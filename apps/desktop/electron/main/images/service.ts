@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import {
-  IPC, IMAGE_GENERATION_TIMEOUT_MS, validateImageOptions,
+  IPC, MIRROR_IMAGE_GENERATION_TIMEOUT_MS, validateImageOptions,
   type AgentEventEnvelope, type AppSettings, type ImageGenerationRequest, type ImageGenerationResult,
   type ImageGenerationState, type ImageModelInfo, type ImageOutput, type ImageSessionConfig,
   type ProviderPublic, type SessionDetail, type UiMessage,
@@ -95,7 +95,7 @@ export class ImageService {
     if (direct) turns.set(request.sessionId, jobId);
     releaseOperation?.();
     this.publish(job, "running");
-    const timer = setTimeout(() => job.controller.abort(new Error("image_timeout")), IMAGE_GENERATION_TIMEOUT_MS);
+    const timer = setTimeout(() => job.controller.abort(new Error("image_timeout")), MIRROR_IMAGE_GENERATION_TIMEOUT_MS);
     const cancel = () => { void job.sidecar?.call("image.abort", { jobId }).catch(() => undefined); };
     job.controller.signal.addEventListener("abort", cancel);
     let turnId: string | undefined;

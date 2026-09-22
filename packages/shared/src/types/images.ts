@@ -55,7 +55,7 @@ export type ImageGenerationResult = {
   text?: string;
   error?: string;
 };
-export type ImageGenerationBinding = {
+export type MirrorImageBinding = {
   model: ImageModelInfo;
   baseUrl: string;
   headers: Record<string, string>;
