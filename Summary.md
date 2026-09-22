@@ -527,4 +527,5 @@ needed by an actual request rather than starting a repository-wide rewrite.
   persistence, encrypted password login, identity reuse after session expiry,
   and relay request-id plus `Retry-After` forwarding.
 - Bumped all workspace and host surfaces to `0.15.2`, added shipped-locale
-  release notes, and refreshed the bundled models.dev snapshot for the release.
+  release notes, advanced the Android package to version code 2, and refreshed
+  the bundled models.dev snapshot for the release.

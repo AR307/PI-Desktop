@@ -1,10 +1,21 @@
 import assert from "node:assert/strict";
 import { mkdtemp, readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
-import test from "node:test";
+import { join, resolve } from "node:path";
+import test, { after } from "node:test";
 import { createCipheriv, createDecipheriv, randomBytes } from "node:crypto";
-import { MobileDeviceCredentials } from "../electron/main/mobile-sync/device-credentials.ts";
+import { createServer as createViteServer } from "vite";
+
+const root = resolve(import.meta.dirname, "..");
+const vite = await createViteServer({
+  root,
+  configFile: false,
+  server: { middlewareMode: true, hmr: false, ws: false },
+  appType: "custom",
+  optimizeDeps: { noDiscovery: true, include: [] },
+});
+const { MobileDeviceCredentials } = await vite.ssrLoadModule("/electron/main/mobile-sync/device-credentials.ts");
+after(() => vite.close());
 
 function encryption() {
   const key = randomBytes(32);
@@ -41,5 +52,5 @@ test("unavailable secure storage fails explicitly", async () => {
   const credentials = new MobileDeviceCredentials(join(await mkdtemp(join(tmpdir(), "pi-mobile-device-")), "device.enc"), {
     ...encryption(), isEncryptionAvailable: () => false,
   });
-  await assert.rejects(credentials.save({ accountId: "a", deviceId: "d", deviceSecret: "s" }), /secure_storage_unavailable/);
+  assert.throws(() => credentials.save({ accountId: "a", deviceId: "d", deviceSecret: "s" }), /secure_storage_unavailable/);
 });
