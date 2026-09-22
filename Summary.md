@@ -1,5 +1,12 @@
 # PI-Desktop project summary
 
+## 2026-09-22 — Local 0.15.3 installer
+
+- Package version is 0.15.3 on `feat/plan-ask-mirrorcoding`. The Windows setup
+  is `apps/desktop/release/PI-Desktop-Setup-0.15.3.exe`. It was not published.
+- The installer was not exercised through the Electron image acceptance flow.
+  That flow still expects the previous size, quality, and single-request body.
+
 ## 2026-09-22 — Composer image mode uses the upstream batch
 
 - The composer image mode is labeled 生图. It still lists every MirrorCoding
