@@ -9,7 +9,7 @@ export function ImageOptions({ capability, options, references, disabled, onChan
   onChange: (options: ImageGenerationOptions) => void;
 }) {
   const { t } = useTranslation();
-  if (!capability) return <p className="image-options-notice" role="status">{t("images.empty")}</p>;
+  if (!capability) return null;
   return <div className="image-options">
     {capability.max_count > 1 ? <label>{t("images.count")}
       <input type="number" min={1} max={capability.max_count} value={options.count ?? 1} disabled={disabled}

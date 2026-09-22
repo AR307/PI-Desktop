@@ -49,8 +49,12 @@ export function parseCatalog(value: unknown): MirrorCodingCatalog {
       const modelId = string(model.id);
       if (!modelId || seen.has(modelId) || !Array.isArray(model.supported_endpoint_types)) throw new Error("invalid_catalog");
       seen.add(modelId);
+      let image: ReturnType<typeof parseImageCapability> | undefined;
+      if (model.image) {
+        try { image = parseImageCapability(model.image); } catch { image = undefined; }
+      }
       return { id: modelId, supported_endpoint_types: model.supported_endpoint_types.map(string),
-        ...(model.image ? { image: parseImageCapability(model.image) } : {}) };
+        ...(image ? { image } : {}) };
     });
     return {
       id, name: string(group.name), description: string(group.description ?? ""),
@@ -73,6 +77,12 @@ export function modelMetadata(catalog: ModelsDevCatalog, modelId: string): Model
   }
   const known = catalog.findModel({ modelId });
   return known ? modelConfigFromModelsDev(known) : genericModelConfig(modelId, "");
+}
+
+function accountImageModelId(modelId: string): boolean {
+  const id = modelId.toLowerCase();
+  if (id.includes("video")) return false;
+  return id.includes("image") || id.includes("imagine");
 }
 
 function preferredEndpoint(config: ModelConfig): MirrorCodingEndpoint | undefined {
@@ -100,14 +110,21 @@ export function compileCatalog(catalog: MirrorCodingCatalog, modelsDev: ModelsDe
         const native = preferredEndpoint(config);
         const candidates = [...new Set([...(native ? [native] : []), ...Object.keys(ENDPOINTS) as MirrorCodingEndpoint[]])];
         const modalities = modelsDev.findModel({ modelId: model.id });
-        const supportsChat = model.image ? model.image.supports_chat :
+        const accountImage = model.image ?? (accountImageModelId(model.id) ? {
+          generation_path: "/v1/images/generations",
+          reference_path: "/v1/images/edits" as const,
+          max_count: 1,
+          supports_chat: false,
+          sendable: true,
+        } : undefined);
+        const supportsChat = accountImage ? accountImage.supports_chat :
           !modalities?.outputPublished || modalities.modalities.output.includes("text");
         const endpoint = supportsChat ? candidates.find((kind) => {
           const advertised = catalog.supported_endpoints[kind];
           return model.supported_endpoint_types.includes(kind) && advertised?.method === "POST" && advertised.path === ENDPOINTS[kind].path;
         }) : undefined;
-        if (model.image) {
-          const capability = { ...model.image };
+        if (accountImage) {
+          const capability = { ...accountImage };
           if (capability.reference_path === "/v1/images/edits" &&
               (!model.supported_endpoint_types.includes("image-edit") || catalog.supported_endpoints["image-edit"]?.path !== capability.reference_path || catalog.supported_endpoints["image-edit"]?.method !== "POST")) {
             delete capability.reference_path;

@@ -85,3 +85,40 @@ test("a nonstandard generation path stays visible and cannot be sent", () => {
   assert.equal(compiled.groups[0].metadata.imageModels["image-a"].sendable, true);
   assert.equal(compiled.groups[0].metadata.imageModels["image-a"].generation_path, "/v1/images/generations");
 });
+
+test("account image model names stay in the image list without a server image object", () => {
+  const parsed = parseCatalog({
+    success: true,
+    data: {
+      user: { id: 7, display_name: "ada" },
+      supported_endpoints: {
+        openai: { path: "/v1/chat/completions", method: "POST" },
+        "openai-response": { path: "/v1/responses", method: "POST" },
+      },
+      groups: [{
+        id: "fast",
+        name: "Fast",
+        description: "",
+        ratio: 1,
+        dynamic_billing: false,
+        models: [
+          { id: "gpt-image-2.5", supported_endpoint_types: ["openai"] },
+          { id: "grok-imagine-image", supported_endpoint_types: ["openai-response"] },
+          { id: "grok-imagine-video", supported_endpoint_types: ["openai-response"] },
+          { id: "gpt-5.4", supported_endpoint_types: ["openai"] },
+          { id: "broken-image", supported_endpoint_types: ["openai"], image: { generation_path: "" } },
+        ],
+      }],
+    },
+  });
+  const compiled = compileCatalog(parsed, { findModel: () => undefined });
+  const images = compiled.groups[0].metadata.imageModels;
+  assert.equal(images["gpt-image-2.5"].sendable, true);
+  assert.equal(images["grok-imagine-image"].generation_path, "/v1/images/generations");
+  assert.equal("grok-imagine-video" in images, false);
+  assert.equal("gpt-5.4" in images, false);
+  assert.equal(images["broken-image"].sendable, true);
+  assert.equal(compiled.groups[0].metadata.routes["gpt-image-2.5"], undefined);
+  assert.equal(compiled.groups[0].metadata.routes["gpt-5.4"], "openai");
+  assert.equal(compiled.groups[0].models.some((model) => model.id === "gpt-image-2.5"), true);
+});

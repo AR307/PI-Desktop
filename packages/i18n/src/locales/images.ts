@@ -1,6 +1,6 @@
 export const imagesEn = {
   mode: "Image generation", chooseMode: "Choose task mode", model: "Image model", chooseModel: "Choose image model",
-  empty: "Sign in to MirrorCoding and choose an available image model.", unavailable: "Unavailable group",
+  empty: "", unavailable: "Unavailable group",
   size: "Size", aspectRatio: "Aspect ratio", quality: "Quality", count: "Count", serverDefault: "Server default",
   referencesSupported: "Reference images supported", noReferences: "Text to image only",
   prompt: "Describe the image to generate…", generating: "Generating images…", result: "Generated image",
@@ -20,7 +20,7 @@ export const imagesEn = {
 };
 export const imagesZhCN: typeof imagesEn = {
   mode: "生图", chooseMode: "选择任务模式", model: "生图模型", chooseModel: "选择生图模型",
-  empty: "登录 MirrorCoding 后，选择可用的生图模型。", unavailable: "分组不可用",
+  empty: "", unavailable: "分组不可用",
   size: "尺寸", aspectRatio: "比例", quality: "质量", count: "数量", serverDefault: "服务端默认",
   referencesSupported: "支持参考图", noReferences: "仅支持文生图",
   prompt: "描述你想生成的图片…", generating: "图片生成中…", result: "生成的图片",

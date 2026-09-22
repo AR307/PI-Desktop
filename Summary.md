@@ -1,5 +1,12 @@
 # PI-Desktop project summary
 
+## 2026-09-22 — Image model list
+
+- The composer no longer shows “登录 MirrorCoding 后，选择可用的生图模型。”
+- Account models whose ids contain image or imagine are listed for image
+  generation even when the catalog omits an image capability. Video ids stay
+  out. A bad image object no longer drops the rest of the catalog.
+
 ## 2026-09-22 — Local 0.15.3 installer
 
 - Package version is 0.15.3 on `feat/plan-ask-mirrorcoding`. The Windows setup
