@@ -249,6 +249,24 @@ export function ProviderSetupDialog({
   };
 
   const save = async () => {
+    const persisted = selection.bindingsToPersist;
+    if (provider?.authKind === "mirrorcoding") {
+      if (persisted.length === 0) return;
+      setSaving(true);
+      setError("");
+      try {
+        const result = await api.updateProvider({
+          id: provider.id,
+          models: persisted,
+        });
+        await onSaved(result.provider ?? provider, persisted);
+      } catch (cause) {
+        setError(cause instanceof Error ? cause.message : String(cause));
+      } finally {
+        setSaving(false);
+      }
+      return;
+    }
     const providerName = resolvedName.trim();
     const providerBaseUrl = normalizeBaseUrlInput(resolvedBaseUrl, resolvedApiStyle);
     if (
@@ -261,7 +279,6 @@ export function ProviderSetupDialog({
       setBaseUrlTouched(true);
       return;
     }
-    const persisted = selection.bindingsToPersist;
     const imageModelIdsToSave = imageModelDraft?.filter((imageModelId) =>
       persisted.some((model) => model.id === imageModelId),
     );
@@ -313,13 +330,15 @@ export function ProviderSetupDialog({
   };
 
   const canSave =
-    !saving &&
-    !requiresApiStyleChoice &&
-    !!service &&
-    !!resolvedName.trim() &&
-    !!resolvedBaseUrl.trim() &&
-    !baseUrlIssue &&
-    models.length > 0;
+    provider?.authKind === "mirrorcoding"
+      ? !saving && models.length > 0
+      : !saving &&
+        !requiresApiStyleChoice &&
+        !!service &&
+        !!resolvedName.trim() &&
+        !!resolvedBaseUrl.trim() &&
+        !baseUrlIssue &&
+        models.length > 0;
 
   return portalOverlay(
     <div
@@ -381,6 +400,7 @@ export function ProviderSetupDialog({
         <div className="provider-setup-body">
           {error ? <div className="provider-setup-error">{error}</div> : null}
 
+          {provider?.authKind === "mirrorcoding" ? null : (
           <div className="provider-setup-credentials">
             <div
               className={
@@ -525,6 +545,7 @@ export function ProviderSetupDialog({
               </div>
             ) : null}
           </div>
+          )}
 
           <ModelSelectionPanes
             discovery={discovery}

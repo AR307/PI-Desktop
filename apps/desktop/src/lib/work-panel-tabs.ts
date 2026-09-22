@@ -142,17 +142,22 @@ export function hasPluginView(
   );
 }
 
+/** Plan and goal markdown opens in the host preview, not the file-manager editor. */
+export function isPlanOrGoalPreviewPath(path: string): boolean {
+  const normalized = path.replace(/\\/g, "/");
+  return /(?:^|\/)\.pi\/(?:plan|goal)\/[^/]+\.md$/i.test(normalized);
+}
+
 /**
  * The tab the host opens a project file in when the host, not the user, chose
  * the file: the bundled file view whenever it is launchable, and the host file
- * tab otherwise — the same preference and fallback a chat file reference
- * already uses, so a plan or goal artifact lands where the user's other file
- * work lives. The bundle is never required: an absent view leaves the host tab.
+ * tab otherwise. `.pi/plan` and `.pi/goal` markdown always use the host preview.
  */
 export function preferredFileWorkPanelTab(
   path: string,
   pluginViews: readonly PluginViewRef[],
 ): WorkPanelTab {
+  if (isPlanOrGoalPreviewPath(path)) return fileWorkPanelTab(path);
   return hasPluginView(pluginViews, FILE_MANAGER_PLUGIN_TAB)
     ? fileManagerPluginTab(path)
     : fileWorkPanelTab(path);

@@ -136,3 +136,14 @@ test("provider headings establish a stronger type level than model rows", () => 
     /:lang\(zh-CN\) \.composer-model-group-label\s*\{[\s\S]*?text-transform:\s*none/,
   );
 });
+
+test("selecting a chat model writes the app default and image selection returns first", () => {
+  const select = modelMenuSource.slice(modelMenuSource.indexOf("const selectModel"));
+  const imageBranch = select.slice(select.indexOf("if (task === \"image\")"), select.indexOf("const nextModelProvider"));
+  assert.match(imageBranch, /onSelectImage/);
+  assert.doesNotMatch(imageBranch, /defaultProviderId/);
+  const chatTail = select.slice(select.indexOf("await configureActiveSession"));
+  assert.match(chatTail, /defaultProviderId: candidate\.id/);
+  assert.match(chatTail, /defaultModelId: nextModelId/);
+  assert.doesNotMatch(chatTail, /candidate\.mirrorCoding && !/);
+});

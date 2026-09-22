@@ -529,6 +529,7 @@ export function createSessionLaunchRuntime({
       if (!row.enabled) continue;
       for (const binding of row.models ?? []) {
         if (!binding.availableForSubagents) continue;
+        if (row.mirrorCoding?.imageModels?.[binding.id] && !row.mirrorCoding.routes[binding.id]) continue;
         let key = `${row.vendorKey ?? row.name}/${binding.id}`;
         // Two provider rows can share a vendor alias. Opting in one row must
         // not authorize the credential-bearing pin resolved from another row.

@@ -86,7 +86,7 @@
     "publish": [
       {
         "provider": "github",
-        "owner": "vastsa",
+        "owner": "AR307",
         "repo": "PI-Desktop"
       }
     ],

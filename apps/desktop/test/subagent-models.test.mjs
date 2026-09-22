@@ -335,3 +335,39 @@ test("the editor exposes the no-pass thinking option", async () => {
   assert.match(thinkingField, /extensions\.subagents\.thinkingOmit/);
   assert.match(thinkingField, /SUBAGENT_THINKING_LEVELS/);
 });
+
+test("a connected MirrorCoding chat model can be pinned and an image model cannot", () => {
+  const mirror = (id, name, routes, models) => provider({
+    id,
+    name,
+    vendorKey: "mirrorcoding",
+    hasSecret: false,
+    authKind: "mirrorcoding",
+    mirrorCoding: {
+      accountId: 1,
+      groupId: id,
+      groupName: name,
+      description: "",
+      ratio: 1,
+      dynamicBilling: false,
+      routes,
+      imageModels: {
+        painter: {
+          generation_path: "/v1/images/generations",
+          max_count: 1,
+          supports_chat: false,
+        },
+      },
+    },
+    models,
+  });
+  const choices = subagentModelChoices([
+    mirror("group-a", "Fast", { "chat-a": "openai" }, [binding("chat-a"), binding("painter")]),
+    mirror("group-b", "Slow", { "chat-b": "openai" }, [binding("chat-b")]),
+    mirror("group-off", "Off", { "chat-c": "openai" }, [binding("chat-c")]),
+  ].map((item, index) => index === 2 ? { ...item, enabled: false } : item));
+  assert.deepEqual(choices.map((choice) => choice.value), [
+    "group-a/chat-a",
+    "group-b/chat-b",
+  ]);
+});

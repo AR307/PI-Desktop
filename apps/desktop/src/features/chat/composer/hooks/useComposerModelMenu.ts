@@ -329,13 +329,18 @@ export function useComposerModelMenu({
         modelId: nextModelId,
         thinkingLevel: nextThinkingLevel,
       });
-      if (candidate.mirrorCoding && !useAppStore.getState().settings?.defaultProviderId) {
-        const settings = await api.getSettings();
-        if (!settings.defaultProviderId) {
-          const updated = { ...settings, defaultProviderId: candidate.id, defaultModelId: nextModelId };
-          await api.setSettings(updated);
-          useAppStore.setState({ settings: updated });
-        }
+      const settings = await api.getSettings();
+      if (
+        settings.defaultProviderId !== candidate.id ||
+        settings.defaultModelId !== nextModelId
+      ) {
+        const updated = {
+          ...settings,
+          defaultProviderId: candidate.id,
+          defaultModelId: nextModelId,
+        };
+        await api.setSettings(updated);
+        useAppStore.setState({ settings: updated });
       }
       setQuery("");
       setView("root");

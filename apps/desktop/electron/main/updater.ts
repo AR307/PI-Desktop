@@ -33,7 +33,7 @@ import {
 
 const { autoUpdater } = electronUpdaterPkg;
 
-export const RELEASES_URL = "https://github.com/vastsa/PI-Desktop/releases/latest";
+export const RELEASES_URL = "https://github.com/AR307/PI-Desktop/releases/latest";
 
 const AUTO_CHECK_INITIAL_DELAY_MS = 15_000;
 const AUTO_CHECK_INTERVAL_MS = 6 * 60 * 60 * 1000;
@@ -165,9 +165,10 @@ export class AppUpdaterController {
     // newer stable release such as 0.2.2. Always track GitHub's latest
     // stable release so RC installs can graduate to stable.
     autoUpdater.allowPrerelease = false;
-    // Even if the user ignores the restart prompt, a downloaded update
-    // lands on the next normal quit.
-    autoUpdater.autoInstallOnAppQuit = true;
+    // A downloaded update must not install on an ordinary quit. The NSIS
+    // installer replaces files while the next launch is already starting,
+    // which is the close-and-reopen crash. Install only from the restart action.
+    autoUpdater.autoInstallOnAppQuit = false;
     autoUpdater.logger = {
       info: (m: unknown) =>
         this.logger.app("updater", "info", "updater diagnostic", {

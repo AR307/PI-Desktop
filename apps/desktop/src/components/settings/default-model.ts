@@ -24,9 +24,11 @@ export function defaultModelOptions(
       .map((binding) => binding.id.trim())
       .filter(Boolean);
     const ids = modelIds.length > 0 ? modelIds : [defaultModelIdOf(provider)?.trim() ?? ""];
-    return [...new Set(ids)].filter((modelId) => !!modelId &&
-      !isImageGenerationModel(imageGeneration, provider.id, modelId),
-    ).map((modelId) => ({ provider, modelId }));
+    return [...new Set(ids)].filter((modelId) => {
+      if (!modelId) return false;
+      if (provider.mirrorCoding && !provider.mirrorCoding.routes[modelId]) return false;
+      return !isImageGenerationModel(imageGeneration, provider.id, modelId);
+    }).map((modelId) => ({ provider, modelId }));
   });
 }
 
@@ -101,7 +103,7 @@ export function providerServesChatModels(
   imageGeneration?: ImageGenerationBindings | null,
 ): boolean {
   return provider.enabled &&
-    (provider.hasSecret || !!provider.hasOauth || provider.authKind === "none") &&
+    (provider.hasSecret || !!provider.hasOauth || provider.authKind === "none" || provider.authKind === "mirrorcoding") &&
     defaultModelOptions([provider], imageGeneration).length > 0;
 }
 

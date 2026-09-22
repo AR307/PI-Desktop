@@ -1,5 +1,20 @@
 # PI-Desktop project summary
 
+## 2026-09-22 — Fork experience: updates, models, subagents, icon, images
+
+- In-app updates and bug reports now target `AR307/PI-Desktop`. Remote-host
+  bundles still download from the upstream release that publishes them.
+- Settings lists each signed-in MirrorCoding group with the same model panes.
+  Account rows have no API key, base URL, or delete. Catalog refresh keeps a
+  user's context window, max tokens, thinking levels, and subagent switch.
+- Connected MirrorCoding chat models can be delegated, including model A
+  spawning model B. Image models stay out of that list.
+- Windows windows look up `apps/desktop/build/icon.ico` from the app directory.
+- Ordinary quit no longer installs a downloaded update. The close-and-reopen
+  crash matched a silent NSIS install racing the next launch.
+- A chat model selection becomes the next session's default. Image selection
+  does not. Plan and goal markdown open in the host preview.
+
 ## 2026-09-22 — Sync upstream/main and keep the fork
 
 - Merged `upstream/main` (`b10325837`) into `sync/upstream-main` from

@@ -268,7 +268,45 @@ pub fn update_provider(
         return Ok(None);
     };
     if current.auth_kind == "mirrorcoding" || input.auth_kind.as_deref() == Some("mirrorcoding") {
-        bail!("MirrorCoding providers are managed by the account");
+        if current.auth_kind != "mirrorcoding"
+            || input
+                .auth_kind
+                .as_deref()
+                .is_some_and(|kind| kind != "mirrorcoding")
+            || input
+                .secret_value
+                .as_ref()
+                .is_some_and(|value| !value.trim().is_empty())
+        {
+            bail!("MirrorCoding providers are managed by the account");
+        }
+        let config_json = if let Some(models) = input.models.as_deref() {
+            validate_model_aliases(models)?;
+            let raw_config: String = db.conn().query_row(
+                "SELECT config_json FROM providers WHERE id = ?1",
+                params![input.id],
+                |row| row.get(0),
+            )?;
+            ensure_model_bindings_update_safe(&raw_config)?;
+            Some(config_with_model_bindings(&raw_config, models)?)
+        } else {
+            None
+        };
+        if config_json.is_some() || input.enabled.is_some() {
+            db.conn().prepare_cached(
+                "UPDATE providers SET
+                    config_json = COALESCE(?1, config_json),
+                    enabled = COALESCE(?2, enabled),
+                    updated_at = ?3
+                 WHERE id = ?4",
+            )?.execute(params![
+                config_json,
+                input.enabled.map(|value| i32::from(value)),
+                now_ms(),
+                input.id
+            ])?;
+        }
+        return get_provider(db, secrets, &input.id);
     }
     // A plugin-declared row is refreshed from its manifest on every load, so a
     // generic edit would be silently reverted. The plugin path owns it.

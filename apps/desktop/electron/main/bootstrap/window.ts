@@ -1,7 +1,7 @@
 import { app, BrowserWindow, nativeTheme, screen, type Tray } from "electron";
 import { execFileSync } from "node:child_process";
 import { existsSync } from "node:fs";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import {
   APP_NAME,
   builtinWindowBackground,
@@ -38,12 +38,22 @@ import { suppressLinuxFramelessSystemMenu } from "../frameless-system-menu";
 
 function windowsIconPath(): string | undefined {
   if (process.platform !== "win32") return undefined;
-
   const resourceRoot = app.isPackaged
     ? process.resourcesPath
     : join(app.getAppPath(), "build");
-  const iconPath = join(resourceRoot, app.isPackaged ? "app-icon.ico" : "icon.ico");
-  return existsSync(iconPath) ? iconPath : undefined;
+  const packagedName = app.isPackaged ? "app-icon.ico" : "icon.ico";
+  const candidates = [join(resourceRoot, packagedName)];
+  if (!app.isPackaged) {
+    let dir = app.getAppPath();
+    for (let depth = 0; depth < 6; depth += 1) {
+      candidates.push(join(dir, "build", "icon.ico"));
+      candidates.push(join(dir, "apps", "desktop", "build", "icon.ico"));
+      const parent = dirname(dir);
+      if (parent === dir) break;
+      dir = parent;
+    }
+  }
+  return candidates.find((candidate) => existsSync(candidate));
 }
 
 export type WindowLifecycleState = {

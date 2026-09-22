@@ -127,7 +127,7 @@ export function ModelConfigPage() {
     providerServesChatModels(provider, imageGenerationCandidates);
 
   const aiProviders = useMemo(
-    () => providers.filter((provider) => provider.authKind !== OAUTH_AUTH_KIND && provider.authKind !== "mirrorcoding"),
+    () => providers.filter((provider) => provider.authKind !== OAUTH_AUTH_KIND),
     [providers],
   );
   const reorder = useProviderReorder(aiProviders, busyId !== null || testingId !== null || setupFor !== null);
@@ -547,6 +547,7 @@ export function ModelConfigPage() {
                 // on every load, so its fields and its enabled switch are not
                 // the user's to change. The credential is.
                 const ownedByPlugin = provider.ownerPluginId;
+                const accountManaged = provider.authKind === "mirrorcoding";
                 const keyEntry = keyFor === provider.id;
                 return (
                   <li
@@ -563,7 +564,7 @@ export function ModelConfigPage() {
                         {isDefault ? (
                           <Badge tone="success">{t("settings.default")}</Badge>
                         ) : null}
-                        {!provider.hasSecret && provider.authKind !== "none" ? (
+                        {!accountManaged && !provider.hasSecret && provider.authKind !== "none" ? (
                           <Badge tone="warning">{t("settings.noSecret")}</Badge>
                         ) : null}
                         {!provider.enabled ? (
@@ -580,10 +581,14 @@ export function ModelConfigPage() {
                         ) : null}
                       </div>
                       <div className="model-provider-row-meta">
-                        <span>{hostFromBaseUrl(provider.baseUrl)}</span>
-                        <span className="model-provider-meta-dot" aria-hidden>
-                          ·
-                        </span>
+                        {accountManaged ? null : (
+                          <>
+                            <span>{hostFromBaseUrl(provider.baseUrl)}</span>
+                            <span className="model-provider-meta-dot" aria-hidden>
+                              ·
+                            </span>
+                          </>
+                        )}
                         <span>{t("settings.providerModelCount", { count: modelCount })}</span>
                         {ownedByPlugin ? (
                           <>
@@ -609,7 +614,7 @@ export function ModelConfigPage() {
                           {t("settings.makeDefault")}
                         </Button>
                       ) : null}
-                      {!ownedByPlugin ? (
+                      {!ownedByPlugin && !accountManaged ? (
                         <TooltipButton
                           type="button"
                           className="icon-btn icon-btn-square model-provider-icon-btn"
@@ -653,6 +658,7 @@ export function ModelConfigPage() {
                       >
                         <IconPencil size={14} />
                       </TooltipButton>
+                      {accountManaged ? null : (
                       <TooltipButton
                         type="button"
                         className={cx(
@@ -666,7 +672,8 @@ export function ModelConfigPage() {
                       >
                         <IconPlug size={14} />
                       </TooltipButton>
-                      {confirming ? (
+                      )}
+                      {accountManaged ? null : confirming ? (
                         <button
                           type="button"
                           className="model-provider-delete-confirm"
@@ -676,7 +683,7 @@ export function ModelConfigPage() {
                         >
                           {t("settings.deleteConfirm")}
                         </button>
-                      ) : (
+                      ) : accountManaged ? null : (
                         <TooltipButton
                           type="button"
                           className="icon-btn icon-btn-square model-provider-icon-btn is-danger"
