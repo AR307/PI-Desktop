@@ -1,5 +1,6 @@
 import { mkdir, mkdtemp, rm } from "node:fs/promises";
 import { join } from "node:path";
+import { PROTOCOL_VERSION } from "../../packages/shared/dist/protocol.js";
 
 import { Host } from "./host.mjs";
 
@@ -8,7 +9,7 @@ export async function withScenario(
   fn,
   binary,
   tempRoot,
-  protocolVersion = 11,
+  protocolVersion = PROTOCOL_VERSION,
 ) {
   const scenarioRoot = await mkdtemp(join(tempRoot, id.toLowerCase() + "-"));
   const dataDir = join(scenarioRoot, "data");

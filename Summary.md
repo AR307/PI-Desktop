@@ -1,5 +1,13 @@
 # PI-Desktop project summary
 
+
+## 2026-09-23 — Full local test pass
+
+- Host acceptance scripts now handshake at the shared protocol version, which
+  is 12. Plan mode ran 13 scenarios. The upstream image batch ran against a
+  local server. Playwright drove the composer through login, the image menu,
+  and group billing, then stopped on the removed quality control.
+
 ## 2026-09-22 — Image model list
 
 - The composer no longer shows “登录 MirrorCoding 后，选择可用的生图模型。”

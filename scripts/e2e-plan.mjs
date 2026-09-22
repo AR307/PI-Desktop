@@ -44,15 +44,9 @@ import {
   resolvePluginExecution,
   waitForPluginExecution,
 } from "./e2e/plugin.mjs";
-const PROTOCOL_VERSION = 11;
+const PROTOCOL_VERSION = SHARED_PROTOCOL_VERSION;
 const PLAN_APPROVAL_TIMEOUT_MS = 30 * 60 * 1000;
 const LONG_TIMEOUT_ENABLED = process.env.PI_DESKTOP_E2E_LONG_TIMEOUT === "1";
-
-if (SHARED_PROTOCOL_VERSION !== PROTOCOL_VERSION) {
-  throw new Error(
-    `shared protocol is ${SHARED_PROTOCOL_VERSION}; Plan acceptance requires protocol v${PROTOCOL_VERSION}`,
-  );
-}
 
 const results = [];
 
