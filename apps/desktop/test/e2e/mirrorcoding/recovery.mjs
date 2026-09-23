@@ -41,8 +41,8 @@ const encryption = {
 };
 let authorizationUrl, generation = 0, refreshes = 0, currentAccess = "", catalogReads = 0;
 let accountId = 42, catalogMode = "normal", revokeUnavailable = false, expired = false, denyGroup = false;
-let nextFailure, streaming, disconnected = false, completedWelcome = false;
-const requests = [], revoked = [];
+let nextFailure, streaming, disconnected = false, completedWelcome = false, transportFailure = false;
+const requests = [], revoked = [], transportBodies = [], relayFailures = [];
 const endpoints = {
   openai: { path: "/v1/chat/completions", method: "POST" },
   "openai-response": { path: "/v1/responses", method: "POST" },
@@ -101,13 +101,26 @@ const server = createServer(async (request, response) => {
 await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
 const origin = `http://127.0.0.1:${server.address().port}`;
 const credentials = new MirrorCodingCredentials(join(output, "credentials.enc"), encryption);
+const transportFetch = async (input, init) => {
+  const url = new URL(typeof input === "string" || input instanceof URL ? input : input.url);
+  if ((url.pathname.startsWith("/v1/") || url.pathname.startsWith("/v1beta/")) && init?.method === "POST") {
+    transportBodies.push(typeof init.body);
+    if (transportFailure) {
+      transportFailure = false;
+      throw Object.assign(new TypeError("fetch failed"), {
+        cause: Object.assign(new Error("network changed"), { code: "ERR_NETWORK_CHANGED" }),
+      });
+    }
+  }
+  return fetch(input, init);
+};
 const deps = {
-  origin, credentials, fetch, modelsDev: new ModelsDevCatalog({ catalogPath: join(root, "apps/desktop/resources/models.dev/api.json") }),
+  origin, credentials, fetch: transportFetch, modelsDev: new ModelsDevCatalog({ catalogPath: join(root, "apps/desktop/resources/models.dev/api.json") }),
   openExternal: async (url) => { authorizationUrl = new URL(url); },
   syncProviders: (input) => host.call("providers.syncMirrorCoding", input),
   completeWelcome: async () => { completedWelcome = true; }, changed() {},
 };
-let account = new MirrorCodingAccount(deps), relay = new MirrorCodingRelay(account);
+let account = new MirrorCodingAccount(deps), relay = new MirrorCodingRelay(account, (failure) => relayFailures.push(failure));
 const providers = async () => (await host.call("providers.list", { includeDisabled: true })).providers;
 async function login() {
   await account.startLogin();
@@ -135,13 +148,20 @@ try {
   const concurrent = await Promise.all(Array.from({ length: 10 }, () => account.request("/probe", { method: "POST", body: "{}" })));
   check("concurrent 401 requests share one refresh", refreshes === beforeRefresh + 1 && concurrent.every((response) => response.ok));
   check("both rotated tokens saved", (await credentials.load()).active.refreshToken === `fixture-refresh-${generation}`);
+  const textTransportStart = transportBodies.length;
   for (const [model, suffix] of [["gpt-5", "/responses"], ["claude-sonnet-4-5", "/v1/messages"], ["gemini-2.5-flash", "/models/gemini-2.5-flash:generateContent?key=sdk-key"]]) {
     const local = await relay.bind(selected.id, selected.mirrorCoding, model, "parent-session");
     const result = await fetch(`${local.baseUrl}${suffix}`, { method: "POST", headers: { ...local.headers, "x-api-key": "sdk-key", "x-goog-api-key": "sdk-key" }, body: JSON.stringify({ model, reasoning: { effort: "high" } }) });
     check(`${model} relay uses encoded group and Bearer only`, result.ok && requests.at(-1).group === encodeURIComponent("中文 % group") && !requests.at(-1).sdkAuth);
   }
+  const textTransportBodies = transportBodies.slice(textTransportStart);
+  check("text relay gives Electron fetch exactly three string bodies", textTransportBodies.length === 3 && textTransportBodies.every((type) => type === "string"));
   const local = await relay.bind(selected.id, selected.mirrorCoding, "gpt-5", "parent-session");
   const send = (signal) => fetch(`${local.baseUrl}/responses`, { method: "POST", headers: local.headers, body: JSON.stringify({ model: "gpt-5", stream: true }), signal });
+  transportFailure = true;
+  const transportError = await send();
+  const transportLog = relayFailures.at(-1);
+  check("transport failure reports the upstream connection stage", transportError.status === 502 && transportLog?.stage === "connect_upstream" && transportLog?.causeCode === "ERR_NETWORK_CHANGED" && transportLog?.path === "/v1/responses");
   for (const status of [429, 503]) {
     nextFailure = status; const response = await send();
     check(`${status} and relay headers preserved`, response.status === status && response.headers.get("retry-after") === "2" && response.headers.get("x-oneapi-request-id") === "oneapi-fixture" && response.headers.get("x-upstream-request-id") === "upstream-fixture" && response.headers.get("x-request-id") === "request-fixture" && response.headers.get("request-id") === "generic-fixture" && account.snapshot().status === "connected");
@@ -165,7 +185,7 @@ try {
   await login(); check("same account reauthorization reuses group", (await providers()).find((row) => row.enabled).id === selected.id);
   accountId = 43; await login();
   rows = await providers(); check("account switch disables historical groups", !rows.find((row) => row.id === selected.id).enabled && rows.some((row) => row.enabled && row.mirrorCoding.accountId === 43));
-  account.dispose(); relay.dispose(); account = new MirrorCodingAccount(deps); relay = new MirrorCodingRelay(account); await account.initialize();
+  account.dispose(); relay.dispose(); account = new MirrorCodingAccount(deps); relay = new MirrorCodingRelay(account, (failure) => relayFailures.push(failure)); await account.initialize();
   check("restart restores encrypted account", account.snapshot().account.id === 43);
   revokeUnavailable = true; await account.logout();
   check("offline logout retains only revoke record", account.snapshot().status === "signed_out" && account.snapshot().pendingRevocation && !(await credentials.load()).active);
@@ -182,7 +202,7 @@ try {
   assert.throws(() => unavailableStorage.assertAvailable(), /secure_storage_unavailable/);
   check("unavailable secure storage is explicit");
 } finally {
-  await writeFile(join(output, "report.json"), JSON.stringify({ passed, requests, refreshes, catalogReads }, null, 2));
+  await writeFile(join(output, "report.json"), JSON.stringify({ passed, requests, refreshes, catalogReads, transportBodies, relayFailures }, null, 2));
   account.dispose(); relay.dispose(); server.closeAllConnections(); server.close(); await host.dispose(); await vite.close();
   console.log(`Recovery artifacts: ${output}`);
 }

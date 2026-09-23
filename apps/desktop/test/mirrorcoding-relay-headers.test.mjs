@@ -45,7 +45,13 @@ function account(onRequest) {
     snapshot: () => ({ status: "connected", account: { id: 7 }, catalog }),
     request: async (path, init) => {
       const body = typeof init.body === "string" ? init.body : Buffer.from(init.body ?? []).toString("utf8");
-      onRequest({ path, headers: Object.fromEntries(init.headers.entries()), body });
+      onRequest({
+        path,
+        headers: Object.fromEntries(init.headers.entries()),
+        body,
+        bodyType: typeof init.body,
+        bodyIsUint8Array: init.body instanceof Uint8Array,
+      });
       return new Response("{}", { status: 200, headers: { "content-type": "application/json" } });
     },
   };
@@ -93,6 +99,7 @@ test("chat forwarding keeps sidecar headers and drops the local relay key", asyn
   assert.equal(seen.headers["x-pi-mirrorcoding-key"], undefined);
   assert.equal(seen.headers.connection, undefined);
   assert.equal(seen.headers["x-mirrorcoding-group"], encodeURIComponent("fast"));
+  assert.equal(seen.bodyType, "string");
   relay.dispose();
 });
 
@@ -129,6 +136,7 @@ test("image generations JSON and edits multipart are forwarded unchanged", async
   assert.deepEqual(JSON.parse(seen.body), { model: "image-a", prompt: "cat", n: 1 });
   assert.equal(seen.body.includes("size"), false);
   assert.equal(seen.headers["x-pi-mirrorcoding-key"], undefined);
+  assert.equal(seen.bodyType, "string");
 
   const edited = await post(
     `${binding.baseUrl}/v1/images/edits`,
@@ -139,6 +147,7 @@ test("image generations JSON and edits multipart are forwarded unchanged", async
   assert.equal(seen.path, "/v1/images/edits");
   assert.equal(seen.body.includes("name=\"prompt\""), true);
   assert.equal(seen.headers["content-type"].includes("multipart/form-data"), true);
+  assert.equal(seen.bodyIsUint8Array, true);
 
   const other = await post(
     `${binding.baseUrl}/v1/images/other`,

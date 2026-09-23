@@ -14,7 +14,7 @@ import { ImageService, type ImageServiceDependencies } from "../images/service";
 import { MirrorCodingAccount } from "./account";
 import { modelMetadata } from "./catalog";
 import { MirrorCodingCredentials } from "./credentials";
-import { MirrorCodingRelay } from "./relay";
+import { MirrorCodingRelay, type MirrorCodingRelayFailure } from "./relay";
 
 type Dependencies = ImageServiceDependencies & {
   dataDir: string;
@@ -22,6 +22,7 @@ type Dependencies = ImageServiceDependencies & {
   modelsDev: ModelsDevCatalog;
   openExternal(url: string): Promise<void>;
   send(channel: string, state: unknown): void;
+  logRelayFailure?(failure: MirrorCodingRelayFailure): void;
 };
 
 export function createMirrorCodingRuntime(deps: Dependencies) {
@@ -49,7 +50,7 @@ export function createMirrorCodingRuntime(deps: Dependencies) {
     syncProviders: async (input) => { await host().call("providers.syncMirrorCoding", input); },
     changed: (state) => deps.send(IPC.event.mirrorCodingChanged, state),
   });
-  const relay = new MirrorCodingRelay(account);
+  const relay = new MirrorCodingRelay(account, deps.logRelayFailure);
   const images = new ImageService(deps, account, relay);
 
   const bindingFor = async (providerId: string, modelId: string, sessionId?: string): Promise<RuntimeProviderConfig> => {

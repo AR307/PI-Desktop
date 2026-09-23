@@ -82,6 +82,11 @@ The response preserves JSON/SSE, status, Retry-After and backpressure. Disconnec
 or Stop cancels the upstream request. Proxy settings apply to upstream requests;
 loopback requests bypass the proxy.
 
+The loopback relay passes JSON requests to Electron `net.fetch` as UTF-8 text
+and preserves multipart image edits as web-compatible byte arrays. A transport
+failure records its relay stage, provider, endpoint and sanitized nested error
+code without logging credentials or request content.
+
 Normal chat, tool continuation, compaction, title generation, prompt enhancement
 and inherited/pinned subagents use the same binding. The Google SDK uses a scoped
 global-fetch bridge because its pi adapter rejects custom fetch options; this

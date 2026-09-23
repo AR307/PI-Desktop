@@ -689,6 +689,10 @@ const mirrorCoding = createMirrorCodingRuntime({
   acquireSessionOperation: (id) => acquireSessionOperation(id), emit: (envelope) => emitAgentEvent(envelope),
   dataDir, getHost: () => host, modelsDev: modelsDevCatalog,
   openExternal: safeOpenExternal, send: sendToRenderer,
+  logRelayFailure: (failure) => logger.app("provider", "warn", "MirrorCoding relay request failed", {
+    event: "mirrorcoding.relay.failed",
+    data: failure,
+  }),
 });
 
 const mobileSync = new MobileSyncService({

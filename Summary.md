@@ -609,3 +609,24 @@ needed by an actual request rather than starting a repository-wide rewrite.
   Android preview APK. Windows artifacts are intentionally unsigned because no
   local Authenticode certificate was available; Android native emulator E2E was
   not rerun because WHPX reported too many emulator instances.
+
+### 2026-09-23 - MirrorCoding desktop relay 502 repair
+
+- Production and desktop logs showed that authorization, catalog sync and model
+  discovery were healthy, while text generation failed locally before response
+  headers. The ten retries consumed exactly the configured 63-second backoff;
+  the final request still reached MirrorCoding and completed after the client
+  had already surfaced a generic 502.
+- Restored the pre-0.15.3 text transport contract: JSON relay requests are sent
+  to Electron `net.fetch` as strings. Only multipart image edits remain binary,
+  and their Node `Buffer` is converted to a web-compatible `Uint8Array`.
+- Added privacy-safe relay failure diagnostics with request stage, provider,
+  endpoint, error name and nested transport code. Tokens, authorization headers
+  and request bodies are never logged.
+- Extended the controlled MirrorCoding recovery flow to assert the text body
+  type and reproduce an `ERR_NETWORK_CHANGED` failure at the exact upstream
+  connection stage.
+- Corrected the shared runtime version to `0.15.3`, matching the package and
+  executable metadata so future logs identify this repaired build accurately.
+- Restored the main-process credential boundary by dropping SDK API-key headers
+  before the account layer adds the MirrorCoding Bearer token.

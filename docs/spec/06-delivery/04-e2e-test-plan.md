@@ -46,7 +46,8 @@ Do not merge into local main for validation.
   with real Rust persistence and controlled local OAuth/HTTP faults. Covers
   concurrent rotation, PKCE, cancellation/timeout, network/empty catalogs,
   permission refresh, group encoding, SDK auth stripping, stop propagation,
-  account reuse/switch and offline revocation retry.
+  JSON text-body transport, staged network failure diagnostics, account
+  reuse/switch and offline revocation retry.
 
 Keep screenshots, reports and isolated profiles outside Git. Production origin
 verification requires a separately authorized run; local acceptance is not
