@@ -17,6 +17,8 @@
   workspace JavaScript build, and desktop production build passed. The full
   Agent Runtime suite still has 13 unrelated Windows native-session fixture
   failures plus a missing external coding-agent dist-root fixture.
+- Added the 0.15.3 shipped-locale release notes; the release documentation
+  check and changelog alignment tests now pass.
 
 
 ## 2026-09-23 — Full local test pass

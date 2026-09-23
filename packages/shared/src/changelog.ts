@@ -29,6 +29,16 @@ export type ChangelogEntry = {
 
 const enEntries: ChangelogEntry[] = [
   {
+    version: "0.15.3",
+    date: "2026-09-23",
+    highlights: [
+      "Fix MirrorCoding 502 failures caused by reusing a relay binding after changing models or protocols.",
+      "Keep MirrorCoding model identities, context limits, and delegated subagent providers isolated across groups.",
+      "Send text and image relay bodies with fetch-compatible types and preserve upstream failure diagnostics.",
+    ],
+  },
+
+  {
     version: "0.15.2",
     date: "2026-09-22",
     highlights: [
@@ -830,6 +840,16 @@ const enEntries: ChangelogEntry[] = [
 
 const zhCNEntries: ChangelogEntry[] = [
   {
+    version: "0.15.3",
+    date: "2026-09-23",
+    highlights: [
+      "修复 MirrorCoding 切换模型或协议后复用旧 relay 凭证导致的 502。",
+      "隔离不同分组的模型身份、上下文限制和子代理提供商，避免请求串组。",
+      "使用兼容 Fetch 的类型发送文本和图片请求体，并保留上游失败阶段诊断。",
+    ],
+  },
+
+  {
     version: "0.15.2",
     date: "2026-09-22",
     highlights: [
@@ -1630,6 +1650,16 @@ const zhCNEntries: ChangelogEntry[] = [
 ];
 
 const zhTWEntries: ChangelogEntry[] = [
+  {
+    version: "0.15.3",
+    date: "2026-09-23",
+    highlights: [
+      "修復 MirrorCoding 切換模型或協議後重用舊 relay 憑證造成的 502。",
+      "隔離不同分組的模型身分、上下文限制與子代理提供者，避免請求串組。",
+      "使用相容 Fetch 的型別傳送文字與圖片請求本文，並保留上游失敗階段診斷。",
+    ],
+  },
+
   {
     version: "0.15.2",
     date: "2026-09-22",

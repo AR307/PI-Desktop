@@ -2,6 +2,16 @@ import type { ChangelogEntry } from "./changelog.js";
 
 export const trEntries: ChangelogEntry[] = [
   {
+    "version": "0.15.3",
+    "date": "2026-09-23",
+    "highlights": [
+      "Model veya protokol değişiminden sonra uyumsuz relay bağlamasının yeniden kullanılmasından kaynaklanan MirrorCoding 502 hatalarını düzeltir.",
+      "Gruplar arasındaki model kimliklerini, bağlam sınırlarını ve devredilen alt ajan sağlayıcılarını birbirinden ayırır.",
+      "Metin ve görsel relay gövdelerini Fetch uyumlu türlerle gönderir ve upstream hata aşaması tanılamasını korur.",
+    ],
+  },
+
+  {
     "version": "0.15.2",
     "date": "2026-09-22",
     "highlights": [

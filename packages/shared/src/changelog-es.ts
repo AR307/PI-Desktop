@@ -2,6 +2,16 @@ import type { ChangelogEntry } from "./changelog.js";
 
 export const esEntries: ChangelogEntry[] = [
   {
+    "version": "0.15.3",
+    "date": "2026-09-23",
+    "highlights": [
+      "Corrige los errores 502 de MirrorCoding tras cambiar de modelo o protocolo por reutilizar enlaces relay incompatibles.",
+      "Aísla las identidades de modelo, los límites de contexto y los proveedores de subagentes delegados entre grupos.",
+      "Envía los cuerpos relay de texto e imagen con tipos compatibles con Fetch y conserva el diagnóstico de la fase upstream.",
+    ],
+  },
+
+  {
     "version": "0.15.2",
     "date": "2026-09-22",
     "highlights": [

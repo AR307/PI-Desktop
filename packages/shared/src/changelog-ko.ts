@@ -2,6 +2,16 @@ import type { ChangelogEntry } from "./changelog.js";
 
 export const koEntries: ChangelogEntry[] = [
   {
+    version: "0.15.3",
+    date: "2026-09-23",
+    highlights: [
+      "모델이나 프로토콜을 바꾼 뒤 호환되지 않는 relay 바인딩을 재사용해 발생하던 MirrorCoding 502 오류를 수정했습니다.",
+      "그룹마다 모델 ID, 컨텍스트 한도와 위임된 서브에이전트 제공자를 분리합니다.",
+      "텍스트와 이미지 relay 본문을 Fetch 호환 타입으로 보내고 upstream 오류 단계 진단을 보존합니다.",
+    ],
+  },
+
+  {
     version: "0.15.2",
     date: "2026-09-22",
     highlights: [
