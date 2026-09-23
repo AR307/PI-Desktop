@@ -12,6 +12,7 @@ import { createImageGenerationTool } from "../services/image-generation-service"
 import { registerPluginDevTools } from "../plugin-dev-tools";
 import { resolveLocalFile } from "../browser-view";
 import { modelConfigFromModelsDev } from "../models-dev-catalog";
+import { mirrorCodingModelBinding } from "../mirrorcoding/catalog";
 import { AgentSidecar } from "../agent-sidecar";
 import { OAUTH_AUTH_KIND, type VendorOAuth } from "../oauth";
 import type { AgentExtensionBridge } from "../agent-extensions";
@@ -425,7 +426,11 @@ export function createSidecarRuntime({
       );
     }
 
-    if (provider.authKind === "mirrorcoding") return mirrorCoding.bindingFor(provider.id, modelId, sessionId);
+    if (provider.authKind === "mirrorcoding") {
+      const canonical = mirrorCodingModelBinding(provider.models ?? [], modelId);
+      if (!canonical) throw new Error(`model "${modelId}" is not configured for provider "${provider.name}"`);
+      return mirrorCoding.bindingFor(provider.id, canonical.id, sessionId);
+    }
     const isVendorAccount = provider.authKind === OAUTH_AUTH_KIND;
     let apiKey = "";
     if (!isVendorAccount && provider.authKind !== "none") {

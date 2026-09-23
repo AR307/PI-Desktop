@@ -622,6 +622,23 @@ export function subagentModelKey(pin: SubagentModelPin): string {
   return `${pin.providerId}/${pin.modelId}`;
 }
 
+/**
+ * Stable provider half for a runtime delegation key. MirrorCoding exposes one
+ * provider row per group but shares the vendor label across all rows, so the
+ * row id is the only unambiguous key for a managed group. Other providers keep
+ * their existing vendor/name spelling and collision handling in the caller.
+ */
+export function subagentProviderKey(provider: {
+  id: string;
+  name: string;
+  vendorKey?: string;
+  authKind?: string;
+}): string {
+  return provider.authKind === "mirrorcoding"
+    ? provider.id
+    : provider.vendorKey ?? provider.name;
+}
+
 /** Distinct providers pinned across a definition list, capped for the same
  * reason as the definition count: each one is a live client in the sidecar. */
 export function subagentPinnedProviders(

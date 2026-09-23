@@ -7,6 +7,7 @@ import {
   isImageGenerationModel,
   normalizeMode,
   resolveBindingContextWindow,
+  subagentProviderKey,
   trustedExtensionAgentKeyFromProviderId,
   type CommandShellCatalog,
   type McpServerRecord,
@@ -322,7 +323,7 @@ export function createSessionLaunchRuntime({
         errorCode: ErrorCodes.PROVIDER_SECRET_MISSING,
       });
     }
-    const modelId = isExtensionAgent
+    const requestedModelId = isExtensionAgent
       ? overrides.modelId ?? session.modelId
       : (provider.id === requestedProviderId
         ? overrides.modelId ?? session.modelId
@@ -332,7 +333,7 @@ export function createSessionLaunchRuntime({
         : undefined) ||
       provider.models?.[0]?.id ||
       provider.defaultModelId;
-    if (!modelId) {
+    if (!requestedModelId) {
       throw Object.assign(new Error("No model selected for provider"), {
         errorCode: ErrorCodes.MODEL_NOT_CONFIGURED,
       });
@@ -340,7 +341,7 @@ export function createSessionLaunchRuntime({
     if (isImageGenerationModel(
       imageGenerationBindings(settings.imageGenerationModels, settings.imageGeneration),
       provider.id,
-      modelId,
+      requestedModelId,
     )) {
       throw Object.assign(new Error("The image model cannot be used for conversation; select a chat model"), {
         errorCode: ErrorCodes.MODEL_NOT_CONFIGURED,
@@ -351,17 +352,25 @@ export function createSessionLaunchRuntime({
     // wire APIs and gateway catalogs.
     const vendorBinding = isVendorAccount
       ? await vendorOAuth
-          .bindingFor(provider.id, modelId)
+          .bindingFor(provider.id, requestedModelId)
           .catch(() => undefined)
       : undefined;
     if (isVendorAccount && !vendorBinding) {
       throw Object.assign(
-        new Error(`Vendor account does not offer model "${modelId}"`),
+        new Error(`Vendor account does not offer model "${requestedModelId}"`),
         { errorCode: ErrorCodes.MODEL_NOT_CONFIGURED },
       );
     }
-    const storedModel = bindingForModel(provider, modelId);
-    const mirrorBinding = isMirrorCoding ? await mirrorCoding.bindingFor(provider.id, modelId, sessionId) : undefined;
+    const mirrorBinding = isMirrorCoding
+      ? await mirrorCoding.bindingFor(provider.id, requestedModelId, sessionId)
+      : undefined;
+    // MirrorCoding resolves case-insensitive pins to the exact catalog spelling
+    // used by its relay. Keep every downstream consumer on that same identity:
+    // pi-ai's request body, model metadata, persisted binding limits, and the
+    // relay's model guard must not disagree about which model is in flight.
+    const modelId = mirrorBinding?.modelId ?? requestedModelId;
+    const storedModel = bindingForModel(provider, modelId) ??
+      (modelId === requestedModelId ? undefined : bindingForModel(provider, requestedModelId));
     const apiStyle = mirrorBinding?.apiStyle ?? vendorBinding?.apiStyle ?? provider.apiStyle;
     const baseUrl = mirrorBinding?.baseUrl ?? vendorBinding?.baseUrl ?? provider.baseUrl;
     const modelsDevModel = modelsDevModelFor(provider, modelId);
@@ -530,7 +539,12 @@ export function createSessionLaunchRuntime({
       for (const binding of row.models ?? []) {
         if (!binding.availableForSubagents) continue;
         if (row.mirrorCoding?.imageModels?.[binding.id] && !row.mirrorCoding.routes[binding.id]) continue;
-        let key = `${row.vendorKey ?? row.name}/${binding.id}`;
+        // MirrorCoding has one provider row per account/group. Its vendor key
+        // is intentionally shared (`mirrorcoding`), so it cannot identify a
+        // delegation target. Use the exact row id for every managed group;
+        // otherwise the first group with a model wins and the other group's
+        // relay binding is silently skipped.
+        let key = `${subagentProviderKey(row)}/${binding.id}`;
         // Two provider rows can share a vendor alias. Opting in one row must
         // not authorize the credential-bearing pin resolved from another row.
         if (subagentBindings.providers[key]?.id && subagentBindings.providers[key].id !== row.id) {

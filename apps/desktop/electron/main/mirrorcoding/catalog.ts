@@ -79,6 +79,22 @@ export function modelMetadata(catalog: ModelsDevCatalog, modelId: string): Model
   return known ? modelConfigFromModelsDev(known) : genericModelConfig(modelId, "");
 }
 
+/**
+ * Resolve a configured MirrorCoding model to the spelling stored in the
+ * provider row. Model IDs are normally case-sensitive on the wire, but a
+ * model override can arrive from a human-authored Task pin with different
+ * casing. Returning the stored row keeps the relay route and its model
+ * settings aligned instead of handing the raw spelling to two different
+ * resolvers.
+ */
+export function mirrorCodingModelBinding(
+  models: readonly ModelBinding[],
+  requestedModelId: string,
+): ModelBinding | undefined {
+  return models.find((model) => model.id === requestedModelId) ??
+    models.find((model) => model.id.toLowerCase() === requestedModelId.toLowerCase());
+}
+
 function accountImageModelId(modelId: string): boolean {
   const id = modelId.toLowerCase();
   if (id.includes("video")) return false;

@@ -12,7 +12,7 @@ import type { HostProcess } from "../host-process";
 import type { ModelsDevCatalog } from "../models-dev-catalog";
 import { ImageService, type ImageServiceDependencies } from "../images/service";
 import { MirrorCodingAccount } from "./account";
-import { modelMetadata } from "./catalog";
+import { mirrorCodingModelBinding, modelMetadata } from "./catalog";
 import { MirrorCodingCredentials } from "./credentials";
 import { MirrorCodingRelay, type MirrorCodingRelayFailure } from "./relay";
 
@@ -57,18 +57,22 @@ export function createMirrorCodingRuntime(deps: Dependencies) {
     await account.initialize();
     const result = await host().call<{ provider?: ProviderPublic }>("providers.get", { id: providerId });
     const provider = result.provider;
-    if (!provider?.enabled || !provider.mirrorCoding || !provider.models.some((model) => model.id === modelId)) {
+    const configuredModel = provider?.models
+      ? mirrorCodingModelBinding(provider.models, modelId)
+      : undefined;
+    if (!provider?.enabled || !provider.mirrorCoding || !configuredModel) {
       throw new Error("model_or_group_unavailable");
     }
-    const binding = await relay.bind(providerId, provider.mirrorCoding, modelId, sessionId);
+    const canonicalModelId = configuredModel.id;
+    const binding = await relay.bind(providerId, provider.mirrorCoding, canonicalModelId, sessionId);
     const modelConfig = {
-      ...modelConfigWithBinding(modelMetadata(deps.modelsDev, modelId), provider.models.find((model) => model.id === modelId)),
+      ...modelConfigWithBinding(modelMetadata(deps.modelsDev, canonicalModelId), configuredModel),
       api: binding.api, baseUrl: binding.baseUrl,
     };
     const capabilities = capabilitiesFromModelConfig(modelConfig);
     return {
       id: providerId, name: provider.name, vendorKey: "mirrorcoding", authKind: "mirrorcoding",
-      modelId, ...binding, modelConfig, ...capabilities, supportedThinkingLevels: [...capabilities.supportedThinkingLevels],
+      modelId: canonicalModelId, ...binding, modelConfig, ...capabilities, supportedThinkingLevels: [...capabilities.supportedThinkingLevels],
     };
   };
 

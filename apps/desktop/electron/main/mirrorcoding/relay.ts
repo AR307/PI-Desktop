@@ -3,7 +3,7 @@ import { createServer, type IncomingMessage, type ServerResponse } from "node:ht
 import type { AddressInfo } from "node:net";
 import { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
-import { imageCapabilitySendable, type MirrorCodingProvider } from "@pi-desktop/shared";
+import { imageCapabilitySendable, type MirrorCodingEndpoint, type MirrorCodingProvider } from "@pi-desktop/shared";
 import type { MirrorCodingAccount } from "./account";
 import { ENDPOINTS } from "./catalog";
 
@@ -24,7 +24,15 @@ function upstreamHeaders(request: IncomingMessage): Headers {
   return headers;
 }
 
-type Binding = { providerId: string; metadata: MirrorCodingProvider; sessionId?: string; imageModelId?: string };
+type Binding = {
+  providerId: string;
+  metadata: MirrorCodingProvider;
+  sessionId?: string;
+  /** Text bindings are scoped to one exact model and wire endpoint. */
+  modelId?: string;
+  endpoint?: MirrorCodingEndpoint;
+  imageModelId?: string;
+};
 
 type RelayStage = "validate_request" | "read_request" | "connect_upstream" | "receive_headers" | "stream_response";
 
@@ -93,10 +101,19 @@ export class MirrorCodingRelay {
     const endpoint = metadata.routes[modelId];
     if (!endpoint) throw new Error("model_or_group_unavailable");
     const origin = await this.listen();
-    // Reuse one ephemeral credential per session/group until logout or shutdown.
-    const existing = [...this.bindings].find(([, value]) => value.providerId === providerId && value.sessionId === sessionId);
+    // Reuse one ephemeral credential only for the same session, group, model
+    // and endpoint. A session may switch models (or protocols) without making
+    // the old relay key point at the new route.
+    const existing = [...this.bindings].find(([, value]) =>
+      value.providerId === providerId &&
+      value.sessionId === sessionId &&
+      value.imageModelId === undefined &&
+      value.modelId === modelId &&
+      value.endpoint === endpoint &&
+      value.metadata.groupId === metadata.groupId,
+    );
     const key = existing?.[0] ?? randomBytes(32).toString("base64url");
-    this.bindings.set(key, { providerId, metadata, sessionId });
+    this.bindings.set(key, { providerId, metadata, sessionId, modelId, endpoint });
     return {
       baseUrl: `${origin}/${providerId}${ENDPOINTS[endpoint].prefix}`,
       apiKey: key, apiStyle: ENDPOINTS[endpoint].style,
@@ -190,11 +207,14 @@ export class MirrorCodingRelay {
           throw new Error("invalid_model_request");
         }
         const gemini = /^\/v1beta\/models\/(.+):(streamGenerateContent|generateContent)$/.exec(path);
-        const modelId = gemini ? decodeURIComponent(gemini[1]) : payload.model;
-        if (typeof modelId !== "string") throw new Error("invalid_model_request");
+        const requestedModelId = gemini ? decodeURIComponent(gemini[1]) : payload.model;
+        if (typeof requestedModelId !== "string" || requestedModelId !== selectedBinding.modelId) {
+          throw new Error("model_or_group_unavailable");
+        }
+        const modelId = requestedModelId;
         const group = state.catalog?.groups.find((entry) => entry.id === selectedBinding.metadata.groupId);
         const catalogModel = group?.models.find((entry) => entry.id === modelId);
-        const endpoint = selectedBinding.metadata.routes[modelId];
+        const endpoint = selectedBinding.endpoint;
         if (!endpoint || (endpoint === "gemini" ? !gemini : path !== ENDPOINTS[endpoint].path) ||
             !catalogModel?.supported_endpoint_types.includes(endpoint)) throw new Error("model_or_group_unavailable");
         query = gemini?.[2] === "streamGenerateContent" ? "?alt=sse" : "";

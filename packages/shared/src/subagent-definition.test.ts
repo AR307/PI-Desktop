@@ -13,6 +13,7 @@ import {
   resolveSubagentToolNames,
   subagentCanMutate,
   subagentPinnedProviders,
+  subagentProviderKey,
   subagentToolsLabel,
   type SubagentDefinition,
 } from "./subagent-definition.js";
@@ -610,6 +611,30 @@ describe("mergeSubagentDefinitions", () => {
       `agent-${MAX_SUBAGENT_DEFINITIONS}`,
       `agent-${MAX_SUBAGENT_DEFINITIONS + 1}`,
     ]);
+  });
+});
+
+describe("subagentProviderKey", () => {
+  it("separates MirrorCoding groups that share the vendor label", () => {
+    expect(
+      subagentProviderKey({
+        id: "group-openai",
+        name: "MirrorCoding 路 OpenAI",
+        vendorKey: "mirrorcoding",
+        authKind: "mirrorcoding",
+      }),
+    ).toBe("group-openai");
+  });
+
+  it("keeps ordinary provider aliases unchanged", () => {
+    expect(
+      subagentProviderKey({
+        id: "provider-1",
+        name: "Local gateway",
+        vendorKey: "custom",
+        authKind: "api_key_and_base_url",
+      }),
+    ).toBe("custom");
   });
 });
 

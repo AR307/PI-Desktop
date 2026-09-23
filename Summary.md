@@ -1,5 +1,23 @@
 # PI-Desktop project summary
 
+## 2026-09-23 - MirrorCoding relay 502 recovery
+
+- Scoped MirrorCoding relay credentials by provider, session, group, model, and
+  endpoint so model/protocol switches cannot reuse an incompatible binding.
+- Normalized MirrorCoding model IDs across the provider catalog, relay guard,
+  session launch, sidecar, and delegated subagent providers; managed groups now
+  remain distinct even when they share the `mirrorcoding` vendor key.
+- Sent text relay bodies as strings and image edit bodies as `Uint8Array`, and
+  added relay-stage/cause diagnostics for connection failures without exposing
+  request content or credentials.
+- Added regressions for cross-provider delegation, model-local context limits,
+  model/protocol binding isolation, and relay body types.
+- Validation: Shared tests 954/954, MirrorCoding relay/subagent tests 7/7,
+  MirrorCoding recovery E2E 28/28, desktop/shared/agent-runtime typechecks,
+  workspace JavaScript build, and desktop production build passed. The full
+  Agent Runtime suite still has 13 unrelated Windows native-session fixture
+  failures plus a missing external coding-agent dist-root fixture.
+
 
 ## 2026-09-23 — Full local test pass
 

@@ -35,9 +35,15 @@ const catalog = {
     id: "fast",
     models: [
       { id: "chat-a", supported_endpoint_types: ["openai"] },
+      { id: "chat-b", supported_endpoint_types: ["anthropic"] },
       { id: "image-a", supported_endpoint_types: ["image-generation"], image },
     ],
   }],
+};
+
+const multiModelMetadata = {
+  ...metadata,
+  routes: { "chat-a": "openai", "chat-b": "anthropic" },
 };
 
 function account(onRequest) {
@@ -118,6 +124,44 @@ test("image forwarding still requires the image endpoint", async () => {
   assert.equal(status, 403);
   assert.equal(seen, false);
   binding.release();
+  relay.dispose();
+});
+
+test("one session keeps separate relay bindings when it switches model or protocol", async () => {
+  const seen = [];
+  const relay = new MirrorCodingRelay(account((value) => { seen.push(value); }));
+  const chat = await relay.bind("provider-1", multiModelMetadata, "chat-a", "session-1");
+  const messages = await relay.bind("provider-1", multiModelMetadata, "chat-b", "session-1");
+  assert.notEqual(chat.apiKey, messages.apiKey);
+
+  const wrongModel = await post(
+    `${chat.baseUrl}/chat/completions`,
+    { "content-type": "application/json", "x-pi-mirrorcoding-key": chat.apiKey },
+    JSON.stringify({ model: "chat-b" }),
+  );
+  assert.equal(wrongModel, 403);
+  assert.equal(seen.length, 0);
+
+  assert.equal(
+    await post(
+      `${chat.baseUrl}/chat/completions`,
+      { "content-type": "application/json", "x-pi-mirrorcoding-key": chat.apiKey },
+      JSON.stringify({ model: "chat-a" }),
+    ),
+    200,
+  );
+  assert.equal(
+    await post(
+      `${messages.baseUrl}/v1/messages`,
+      { "content-type": "application/json", "x-pi-mirrorcoding-key": messages.apiKey },
+      JSON.stringify({ model: "chat-b" }),
+    ),
+    200,
+  );
+  assert.deepEqual(seen.map((request) => ({ path: request.path, group: request.headers["x-mirrorcoding-group"] })), [
+    { path: "/v1/chat/completions", group: "fast" },
+    { path: "/v1/messages", group: "fast" },
+  ]);
   relay.dispose();
 });
 
