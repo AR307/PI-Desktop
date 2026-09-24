@@ -38,7 +38,22 @@ export function MirrorCodingModelConfigs({ providers }: { providers: ProviderPub
   const [drafts, setDrafts] = useState<Record<string, ModelBinding>>({});
   const [saving, setSaving] = useState<string>();
 
-  if (rows.length === 0) return null;
+  if (rows.length === 0) {
+    return (
+      <section className="settings-card-block mirrorcoding-model-configs">
+        <div className="model-config-section-head">
+          <div>
+            <h3 className="settings-card-heading">{t("settings.modelConfigurations")}</h3>
+            <p className="settings-row-detail">{t("mirrorCoding.description")}</p>
+          </div>
+          <span className="provider-section-count">0</span>
+        </div>
+        <div className="settings-panel mirrorcoding-model-config-panel mirrorcoding-model-config-empty" role="status">
+          {t("mirrorCoding.empty")}
+        </div>
+      </section>
+    );
+  }
 
   const draftFor = (entry: ModelRow): ModelBinding => {
     const key = entry.provider.id + ":" + entry.binding.id;

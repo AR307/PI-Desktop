@@ -13,7 +13,7 @@
   "type": "module",
   "scripts": {
     "build:deps": "pnpm --filter '@pi-desktop/desktop^...' build",
-    "predev": "pnpm run build:deps && cargo build --manifest-path ../../Cargo.toml -p host-core",
+    "predev": "pnpm run build:deps && pnpm run bundle:runtime && cargo build --manifest-path ../../Cargo.toml -p host-core",
     "dev": "node ../../scripts/dev-electron.mjs",
     "build": "electron-vite build",
     "preview": "electron-vite preview",

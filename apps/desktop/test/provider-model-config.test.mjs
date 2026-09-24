@@ -26,6 +26,7 @@ const vendorDialogSource = await read("../src/components/settings/VendorAccountD
 const pickerSource = await read("../src/components/settings/ModelSelectionPanes.tsx");
 const filterSource = await read("../src/components/settings/model-chosen-filter.ts");
 const vendorAccountsSource = await read("../src/components/settings/VendorAccountsSection.tsx");
+const mirrorCodingConfigSource = await read("../src/components/settings/MirrorCodingModelConfigs.tsx");
 const apiSource = await read("../src/lib/api.ts");
 const catalogContractSource = await read("../../../packages/shared/src/model-catalog.ts");
 const styles = await loadStyles();
@@ -227,6 +228,12 @@ test("default model selection saves the exact model and provider", () => {
   // The summary line must resolve a configured complete wire id.
   assert.match(pageSource, /displayedChatModelId\(/);
   assert.doesNotMatch(pageSource, /\{settings\.defaultModelId \|\|/);
+});
+
+test("MirrorCoding model management remains visible before the catalog is ready", () => {
+  assert.match(mirrorCodingConfigSource, /settings\.modelConfigurations/);
+  assert.match(mirrorCodingConfigSource, /mirrorCoding\.empty/);
+  assert.doesNotMatch(mirrorCodingConfigSource, /if \(rows\.length === 0\) return null/);
 });
 
 test("the rejected catalog-browser styles are gone from the cascade", () => {

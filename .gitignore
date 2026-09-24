@@ -48,6 +48,7 @@ coverage/
 .artifacts/
 .pi-desktop/
 .pi-desktop-test/
+.dev-profile/
 .pi/
 .cc-connect/
 

@@ -1790,6 +1790,7 @@
 .model-provider-list[aria-busy="true"] .model-provider-row { cursor: default; transition: none; }
 
 .mirrorcoding-model-config-panel { padding: 0; }
+.mirrorcoding-model-config-empty { padding: 16px; color: var(--ds-text-muted); }
 .mirrorcoding-model-list { list-style: none; margin: 0; padding: 0; }
 .mirrorcoding-model-row + .mirrorcoding-model-row { border-top: 1px solid var(--ds-border-default); }
 .mirrorcoding-model-row-head {
