@@ -203,7 +203,10 @@ export class MirrorCodingRelay {
     try {
       const key = request.headers["x-pi-mirrorcoding-key"];
       const binding = typeof key === "string" ? this.bindings.get(key) : undefined;
-      if (!binding || request.method !== "POST" || request.headers.origin) {
+      // The relay is authenticated by a per-binding random key. pi-ai may
+      // attach an Origin header even though this is a sidecar request, so
+      // Origin is not a reliable browser boundary here.
+      if (!binding || request.method !== "POST") {
         response.writeHead(403).end();
         return;
       }

@@ -483,6 +483,8 @@ needed by an actual request rather than starting a repository-wide rewrite.
   renderer-side secret; their credentials remain main-process owned.
 - Forwarded provider-scoped relay headers into pi-ai chat models so Agent tool
   calls use the same main-owned MirrorCoding binding as direct image requests.
+- Removed the relay's incorrect Origin-header rejection; the per-binding
+  random key remains the sidecar authentication boundary for pi-ai requests.
 
 ## Release Candidate
 
