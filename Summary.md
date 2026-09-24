@@ -481,3 +481,12 @@ needed by an actual request rather than starting a repository-wide rewrite.
   group rows are retained during the selection transition.
 - Allowed logged-in MirrorCoding image Providers to submit without exposing a
   renderer-side secret; their credentials remain main-process owned.
+
+## Release Candidate
+
+- Windows installer: apps/desktop/release/PI-Desktop-Setup-0.15.6.exe.
+- Windows portable ZIP: apps/desktop/release/PI-Desktop-Portable-0.15.6.zip.
+- Android release APK: apps/mobile/android/app/build/outputs/apk/release/app-release-unsigned.apk.
+- Release validation used Node 24.19.0, Rust 1.90.0, Java 21 and the single
+  PiMobileQA / emulator-5554 instance. The APK is unsigned because no release
+  keystore is configured in this workspace.

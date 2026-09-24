@@ -1,4 +1,4 @@
-# Unreleased local changes
+## v0.15.6-mirrorcoding.1
 
 ## Android companion
 
@@ -44,4 +44,6 @@
 - Center welcome and running-task confirmation dialogs at normal/narrow widths.
 - Existing manual providers and vendor-account connections remain available.
 
-This is a local development change, not a published release or server deployment.
+This desktop/mobile package is published as a MirrorCoding preview. The MC
+server-side catalog, authorization and relay contract remains a separately
+deployed dependency.
