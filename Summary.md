@@ -1,5 +1,20 @@
 # PI-Desktop MirrorCoding Edition
 
+## 2026-09-24 - Dev relay and model-management fixes
+
+- The MirrorCoding model settings section now stays visible while the account
+  catalog is empty or still synchronizing, instead of disappearing entirely.
+- Desktop development startup now rebuilds the Node sidecar bundle before
+  launching Electron. This keeps the provider-scoped loopback relay header in
+  the actual runtime bundle and prevents `relay_binding_missing` responses
+  after source changes.
+- Rebuilt host-core and the sidecar against the current account-scoped
+  Provider implementation; the isolated profile now contains the account
+  projection with 12 groups and 51 models.
+- Validation: desktop typecheck, style-token lint, agent-runtime typecheck,
+  provider-binding tests 29/29, and desktop model-configuration tests 29/29
+  passed. The running Electron preview uses the rebuilt host and sidecar.
+
 ## 2026-09-24 - Model-first account provider and group-aware relay
 
 - Added a stable account-scoped MirrorCoding Provider projection alongside the
