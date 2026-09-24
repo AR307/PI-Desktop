@@ -473,3 +473,5 @@ needed by an actual request rather than starting a repository-wide rewrite.
   used by the desktop account catalog refresh.
 - Aligned Rust image-route deserialization with the shared route object shape so
   image-capable groups no longer fail whole-catalog synchronization.
+- Preserved the catalog image-model capability map in Rust Provider reads so
+  desktop and mobile image pickers can see declared generation/edit parameters.

@@ -42,6 +42,15 @@ fn mirrorcoding_sync_persists_group_and_model_bindings() {
                             "supportsChat": false,
                         }),
                     )])),
+                    image_models: Some(BTreeMap::from([(
+                        "gpt-image-1".into(),
+                        json!({
+                            "generation_path": "/v1/images/generations",
+                            "reference_path": "/v1/images/edits",
+                            "max_count": 1,
+                            "supports_chat": false,
+                        }),
+                    )])),
                 },
                 models: vec![ModelBinding {
                     id: "gpt-5".into(),
@@ -65,6 +74,16 @@ fn mirrorcoding_sync_persists_group_and_model_bindings() {
     assert_eq!(providers.len(), 1);
     assert_eq!(providers[0].auth_kind, "mirrorcoding");
     assert_eq!(providers[0].models[0].id, "gpt-5");
+    assert_eq!(
+        providers[0]
+            .mirror_coding
+            .as_ref()
+            .unwrap()
+            .image_models
+            .as_ref()
+            .unwrap()["gpt-image-1"]["reference_path"],
+        "/v1/images/edits"
+    );
 }
 
 #[test]
