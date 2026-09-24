@@ -40,6 +40,7 @@ import { ImageGenerationModelRow } from "./ImageGenerationModelRow";
 import { ProviderSetupDialog } from "./ProviderSetupDialog";
 import { useProviderReorder } from "./useProviderReorder";
 import { VendorAccountsSection } from "./VendorAccountsSection";
+import { MirrorCodingModelConfigs } from "./MirrorCodingModelConfigs";
 
 const DELETE_CONFIRM_MS = 3000;
 
@@ -162,7 +163,9 @@ export function ModelConfigPage() {
     providerServesChatModels(provider, imageGenerationCandidates);
 
   const aiProviders = useMemo(
-    () => providers.filter((provider) => provider.authKind !== OAUTH_AUTH_KIND),
+    () => providers.filter((provider) =>
+      provider.authKind !== OAUTH_AUTH_KIND && provider.authKind !== "mirrorcoding",
+    ),
     [providers],
   );
   const reorder = useProviderReorder(aiProviders, busyId !== null || testingId !== null || setupFor !== null);
@@ -569,6 +572,8 @@ export function ModelConfigPage() {
           ) : null}
         </div>
       </section>
+
+      <MirrorCodingModelConfigs providers={providers} />
 
       <section className="settings-card-block">
         <div className="model-config-section-head">

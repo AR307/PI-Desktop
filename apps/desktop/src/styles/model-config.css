@@ -1788,6 +1788,44 @@
   transition: none;
 }
 .model-provider-list[aria-busy="true"] .model-provider-row { cursor: default; transition: none; }
+
+.mirrorcoding-model-config-panel { padding: 0; }
+.mirrorcoding-model-list { list-style: none; margin: 0; padding: 0; }
+.mirrorcoding-model-row + .mirrorcoding-model-row { border-top: 1px solid var(--ds-border-default); }
+.mirrorcoding-model-row-head {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  gap: 10px;
+  border: 0;
+  background: transparent;
+  padding: 12px 14px;
+  color: var(--ds-text-primary);
+  text-align: left;
+  cursor: pointer;
+}
+.mirrorcoding-model-row-head:hover,
+.mirrorcoding-model-row-head:focus-visible { background: var(--ds-bg-hover); }
+.mirrorcoding-model-id { min-width: 0; flex: 1; overflow-wrap: anywhere; }
+.mirrorcoding-model-group-count { color: var(--ds-text-muted); font-size: var(--text-sm); }
+.mirrorcoding-model-chevron { color: var(--ds-text-muted); transition: transform 160ms ease; }
+.mirrorcoding-model-chevron.is-open { transform: rotate(180deg); }
+.mirrorcoding-model-groups { display: grid; gap: 10px; padding: 0 14px 14px; }
+.mirrorcoding-model-group-config {
+  display: grid;
+  gap: 10px;
+  border: 1px solid var(--ds-border-default);
+  border-radius: var(--radius-sm);
+  padding: 12px;
+}
+.mirrorcoding-model-group-head { display: flex; justify-content: space-between; gap: 12px; }
+.mirrorcoding-model-group-head p { margin: 3px 0 0; color: var(--ds-text-muted); font-size: var(--text-sm); }
+.mirrorcoding-model-fields { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
+.mirrorcoding-model-fields label { display: grid; gap: 5px; color: var(--ds-text-secondary); font-size: var(--text-sm); }
+.mirrorcoding-model-fields select { min-height: 32px; border: 1px solid var(--ds-border-default); border-radius: var(--radius-sm); background: var(--ds-bg-inset); color: var(--ds-text-primary); padding: 0 8px; }
+@media (max-width: 720px) {
+  .mirrorcoding-model-fields { grid-template-columns: 1fr; }
+}
 @media (prefers-reduced-motion: reduce) {
   .model-provider-row { transition: none; }
 }

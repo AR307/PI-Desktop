@@ -490,6 +490,9 @@ needed by an actual request rather than starting a repository-wide rewrite.
   detached during group selection.
 - Made local relay binding/method denials return non-secret diagnostic error
   codes instead of an empty 403 body.
+- Added a model-first MirrorCoding configuration section. Managed group rows no
+  longer appear as ordinary API-key channels; each model expands to its groups
+  and edits context, output limits and reasoning defaults per group.
 
 ## Release Candidate
 
