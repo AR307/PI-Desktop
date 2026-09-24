@@ -11,7 +11,9 @@ const hooks = registerHooks({
     return nextResolve(specifier, context);
   },
 });
-const { parseCatalog } = await import(moduleUrl.href).finally(() => hooks.deregister());
+const { compileCatalog, parseCatalog } = await import(moduleUrl.href).finally(() => hooks.deregister());
+
+const emptyModelsDev = { findModel: () => undefined };
 
 test("parses MirrorCoding catalog fields and preserves group routing data", () => {
   const catalog = parseCatalog({
@@ -90,4 +92,35 @@ test("rejects duplicate group and model identities", () => {
       ],
     },
   }), /invalid_catalog/);
+});
+
+test("only compiles declared image capabilities and keeps generation/reference routes", () => {
+  const catalog = parseCatalog({
+    success: true,
+    data: {
+      user: { id: 42, displayName: "tester" },
+      supportedEndpoints: {
+        "image-generation": { path: "/v1/images/generations", method: "POST" },
+        "image-edit": { path: "/v1/images/edits", method: "POST" },
+      },
+      groups: [{
+        id: "g-images", name: "Images", description: "", ratio: null, dynamicBilling: true,
+        models: [
+          { id: "declared", supportedEndpointTypes: ["image-generation", "image-edit"], image: {
+            generationPath: "/v1/images/generations", referencePath: "/v1/images/edits",
+          } },
+          { id: "json-reference", supportedEndpointTypes: ["image-generation"], image: {
+            generationPath: "/v1/images/generations", referencePath: "/v1/images/generations",
+          } },
+          { id: "undeclared", supportedEndpointTypes: ["image-generation"] },
+        ],
+      }],
+    },
+  });
+  const metadata = compileCatalog(catalog, emptyModelsDev).groups[0].metadata;
+  assert.deepEqual(metadata.imageRoutes, {
+    declared: { generation: "image-generation", reference: "image-edit" },
+    "json-reference": { generation: "image-generation", reference: "image-generation" },
+  });
+  assert.equal(metadata.imageRoutes?.undeclared, undefined);
 });
