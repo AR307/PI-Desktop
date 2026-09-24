@@ -455,3 +455,5 @@ needed by an actual request rather than starting a repository-wide rewrite.
   reported too many emulator instances; no AVD or lock file was removed. The
   earlier companion native run remains baseline evidence, not a claim that this
   UI revision was re-executed on Android.
+- Normalized the migrated mobile configuration sheet so image-mode controls
+  remain cleanly formatted and pass repository whitespace checks.
