@@ -457,3 +457,7 @@ needed by an actual request rather than starting a repository-wide rewrite.
   UI revision was re-executed on Android.
 - Normalized the migrated mobile configuration sheet so image-mode controls
   remain cleanly formatted and pass repository whitespace checks.
+- Added the shared mobile, image, and sync namespaces to the Portuguese locale
+  fallback so every shipped locale satisfies the catalog contract.
+- Aligned the desktop pairing dialog with the normalized MirrorCoding account
+  display-name field used by the current account state.

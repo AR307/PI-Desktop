@@ -1,6 +1,12 @@
 import type { EnglishCatalog } from "../en/index.js";
+import { mobileSyncEn } from "../mobile-sync.js";
+import { mobileEn } from "../mobile.js";
+import { imagesEn } from "../images.js";
 
 export const ptBR = {
+  mobileSync: mobileSyncEn,
+  mobile: mobileEn,
+  images: imagesEn,
   app: {
     shellName: "PI-Desktop",
     tagline: "Parceiro local de programação com IA",

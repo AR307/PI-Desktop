@@ -130,7 +130,7 @@ export function MobilePairingDialog({ target, existing, onClose }: {
           account?.status === "authorizing" ? <><p role="status">{t("mirrorCoding.authorizing")}</p><Button disabled={busy} onClick={() => void cancelLogin()}>{t("mirrorCoding.cancel")}</Button></> :
           <Button disabled={busy} onClick={() => void login()}>{t("mirrorCoding.login")}</Button>}
       </> : paired ? <p role="status" className="mobile-sync-success">{t("mobileSync.paired")}</p> : <>
-        <p>{t("mobileSync.pairInstructions", { account: account.account?.display_name ?? "MirrorCoding" })}</p>
+        <p>{t("mobileSync.pairInstructions", { account: account.account?.displayName ?? "MirrorCoding" })}</p>
         {pairing && !expired ? <>
           <output className="mobile-sync-code" aria-label={t("mobileSync.code")} data-testid="mobile-pairing-code">{pairing.code}</output>
           <p className="mobile-sync-expiry">{t("mobileSync.expires", { time: new Date(pairing.expiresAt).toLocaleTimeString(i18n.language, { hour: "2-digit", minute: "2-digit" }) })}</p>
