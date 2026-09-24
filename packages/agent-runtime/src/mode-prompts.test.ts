@@ -13,6 +13,12 @@ describe("mode-specific system prompts", () => {
     expect(prompt).toContain(PLAN_MODE_SYSTEM_PROMPT);
     expect(prompt).toContain("Inspect the workspace");
     expect(prompt).toContain("SubmitPlan");
+    expect(prompt).toContain(
+      "Before SubmitPlan, call asktool for every uncertainty that would change the plan",
+    );
+    expect(prompt).toContain(
+      "Do not call SubmitPlan in the same turn as an unanswered asktool",
+    );
     expect(prompt).toContain("When any initial or revised plan is ready");
     expect(prompt).toContain("immediately exactly once in the current turn");
     expect(prompt).toContain("one complete Markdown snapshot");

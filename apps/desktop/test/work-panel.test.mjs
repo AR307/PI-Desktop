@@ -28,6 +28,15 @@ const panelSource = await readFile(
 const transcriptSource = await readTranscriptSource();
 const storeSource = await readStoreSource();
 const globalStyles = await loadStyles();
+test("work-panel header leaves empty tab-strip space draggable", () => {
+  assert.match(panelSource, /className="work-panel-tab-strip-wrap"/);
+  assert.match(
+    panelSource,
+    /className=\{cx\(\s*"no-drag",\s*"work-panel-tab",/s,
+  );
+  assert.doesNotMatch(panelSource, /work-panel-tab-strip-wrap no-drag/);
+});
+
 test("closing a subagent panel restores focus to its transcript trigger", () => {
   assert.match(panelSource, /const closeSubagentPanelAndFocus = useCallback/);
   assert.match(panelSource, /data-subagent-trigger/);
