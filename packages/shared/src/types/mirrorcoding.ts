@@ -4,10 +4,22 @@ export const MIRRORCODING_AUTH_KIND = "mirrorcoding" as const;
 export const MIRRORCODING_ORIGIN = "https://console.mirrorcoding.xyz" as const;
 
 export type MirrorCodingEndpoint = "openai" | "openai-response" | "anthropic" | "gemini";
+export type MirrorCodingImageEndpoint = "image-generation" | "image-edit";
+
+export type MirrorCodingImageCapability = {
+  generationPath?: string;
+  referencePath?: string;
+  sizes?: string[];
+  qualities?: string[];
+  aspectRatios?: string[];
+  maxCount?: number;
+  supportsChat?: boolean;
+};
 
 export type MirrorCodingModel = {
   id: string;
   supportedEndpointTypes: string[];
+  image?: MirrorCodingImageCapability;
 };
 
 export type MirrorCodingGroup = {
@@ -33,6 +45,8 @@ export type MirrorCodingProvider = {
   ratio: number | null;
   dynamicBilling: boolean;
   routes: Record<string, MirrorCodingEndpoint>;
+  imageRoutes?: Record<string, MirrorCodingImageEndpoint>;
+  imageCapabilities?: Record<string, MirrorCodingImageCapability>;
 };
 
 export type MirrorCodingProviderGroup = {

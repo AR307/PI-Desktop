@@ -18,6 +18,8 @@ export type ImageEndpoint = {
   modelId: string;
   apiKey?: string;
   headers?: Record<string, string>;
+  /** MirrorCoding accepts reference images as JSON data URLs. */
+  jsonImages?: boolean;
 };
 
 export function imageGenerationUrl(baseUrl: string, edit = false): string {
@@ -53,7 +55,16 @@ export async function generateOneImage(
     model: endpoint.modelId, prompt, n: 1,
     ...(responseFormat ? { response_format: responseFormat } : {}),
   });
-  if (images.length) {
+  if (images.length && endpoint.jsonImages) {
+    const encodedImages = images.map((image) => ({
+      image_url: `data:${image.mimeType};base64,${Buffer.from(image.bytes).toString("base64")}`,
+    }));
+    body = JSON.stringify({
+      model: endpoint.modelId, prompt, n: 1,
+      ...(responseFormat ? { response_format: responseFormat } : {}),
+      images: encodedImages,
+    });
+  } else if (images.length) {
     const form = new FormData();
     form.set("model", endpoint.modelId);
     form.set("prompt", prompt);

@@ -36,6 +36,48 @@ test("parses MirrorCoding catalog fields and preserves group routing data", () =
   assert.deepEqual(catalog.groups[0].models[0].supportedEndpointTypes, ["openai"]);
 });
 
+test("parses documented image capability fields without inventing defaults", () => {
+  const catalog = parseCatalog({
+    success: true,
+    data: {
+      user: { id: 42, display_name: "tester" },
+      supported_endpoints: {
+        "image-generation": { path: "/v1/images/generations", method: "POST" },
+        "image-edit": { path: "/v1/images/edits", method: "POST" },
+      },
+      groups: [{
+        id: "g-images",
+        name: "Images",
+        description: "Image group",
+        ratio: null,
+        dynamic_billing: true,
+        models: [{
+          id: "gpt-image-1",
+          supported_endpoint_types: ["image-generation", "image-edit"],
+          image: {
+            generation_path: "/v1/images/generations",
+            reference_path: "/v1/images/edits",
+            sizes: ["1024x1024"],
+            qualities: ["auto", "high"],
+            aspect_ratios: ["1:1"],
+            max_count: 4,
+            supports_chat: false,
+          },
+        }],
+      }],
+    },
+  });
+  assert.deepEqual(catalog.groups[0].models[0].image, {
+    generationPath: "/v1/images/generations",
+    referencePath: "/v1/images/edits",
+    sizes: ["1024x1024"],
+    qualities: ["auto", "high"],
+    aspectRatios: ["1:1"],
+    maxCount: 4,
+    supportsChat: false,
+  });
+});
+
 test("rejects duplicate group and model identities", () => {
   assert.throws(() => parseCatalog({
     success: true,

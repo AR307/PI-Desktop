@@ -3,11 +3,17 @@ import { createServer, type IncomingMessage, type ServerResponse } from "node:ht
 import type { AddressInfo } from "node:net";
 import { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
-import type { MirrorCodingProvider } from "@pi-desktop/shared";
+import type { MirrorCodingEndpoint, MirrorCodingImageEndpoint, MirrorCodingProvider } from "@pi-desktop/shared";
 import type { MirrorCodingAccount } from "./account";
-import { ENDPOINTS } from "./catalog";
+import { ENDPOINTS, IMAGE_ENDPOINTS } from "./catalog";
 
-type Binding = { providerId: string; metadata: MirrorCodingProvider; sessionId?: string };
+type Binding = {
+  providerId: string;
+  metadata: MirrorCodingProvider;
+  sessionId?: string;
+  kind: "chat" | "image";
+  endpoint: MirrorCodingEndpoint | MirrorCodingImageEndpoint;
+};
 
 /** Main owns upstream auth; the sidecar can only use its local selected binding. */
 export class MirrorCodingRelay {
@@ -24,21 +30,41 @@ export class MirrorCodingRelay {
     });
   }
 
-  async bind(providerId: string, metadata: MirrorCodingProvider, modelId: string, sessionId?: string) {
+  private async bindInternal(
+    providerId: string,
+    metadata: MirrorCodingProvider,
+    modelId: string,
+    sessionId: string | undefined,
+    kind: "chat" | "image",
+    endpoint: MirrorCodingEndpoint | MirrorCodingImageEndpoint,
+  ) {
     const state = this.account.snapshot();
     if (state.status !== "connected" || state.account?.id !== metadata.accountId) throw new Error("reauthorization_required");
+    const origin = await this.listen();
+    // Reuse one ephemeral credential per session/group/route until logout or shutdown.
+    const existing = [...this.bindings].find(([, value]) => value.providerId === providerId && value.sessionId === sessionId && value.kind === kind && value.endpoint === endpoint);
+    const key = existing?.[0] ?? randomBytes(32).toString("base64url");
+    this.bindings.set(key, { providerId, metadata, sessionId, kind, endpoint });
+    const route = kind === "chat" ? ENDPOINTS[endpoint as MirrorCodingEndpoint] : IMAGE_ENDPOINTS[endpoint as MirrorCodingImageEndpoint];
+    return {
+      baseUrl: `${origin}/${providerId}${route.prefix}`,
+      apiKey: key, ...(kind === "chat" ? { apiStyle: ENDPOINTS[endpoint as MirrorCodingEndpoint].style, api: ENDPOINTS[endpoint as MirrorCodingEndpoint].api } : {}),
+      headers: { "x-pi-mirrorcoding-key": key },
+    };
+  }
+
+  async bind(providerId: string, metadata: MirrorCodingProvider, modelId: string, sessionId?: string) {
     const endpoint = metadata.routes[modelId];
     if (!endpoint) throw new Error("model_or_group_unavailable");
-    const origin = await this.listen();
-    // Reuse one ephemeral credential per session/group until logout or shutdown.
-    const existing = [...this.bindings].find(([, value]) => value.providerId === providerId && value.sessionId === sessionId);
-    const key = existing?.[0] ?? randomBytes(32).toString("base64url");
-    this.bindings.set(key, { providerId, metadata, sessionId });
-    return {
-      baseUrl: `${origin}/${providerId}${ENDPOINTS[endpoint].prefix}`,
-      apiKey: key, apiStyle: ENDPOINTS[endpoint].style,
-      headers: { "x-pi-mirrorcoding-key": key }, api: ENDPOINTS[endpoint].api,
-    };
+    return this.bindInternal(providerId, metadata, modelId, sessionId, "chat", endpoint);
+  }
+
+  async bindImage(providerId: string, metadata: MirrorCodingProvider, modelId: string, sessionId: string | undefined, edit: boolean) {
+    const endpoint = metadata.imageRoutes?.[modelId];
+    if (!endpoint || (edit ? endpoint !== "image-edit" : endpoint !== "image-generation")) {
+      throw new Error("model_or_group_unavailable");
+    }
+    return this.bindInternal(providerId, metadata, modelId, sessionId, "image", endpoint);
   }
 
   boundSessions(): string[] {
@@ -77,13 +103,25 @@ export class MirrorCodingRelay {
       this.requests.set(controller, binding);
       const chunks: Buffer[] = [];
       for await (const chunk of request) chunks.push(Buffer.from(chunk));
-      const body = Buffer.concat(chunks).toString("utf8");
-      const payload = JSON.parse(body) as { model?: unknown };
+      const rawBody = Buffer.concat(chunks);
+      const body = rawBody.toString("utf8");
+      const contentType = String(request.headers["content-type"] ?? "");
+      let payload: { model?: unknown } = {};
+      if (contentType.toLowerCase().includes("application/json")) {
+        payload = JSON.parse(body) as { model?: unknown };
+      } else if (contentType.toLowerCase().includes("multipart/form-data")) {
+        const model = /name="model"\r?\n\r?\n([^\r\n]+)/.exec(body)?.[1];
+        payload = { model };
+      }
       const gemini = /^\/v1beta\/models\/(.+):(streamGenerateContent|generateContent)$/.exec(path);
       const modelId = gemini ? decodeURIComponent(gemini[1]) : payload.model;
       if (typeof modelId !== "string") throw new Error("invalid_model_request");
-      const endpoint = binding.metadata.routes[modelId];
-      if (!endpoint || (endpoint === "gemini" ? !gemini : path !== ENDPOINTS[endpoint].path)) {
+      const endpoint = binding.kind === "chat" ? binding.metadata.routes[modelId] : binding.metadata.imageRoutes?.[modelId];
+      const expectedPath = binding.kind === "chat"
+        ? (binding.metadata.routes[modelId] ? ENDPOINTS[binding.metadata.routes[modelId]!].path : "")
+        : (binding.metadata.imageRoutes?.[modelId] ? IMAGE_ENDPOINTS[binding.metadata.imageRoutes[modelId]!].path : "");
+      if (!endpoint || (binding.kind === "chat" && (endpoint === "gemini" ? !gemini : path !== expectedPath)) ||
+          (binding.kind === "image" && path !== expectedPath)) {
         response.writeHead(403).end(JSON.stringify({ error: { message: "Model or group unavailable", code: "model_or_group_unavailable" } }));
         return;
       }
@@ -93,7 +131,7 @@ export class MirrorCodingRelay {
         throw new Error("model_or_group_unavailable");
       }
       const headers = new Headers({
-        "Content-Type": "application/json", Accept: "application/json, text/event-stream",
+        "Content-Type": contentType || "application/json", Accept: "application/json, text/event-stream",
         "X-Mirrorcoding-Group": encodeURIComponent(binding.metadata.groupId),
       });
       for (const name of ["anthropic-version", "anthropic-beta"]) {
@@ -101,7 +139,7 @@ export class MirrorCodingRelay {
         if (typeof value === "string") headers.set(name, value);
       }
       const query = gemini?.[2] === "streamGenerateContent" ? "?alt=sse" : "";
-      const upstream = await this.account.request(`${path}${query}`, { method: "POST", headers, body, signal: controller.signal });
+      const upstream = await this.account.request(`${path}${query}`, { method: "POST", headers, body: rawBody, signal: controller.signal });
       if (upstream.status === 403) {
         const denied = await upstream.clone().json().catch(() => null) as { error?: { code?: string; message?: string } } | null;
         if (denied?.error?.code?.includes("group") || denied?.error?.message === "The selected group is not available to this account") {

@@ -26,6 +26,8 @@ export function defaultModelOptions(
     const ids = modelIds.length > 0 ? modelIds : [defaultModelIdOf(provider)?.trim() ?? ""];
     return [...new Set(ids)].filter((modelId) => !!modelId &&
       !isImageGenerationModel(imageGeneration, provider.id, modelId),
+    ).filter((modelId) =>
+      provider.authKind !== "mirrorcoding" || Boolean(provider.mirrorCoding?.routes[modelId]),
     ).map((modelId) => ({ provider, modelId }));
   });
 }

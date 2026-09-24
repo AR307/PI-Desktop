@@ -9,7 +9,7 @@ import {
   type ProviderPublic,
 } from "@pi-desktop/shared";
 
-type ConfiguredProvider = Pick<ProviderPublic, "id" | "models" | "defaultModelId">;
+type ConfiguredProvider = Pick<ProviderPublic, "id" | "models" | "defaultModelId" | "mirrorCoding">;
 
 /** UI identity is the complete wire id, not a catalog alias or a route suffix. */
 export function sameComposerModelId(left: string, right: string): boolean {
@@ -39,6 +39,8 @@ export function composerModelsForProvider(
 ): ModelInfo[] {
   return configuredModelIds(provider).filter((modelId) =>
     !isImageGenerationModel(imageGeneration, provider.id, modelId),
+  ).filter((modelId) =>
+    provider.mirrorCoding ? Boolean(provider.mirrorCoding.routes[modelId]) : true,
   ).map((modelId) => {
     const metadata = (discovered ?? []).find((model) =>
       sameComposerModelId(model.modelId, modelId),

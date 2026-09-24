@@ -41,6 +41,7 @@ export function imageGenerationBindingAvailable(
     provider.authKind !== "oauth" &&
     !!provider.baseUrl &&
     (provider.hasSecret || provider.authKind === "none" || provider.authKind === "mirrorcoding") &&
+    (provider.authKind !== "mirrorcoding" || Boolean(provider.mirrorCoding?.imageRoutes?.[modelId])) &&
     // Mirror image-generation-service's exact availability guard. A different
     // case is a different outbound wire ID for a case-sensitive endpoint.
     provider.models.some((model) => model.id === modelId)

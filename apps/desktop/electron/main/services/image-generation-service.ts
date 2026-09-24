@@ -4,12 +4,14 @@ import { isAbsolute, join, relative, resolve } from "node:path";
 import { generateImageBatch } from "@pi-desktop/agent-runtime";
 import {
   imageGenerationPrompts,
+  imageGenerationItems,
   parseImageGenerationBinding,
   type AppSettings,
   type ProviderPublic,
 } from "@pi-desktop/shared";
 import type { HostProcess } from "../host-process";
 import type { LocalToolHandler } from "../agent-sidecar";
+import type { MirrorCodingRuntime } from "../mirrorcoding/runtime";
 import { imageInputLoader } from "./image-inputs";
 
 function failure(errorCode: string, content: string) {
@@ -26,6 +28,7 @@ export function createImageGenerationTool(options: {
   getHost: () => Pick<HostProcess, "call"> | null;
   fetchImpl?: typeof fetch;
   allowFakeIp?: () => boolean;
+  mirrorCoding?: MirrorCodingRuntime;
 }): LocalToolHandler {
   return async ({ sessionId, args, signal }) => {
     imageGenerationPrompts(args);
@@ -56,11 +59,30 @@ export function createImageGenerationTool(options: {
         "IMAGE_AUTH_UNSUPPORTED",
         "Image generation requires an API-key or no-auth service.",
       );
-    const { value } = await host.call<{ value?: string }>("providers.getSecret", {
-      id: provider.id,
-    });
-    if (provider.authKind !== "none" && !value)
-      return failure("IMAGE_AUTH_FAILED", "The image provider needs an API key.");
+    const items = imageGenerationItems(args);
+    const hasReferenceImages = items.some((item) => Boolean(item.images?.length));
+    const hasTextOnly = items.some((item) => !item.images?.length);
+    if (hasReferenceImages && hasTextOnly) {
+      return failure("IMAGE_INVALID_INPUT", "A generation batch cannot mix reference-image and text-only items.");
+    }
+    let endpoint: { baseUrl: string; modelId: string; apiKey?: string; headers?: Record<string, string>; jsonImages?: boolean };
+    if (provider.authKind === "mirrorcoding") {
+      if (!options.mirrorCoding) return failure("IMAGE_AUTH_FAILED", "MirrorCoding is not available.");
+      try {
+        const bound = await options.mirrorCoding.bindingForImage(provider.id, binding.modelId, sessionId, hasReferenceImages);
+        endpoint = { baseUrl: bound.baseUrl!, modelId: bound.modelId, apiKey: bound.apiKey, headers: bound.headers, jsonImages: true };
+      } catch (error) {
+        const code = error instanceof Error && error.message === "model_or_group_unavailable" ? "IMAGE_MODEL_UNAVAILABLE" : "IMAGE_AUTH_FAILED";
+        return failure(code, code === "IMAGE_MODEL_UNAVAILABLE" ? "The configured MirrorCoding image model or group is unavailable." : "MirrorCoding authorization is required.");
+      }
+    } else {
+      const { value } = await host.call<{ value?: string }>("providers.getSecret", {
+        id: provider.id,
+      });
+      if (provider.authKind !== "none" && !value)
+        return failure("IMAGE_AUTH_FAILED", "The image provider needs an API key.");
+      endpoint = { baseUrl: provider.baseUrl!, modelId: binding.modelId, apiKey: value, headers: provider.headers };
+    }
     const { path } = await host.call<{ path: string }>("session.getScratchPath", { sessionId });
     const root = resolve(options.dataDir, "scratch");
     const within = (base: string, target: string) => {
@@ -81,12 +103,7 @@ export function createImageGenerationTool(options: {
     if (!session) return failure("SESSION_NOT_FOUND", "The image session no longer exists.");
     const results = await generateImageBatch({
       input: args,
-      endpoint: {
-        baseUrl: provider.baseUrl,
-        modelId: binding.modelId,
-        apiKey: value,
-        headers: provider.headers,
-      },
+      endpoint,
       signal,
       fetchImpl: options.fetchImpl,
       downloadOptions: { allowFakeIp: options.allowFakeIp?.() === true },

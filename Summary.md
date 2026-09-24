@@ -41,8 +41,10 @@ Capacitor application after the desktop relay contracts are in place.
    catalog parsing, managed-provider sync, and a localhost request relay.
 2. The relay keeps MirrorCoding access/refresh tokens in Electron main and gives
    the sidecar only a per-session local key, selected route, and group header.
-3. Image work will adapt the upstream ImageService and use the same relay rather
-   than copying the old image implementation.
+3. MirrorCoding image catalog capabilities and image-generation/edit relay
+   bindings are now parsed and routed through the same local relay. Reference
+   images use the documented JSON data-URL shape, while credentials remain in
+   Electron main.
 4. Mobile-sync shared contracts and encrypted desktop device credentials are
    present, while scope enforcement, the MC relay service, Android client, and
    mobile configuration remain follow-up work.
@@ -60,8 +62,20 @@ identity with Electron `safeStorage` and writes it atomically. The optional
 `MobileSyncService` IPC seam validates pairing, cancellation, refresh, and
 grant-revocation inputs without changing the existing remote-host protocol.
 
-The relay, scope enforcement, Android client, and MC service implementation
-remain separate follow-up work.
+The relay and catalog image capability layer are present; image parameter
+validation, the desktop image mode UI, scope enforcement, Android client, and
+MC service implementation remain separate follow-up work.
+
+## Latest implementation update
+
+- Added strict parsing for MirrorCoding image generation/edit capabilities,
+  including supported sizes, qualities, aspect ratios, reference paths, and
+  maximum output count.
+- Added image route bindings to managed providers and a main-process relay path
+  for JSON generation and reference-image requests.
+- Added MirrorCoding image-model filtering to chat/default-model selection so a
+  model is only offered for a chat request when the catalog declares a chat
+  route.
 ## Validation
 
 The shared, agent-runtime, and desktop TypeScript builds pass in this worktree.

@@ -73,6 +73,10 @@ pub struct MirrorCodingProvider {
     pub ratio: Option<f64>,
     pub dynamic_billing: bool,
     pub routes: BTreeMap<String, String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub image_routes: Option<BTreeMap<String, String>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub image_capabilities: Option<BTreeMap<String, serde_json::Value>>,
 }
 
 #[derive(Debug, Deserialize)]

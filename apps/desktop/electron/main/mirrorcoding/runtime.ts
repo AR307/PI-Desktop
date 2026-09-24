@@ -63,12 +63,37 @@ export function createMirrorCodingRuntime(deps: Dependencies) {
     };
   };
 
+  const bindingForImage = async (
+    providerId: string,
+    modelId: string,
+    sessionId: string | undefined,
+    edit: boolean,
+  ): Promise<RuntimeProviderConfig> => {
+    await account.initialize();
+    const result = await host().call<{ provider?: ProviderPublic }>("providers.get", { id: providerId });
+    const provider = result.provider;
+    if (!provider?.enabled || !provider.mirrorCoding || !provider.mirrorCoding.imageRoutes?.[modelId] ||
+        !provider.models.some((model) => model.id === modelId)) {
+      throw new Error("model_or_group_unavailable");
+    }
+    const binding = await relay.bindImage(providerId, provider.mirrorCoding, modelId, sessionId, edit);
+    const modelConfig = {
+      ...modelConfigWithBinding(modelMetadata(deps.modelsDev, modelId), provider.models.find((model) => model.id === modelId)),
+      baseUrl: binding.baseUrl,
+    };
+    const capabilities = capabilitiesFromModelConfig(modelConfig);
+    return {
+      id: providerId, name: provider.name, vendorKey: "mirrorcoding", authKind: "mirrorcoding",
+      modelId, ...binding, modelConfig, ...capabilities, supportedThinkingLevels: [...capabilities.supportedThinkingLevels],
+    };
+  };
+
   const isReady = (metadata?: MirrorCodingProvider): boolean => {
     const state = account.snapshot();
     return Boolean(metadata && state.status === "connected" && state.account?.id === metadata.accountId);
   };
   return {
-    account, relay, bindingFor, isReady, completeWelcome,
+    account, relay, bindingFor, bindingForImage, isReady, completeWelcome,
     async start() { await account.initialize(); void account.refreshCatalog(); void account.retryRevocation(); },
     dispose() { account.dispose(); relay.dispose(); },
   };

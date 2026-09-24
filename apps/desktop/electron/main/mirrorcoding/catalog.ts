@@ -1,5 +1,6 @@
 import type {
-  MirrorCodingCatalog, MirrorCodingEndpoint, MirrorCodingProviderSync, ModelBinding,
+  MirrorCodingCatalog, MirrorCodingEndpoint, MirrorCodingImageEndpoint,
+  MirrorCodingProviderSync, ModelBinding,
 } from "@pi-desktop/shared";
 import { genericModelConfig, type ModelConfig } from "@pi-desktop/agent-runtime";
 import { modelConfigFromModelsDev, type ModelsDevCatalog } from "../models-dev-catalog";
@@ -11,6 +12,11 @@ export const ENDPOINTS = {
   gemini: { api: "google-generative-ai", style: "google_generative_ai", path: "/v1beta/models/{model}:generateContent", prefix: "/v1beta" },
 } as const;
 
+export const IMAGE_ENDPOINTS = {
+  "image-generation": { path: "/v1/images/generations", prefix: "/v1" },
+  "image-edit": { path: "/v1/images/edits", prefix: "/v1" },
+} as const;
+
 function record(value: unknown): Record<string, unknown> {
   if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("invalid_catalog");
   return value as Record<string, unknown>;
@@ -18,6 +24,39 @@ function record(value: unknown): Record<string, unknown> {
 function string(value: unknown): string {
   if (typeof value !== "string") throw new Error("invalid_catalog");
   return value;
+}
+
+function optionalStringArray(value: unknown): string[] | undefined {
+  if (value === undefined || value === null) return undefined;
+  if (!Array.isArray(value) || value.some((item) => typeof item !== "string" || !item.trim())) {
+    throw new Error("invalid_catalog");
+  }
+  return value.map((item) => item.trim());
+}
+
+function parseImageCapability(value: unknown): NonNullable<MirrorCodingCatalog["groups"][number]["models"][number]["image"]> | undefined {
+  if (value === undefined || value === null) return undefined;
+  const image = record(value);
+  const maxCount = image.max_count ?? image.maxCount;
+  if (maxCount !== undefined && (!Number.isInteger(maxCount) || (maxCount as number) < 1 || (maxCount as number) > 10)) {
+    throw new Error("invalid_catalog");
+  }
+  const supportsChat = image.supports_chat ?? image.supportsChat;
+  if (supportsChat !== undefined && typeof supportsChat !== "boolean") throw new Error("invalid_catalog");
+  const generationPath = image.generation_path ?? image.generationPath;
+  const referencePath = image.reference_path ?? image.referencePath;
+  for (const path of [generationPath, referencePath]) {
+    if (path !== undefined && (typeof path !== "string" || !path.startsWith("/"))) throw new Error("invalid_catalog");
+  }
+  return {
+    ...(generationPath === undefined ? {} : { generationPath: generationPath as string }),
+    ...(referencePath === undefined ? {} : { referencePath: referencePath as string }),
+    ...(optionalStringArray(image.sizes) ? { sizes: optionalStringArray(image.sizes) } : {}),
+    ...(optionalStringArray(image.qualities) ? { qualities: optionalStringArray(image.qualities) } : {}),
+    ...(optionalStringArray(image.aspect_ratios ?? image.aspectRatios) ? { aspectRatios: optionalStringArray(image.aspect_ratios ?? image.aspectRatios) } : {}),
+    ...(maxCount === undefined ? {} : { maxCount: maxCount as number }),
+    ...(supportsChat === undefined ? {} : { supportsChat: supportsChat as boolean }),
+  };
 }
 
 export function parseCatalog(value: unknown): MirrorCodingCatalog {
@@ -50,7 +89,7 @@ export function parseCatalog(value: unknown): MirrorCodingCatalog {
       const endpointTypes = model.supported_endpoint_types ?? model.supportedEndpointTypes;
       if (!modelId || seen.has(modelId) || !Array.isArray(endpointTypes)) throw new Error("invalid_catalog");
       seen.add(modelId);
-      return { id: modelId, supportedEndpointTypes: endpointTypes.map(string) };
+      return { id: modelId, supportedEndpointTypes: endpointTypes.map(string), image: parseImageCapability(model.image) };
     });
     return {
       id, name: string(group.name), description: string(group.description ?? ""),
@@ -93,6 +132,8 @@ export function compileCatalog(catalog: MirrorCodingCatalog, modelsDev: ModelsDe
     accountId: catalog.user.id,
     groups: catalog.groups.map((group) => {
       const routes: Record<string, MirrorCodingEndpoint> = {};
+      const imageRoutes: Record<string, MirrorCodingImageEndpoint> = {};
+      const imageCapabilities: NonNullable<MirrorCodingProviderSync["groups"][number]["metadata"]["imageCapabilities"]> = {};
       const models: ModelBinding[] = [];
       for (const model of group.models) {
         const config = modelMetadata(modelsDev, model.id);
@@ -102,8 +143,18 @@ export function compileCatalog(catalog: MirrorCodingCatalog, modelsDev: ModelsDe
           const advertised = catalog.supportedEndpoints[kind];
           return model.supportedEndpointTypes.includes(kind) && advertised?.method === "POST" && advertised.path === ENDPOINTS[kind].path;
         });
-        if (!endpoint) continue;
-        routes[model.id] = endpoint;
+        const imageEndpoint = (["image-edit", "image-generation"] as const).find((kind) => {
+          const advertised = catalog.supportedEndpoints[kind];
+          const declaredPath = kind === "image-edit" ? model.image?.referencePath : model.image?.generationPath;
+          return model.supportedEndpointTypes.includes(kind) && advertised?.method === "POST" && advertised.path === IMAGE_ENDPOINTS[kind].path &&
+            (!declaredPath || declaredPath === advertised.path);
+        });
+        if (!endpoint && !imageEndpoint) continue;
+        if (endpoint) routes[model.id] = endpoint;
+        if (imageEndpoint) {
+          imageRoutes[model.id] = imageEndpoint;
+          imageCapabilities[model.id] = model.image ?? {};
+        }
         models.push({
           id: model.id, contextWindow: config.contextWindow, contextWindowSource: "catalog",
           maxTokens: config.maxTokens, thinkingLevels: [...config.supportedThinkingLevels ?? []],
@@ -116,6 +167,7 @@ export function compileCatalog(catalog: MirrorCodingCatalog, modelsDev: ModelsDe
           accountId: catalog.user.id, groupId: group.id, groupName: group.name,
           description: group.description, ratio: group.dynamicBilling ? null : group.ratio,
           dynamicBilling: group.dynamicBilling, routes,
+          ...(Object.keys(imageRoutes).length ? { imageRoutes, imageCapabilities } : {}),
         }, models,
       };
     }),

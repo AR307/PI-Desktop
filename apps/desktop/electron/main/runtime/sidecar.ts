@@ -488,6 +488,7 @@ export function createSidecarRuntime({
   s.setLocalTool("GenerateImages", createImageGenerationTool({
     dataDir,
     getHost: () => runtimeState.host,
+    mirrorCoding,
     // Fake-IP tolerance belongs to the network policy, not to the proxy switch.
     allowFakeIp: () => relaxedNetworkPolicyEnabled(),
   }));
