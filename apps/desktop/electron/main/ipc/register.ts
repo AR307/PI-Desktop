@@ -289,7 +289,6 @@ export function registerIpcHandlers(dependencies: RegisterIpcDependencies) {
     bindingForModel,
   });
   registerImageIpc(registrar, mirrorCoding.images);
-  if (dependencies.mobileSync) registerMobileSyncIpc(registrar, dependencies.mobileSync);
   registerMirrorCodingIpc({
     registrar,
     runtime: mirrorCoding,
