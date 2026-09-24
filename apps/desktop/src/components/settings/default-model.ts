@@ -101,7 +101,7 @@ export function providerServesChatModels(
   imageGeneration?: ImageGenerationBindings | null,
 ): boolean {
   return provider.enabled &&
-    (provider.hasSecret || !!provider.hasOauth || provider.authKind === "none") &&
+    (provider.hasSecret || !!provider.hasOauth || provider.authKind === "none" || provider.authKind === "mirrorcoding") &&
     defaultModelOptions([provider], imageGeneration).length > 0;
 }
 

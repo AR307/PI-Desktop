@@ -29,6 +29,7 @@ import {
   resolveSubagentProviders,
   visionFromModelConfig,
   type UserSubagentDocument,
+  type RuntimeProviderConfig,
 } from "@pi-desktop/agent-runtime";
 import { builtinSkills } from "../builtin-skills";
 import { OAUTH_AUTH_KIND, type VendorOAuth } from "../oauth";
@@ -82,6 +83,11 @@ export type SessionLaunchRuntimeDependencies = {
     capabilities: ReturnType<typeof capabilitiesFromModelConfig>;
   };
   normalizeThinkingLevel: (value: unknown) => SessionThinkingLevel;
+  mirrorCodingBindingFor?: (
+    providerId: string,
+    modelId: string,
+    sessionId: string,
+  ) => Promise<RuntimeProviderConfig>;
 };
 
 export function createSessionLaunchRuntime({
@@ -99,6 +105,7 @@ export function createSessionLaunchRuntime({
   modelsDevModelFor,
   effectiveSubagentModelConfig,
   normalizeThinkingLevel,
+  mirrorCodingBindingFor,
 }: SessionLaunchRuntimeDependencies) {
   const isHostUnavailable = (error: unknown): boolean =>
     (error as { errorCode?: string } | null | undefined)?.errorCode ===
@@ -291,7 +298,7 @@ export function createSessionLaunchRuntime({
       : providers.providers.find((item) => item.id === requestedProviderId) ||
         providers.providers.find((item) => item.id === settings.defaultProviderId) ||
         providers.providers.find(
-          (item) => item.hasSecret || item.hasOauth || item.authKind === "none",
+          (item) => item.hasSecret || item.hasOauth || item.authKind === "none" || item.authKind === "mirrorcoding",
         ) ||
         providers.providers[0];
     if (!provider) {
@@ -303,12 +310,13 @@ export function createSessionLaunchRuntime({
     // extension; the host never reads or injects a secret for them.
     const isExtensionAgent = Boolean(extensionAgentKey);
     const isVendorAccount = !isExtensionAgent && provider.authKind === OAUTH_AUTH_KIND;
-    const secret = isExtensionAgent || isVendorAccount
+    const isMirrorCodingAccount = !isExtensionAgent && provider.authKind === "mirrorcoding";
+    const secret = isExtensionAgent || isVendorAccount || isMirrorCodingAccount
       ? { value: undefined }
       : await runtimeState.host!.call<{ value?: string }>("providers.getSecret", {
           id: provider.id,
         });
-    if (!secret.value && !isExtensionAgent && !isVendorAccount && provider.authKind !== "none") {
+    if (!secret.value && !isExtensionAgent && !isVendorAccount && !isMirrorCodingAccount && provider.authKind !== "none") {
       throw Object.assign(new Error("Provider API key missing"), {
         errorCode: ErrorCodes.PROVIDER_SECRET_MISSING,
       });
@@ -337,6 +345,14 @@ export function createSessionLaunchRuntime({
         errorCode: ErrorCodes.MODEL_NOT_CONFIGURED,
       });
     }
+    const mirrorCodingBinding = isMirrorCodingAccount
+      ? await mirrorCodingBindingFor?.(provider.id, modelId, sessionId)
+      : undefined;
+    if (isMirrorCodingAccount && !mirrorCodingBinding) {
+      throw Object.assign(new Error("MirrorCoding account is not ready"), {
+        errorCode: ErrorCodes.MODEL_NOT_CONFIGURED,
+      });
+    }
     // The authenticated collection owns a vendor account's available model IDs
     // and wire endpoint. models.dev owns metadata; one account can span multiple
     // wire APIs and gateway catalogs.
@@ -352,10 +368,10 @@ export function createSessionLaunchRuntime({
       );
     }
     const storedModel = bindingForModel(provider, modelId);
-    const apiStyle = vendorBinding?.apiStyle ?? provider.apiStyle;
-    const baseUrl = vendorBinding?.baseUrl ?? provider.baseUrl;
+    const apiStyle = mirrorCodingBinding?.apiStyle ?? vendorBinding?.apiStyle ?? provider.apiStyle;
+    const baseUrl = mirrorCodingBinding?.baseUrl ?? vendorBinding?.baseUrl ?? provider.baseUrl;
     const modelsDevModel = modelsDevModelFor(provider, modelId);
-    const catalogModelConfig = vendorBinding?.modelConfig ??
+    const catalogModelConfig = mirrorCodingBinding?.modelConfig ?? vendorBinding?.modelConfig ??
       (modelsDevModel
         ? modelConfigFromModelsDev(modelsDevModel, baseUrl)
         : genericModelConfig(modelId, baseUrl ?? ""));
@@ -636,11 +652,12 @@ export function createSessionLaunchRuntime({
           vendorKey: provider.vendorKey,
           baseUrl,
           modelId,
-          apiKey: secret.value || "",
+          apiKey: mirrorCodingBinding?.apiKey || secret.value || "",
           authKind: provider.authKind,
           extensionAgentKey: provider.extensionAgentKey,
           apiStyle,
           ...optionalProviderHeaders(provider.headers),
+          ...(mirrorCodingBinding?.headers ?? {}),
           supportsReasoning: thinkingCapabilities.supportsReasoning,
           supportsVision: visionFromModelConfig(modelConfig),
           supportedThinkingLevels: [...thinkingCapabilities.supportedThinkingLevels],

@@ -49,6 +49,10 @@ pub struct ProviderPublic {
     /// Sampling temperature override. `None` leaves the provider default.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub temperature: Option<f64>,
+    /// Public MirrorCoding account/group routing metadata. Credentials remain
+    /// owned by Electron main and never appear here.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mirror_coding: Option<MirrorCodingProvider>,
     /// Owning plugin id when the row came from `contributes.providers`
     /// (ADR 0259). Absent for a row the user created. A plugin-owned row is
     /// read-only in Settings: the plugin refreshes it on every load, and
@@ -57,6 +61,18 @@ pub struct ProviderPublic {
     pub owner_plugin_id: Option<String>,
     pub created_at: String,
     pub updated_at: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct MirrorCodingProvider {
+    pub account_id: i64,
+    pub group_id: String,
+    pub group_name: String,
+    pub description: String,
+    pub ratio: Option<f64>,
+    pub dynamic_billing: bool,
+    pub routes: BTreeMap<String, String>,
 }
 
 #[derive(Debug, Deserialize)]

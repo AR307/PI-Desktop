@@ -56,6 +56,9 @@ pub(crate) fn provider_from_row(
             .get::<_, String>(11)
             .ok()
             .and_then(|raw| config_limit_f64(&raw, "temperature")),
+        mirror_coding: serde_json::from_str::<serde_json::Value>(&config_raw)
+            .ok()
+            .and_then(|value| serde_json::from_value(value.get("mirrorCoding")?.clone()).ok()),
         owner_plugin_id: row.get(14)?,
         created_at: ms_to_ts(row.get(12)?),
         updated_at: ms_to_ts(row.get(13)?),

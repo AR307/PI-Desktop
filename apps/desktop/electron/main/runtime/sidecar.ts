@@ -5,6 +5,7 @@ import {
   loadInstructionChain,
   modelConfigWithBinding,
   subagentProviderLookupError,
+  type RuntimeProviderConfig,
 } from "@pi-desktop/agent-runtime";
 import { loadBuiltinSkillBody } from "../builtin-skills";
 import { createImageGenerationTool } from "../services/image-generation-service";
@@ -23,6 +24,7 @@ import type { PluginRuntime } from "../plugin-runtime";
 import type { UserMcpRuntime } from "../user-mcp";
 import type { RuntimeState } from "./context";
 import type { FinishTurn } from "./plans";
+import type { MirrorCodingRuntime } from "../mirrorcoding/runtime";
 
 export type SidecarRuntimeDependencies = {
   runtimeState: RuntimeState;
@@ -47,6 +49,7 @@ export type SidecarRuntimeDependencies = {
   dataDir: string;
   agentExtensions: AgentExtensionBridge;
   vendorOAuth: VendorOAuth;
+  mirrorCoding?: MirrorCodingRuntime;
   listRuntimeProviders: (includeDisabled?: boolean) => Promise<any[]>;
   modelsDevCatalog: ModelsDevCatalog;
   effectiveSubagentModelConfig: (...args: any[]) => any;
@@ -77,6 +80,7 @@ export function createSidecarRuntime({
   dataDir,
   agentExtensions,
   vendorOAuth,
+  mirrorCoding,
   listRuntimeProviders,
   modelsDevCatalog,
   effectiveSubagentModelConfig,
@@ -422,8 +426,9 @@ export function createSidecarRuntime({
     }
 
     const isVendorAccount = provider.authKind === OAUTH_AUTH_KIND;
+    const isMirrorCoding = provider.authKind === "mirrorcoding";
     let apiKey = "";
-    if (!isVendorAccount && provider.authKind !== "none") {
+    if (!isVendorAccount && !isMirrorCoding && provider.authKind !== "none") {
       const secret = await runtimeState.host!.call<{ value?: string }>(
         "providers.getSecret",
         { id: provider.id },
@@ -434,7 +439,14 @@ export function createSidecarRuntime({
 
     await modelsDevCatalog.ensureLoaded();
     let catalogModelConfig: Parameters<typeof modelConfigWithBinding>[0];
-    if (isVendorAccount) {
+    let managedBinding: RuntimeProviderConfig | undefined;
+    if (isMirrorCoding) {
+      if (!mirrorCoding) throw new Error("MirrorCoding runtime unavailable");
+      managedBinding = await mirrorCoding.bindingFor(provider.id, modelId, "subagent");
+      apiKey = managedBinding.apiKey;
+      catalogModelConfig = managedBinding.modelConfig ??
+        genericModelConfig(modelId, managedBinding.baseUrl ?? provider.baseUrl ?? "");
+    } else if (isVendorAccount) {
       const vendorBinding = await vendorOAuth.bindingFor(provider.id, modelId);
       if (!vendorBinding) throw new Error(`vendor "${provider.name}" does not offer "${modelId}"`);
       catalogModelConfig =
@@ -463,7 +475,9 @@ export function createSidecarRuntime({
       modelId,
       apiKey,
       ...(provider.authKind ? { authKind: provider.authKind } : {}),
-      ...(provider.apiStyle ? { apiStyle: provider.apiStyle } : {}),
+      ...(managedBinding?.baseUrl ?? provider.baseUrl ? { baseUrl: managedBinding?.baseUrl ?? provider.baseUrl } : {}),
+      ...(managedBinding?.apiStyle ?? provider.apiStyle ? { apiStyle: managedBinding?.apiStyle ?? provider.apiStyle } : {}),
+      ...(isMirrorCoding ? { headers: { ...(provider.headers ?? {}), ...(managedBinding?.headers ?? {}) } } : {}),
       supportsReasoning: capabilities.supportsReasoning,
       supportedThinkingLevels: [...capabilities.supportedThinkingLevels],
       ...(modelConfig ? { modelConfig } : {}),

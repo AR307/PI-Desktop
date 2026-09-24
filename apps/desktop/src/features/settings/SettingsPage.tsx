@@ -31,6 +31,7 @@ import {
   IconSliders,
   IconSparkles,
   IconCloudDown,
+  IconUser,
 } from "../../components/icons";
 import { Badge, Button, cx } from "../../components/ui";
 import { ModelConfigPage } from "../../components/settings/ModelConfigPage";
@@ -61,6 +62,7 @@ import { PromptEnhancementCard } from "./prompt-enhancement-card";
 import { CloseBehaviorSection, DeveloperSection } from "./developer-sections";
 import { PluginScenicThemesDestination } from "../../components/settings/PluginScenicThemesDestination";
 import { ConfigSyncPage } from "../../components/settings/ConfigSyncPage";
+import { MirrorCodingAccountPage } from "../account/MirrorCodingAccountPage";
 
 type SettingsTab = ReturnType<typeof useAppStore.getState>["settingsTab"];
 
@@ -218,6 +220,7 @@ export function SettingsPage() {
   const navItems: NavItem[] = useMemo(() => {
     const iconFor: Record<SettingsTab, ReactNode> = {
       // Semantic Lucide glyphs for the settings destinations.
+      account: <IconUser size={14} />,
       general: <IconSliders size={14} />,
       ai: <IconSparkles size={14} />,
       shortcuts: <IconKeyboard size={14} />,
@@ -392,6 +395,8 @@ export function SettingsPage() {
               ) : null}
             </div>
           ) : null}
+
+          {tab === "account" && <MirrorCodingAccountPage />}
 
           {tab === "general" && settings && (
             <div className="settings-stack">

@@ -12,6 +12,7 @@ export * from "./types/sessions.js";
 export * from "./types/agent.js";
 export * from "./types/workspace.js";
 export * from "./types/providers.js";
+export * from "./types/mirrorcoding.js";
 export * from "./types/settings.js";
 export * from "./types/plugins.js";
 export * from "./types/capabilities.js";

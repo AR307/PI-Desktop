@@ -21,6 +21,7 @@ import { api } from "../../lib/api";
 import { PortalVisibilityProvider } from "../../lib/portal-visibility";
 import { CollapsedTitlebarActions, RoutePending } from "./chrome";
 import { useAppShellRuntime } from "./useAppShellRuntime";
+import { MirrorCodingWelcome } from "../account/MirrorCodingWelcome";
 
 const SettingsPage = lazy(() =>
   import("../../pages/SettingsPage").then((module) => ({
@@ -339,6 +340,7 @@ export function AppShell() {
         <WindowControls />
       ) : null}
       <ProjectCreateDialog />
+      {ready ? <MirrorCodingWelcome /> : null}
       {splash}
       {startupRecovery}
     </div>

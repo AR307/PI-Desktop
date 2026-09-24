@@ -28,6 +28,7 @@ import {
   type McpControlInvokeInput,
 } from "../mcp-control";
 import type { ModelsDevCatalog } from "../models-dev-catalog";
+import type { MirrorCodingRuntime } from "../mirrorcoding/runtime";
 import type { AppUpdaterController } from "../updater";
 import type { HostProcess } from "../host-process";
 import type { Logger } from "../logger";
@@ -70,6 +71,7 @@ export type StartupState = {
 };
 
 export type StartupDependencies = {
+  mirrorCoding?: Pick<MirrorCodingRuntime, "start">;
   hasSingleInstanceLock: boolean;
   state: StartupState;
   dataDir: string;
@@ -140,6 +142,7 @@ export function registerApplicationStartup(deps: StartupDependencies): void {
   void app.whenReady().then(async () => {
     const {
       hasSingleInstanceLock,
+      mirrorCoding,
       state,
       dataDir,
       logger,
@@ -278,6 +281,9 @@ export function registerApplicationStartup(deps: StartupDependencies): void {
     let bootError: unknown = null;
     try {
       await bootBackends();
+      void mirrorCoding?.start().catch((error) => {
+        logger.app("provider", "warn", "MirrorCoding startup sync failed", { data: String(error) });
+      });
     } catch (error) {
       bootError = error;
       logger.app("runtime", "error", "backend boot failed", {

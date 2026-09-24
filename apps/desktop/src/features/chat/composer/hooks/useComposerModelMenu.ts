@@ -123,7 +123,7 @@ export function useComposerModelMenu({
         .filter(
           (candidate) =>
             candidate.enabled &&
-            (candidate.hasSecret || candidate.authKind === "none"),
+            (candidate.hasSecret || candidate.authKind === "none" || candidate.authKind === "mirrorcoding"),
         )
         .map((candidate) => {
           const models = composerModelsForProvider(
@@ -197,7 +197,7 @@ export function useComposerModelMenu({
   useEffect(() => {
     if (!open) return;
     for (const candidate of providers) {
-      if (candidate.enabled && (candidate.hasSecret || candidate.authKind === "none")) {
+      if (candidate.enabled && (candidate.hasSecret || candidate.authKind === "none" || candidate.authKind === "mirrorcoding")) {
         void loadProviderModels(candidate.id);
       }
     }

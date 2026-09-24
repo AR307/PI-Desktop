@@ -393,7 +393,7 @@ export function Composer({
       provider.enabled &&
       !!modelId &&
       !isImageGenerationModel(imageGenerationCandidates, provider.id, modelId) &&
-      (provider.hasSecret || provider.authKind === "none");
+      (provider.hasSecret || provider.authKind === "none" || provider.authKind === "mirrorcoding");
   const enterToSend = settings?.enterToSend ?? true;
   const hasDraftContent = Boolean(value.trim() || activeFileReferences.length);
 

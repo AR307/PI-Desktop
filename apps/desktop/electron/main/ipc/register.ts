@@ -35,8 +35,11 @@ import { registerComposerIpc } from "./composer-ipc";
 import { registerSpeechIpc } from "./speech-ipc";
 import type { IpcRegistrar } from "./types";
 import type { createTraySessions } from "../tray-sessions";
+import { registerMirrorCodingIpc } from "../mirrorcoding/ipc";
+import type { MirrorCodingRuntime } from "../mirrorcoding/runtime";
 
 export type RegisterIpcDependencies = {
+  mirrorCoding?: MirrorCodingRuntime;
   isQuitting: () => boolean;
   mobileSync?: MobileSyncService;
   ipcMain: IpcMain;
@@ -282,6 +285,18 @@ export function registerIpcHandlers(dependencies: RegisterIpcDependencies) {
     enrichProviderList,
     bindingForModel,
   });
+  if (dependencies.mirrorCoding) {
+    registerMirrorCodingIpc({
+      registrar,
+      runtime: dependencies.mirrorCoding,
+      activeTurns,
+      abort: async (sessionId) => {
+        const handler = ipcHandlers.get(IPC.invoke.agentAbort);
+        if (!handler) throw new Error("agent unavailable");
+        return handler({ sessionId });
+      },
+    });
+  }
   const loadComposerTemplatesCached = createComposerTemplateLoader(logger);
   const composerCommandService = registerComposerIpc({
     registrar,

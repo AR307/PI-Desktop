@@ -2063,6 +2063,14 @@ async fn handle_request(
                 .map_err(|e| rpc_err(1000, e.to_string(), "INTERNAL"))?;
             Ok(json!({ "providers": list }))
         }
+        "providers.syncMirrorCoding" => {
+            let input: providers::MirrorCodingProviderSync = serde_json::from_value(params)
+                .map_err(|e| rpc_err(1002, e.to_string(), "INVALID_PARAMS"))?;
+            let st = state.lock().await;
+            providers::sync_mirrorcoding(&st.db, input)
+                .map_err(|e| rpc_err(1000, e.to_string(), "INTERNAL"))?;
+            Ok(json!({ "ok": true }))
+        }
         "providers.reorder" => {
             let input: providers::ProviderReorderInput = serde_json::from_value(params)
                 .map_err(|e| rpc_err(1002, e.to_string(), "INVALID_PARAMS"))?;

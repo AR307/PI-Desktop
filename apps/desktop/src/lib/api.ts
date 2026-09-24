@@ -122,6 +122,7 @@ import type {
   TrustedExtensionStatusEvent,
   TrustedExtensionUiPrompt,
   TrustedExtensionUiPromptResponse,
+  MirrorCodingAccountState,
 } from "@pi-desktop/shared";
 import {
   defaultCommandShellForPlatform,
@@ -617,6 +618,26 @@ export const api = {
   getSettings: () => invoke<AppSettings>(IPC.invoke.settingsGet).then(normalizeSettings),
   setSettings: (settings: AppSettings) =>
     invoke(IPC.invoke.settingsSet, validateSettingsWrite(settings)),
+  mirrorCodingState: () =>
+    invoke<MirrorCodingAccountState>(IPC.invoke.mirrorCodingGetState),
+  mirrorCodingLogin: (confirmed = false) =>
+    invoke<{ confirmationRequired?: boolean; state?: MirrorCodingAccountState }>(
+      IPC.invoke.mirrorCodingLogin,
+      confirmed,
+    ),
+  mirrorCodingCancel: () =>
+    invoke<MirrorCodingAccountState>(IPC.invoke.mirrorCodingCancelLogin),
+  mirrorCodingRefresh: () =>
+    invoke<MirrorCodingAccountState>(IPC.invoke.mirrorCodingRefresh),
+  mirrorCodingLogout: (confirmed = false) =>
+    invoke<{ confirmationRequired?: boolean; state?: MirrorCodingAccountState }>(
+      IPC.invoke.mirrorCodingLogout,
+      confirmed,
+    ),
+  mirrorCodingRetryRevocation: () =>
+    invoke<MirrorCodingAccountState>(IPC.invoke.mirrorCodingRetryRevocation),
+  mirrorCodingCompleteWelcome: () =>
+    invoke<{ ok: boolean }>(IPC.invoke.mirrorCodingCompleteWelcome),
   configSyncGetState: () => invoke<ConfigSyncState>(IPC.invoke.configSyncGetState),
   configSyncConfigure: (input: ConfigSyncConfigureInput) =>
     invoke<ConfigSyncState>(IPC.invoke.configSyncConfigure, input),
@@ -1576,6 +1597,12 @@ export const api = {
     if (!window.piDesktop?.on) return () => undefined;
     return window.piDesktop.on(IPC.event.settingsChanged, (payload) =>
       listener((payload ?? {}) as Record<string, unknown>),
+    );
+  },
+  onMirrorCodingChanged: (listener: (state: MirrorCodingAccountState) => void) => {
+    if (!window.piDesktop?.on) return () => undefined;
+    return window.piDesktop.on(IPC.event.mirrorCodingChanged, (payload) =>
+      listener(payload as MirrorCodingAccountState),
     );
   },
   onConfigSyncChanged: (listener: (state: ConfigSyncState) => void) => {

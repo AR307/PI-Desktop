@@ -37,7 +37,7 @@ function providerIsReady(provider: ProviderPublic, excludedId?: string): boolean
     provider.id !== excludedId &&
     provider.enabled &&
     !!provider.defaultModelId &&
-    (provider.hasSecret || provider.hasOauth || provider.authKind === "none")
+    (provider.hasSecret || provider.hasOauth || provider.authKind === "none" || provider.authKind === "mirrorcoding")
   );
 }
 

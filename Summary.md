@@ -36,15 +36,16 @@ Capacitor application after the desktop relay contracts are in place.
 
 ## Migration status
 
-1. Audit complete. MirrorCoding account/provider, MirrorCoding image routing,
-   mobile sync/Android, mobile configuration, and window layout fixes are not
-   present in the new upstream baseline.
-2. Account/provider migration is being rebuilt against current Electron,
-   shared, and Rust contracts.
-3. Image work will adapt the upstream ImageService instead of copying the old
-   image feature tree.
-4. Mobile sync will reuse current RACP/remote-host primitives and enforce a
-   scoped project/session relay.
+1. MirrorCoding account lifecycle now uses the fixed `pi-desktop` PKCE contract,
+   safeStorage, single-flight access-token refresh, revocation retry records,
+   catalog parsing, managed-provider sync, and a localhost request relay.
+2. The relay keeps MirrorCoding access/refresh tokens in Electron main and gives
+   the sidecar only a per-session local key, selected route, and group header.
+3. Image work will adapt the upstream ImageService and use the same relay rather
+   than copying the old image implementation.
+4. Mobile-sync shared contracts and encrypted desktop device credentials are
+   present, while scope enforcement, the MC relay service, Android client, and
+   mobile configuration remain follow-up work.
 5. Window sizing, panel dragging, and Plan prompt-question behavior have been
    migrated with focused regression coverage.
 
@@ -61,3 +62,9 @@ grant-revocation inputs without changing the existing remote-host protocol.
 
 The relay, scope enforcement, Android client, and MC service implementation
 remain separate follow-up work.
+## Validation
+
+The shared, agent-runtime, and desktop TypeScript builds pass in this worktree.
+The workspace currently runs Node `22.12.0`; the repository declares
+`>=22.19.0`, so final release validation must rerun under a supported Node
+runtime. Rust validation is still pending.
