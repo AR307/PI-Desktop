@@ -7,14 +7,14 @@ import { useAppStore } from "../../stores/app-store";
 export function MirrorCodingDefault() {
   const { t } = useTranslation();
   const settings = useAppStore((state) => state.settings);
-  const providers = useAppStore((state) => state.providers).filter((provider) => provider.mirrorCoding && provider.enabled && provider.hasSecret);
+  const providers = useAppStore((state) => state.providers).filter((provider) => provider.mirrorCoding?.scope !== "account" && provider.mirrorCoding && provider.enabled);
   const models = [...new Set(providers.flatMap((provider) => Object.keys(provider.mirrorCoding?.routes ?? {})))];
   const [modelId, setModelId] = useState("");
   const [providerId, setProviderId] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(false);
   if (!settings || settings.defaultProviderId || !models.length) return null;
-  const groups = providers.filter((provider) => !!provider.mirrorCoding?.routes[modelId]);
+  const groups = providers.filter((provider) => Boolean(provider.mirrorCoding?.routes[modelId]));
   const save = async () => {
     if (!groups.some((group) => group.id === providerId)) return;
     setBusy(true); setError(false);

@@ -71,6 +71,21 @@ pub(crate) fn normalize_model_bindings(bindings: &[ModelBinding]) -> Vec<ModelBi
                 supports_documents: binding.supports_documents,
                 available_for_subagents: binding.available_for_subagents,
                 native_web_search: binding.native_web_search,
+                mirror_coding_group_id: binding
+                    .mirror_coding_group_id
+                    .as_deref()
+                    .map(str::trim)
+                    .filter(|value| !value.is_empty())
+                    .map(str::to_string),
+                temperature: binding
+                    .temperature
+                    .filter(|value| value.is_finite() && *value >= 0.0),
+                api_style: binding
+                    .api_style
+                    .as_deref()
+                    .map(str::trim)
+                    .filter(|value| !value.is_empty())
+                    .map(str::to_string),
             })
         })
         .collect()
@@ -92,6 +107,9 @@ fn legacy_model_binding(model_id: Option<String>) -> Vec<ModelBinding> {
                 supports_documents: None,
                 available_for_subagents: None,
                 native_web_search: None,
+                mirror_coding_group_id: None,
+                temperature: None,
+                api_style: None,
             }]
         })
         .unwrap_or_default()
@@ -375,6 +393,9 @@ mod tests {
             supports_documents: None,
             available_for_subagents: None,
             native_web_search: None,
+            mirror_coding_group_id: None,
+            temperature: None,
+            api_style: None,
         }
     }
 

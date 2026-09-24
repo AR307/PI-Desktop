@@ -367,7 +367,11 @@ export function createSessionLaunchRuntime({
         { errorCode: ErrorCodes.MODEL_NOT_CONFIGURED },
       );
     }
-    const storedModel = bindingForModel(provider, modelId);
+    // MirrorCoding model settings are owned by the account-level projection;
+    // group rows only select the historical route and must not override them.
+    const storedModel = isMirrorCodingAccount
+      ? (providers.providers.find((candidate) => candidate.mirrorCoding?.scope === "account" && candidate.mirrorCoding.accountId === provider.mirrorCoding?.accountId)?.models?.find((entry) => entry.id === modelId) ?? undefined)
+      : bindingForModel(provider, modelId);
     const apiStyle = mirrorCodingBinding?.apiStyle ?? vendorBinding?.apiStyle ?? provider.apiStyle;
     const baseUrl = mirrorCodingBinding?.baseUrl ?? vendorBinding?.baseUrl ?? provider.baseUrl;
     const modelsDevModel = modelsDevModelFor(provider, modelId);
@@ -385,8 +389,9 @@ export function createSessionLaunchRuntime({
       thinkingCapabilities,
       normalizeThinkingLevel(
         overrides.thinkingLevel ??
-          (provider.id === requestedProviderId ? session.thinkingLevel : undefined) ??
-          storedModel?.defaultThinkingLevel,
+        (provider.id === requestedProviderId ? session.thinkingLevel : undefined) ??
+        mirrorCodingBinding?.defaultThinkingLevel ??
+        storedModel?.defaultThinkingLevel,
       ),
     );
     const projectPath =
@@ -656,6 +661,10 @@ export function createSessionLaunchRuntime({
           authKind: provider.authKind,
           extensionAgentKey: provider.extensionAgentKey,
           apiStyle,
+          ...(mirrorCodingBinding?.temperature !== undefined ? { temperature: mirrorCodingBinding.temperature } : {}),
+          ...(mirrorCodingBinding?.defaultThinkingLevel !== undefined
+            ? { defaultThinkingLevel: mirrorCodingBinding.defaultThinkingLevel }
+            : {}),
           ...optionalProviderHeaders(provider.headers),
           ...(mirrorCodingBinding?.headers ?? {}),
           supportsReasoning: thinkingCapabilities.supportsReasoning,

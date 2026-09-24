@@ -383,6 +383,13 @@ type ThinkingLevel =
   | "max"
 ```
 
+MirrorCoding account-scoped bindings additionally persist the selected
+`mirrorCodingGroupId`, an optional model-level `temperature`, and an optional
+`apiStyle` marker. The account projection contains the union of the authorized
+catalog; retained group-scoped Provider rows remain the session route identity
+for historical sessions. Runtime settings are read from the account binding
+and the relay selects the explicit group before forwarding the request.
+
 The compatibility fields above are retained as a persisted-schema compatibility
 surface for older clients. PI-Desktop no longer reads them as runtime model
 overrides. `ModelInfo` reasoning support and supported thinking levels describe

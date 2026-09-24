@@ -464,11 +464,15 @@ export function createSidecarRuntime({
         ? modelConfigFromModelsDev(model, provider.baseUrl)
         : genericModelConfig(modelId, provider.baseUrl ?? "");
     }
-    const { modelConfig, capabilities } = effectiveSubagentModelConfig(
-      provider,
-      modelId,
-      catalogModelConfig,
-    );
+    const { modelConfig, capabilities } = managedBinding
+      ? {
+          modelConfig: managedBinding.modelConfig ?? catalogModelConfig,
+          capabilities: {
+            supportsReasoning: managedBinding.supportsReasoning,
+            supportedThinkingLevels: managedBinding.supportedThinkingLevels,
+          },
+        }
+      : effectiveSubagentModelConfig(provider, modelId, catalogModelConfig);
 
     return {
       id: provider.id,
@@ -482,6 +486,7 @@ export function createSidecarRuntime({
       ...(isMirrorCoding ? { headers: { ...(provider.headers ?? {}), ...(managedBinding?.headers ?? {}) } } : {}),
       supportsReasoning: capabilities.supportsReasoning,
       supportedThinkingLevels: [...capabilities.supportedThinkingLevels],
+      ...(managedBinding?.temperature !== undefined ? { temperature: managedBinding.temperature } : {}),
       ...(modelConfig ? { modelConfig } : {}),
     };
   });

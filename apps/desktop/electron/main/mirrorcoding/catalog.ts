@@ -188,10 +188,12 @@ export function compileCatalog(catalog: MirrorCodingCatalog, modelsDev: ModelsDe
           maxTokens: config.maxTokens, thinkingLevels: [...config.supportedThinkingLevels ?? []],
           defaultThinkingLevel: config.reasoning ? (config.supportedThinkingLevels?.includes("medium") ? "medium" : config.supportedThinkingLevels?.[0] ?? "off") : "off",
           supportsImages: config.input.includes("image"), supportsDocuments: config.modalities?.input.includes("pdf") ?? false,
+          mirrorCodingGroupId: group.id,
         });
       }
       return {
         metadata: {
+          scope: "group",
           accountId: catalog.user.id, groupId: group.id, groupName: group.name,
           description: group.description, ratio: group.dynamicBilling ? null : group.ratio,
           dynamicBilling: group.dynamicBilling, routes,

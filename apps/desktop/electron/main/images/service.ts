@@ -53,11 +53,18 @@ export class ImageService {
     if (refresh) await this.account.refreshCatalog();
     const { providers } = await this.host().call<{ providers: ProviderPublic[] }>("providers.list");
     const accountId = this.account.snapshot().account?.id;
-    return providers.filter((p) => p.enabled && p.mirrorCoding?.accountId === accountId).flatMap((p) =>
-      Object.entries(p.mirrorCoding?.imageModels ?? {}).map(([modelId, capability]) => ({
-        providerId: p.id, modelId, displayName: modelId, capability, groupName: p.mirrorCoding!.groupName,
-        description: p.mirrorCoding!.description, ratio: p.mirrorCoding!.ratio, dynamicBilling: p.mirrorCoding!.dynamicBilling,
+    return providers.filter((p) => p.enabled && p.mirrorCoding?.scope !== "account" && p.mirrorCoding?.accountId === accountId).flatMap((p) => {
+      const metadata = p.mirrorCoding!;
+      const groups = [{
+        id: metadata.groupId, name: metadata.groupName, description: metadata.description,
+        ratio: metadata.ratio, dynamicBilling: metadata.dynamicBilling,
+        imageModels: metadata.imageModels,
+      }];
+      return groups.flatMap((group) => Object.entries(group.imageModels ?? {}).map(([modelId, capability]) => ({
+        providerId: p.id, modelId, groupId: group.id, displayName: modelId, capability, groupName: group.name,
+        description: group.description, ratio: group.ratio, dynamicBilling: group.dynamicBilling,
       })));
+    });
   }
   configure(key: string, input: ImageSessionConfig): Promise<ImageSessionConfig> {
     const write = this.configWrite.then(async () => {
@@ -132,7 +139,8 @@ export class ImageService {
         this.emitMessage(request.sessionId, message, turnId);
       }
       admitted?.(jobId);
-      const binding = await this.relay.bindImage(request.providerId, provider.mirrorCoding!, request.modelId, request.sessionId);
+      const selectedGroupId = model.groupId ?? provider.models.find((binding) => binding.id === request.modelId)?.mirrorCodingGroupId;
+      const binding = await this.relay.bindImage(request.providerId, provider.mirrorCoding!, request.modelId, request.sessionId, false, selectedGroupId);
       releaseBinding = binding.release;
       job.controller.signal.throwIfAborted();
       job.sidecar = this.deps.getSidecar() ?? undefined;

@@ -369,6 +369,12 @@ pub fn update_provider(
             now_ms(),
             input.id
         ])?;
+    if let (Some(metadata), Some(models)) = (current.mirror_coding.as_ref(), input.models.as_ref())
+    {
+        if metadata.scope.as_deref() == Some("account") {
+            super::mirrorcoding::project_account_model_settings(db, metadata.account_id, models)?;
+        }
+    }
     get_provider(db, secrets, &input.id)
 }
 

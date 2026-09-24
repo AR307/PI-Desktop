@@ -19,6 +19,7 @@ fn mirrorcoding_sync_persists_group_and_model_bindings() {
             account_id: Some(901),
             groups: vec![MirrorCodingGroupSync {
                 metadata: MirrorCodingProvider {
+                    scope: Some("group".into()),
                     account_id: 901,
                     group_id: "group-1".into(),
                     group_name: "Group 1".into(),
@@ -51,6 +52,7 @@ fn mirrorcoding_sync_persists_group_and_model_bindings() {
                             "supports_chat": false,
                         }),
                     )])),
+                    groups: None,
                 },
                 models: vec![ModelBinding {
                     id: "gpt-5".into(),
@@ -64,6 +66,9 @@ fn mirrorcoding_sync_persists_group_and_model_bindings() {
                     supports_documents: None,
                     available_for_subagents: None,
                     native_web_search: None,
+                    mirror_coding_group_id: Some("group-1".into()),
+                    temperature: None,
+                    api_style: None,
                 }],
             }],
         },
@@ -71,11 +76,36 @@ fn mirrorcoding_sync_persists_group_and_model_bindings() {
     .unwrap();
 
     let providers = list_providers(&db, &secrets, true).unwrap();
-    assert_eq!(providers.len(), 1);
-    assert_eq!(providers[0].auth_kind, "mirrorcoding");
-    assert_eq!(providers[0].models[0].id, "gpt-5");
+    assert_eq!(providers.len(), 2);
+    let account = providers
+        .iter()
+        .find(|provider| {
+            provider
+                .mirror_coding
+                .as_ref()
+                .and_then(|meta| meta.scope.as_deref())
+                == Some("account")
+        })
+        .unwrap();
+    assert_eq!(account.auth_kind, "mirrorcoding");
+    assert_eq!(account.models[0].id, "gpt-5");
     assert_eq!(
-        providers[0]
+        account.models[0].mirror_coding_group_id.as_deref(),
+        Some("group-1")
+    );
+    assert_eq!(
+        account
+            .mirror_coding
+            .as_ref()
+            .unwrap()
+            .groups
+            .as_ref()
+            .unwrap()
+            .len(),
+        1
+    );
+    assert_eq!(
+        account
             .mirror_coding
             .as_ref()
             .unwrap()
@@ -84,6 +114,88 @@ fn mirrorcoding_sync_persists_group_and_model_bindings() {
             .unwrap()["gpt-image-1"]["reference_path"],
         "/v1/images/edits"
     );
+}
+
+#[test]
+fn mirrorcoding_account_model_settings_project_to_groups_and_survive_refresh() {
+    let (_dir, db, secrets) = test_context();
+    let catalog = json!({
+        "accountId": 901,
+        "groups": [
+            {
+                "metadata": {
+                    "scope": "group", "accountId": 901, "groupId": "cn-fast",
+                    "groupName": "Fast", "description": "Fast group", "ratio": 0.06,
+                    "dynamicBilling": false, "routes": {"gpt-5": "openai"}
+                },
+                "models": [{"id": "gpt-5", "contextWindow": 128000,
+                    "maxTokens": 8192, "thinkingLevels": ["off", "medium"],
+                    "defaultThinkingLevel": "medium", "mirrorCodingGroupId": "cn-fast"}]
+            },
+            {
+                "metadata": {
+                    "scope": "group", "accountId": 901, "groupId": "premium",
+                    "groupName": "Premium", "description": "Premium group", "ratio": 1.2,
+                    "dynamicBilling": false, "routes": {"gpt-5": "openai-response"}
+                },
+                "models": [{"id": "gpt-5", "contextWindow": 128000,
+                    "maxTokens": 8192, "thinkingLevels": ["off", "medium"],
+                    "defaultThinkingLevel": "medium", "mirrorCodingGroupId": "premium"}]
+            }
+        ]
+    });
+    let sync = || {
+        sync_mirrorcoding(
+            &db,
+            serde_json::from_value::<MirrorCodingProviderSync>(catalog.clone()).unwrap(),
+        )
+        .unwrap();
+    };
+    sync();
+    let before = list_providers(&db, &secrets, true).unwrap();
+    let account = before
+        .iter()
+        .find(|provider| {
+            provider.mirror_coding.as_ref().unwrap().scope.as_deref() == Some("account")
+        })
+        .unwrap();
+    let mut edited = account.models.clone();
+    edited[0].context_window = 200_000;
+    edited[0].max_tokens = 12_000;
+    edited[0].temperature = Some(0.7);
+    edited[0].mirror_coding_group_id = Some("premium".into());
+    let input: ProviderUpdateInput = serde_json::from_value(json!({
+        "id": account.id,
+        "models": edited,
+    }))
+    .unwrap();
+    update_provider(&db, &secrets, input).unwrap();
+    let updated = list_providers(&db, &secrets, true).unwrap();
+    for group in updated.iter().filter(|provider| {
+        provider.mirror_coding.as_ref().unwrap().scope.as_deref() != Some("account")
+    }) {
+        assert_eq!(group.models[0].context_window, 200_000);
+        assert_eq!(group.models[0].max_tokens, 12_000);
+        assert_eq!(group.models[0].temperature, Some(0.7));
+        assert_eq!(
+            group.models[0].mirror_coding_group_id.as_deref(),
+            Some(group.mirror_coding.as_ref().unwrap().group_id.as_str())
+        );
+    }
+    sync();
+    let refreshed = list_providers(&db, &secrets, true).unwrap();
+    let account = refreshed
+        .iter()
+        .find(|provider| {
+            provider.mirror_coding.as_ref().unwrap().scope.as_deref() == Some("account")
+        })
+        .unwrap();
+    assert_eq!(
+        account.models[0].mirror_coding_group_id.as_deref(),
+        Some("premium")
+    );
+    assert_eq!(account.models[0].temperature, Some(0.7));
+    assert_eq!(account.models[0].context_window, 200_000);
 }
 
 #[test]
@@ -248,6 +360,9 @@ fn model_bindings_roundtrip_and_legacy_model_migrates_on_read() {
                     supports_documents: None,
                     available_for_subagents: Some(true),
                     native_web_search: None,
+                    mirror_coding_group_id: None,
+                    temperature: None,
+                    api_style: None,
                 },
                 ModelBinding {
                     id: "plain-model".into(),
@@ -261,6 +376,9 @@ fn model_bindings_roundtrip_and_legacy_model_migrates_on_read() {
                     supports_documents: Some(false),
                     available_for_subagents: None,
                     native_web_search: None,
+                    mirror_coding_group_id: None,
+                    temperature: None,
+                    api_style: None,
                 },
             ]),
             default_model_id: None,
@@ -368,6 +486,9 @@ fn binding_with_alias(id: &str, alias: Option<&str>) -> ModelBinding {
         supports_documents: None,
         available_for_subagents: None,
         native_web_search: None,
+        mirror_coding_group_id: None,
+        temperature: None,
+        api_style: None,
     }
 }
 
@@ -1264,6 +1385,9 @@ fn binding_with_limits(id: &str, context_window: u32, max_tokens: u32) -> ModelB
         supports_documents: None,
         available_for_subagents: None,
         native_web_search: None,
+        mirror_coding_group_id: None,
+        temperature: None,
+        api_style: None,
     }
 }
 

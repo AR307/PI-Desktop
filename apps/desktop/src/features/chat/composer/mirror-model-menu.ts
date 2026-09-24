@@ -15,13 +15,15 @@ export function collapseMirrorCodingGroups<
   const managed = groups.filter((group) => group.provider.mirrorCoding);
   const regular = groups.filter((group) => !group.provider.mirrorCoding);
   if (!managed.length) return [...regular];
+  const legacy = managed.filter((group) => group.provider.mirrorCoding?.scope !== "account");
+  const source = legacy.length ? legacy : managed;
   const seen = new Set<string>();
-  const models = managed.flatMap((group) => group.models).filter((model) => {
+  const models = source.flatMap((group) => group.models).filter((model) => {
     if (seen.has(model.modelId)) return false;
     seen.add(model.modelId);
     return true;
   });
-  const first = managed[0]!;
+  const first = source[0]!;
   return [{
     ...first,
     providerDisplayName: "MirrorCoding",
@@ -36,7 +38,7 @@ export function mirrorGroupsForModel<
 >(groups: readonly TGroup[], modelId: string | null | undefined): TGroup[] {
   if (!modelId) return [];
   return groups.filter((group) =>
-    Boolean(group.provider.mirrorCoding) &&
+    Boolean(group.provider.mirrorCoding && group.provider.mirrorCoding.scope !== "account") &&
     group.models.some((model) => model.modelId === modelId),
   );
 }

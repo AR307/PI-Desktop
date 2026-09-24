@@ -107,10 +107,10 @@ test("only compiles declared image capabilities and keeps generation/reference r
         id: "g-images", name: "Images", description: "", ratio: null, dynamicBilling: true,
         models: [
           { id: "declared", supportedEndpointTypes: ["image-generation", "image-edit"], image: {
-            generationPath: "/v1/images/generations", referencePath: "/v1/images/edits",
+            generationPath: "/v1/images/generations", referencePath: "/v1/images/edits", max_count: 1, supports_chat: false,
           } },
           { id: "json-reference", supportedEndpointTypes: ["image-generation"], image: {
-            generationPath: "/v1/images/generations", referencePath: "/v1/images/generations",
+            generationPath: "/v1/images/generations", referencePath: "/v1/images/generations", max_count: 1, supports_chat: false,
           } },
           { id: "undeclared", supportedEndpointTypes: ["image-generation"] },
         ],

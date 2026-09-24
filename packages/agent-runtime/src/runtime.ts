@@ -1921,6 +1921,9 @@ Delegation rules:
           withOpenCodeSessionHeaders(
             {
               ...options,
+              ...(this.provider.temperature !== undefined && options?.temperature === undefined
+                ? { temperature: this.provider.temperature }
+                : {}),
               maxRetries: PROVIDER_REQUEST_MAX_RETRIES,
               sessionId: this.sessionId,
               // pi-ai only exposes onResponse after a request succeeds. Capture the

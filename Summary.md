@@ -1,5 +1,27 @@
 # PI-Desktop MirrorCoding Edition
 
+## 2026-09-24 - Model-first account provider and group-aware relay
+
+- Added a stable account-scoped MirrorCoding Provider projection alongside the
+  existing per-group rows. The account row aggregates every authorized model
+  and group, while group rows remain available for historical session routing.
+- Extended `ModelBinding` with the selected MirrorCoding group, model-level
+  temperature, and protocol metadata. Account model settings now own context,
+  output, reasoning defaults, and temperature; runtime launches apply those
+  values even when the session uses a retained group row.
+- Updated the Electron relay to resolve `model + groupId`, inject the selected
+  group header, validate current catalog access, and route chat/image requests
+  through the authenticated MirrorCoding account. Mobile and image catalogs
+  use the same group projection.
+- Reworked the MirrorCoding model settings section around account-level models
+  and group choices, added localized group/default labels and a temperature
+  field, and kept ordinary API-key/vendor providers unchanged.
+- Validation: shared tests 1032/1032, i18n tests 27/27, desktop model-config
+  tests 28/28, desktop typecheck, shared/agent-runtime builds, Rust fmt, and
+  the focused host-core synchronization test passed. Full host-core clippy
+  remains blocked by four existing warnings outside this change; one stale
+  MirrorCoding catalog fixture still omits required image capability fields.
+
 ## 2026-09-21 - Android companion implementation
 
 - Added the MC-team requirements handoff, scoped online-sync domain spec and

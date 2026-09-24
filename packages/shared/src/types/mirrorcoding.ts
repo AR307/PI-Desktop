@@ -22,6 +22,19 @@ export type MirrorCodingImageCapability = {
   supportsChat?: boolean;
 };
 
+/** Route and billing information for one authorized account group. */
+export type MirrorCodingGroupRoute = {
+  id: string;
+  name: string;
+  description: string;
+  ratio: number | null;
+  dynamicBilling: boolean;
+  routes: Record<string, MirrorCodingEndpoint>;
+  imageRoutes?: Record<string, MirrorCodingImageRoutes>;
+  imageCapabilities?: Record<string, MirrorCodingImageCapability>;
+  imageModels?: Record<string, ImageGenerationCapability>;
+};
+
 export type MirrorCodingModel = {
   id: string;
   supportedEndpointTypes: string[];
@@ -44,6 +57,9 @@ export type MirrorCodingCatalog = {
 };
 
 export type MirrorCodingProvider = {
+  /** Group rows are retained for historical sessions; account rows are the
+   * model-first provider used for new selections. */
+  scope?: "group" | "account";
   accountId: number;
   groupId: string;
   groupName: string;
@@ -54,6 +70,8 @@ export type MirrorCodingProvider = {
   imageRoutes?: Record<string, MirrorCodingImageRoutes>;
   imageCapabilities?: Record<string, MirrorCodingImageCapability>;
   imageModels?: Record<string, ImageGenerationCapability>;
+  /** All groups available to an account-level provider. */
+  groups?: MirrorCodingGroupRoute[];
 };
 
 export type MirrorCodingProviderGroup = {

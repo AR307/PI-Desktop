@@ -56,18 +56,29 @@ export function createMirrorCodingRuntime(deps: Dependencies) {
     await account.initialize();
     const result = await host().call<{ provider?: ProviderPublic }>("providers.get", { id: providerId });
     const provider = result.provider;
-    if (!provider?.enabled || !provider.mirrorCoding || !provider.models.some((model) => model.id === modelId)) {
+    if (!provider?.enabled || !provider.mirrorCoding) {
       throw new Error("model_or_group_unavailable");
     }
-    const binding = await relay.bind(providerId, provider.mirrorCoding, modelId, sessionId);
+    const providers = await host().call<{ providers: ProviderPublic[] }>("providers.list", { includeDisabled: false });
+    const accountProvider = provider.mirrorCoding.scope === "account"
+      ? provider
+      : providers.providers.find((candidate) => candidate.mirrorCoding?.scope === "account" && candidate.mirrorCoding.accountId === provider.mirrorCoding?.accountId);
+    const model = accountProvider?.models.find((entry) => entry.id === modelId) ?? provider.models.find((entry) => entry.id === modelId);
+    if (!model) throw new Error("model_or_group_unavailable");
+    const groupId = provider.mirrorCoding.scope === "account"
+      ? model.mirrorCodingGroupId
+      : provider.mirrorCoding.groupId;
+    const binding = await relay.bind(providerId, provider.mirrorCoding, modelId, sessionId, groupId);
     const modelConfig = {
-      ...modelConfigWithBinding(modelMetadata(deps.modelsDev, modelId), provider.models.find((model) => model.id === modelId)),
+      ...modelConfigWithBinding(modelMetadata(deps.modelsDev, modelId), model),
       api: binding.api, baseUrl: binding.baseUrl,
     };
     const capabilities = capabilitiesFromModelConfig(modelConfig);
     return {
       id: providerId, name: provider.name, vendorKey: "mirrorcoding", authKind: "mirrorcoding",
-      modelId, ...binding, modelConfig, ...capabilities, supportedThinkingLevels: [...capabilities.supportedThinkingLevels],
+      modelId, ...binding, modelConfig, temperature: model.temperature,
+      defaultThinkingLevel: model.defaultThinkingLevel,
+      ...capabilities, supportedThinkingLevels: [...capabilities.supportedThinkingLevels],
     };
   };
 
@@ -80,19 +91,28 @@ export function createMirrorCodingRuntime(deps: Dependencies) {
     await account.initialize();
     const result = await host().call<{ provider?: ProviderPublic }>("providers.get", { id: providerId });
     const provider = result.provider;
-    if (!provider?.enabled || !provider.mirrorCoding || !provider.mirrorCoding.imageRoutes?.[modelId] ||
-        !provider.models.some((model) => model.id === modelId)) {
+    const providers = provider
+      ? await host().call<{ providers: ProviderPublic[] }>("providers.list", { includeDisabled: false })
+      : { providers: [] };
+    const accountProvider = provider?.mirrorCoding?.scope === "account"
+      ? provider
+      : providers.providers.find((candidate) => candidate.mirrorCoding?.scope === "account" && candidate.mirrorCoding.accountId === provider?.mirrorCoding?.accountId);
+    const model = accountProvider?.models.find((entry) => entry.id === modelId) ?? provider?.models.find((entry) => entry.id === modelId);
+    if (!provider?.enabled || !provider.mirrorCoding || !model) {
       throw new Error("model_or_group_unavailable");
     }
-    const binding = await relay.bindImage(providerId, provider.mirrorCoding, modelId, sessionId, edit);
+    const groupId = provider.mirrorCoding.scope === "account" ? model.mirrorCodingGroupId : provider.mirrorCoding.groupId;
+    const binding = await relay.bindImage(providerId, provider.mirrorCoding, modelId, sessionId, edit, groupId);
     const modelConfig = {
-      ...modelConfigWithBinding(modelMetadata(deps.modelsDev, modelId), provider.models.find((model) => model.id === modelId)),
+      ...modelConfigWithBinding(modelMetadata(deps.modelsDev, modelId), model),
       baseUrl: binding.baseUrl,
     };
     const capabilities = capabilitiesFromModelConfig(modelConfig);
     return {
       id: providerId, name: provider.name, vendorKey: "mirrorcoding", authKind: "mirrorcoding",
-      modelId, ...binding, modelConfig, ...capabilities, supportedThinkingLevels: [...capabilities.supportedThinkingLevels],
+      modelId, ...binding, modelConfig, temperature: model.temperature,
+      defaultThinkingLevel: model.defaultThinkingLevel,
+      ...capabilities, supportedThinkingLevels: [...capabilities.supportedThinkingLevels],
     };
   };
 

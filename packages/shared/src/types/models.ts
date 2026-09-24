@@ -223,6 +223,12 @@ export type ModelBinding = {
    * knowledge of the endpoint is the only source.
    */
   nativeWebSearch?: boolean;
+  /** Selected MirrorCoding group for this model on an account-level provider. */
+  mirrorCodingGroupId?: string;
+  /** Model-level sampling override; absent leaves the adapter default. */
+  temperature?: number;
+  /** Model-level wire protocol override when the catalog exposes more than one. */
+  apiStyle?: string;
 };
 
 export const MODEL_MODALITIES = ["text", "image", "audio", "video", "pdf"] as const;

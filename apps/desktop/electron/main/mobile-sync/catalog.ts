@@ -26,14 +26,15 @@ export async function buildMobileModelCatalog({ host, images, isMirrorCodingRead
   ]);
   const chat: MobileModelChoice[] = [];
   for (const provider of providers ?? []) {
-    if (!provider.enabled || (provider.mirrorCoding
+    if (!provider.enabled || provider.mirrorCoding?.scope === "account" || (provider.mirrorCoding
       ? !isMirrorCodingReady(provider.mirrorCoding)
       : !provider.hasSecret && !provider.hasOauth && provider.authKind !== "none")) continue;
     const bindings = normalizedBindings(provider);
     for (const binding of bindings) {
-      const mirrorRoute = provider.mirrorCoding?.routes[binding.id];
+      const legacyGroup = provider.mirrorCoding;
+      const mirrorRoute = legacyGroup?.routes[binding.id];
       if (provider.mirrorCoding && !mirrorRoute) continue;
-      const image = provider.mirrorCoding?.imageModels?.[binding.id];
+      const image = legacyGroup?.imageModels?.[binding.id];
       const modalitiesInput: ModelModality[] = ["text"];
       if (binding.supportsImages === true) modalitiesInput.push("image");
       chat.push({

@@ -21,6 +21,8 @@ export type ImageSessionConfig = {
 export type ImageModelInfo = {
   providerId: string;
   modelId: string;
+  /** Selected MirrorCoding group when the provider is account-scoped. */
+  groupId?: string;
   displayName: string;
   groupName: string;
   description: string;

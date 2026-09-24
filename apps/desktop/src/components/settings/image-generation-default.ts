@@ -36,7 +36,7 @@ export function imageGenerationBindingAvailable(
   provider: ProviderPublic | undefined,
   modelId: string,
 ): boolean {
-  if (!provider || !provider.enabled) return false;
+  if (!provider || !provider.enabled || provider.mirrorCoding?.scope === "account") return false;
   return (
     provider.authKind !== "oauth" &&
     !!provider.baseUrl &&

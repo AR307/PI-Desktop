@@ -8,6 +8,7 @@ import {
   validateSpeechSettings,
   type CommandShellId,
   type ModelBinding,
+  type MirrorCodingProvider,
   type SessionThinkingLevel,
 } from "@pi-desktop/shared";
 import {
@@ -47,6 +48,7 @@ export type RuntimeProvider = {
   headers?: Record<string, string>;
   enabled?: boolean;
   supportsVision?: boolean;
+  mirrorCoding?: MirrorCodingProvider;
 };
 
 export type RuntimeSession = {

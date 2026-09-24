@@ -74,9 +74,32 @@ pub struct MirrorCodingImageRoute {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct MirrorCodingProvider {
+    /// `group` rows are retained for historical sessions; `account` is the
+    /// model-first provider projected from the complete authorized catalog.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub scope: Option<String>,
     pub account_id: i64,
     pub group_id: String,
     pub group_name: String,
+    pub description: String,
+    pub ratio: Option<f64>,
+    pub dynamic_billing: bool,
+    pub routes: BTreeMap<String, String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub image_routes: Option<BTreeMap<String, MirrorCodingImageRoute>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub image_capabilities: Option<BTreeMap<String, serde_json::Value>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub image_models: Option<BTreeMap<String, serde_json::Value>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub groups: Option<Vec<MirrorCodingGroupRoute>>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct MirrorCodingGroupRoute {
+    pub id: String,
+    pub name: String,
     pub description: String,
     pub ratio: Option<f64>,
     pub dynamic_billing: bool,
@@ -149,7 +172,7 @@ pub struct ProviderUpdateInput {
     pub enabled: Option<bool>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct ModelBinding {
     pub id: String,
@@ -193,7 +216,18 @@ pub struct ModelBinding {
     /// default because models.dev does not publish hosted-tool capability.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub native_web_search: Option<bool>,
+    /// Selected MirrorCoding group for an account-level provider.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mirror_coding_group_id: Option<String>,
+    /// Model-level sampling override. Absent leaves the adapter default.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub temperature: Option<f64>,
+    /// Model-level wire protocol override.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub api_style: Option<String>,
 }
+
+impl Eq for ModelBinding {}
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]

@@ -1,32 +1,30 @@
 import { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
-import type { ModelBinding, ProviderPublic } from "@pi-desktop/shared";
+import type { MirrorCodingGroupRoute, ModelBinding, ProviderPublic } from "@pi-desktop/shared";
 import { Button, Input, cx } from "../ui";
 import { IconCheck, IconChevronDown } from "../icons";
 import { api } from "../../lib/api";
 import { useAppStore } from "../../stores/app-store";
 
-type GroupModel = { provider: ProviderPublic; binding: ModelBinding };
-type ModelRow = { modelId: string; groups: GroupModel[] };
+type ModelRow = { modelId: string; provider: ProviderPublic; binding: ModelBinding; groups: MirrorCodingGroupRoute[] };
 
 function modelRows(providers: ProviderPublic[]): ModelRow[] {
-  const rows = new Map<string, GroupModel[]>();
+  const rows: ModelRow[] = [];
   for (const provider of providers) {
-    if (provider.authKind !== "mirrorcoding") continue;
+    if (provider.authKind !== "mirrorcoding" || provider.mirrorCoding?.scope !== "account") continue;
     for (const binding of provider.models) {
-      const groups = rows.get(binding.id) ?? [];
-      groups.push({ provider, binding });
-      rows.set(binding.id, groups);
+      const groups = (provider.mirrorCoding.groups ?? []).filter((group) =>
+        Boolean(group.routes[binding.id] || group.imageRoutes?.[binding.id] || group.imageModels?.[binding.id]),
+      );
+      rows.push({ modelId: binding.id, provider, binding, groups });
     }
   }
-  return [...rows.entries()]
-    .map(([modelId, groups]) => ({ modelId, groups }))
+  return rows
     .sort((left, right) => left.modelId.localeCompare(right.modelId));
 }
 
-function rate(provider: ProviderPublic, dynamic: string): string {
-  const group = provider.mirrorCoding;
-  return !group || group.dynamicBilling || group.ratio == null
+function rate(group: MirrorCodingGroupRoute, dynamic: string): string {
+  return group.dynamicBilling || group.ratio == null
     ? dynamic
     : String(group.ratio) + "×";
 }
@@ -42,15 +40,15 @@ export function MirrorCodingModelConfigs({ providers }: { providers: ProviderPub
 
   if (rows.length === 0) return null;
 
-  const draftFor = (entry: GroupModel): ModelBinding => {
+  const draftFor = (entry: ModelRow): ModelBinding => {
     const key = entry.provider.id + ":" + entry.binding.id;
     return drafts[key] ?? entry.binding;
   };
-  const updateDraft = (entry: GroupModel, patch: Partial<ModelBinding>) => {
+  const updateDraft = (entry: ModelRow, patch: Partial<ModelBinding>) => {
     const key = entry.provider.id + ":" + entry.binding.id;
     setDrafts((current) => ({ ...current, [key]: { ...draftFor(entry), ...patch } }));
   };
-  const save = async (entry: GroupModel) => {
+  const save = async (entry: ModelRow) => {
     const key = entry.provider.id + ":" + entry.binding.id;
     const next = draftFor(entry);
     setSaving(key);
@@ -102,17 +100,34 @@ export function MirrorCodingModelConfigs({ providers }: { providers: ProviderPub
                 </button>
                 {isOpen ? (
                   <div className="mirrorcoding-model-groups">
-                    {row.groups.map((entry) => {
-                      const draft = draftFor(entry);
-                      const key = entry.provider.id + ":" + entry.binding.id;
+                    {(() => {
+                      const draft = draftFor(row);
+                      const key = row.provider.id + ":" + row.binding.id;
                       return (
-                        <div className="mirrorcoding-model-group-config" key={entry.provider.id}>
+                        <div className="mirrorcoding-model-group-config" key={row.provider.id}>
                           <div className="mirrorcoding-model-group-head">
                             <div>
-                              <strong>{entry.provider.mirrorCoding?.groupName ?? entry.provider.name}</strong>
-                              <p>{entry.provider.mirrorCoding?.description}</p>
+                              <strong>{row.provider.name}</strong>
+                              <p>{t("mirrorCoding.models", { count: row.groups.length })}</p>
                             </div>
-                            <span>{rate(entry.provider, t("mirrorCoding.dynamic"))}</span>
+                            <span>{t("mirrorCoding.chooseGroup")}</span>
+                          </div>
+                          <div className="mirrorcoding-model-group-choices" role="group" aria-label={t("mirrorCoding.chooseGroup")}>
+                            {row.groups.map((group) => {
+                              const selected = draft.mirrorCodingGroupId === group.id;
+                              return (
+                                <button
+                                  type="button"
+                                  key={group.id}
+                                  className={cx("mirrorcoding-group-choice", selected && "selected")}
+                                  aria-pressed={selected}
+                                  onClick={() => updateDraft(row, { mirrorCodingGroupId: group.id })}
+                                >
+                                  <span><strong>{group.name}</strong><small>{group.description}</small></span>
+                                  <span>{rate(group, t("mirrorCoding.dynamic"))}</span>
+                                </button>
+                              );
+                            })}
                           </div>
                           <div className="mirrorcoding-model-fields">
                             <label>
@@ -121,7 +136,7 @@ export function MirrorCodingModelConfigs({ providers }: { providers: ProviderPub
                                 type="number"
                                 min={1}
                                 value={draft.contextWindow}
-                                onChange={(event) => updateDraft(entry, {
+                                onChange={(event) => updateDraft(row, {
                                   contextWindow: Number(event.target.value) || 0,
                                   contextWindowSource: "user",
                                 })}
@@ -133,7 +148,7 @@ export function MirrorCodingModelConfigs({ providers }: { providers: ProviderPub
                                 type="number"
                                 min={1}
                                 value={draft.maxTokens}
-                                onChange={(event) => updateDraft(entry, {
+                                onChange={(event) => updateDraft(row, {
                                   maxTokens: Number(event.target.value) || 0,
                                 })}
                               />
@@ -142,25 +157,38 @@ export function MirrorCodingModelConfigs({ providers }: { providers: ProviderPub
                               <span>{t("chat.reasoningLevel")}</span>
                               <select
                                 value={draft.defaultThinkingLevel ?? "off"}
-                                onChange={(event) => updateDraft(entry, {
+                                onChange={(event) => updateDraft(row, {
                                   defaultThinkingLevel: event.target.value as ModelBinding["defaultThinkingLevel"],
                                 })}
                               >
                                 {draft.thinkingLevels.map((level) => <option key={level} value={level}>{level}</option>)}
                               </select>
                             </label>
+                            <label>
+                              <span>{t("settings.temperature")}</span>
+                              <Input
+                                type="number"
+                                min={0}
+                                max={2}
+                                step={0.1}
+                                value={draft.temperature ?? ""}
+                                onChange={(event) => updateDraft(row, {
+                                  temperature: event.target.value === "" ? undefined : Number(event.target.value),
+                                })}
+                              />
+                            </label>
                           </div>
                           <Button
                             variant="ghost"
                             disabled={saving === key}
-                            onClick={() => void save(entry)}
+                            onClick={() => void save(row)}
                           >
                             <IconCheck size={13} />
                             {t("common.save")}
                           </Button>
                         </div>
                       );
-                    })}
+                    })()}
                   </div>
                 ) : null}
               </li>

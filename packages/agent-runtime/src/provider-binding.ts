@@ -36,6 +36,7 @@ import {
   nativeWebSearchTransport,
   deepseekRequestCompat,
   zhipuRequestCompat,
+  type SessionThinkingLevel,
   type ThinkingLevel,
 } from "@pi-desktop/shared";
 import { genericModelConfig } from "./model-capabilities.js";
@@ -53,6 +54,10 @@ export type RuntimeProviderConfig = {
   extensionAgentKey?: string;
   /** Wire protocol for the endpoint (provider config apiStyle). */
   apiStyle?: string;
+  /** Model-level sampling override, when configured. */
+  temperature?: number;
+  /** Default level selected in the model binding. */
+  defaultThinkingLevel?: SessionThinkingLevel | null;
   supportsReasoning: boolean;
   supportedThinkingLevels: ThinkingLevel[];
   /** Complete model metadata resolved from models.dev by Electron main. */

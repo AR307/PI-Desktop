@@ -1820,6 +1820,11 @@
 }
 .mirrorcoding-model-group-head { display: flex; justify-content: space-between; gap: 12px; }
 .mirrorcoding-model-group-head p { margin: 3px 0 0; color: var(--ds-text-muted); font-size: var(--text-sm); }
+.mirrorcoding-model-group-choices { display: grid; gap: 6px; }
+.mirrorcoding-group-choice { display: flex; align-items: center; justify-content: space-between; gap: 10px; width: 100%; border: 1px solid var(--ds-border-default); border-radius: var(--radius-sm); background: var(--ds-bg-inset); color: var(--ds-text-primary); padding: 8px 10px; text-align: left; }
+.mirrorcoding-group-choice:hover, .mirrorcoding-group-choice.selected { border-color: var(--ds-border-focus); background: var(--ds-bg-hover); }
+.mirrorcoding-group-choice span:first-child { display: grid; gap: 2px; min-width: 0; }
+.mirrorcoding-group-choice small { color: var(--ds-text-muted); overflow-wrap: anywhere; }
 .mirrorcoding-model-fields { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
 .mirrorcoding-model-fields label { display: grid; gap: 5px; color: var(--ds-text-secondary); font-size: var(--text-sm); }
 .mirrorcoding-model-fields select { min-height: 32px; border: 1px solid var(--ds-border-default); border-radius: var(--radius-sm); background: var(--ds-bg-inset); color: var(--ds-text-primary); padding: 0 8px; }

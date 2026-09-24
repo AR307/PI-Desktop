@@ -20,6 +20,7 @@ export function defaultModelOptions(
   imageGeneration?: ImageGenerationBindings | null,
 ): DefaultModelOption[] {
   return providers.flatMap((provider) => {
+    if (provider.mirrorCoding?.scope === "account") return [];
     const modelIds = (provider.models ?? [])
       .map((binding) => binding.id.trim())
       .filter(Boolean);

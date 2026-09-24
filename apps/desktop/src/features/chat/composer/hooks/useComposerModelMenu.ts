@@ -133,6 +133,7 @@ export function useComposerModelMenu({
         .filter(
           (candidate) =>
             candidate.enabled &&
+            candidate.mirrorCoding?.scope !== "account" &&
             (candidate.hasSecret || candidate.authKind === "none" || candidate.authKind === "mirrorcoding"),
         )
         .map((candidate) => {

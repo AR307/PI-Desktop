@@ -20,6 +20,7 @@ type Binding = {
   sessionId?: string;
   kind: "chat" | "image";
   endpoint: MirrorCodingEndpoint | MirrorCodingImageEndpoint;
+  groupId: string;
   imageModelId?: string;
 };
 export type ImageReference = { data: string; mimeType: string; name?: string };
@@ -37,6 +38,29 @@ function imageCapability(metadata: MirrorCodingProvider, modelId: string): Image
   const capability = metadata.imageModels?.[modelId];
   if (!capability) throw new Error("model_or_group_unavailable");
   return capability;
+}
+
+function selectedGroup(metadata: MirrorCodingProvider, groupId?: string): MirrorCodingProvider {
+  if (metadata.scope !== "account") {
+    if (groupId && groupId !== metadata.groupId) throw new Error("model_or_group_unavailable");
+    return metadata;
+  }
+  const selected = groupId ?? metadata.groups?.[0]?.id;
+  const route = metadata.groups?.find((group) => group.id === selected);
+  if (!route) throw new Error("model_or_group_unavailable");
+  return {
+    scope: "group",
+    accountId: metadata.accountId,
+    groupId: route.id,
+    groupName: route.name,
+    description: route.description,
+    ratio: route.ratio,
+    dynamicBilling: route.dynamicBilling,
+    routes: route.routes,
+    ...(route.imageRoutes ? { imageRoutes: route.imageRoutes } : {}),
+    ...(route.imageCapabilities ? { imageCapabilities: route.imageCapabilities } : {}),
+    ...(route.imageModels ? { imageModels: route.imageModels } : {}),
+  };
 }
 
 /** Main owns upstream auth; the sidecar can only use its local selected binding. */
@@ -62,14 +86,15 @@ export class MirrorCodingRelay {
     sessionId: string | undefined,
     kind: "chat" | "image",
     endpoint: MirrorCodingEndpoint | MirrorCodingImageEndpoint,
+    groupId: string,
   ) {
     const state = this.account.snapshot();
     if (state.status !== "connected" || state.account?.id !== metadata.accountId) throw new Error("reauthorization_required");
     const origin = await this.listen();
     // Reuse one ephemeral credential per session/group/route until logout or shutdown.
-    const existing = [...this.bindings].find(([, value]) => value.providerId === providerId && value.sessionId === sessionId && value.kind === kind && value.endpoint === endpoint && (kind !== "image" || value.imageModelId === modelId));
+    const existing = [...this.bindings].find(([, value]) => value.providerId === providerId && value.sessionId === sessionId && value.kind === kind && value.endpoint === endpoint && value.groupId === groupId && (kind !== "image" || value.imageModelId === modelId));
     const key = existing?.[0] ?? randomBytes(32).toString("base64url");
-    this.bindings.set(key, { providerId, metadata, sessionId, kind, endpoint, ...(kind === "image" ? { imageModelId: modelId } : {}) });
+    this.bindings.set(key, { providerId, metadata, sessionId, kind, endpoint, groupId, ...(kind === "image" ? { imageModelId: modelId } : {}) });
     const route = kind === "chat" ? ENDPOINTS[endpoint as MirrorCodingEndpoint] : IMAGE_ENDPOINTS[endpoint as MirrorCodingImageEndpoint];
     return {
       baseUrl: `${origin}/${providerId}${route.prefix}`,
@@ -78,19 +103,21 @@ export class MirrorCodingRelay {
     };
   }
 
-  async bind(providerId: string, metadata: MirrorCodingProvider, modelId: string, sessionId?: string) {
-    const endpoint = metadata.routes[modelId];
+  async bind(providerId: string, metadata: MirrorCodingProvider, modelId: string, sessionId?: string, groupId?: string) {
+    const group = selectedGroup(metadata, groupId);
+    const endpoint = group.routes[modelId];
     if (!endpoint) throw new Error("model_or_group_unavailable");
-    return this.bindInternal(providerId, metadata, modelId, sessionId, "chat", endpoint);
+    return this.bindInternal(providerId, group, modelId, sessionId, "chat", endpoint, group.groupId);
   }
 
-  async bindImage(providerId: string, metadata: MirrorCodingProvider, modelId: string, sessionId: string | undefined, edit = false) {
-    const routes = metadata.imageRoutes?.[modelId];
+  async bindImage(providerId: string, metadata: MirrorCodingProvider, modelId: string, sessionId: string | undefined, edit = false, groupId?: string) {
+    const group = selectedGroup(metadata, groupId);
+    const routes = group.imageRoutes?.[modelId];
     const endpoint = edit ? routes?.reference : routes?.generation;
     if (!endpoint || (!edit && endpoint !== "image-generation") || (edit && endpoint !== "image-edit" && endpoint !== "image-generation")) {
       throw new Error("model_or_group_unavailable");
     }
-    const bound = await this.bindInternal(providerId, metadata, modelId, sessionId, "image", endpoint);
+    const bound = await this.bindInternal(providerId, group, modelId, sessionId, "image", endpoint, group.groupId);
     const origin = await this.listen();
     return {
       ...bound,
@@ -111,6 +138,7 @@ export class MirrorCodingRelay {
     options: ImageGenerationOptions,
     references: readonly ImageReference[],
     signal?: AbortSignal,
+    groupId?: string,
   ): Promise<Response> {
     const controller = new AbortController();
     const forwardAbort = () => controller.abort();
@@ -122,8 +150,9 @@ export class MirrorCodingRelay {
       if (state.status !== "connected" || state.account?.id !== metadata.accountId) {
         throw new Error("reauthorization_required");
       }
-      const capability = imageCapability(metadata, modelId);
-      const group = state.catalog?.groups.find((entry) => entry.id === metadata.groupId);
+      const selected = selectedGroup(metadata, groupId);
+      const capability = imageCapability(selected, modelId);
+      const group = state.catalog?.groups.find((entry) => entry.id === selected.groupId);
       const catalogModel = group?.models.find((entry) => entry.id === modelId);
       if (!catalogModel?.image || !catalogModel.supportedEndpointTypes.includes("image-generation")) {
         throw new Error("model_or_group_unavailable");
@@ -142,7 +171,7 @@ export class MirrorCodingRelay {
       }
       const headers = new Headers({
         Accept: "application/json",
-        "X-Mirrorcoding-Group": encodeURIComponent(metadata.groupId),
+        "X-Mirrorcoding-Group": encodeURIComponent(selected.groupId),
       });
       let body: BodyInit;
       if (path === "/v1/images/edits") {
