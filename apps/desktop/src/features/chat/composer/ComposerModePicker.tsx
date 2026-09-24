@@ -11,8 +11,9 @@ export type ComposerMode = Mode | "image";
 const modes: readonly ComposerMode[] = ["agent", "plan", "goal", "image"];
 
 /** One selection path for both cycling and the accessible dropdown. */
-export function ComposerModePicker({ mode, blocked, onSelect, onOpen }: {
+export function ComposerModePicker({ mode, planningLive = false, blocked, onSelect, onOpen }: {
   mode: ComposerMode;
+  planningLive?: boolean;
   blocked: boolean;
   onSelect: (mode: ComposerMode) => Promise<void>;
   onOpen: () => void;
@@ -21,6 +22,7 @@ export function ComposerModePicker({ mode, blocked, onSelect, onOpen }: {
   const [open, setOpen] = useState(false);
   useEffect(() => { if (blocked) setOpen(false); }, [blocked]);
   const label = (value: ComposerMode) => t(value === "image" ? "images.mode" : MODE_LABEL_KEYS[value]);
+  const chipLabel = planningLive && mode !== "image" ? t(`${mode}.planning`) : label(mode);
   const select = (value: ComposerMode) => {
     setOpen(false);
     onOpen();
@@ -28,7 +30,8 @@ export function ComposerModePicker({ mode, blocked, onSelect, onOpen }: {
   };
   return <div className="composer-mode-switch">
     <TooltipButton type="button" className="icon-btn mode-chip composer-mode-chip"
-      data-mode={mode} tooltip={label(mode)} ariaLabel={label(mode)} disabled={blocked}
+      data-mode={mode} data-planning={planningLive ? "true" : undefined}
+      tooltip={chipLabel} ariaLabel={chipLabel} disabled={blocked}
       onClick={() => select(modes[(modes.indexOf(mode) + 1) % modes.length])}>
       <span className="composer-mode-chip-face" key={mode}>
         <ModeIcon mode={mode} /><span className="composer-mode-chip-label text-sm">{label(mode)}</span>

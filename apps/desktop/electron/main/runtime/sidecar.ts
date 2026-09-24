@@ -50,7 +50,7 @@ export type SidecarRuntimeDependencies = {
   dataDir: string;
   agentExtensions: AgentExtensionBridge;
   vendorOAuth: VendorOAuth;
-  mirrorCoding?: MirrorCodingRuntime;
+  mirrorCoding: MirrorCodingRuntime;
   listRuntimeProviders: (includeDisabled?: boolean) => Promise<any[]>;
   modelsDevCatalog: ModelsDevCatalog;
   effectiveSubagentModelConfig: (...args: any[]) => any;

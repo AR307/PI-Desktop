@@ -17,6 +17,7 @@ export {
   type ImageGenerationCapability,
   type ImageGenerationOptions,
   type ImageSessionConfig,
+  type ImageSessionBinding,
   type ImageModelInfo,
   type ImageGenerationRequest,
   type GeneratedImage,

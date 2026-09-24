@@ -68,6 +68,7 @@ export function ComposerToolbar({
   t,
   mode,
   task,
+  planningLive,
   providerId,
   modelId,
   thinkingLevel,
@@ -121,6 +122,7 @@ export function ComposerToolbar({
         </div>
         <ComposerModePicker
           mode={task === "image" ? "image" : mode}
+          planningLive={planningLive}
           blocked={controlsBlocked || modeBlocked}
           onSelect={onModeChange}
           onOpen={() => {

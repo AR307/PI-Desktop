@@ -1,7 +1,7 @@
 import { createImagesModels, createImagesProvider, type ImagesModel, type ImagesOutputContent } from "@earendil-works/pi-ai";
-import { validateImageOptions, type ImageGenerationBinding, type ImageGenerationOptions, type ImageOutput } from "@pi-desktop/shared";
+import { validateImageOptions, type ImageGenerationOptions, type ImageOutput, type ImageSessionBinding } from "@pi-desktop/shared";
 
-export type ImageTask = { jobId: string; binding: ImageGenerationBinding; prompt: string; options?: ImageGenerationOptions };
+export type ImageTask = { jobId: string; binding: ImageSessionBinding; prompt: string; options?: ImageGenerationOptions };
 
 /** One-shot image requests use pi's image extension, independently of Agent. */
 export class ImageTasks {
