@@ -481,6 +481,8 @@ needed by an actual request rather than starting a repository-wide rewrite.
   group rows are retained during the selection transition.
 - Allowed logged-in MirrorCoding image Providers to submit without exposing a
   renderer-side secret; their credentials remain main-process owned.
+- Forwarded provider-scoped relay headers into pi-ai chat models so Agent tool
+  calls use the same main-owned MirrorCoding binding as direct image requests.
 
 ## Release Candidate
 

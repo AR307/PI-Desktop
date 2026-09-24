@@ -24,6 +24,14 @@ const keyedProvider: RuntimeProviderConfig = {
   supportedThinkingLevels: ["off"],
 };
 
+it("carries provider-scoped relay headers into the pi-ai model", () => {
+  const model = buildProviderModel({
+    ...keyedProvider,
+    headers: { "x-pi-mirrorcoding-key": "local-only" },
+  });
+  expect(model.headers).toMatchObject({ "x-pi-mirrorcoding-key": "local-only" });
+});
+
 describe("apiBindingForStyle", () => {
   it("binds OpenCode Go to its fixed OpenAI-compatible endpoint", () => {
     const opencode = apiBindingForStyle("opencode_go");

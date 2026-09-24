@@ -250,6 +250,7 @@ export function buildProviderModel(
       ? nativeCopilotHeaders(provider.modelId)
       : undefined;
   const modelHeaders = {
+    ...(provider.headers ?? {}),
     ...(copilotDefaults ?? {}),
     ...(catalogModel.headers ?? {}),
   };
