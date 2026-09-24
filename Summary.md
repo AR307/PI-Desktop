@@ -461,3 +461,7 @@ needed by an actual request rather than starting a repository-wide rewrite.
   fallback so every shipped locale satisfies the catalog contract.
 - Aligned the desktop pairing dialog with the normalized MirrorCoding account
   display-name field used by the current account state.
+- Fixed local image-tool cancellation to notify Host after aborting the local
+  controller, keeping desktop and mobile cancellation state consistent.
+- Made the launch-resolver scratch-directory assertion use the platform path
+  helper so the host-runtime suite passes on Windows as well as POSIX systems.

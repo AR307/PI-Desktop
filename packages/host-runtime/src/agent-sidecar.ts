@@ -485,9 +485,6 @@ export class AgentSidecar {
             { code: -32000, data: { errorCode: "TOOL_DISABLED_IN_PLAN" } },
           );
         }
-        if (method === "tools.abort") {
-          this.localToolControllers.get(`${params.sessionId}:${params.toolCallId}`)?.abort();
-        }
         if (method === "project.instructions.resolve") {
           if (!this.projectInstructionResolver) {
             throw new Error("project instruction resolver unavailable");
@@ -536,6 +533,9 @@ export class AgentSidecar {
           const controller = this.localToolControllers.get(`${params.sessionId}:${params.toolCallId}`);
           if (controller) {
             controller.abort();
+            if (this.host) {
+              await this.host.call("tools.abort", params).catch(() => undefined);
+            }
             this.writeToChild(JSON.stringify({ jsonrpc: "2.0", id: msg.id, result: { aborted: true } }) + "\n");
             return;
           }
