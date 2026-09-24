@@ -465,3 +465,5 @@ needed by an actual request rather than starting a repository-wide rewrite.
   controller, keeping desktop and mobile cancellation state consistent.
 - Made the launch-resolver scratch-directory assertion use the platform path
   helper so the host-runtime suite passes on Windows as well as POSIX systems.
+- Restored the missing host-core import for the MirrorCoding provider metadata
+  used by managed-provider synchronization.
