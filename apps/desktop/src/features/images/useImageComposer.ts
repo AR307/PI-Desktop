@@ -19,7 +19,11 @@ export function useImageComposer(sessionId: string | undefined, mode: Mode, thin
   const provider = providers.find((item) => item.id === config.providerId);
   const capability = config.modelId ? provider?.mirrorCoding?.imageModels?.[config.modelId] : undefined;
   const running = job?.status === "running";
-  const ready = !!(provider?.enabled && provider.hasSecret && capability);
+  const ready = !!(
+    provider?.enabled &&
+    (provider.hasSecret || provider.authKind === "mirrorcoding") &&
+    capability
+  );
   const report = (error: unknown) => {
     const code = error instanceof Error ? error.message : String(error);
     useAppStore.getState().showToast(t(`images.${code}`, { defaultValue: code }), { variant: "error" });

@@ -1,7 +1,7 @@
 import { formatTokenCount, type ModelInfo, type ProviderPublic } from "@pi-desktop/shared";
 import type { TFunction } from "i18next";
 import type { RefObject } from "react";
-import { IconCheck, IconSearch } from "../../../components/icons";
+import { IconCheck, IconChevronRight, IconSearch } from "../../../components/icons";
 import { composerModelBadges, composerModelDisplayName, sameComposerModelId } from "../../../lib/composer-models";
 
 export type ComposerModelGroup = {
@@ -14,6 +14,7 @@ export type ComposerModelGroup = {
 export function ComposerModelList({
   t, query, setQuery, modelSearchRef, modelListRef, modelGroups,
   modelHighlight, setModelHighlight, selectedProviderId, selectedModelId, selectModel,
+  accountSelected = false,
 }: {
   t: TFunction;
   query: string;
@@ -26,6 +27,7 @@ export function ComposerModelList({
   selectedProviderId?: string;
   selectedModelId?: string;
   selectModel: (provider: ProviderPublic, modelId: string) => void | Promise<void>;
+  accountSelected?: boolean;
 }) {
   const flatModels = modelGroups.flatMap(group => group.models);
   return <>
@@ -57,9 +59,11 @@ export function ComposerModelList({
                       <div className="composer-model-group-label">{group.providerDisplayName}</div>
                       {group.models.map((model) => {
                         const index = flatIndex++;
-                        const active =
-                          selectedProviderId === group.provider.id &&
-                          sameComposerModelId(selectedModelId ?? "", model.modelId);
+                        const account = Boolean(group.provider.mirrorCoding);
+                        const active = account
+                          ? accountSelected && selectedModelId === model.modelId
+                          : selectedProviderId === group.provider.id &&
+                            sameComposerModelId(selectedModelId ?? "", model.modelId);
                         const optionTitle = model.modelId;
                         const optionDisplayName = composerModelDisplayName(
                           group.provider,
@@ -73,8 +77,9 @@ export function ComposerModelList({
                             data-model-index={index}
                             title={optionTitle}
                             className={`composer-plus-item composer-model-option ${active ? "active" : ""} ${modelHighlight === index ? "kb-active" : ""}`}
-                            role="menuitemradio"
-                            aria-checked={active}
+                            role={account ? "menuitem" : "menuitemradio"}
+                            aria-haspopup={account ? "menu" : undefined}
+                            aria-checked={account ? undefined : active}
                             onMouseMove={() => setModelHighlight(index)}
                             onClick={() => void selectModel(group.provider, model.modelId)}
                           >
@@ -101,6 +106,7 @@ export function ComposerModelList({
                               </span>
                             </span>
                             {active ? <IconCheck size={14} className="composer-model-check" aria-hidden="true" /> : null}
+                            {account ? <IconChevronRight size={14} aria-hidden="true" /> : null}
                           </button>
                         );
                       })}

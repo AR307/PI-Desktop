@@ -29,6 +29,7 @@ import {
   type ComposerTask,
 } from "../model";
 import { createLatestCommitQueue } from "../thinking-commit-queue";
+import { collapseMirrorCodingGroups, mirrorGroupsForModel } from "../mirror-model-menu";
 
 type UseComposerModelMenuOptions = {
   task?: ComposerTask;
@@ -74,6 +75,8 @@ export function useComposerModelMenu({
   const [query, setQuery] = useState("");
   const [modelHighlight, setModelHighlight] = useState(-1);
   const [thinkingHighlight, setThinkingHighlight] = useState(-1);
+  const [pendingMirrorModel, setPendingMirrorModel] = useState<string>();
+  const groupListRef = useRef<HTMLDivElement>(null);
   const rootMenuRef = useRef<HTMLDivElement>(null);
   const modelSearchRef = useRef<HTMLInputElement>(null);
   const modelListRef = useRef<HTMLDivElement>(null);
@@ -148,11 +151,15 @@ export function useComposerModelMenu({
         .filter((group) => group.models.length > 0),
     [imageGenerationCandidates, providers, providerModels, task],
   );
+  const displayGroups = useMemo(
+    () => collapseMirrorCodingGroups(modelGroups),
+    [modelGroups],
+  );
   const queryNeedle = query.trim().toLowerCase();
   const filteredModelGroups = useMemo(
     () =>
       queryNeedle
-        ? modelGroups
+        ? displayGroups
             .map((group) => ({
               ...group,
               models: group.models.filter((model) =>
@@ -165,9 +172,37 @@ export function useComposerModelMenu({
               ),
             }))
             .filter((group) => group.models.length > 0)
-        : modelGroups,
-    [modelGroups, queryNeedle],
+        : displayGroups,
+    [displayGroups, queryNeedle],
   );
+  const mirrorGroups = useMemo(() => {
+    const current = mirrorGroupsForModel(modelGroups, pendingMirrorModel);
+    if (current.length || !pendingMirrorModel) return current;
+    // Provider metadata is authoritative for a group selection. A provider
+    // catalog refresh can briefly replace its discovered model rows, so keep
+    // the second-level choice available while that read settles.
+    return providers
+      .filter((candidate) =>
+        candidate.enabled &&
+        candidate.mirrorCoding &&
+        (task === "image"
+          ? Boolean(candidate.mirrorCoding.imageRoutes?.[pendingMirrorModel] || candidate.mirrorCoding.imageModels?.[pendingMirrorModel])
+          : Boolean(candidate.mirrorCoding.routes[pendingMirrorModel])),
+      )
+      .map((candidate) => {
+        const models = composerModelsForProvider(
+          candidate,
+          providerModels[candidate.id],
+          task === "image" ? "image" : imageGenerationCandidates,
+        ).filter((model) => model.modelId === pendingMirrorModel);
+        return {
+          provider: candidate,
+          providerDisplayName: providerDisplayName(candidate),
+          providerSearchText: providerSearchText(candidate),
+          models,
+        };
+      });
+  }, [imageGenerationCandidates, modelGroups, pendingMirrorModel, providerModels, providers, task]);
   const flatModels = useMemo(
     () =>
       filteredModelGroups.flatMap((group) =>
@@ -236,6 +271,7 @@ export function useComposerModelMenu({
       if (view === "root") rootMenuRef.current?.querySelector<HTMLButtonElement>(".composer-menu-entry")?.focus();
       if (view === "model") modelSearchRef.current?.focus();
       if (view === "thinking") thinkingListRef.current?.querySelector<HTMLButtonElement>("button")?.focus();
+      if (view === "group") groupListRef.current?.querySelector<HTMLButtonElement>("button")?.focus();
       if (view === "model" && modelHighlight >= 0) {
         modelListRef.current
           ?.querySelector(`[data-model-index="${modelHighlight}"]`)
@@ -267,10 +303,16 @@ export function useComposerModelMenu({
     setView(nextView);
     setModelHighlight(-1);
     setThinkingHighlight(-1);
+    if (nextView !== "group") setPendingMirrorModel(undefined);
     if (nextView !== "model") setQuery("");
   };
 
-  const selectModel = async (candidate: ProviderPublic, nextModelId: string) => {
+  const selectModel = async (candidate: ProviderPublic, nextModelId: string, groupChosen = false) => {
+    if (candidate.mirrorCoding && !groupChosen) {
+      setPendingMirrorModel(nextModelId);
+      showView("group");
+      return;
+    }
     thinkingQueueRef.current?.invalidate();
     await thinkingQueueRef.current?.idle();
     if (task !== "image" && isImageGenerationModel(
@@ -349,7 +391,7 @@ export function useComposerModelMenu({
     }
     if (event.key === "ArrowLeft" && view !== "root") {
       event.preventDefault();
-      showView("root");
+      showView(view === "group" ? "model" : "root");
       return;
     }
     if (event.key !== "ArrowDown" && event.key !== "ArrowUp") {
@@ -380,6 +422,7 @@ export function useComposerModelMenu({
       });
       return;
     }
+    if (view === "group") return;
     if (!thinkingMenuLevels.length) return;
     const delta = event.key === "ArrowDown" ? 1 : -1;
     setThinkingHighlight((current) => {
@@ -391,6 +434,10 @@ export function useComposerModelMenu({
   return {
     task,
     selectedImage: imageSelection,
+    pendingMirrorModel,
+    mirrorGroups,
+    groupListRef,
+    mirrorCodingSelected: Boolean(provider?.mirrorCoding),
     open,
     setOpen,
     view,

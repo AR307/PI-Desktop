@@ -475,3 +475,9 @@ needed by an actual request rather than starting a repository-wide rewrite.
   image-capable groups no longer fail whole-catalog synchronization.
 - Preserved the catalog image-model capability map in Rust Provider reads so
   desktop and mobile image pickers can see declared generation/edit parameters.
+- Restored the desktop two-level MirrorCoding picker: model IDs are deduplicated
+  across groups, then the user chooses the concrete group and multiplier.
+- Kept the pending model ID while entering the group submenu so the available
+  group rows are retained during the selection transition.
+- Allowed logged-in MirrorCoding image Providers to submit without exposing a
+  renderer-side secret; their credentials remain main-process owned.

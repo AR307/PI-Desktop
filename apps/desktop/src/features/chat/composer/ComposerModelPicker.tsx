@@ -58,6 +58,10 @@ export function ComposerModelPicker({
     modelSearchRef,
     modelListRef,
     thinkingListRef,
+    groupListRef,
+    pendingMirrorModel,
+    mirrorGroups,
+    mirrorCodingSelected,
     modelGroups,
     thinkingMenuLevels,
     showView,
@@ -161,10 +165,10 @@ export function ComposerModelPicker({
             type="button"
             className="composer-menu-back"
             role="menuitem"
-            onClick={() => showView("root")}
+            onClick={() => showView(view === "group" ? "model" : "root")}
           >
             <IconChevronLeft size={14} aria-hidden="true" />
-            <span>{view === "model" ? (imageMode ? t("images.model") : t("chat.model")) : t("chat.reasoningLevel")}</span>
+            <span>{view === "group" ? pendingMirrorModel : view === "model" ? (imageMode ? t("images.model") : t("chat.model")) : t("chat.reasoningLevel")}</span>
           </button>
           <div className="composer-menu-separator" />
           {view === "model" ? (
@@ -175,8 +179,40 @@ export function ComposerModelPicker({
                 modelGroups={modelGroups} modelHighlight={modelHighlight}
                 setModelHighlight={setModelHighlight} selectModel={selectModel}
                 selectedProviderId={selectedProviderId} selectedModelId={selectedModelId}
+                accountSelected={mirrorCodingSelected}
               />
             </>
+          ) : view === "group" ? (
+            <div className="composer-model-list" ref={groupListRef} aria-label={t("images.chooseModel")}>
+              {mirrorGroups.map(({ provider }) => {
+                const group = provider.mirrorCoding!;
+                const binding = provider.models.find((entry) => entry.id === pendingMirrorModel);
+                const active = provider.id === selectedProviderId && pendingMirrorModel === selectedModelId;
+                const imageCapability = group.imageModels?.[pendingMirrorModel ?? ""];
+                return (
+                  <button
+                    key={provider.id}
+                    type="button"
+                    role="menuitemradio"
+                    aria-checked={active}
+                    className={`composer-plus-item mirrorcoding-group-option ${active ? "active" : ""}`}
+                    onClick={() => pendingMirrorModel && void selectModel(provider, pendingMirrorModel, true)}
+                  >
+                    <strong className="mirrorcoding-group-name">{group.groupName}</strong>
+                    <span className="mirrorcoding-group-rate">
+                      {group.dynamicBilling || group.ratio == null ? t("mirrorCoding.dynamic") : String(group.ratio) + "×"}
+                    </span>
+                    {group.description ? <span className="mirrorcoding-group-detail">{group.description}</span> : null}
+                    <span className="mirrorcoding-group-detail">
+                      {imageMode
+                        ? t(imageCapability?.reference_path ? "images.referencesSupported" : "images.noReferences")
+                        : binding?.thinkingLevels.join(" / ") || "off"}
+                    </span>
+                  </button>
+                );
+              })}
+              {mirrorGroups.length === 0 ? <p role="status">{t("mirrorCoding.model_or_group_unavailable")}</p> : null}
+            </div>
           ) : (
             <>
               <div className="composer-thinking-heading">

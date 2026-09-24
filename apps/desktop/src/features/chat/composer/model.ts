@@ -68,7 +68,7 @@ export type ComposerFileReference = {
   token?: string;
 };
 
-export type ComposerMenuView = "root" | "model" | "thinking";
+export type ComposerMenuView = "root" | "model" | "group" | "thinking";
 
 export type PromptEnhancementError = {
   message: string;
