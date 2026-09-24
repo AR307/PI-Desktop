@@ -8,7 +8,7 @@
  * guarantee lives here once instead of in a convention two files had to
  * remember.
  */
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import {
   THINKING_LEVELS,
@@ -209,6 +209,14 @@ export type ModelSelectionPanesProps = {
    * limits; absent fields only widen the catalog search.
    */
   lookupContext?: CustomModelLookupContext;
+  /** Optional provider-specific controls rendered inside the native advanced row. */
+  renderBindingExtra?: (
+    binding: ModelBinding,
+    updateBinding: (id: string, update: Partial<ModelBinding>) => void,
+    busy: boolean,
+  ) => ReactNode;
+  /** Managed catalogs do not permit hand-typed models outside their directory. */
+  allowCustomModels?: boolean;
 };
 
 /**
@@ -226,6 +234,8 @@ export function ModelSelectionPanes({
   imageModelIds,
   lookupContext,
   onImageModelChange,
+  renderBindingExtra,
+  allowCustomModels = true,
 }: ModelSelectionPanesProps) {
   const { t } = useTranslation();
   const { rows, models, publishedLevelsById, setModels } = selection;
@@ -859,6 +869,7 @@ export function ModelSelectionPanes({
                         })}
                       </div>
                     </div>
+                    {renderBindingExtra?.(binding, updateBinding, busy)}
                     <div className="provider-chosen-capabilities">
                       <span className="provider-chosen-thinking-label">
                         {t("settings.modelCapabilities")}
@@ -965,7 +976,7 @@ export function ModelSelectionPanes({
           </ul>
         )}
 
-        <div className="provider-custom-model">
+        {allowCustomModels ? <div className="provider-custom-model">
           <Field
             label={t("settings.customModel")}
             hint={customModelError || t("settings.customModelHint")}
@@ -991,7 +1002,7 @@ export function ModelSelectionPanes({
               </Button>
             </div>
           </Field>
-        </div>
+        </div> : null}
       </div>
     </div>
   );

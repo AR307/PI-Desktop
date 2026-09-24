@@ -236,6 +236,12 @@ test("MirrorCoding model management remains visible before the catalog is ready"
   assert.doesNotMatch(mirrorCodingConfigSource, /if \(rows\.length === 0\) return null/);
 });
 
+test("MirrorCoding model settings reuse the native provider picker", () => {
+  assert.match(mirrorCodingConfigSource, /ModelSelectionPanes/);
+  assert.match(mirrorCodingConfigSource, /useModelSelection/);
+  assert.doesNotMatch(mirrorCodingConfigSource, /mirrorcoding-model-fields/);
+});
+
 test("the rejected catalog-browser styles are gone from the cascade", () => {
   assert.doesNotMatch(styles, /\.model-catalog-panes\s*\{/);
   assert.doesNotMatch(styles, /\.model-catalog-filter\s*\{/);

@@ -1,5 +1,18 @@
 # PI-Desktop MirrorCoding Edition
 
+## 2026-09-24 - Native model configuration reuse
+
+- Replaced the custom MirrorCoding model form with the existing
+  `ModelSelectionPanes` and `useModelSelection` flow used by API-key services
+  and vendor accounts. Context limits, max output, reasoning levels, model
+  capabilities, aliases, ordering, and persistence now share the native
+  provider implementation.
+- Kept only the MirrorCoding-specific group selector as an extension rendered
+  inside the native advanced binding row. Managed catalogs disable hand-typed
+  custom models and save the complete binding list through the account Provider.
+- Added regression coverage proving the management section stays visible before
+  synchronization and uses the shared picker rather than a duplicate form.
+
 ## 2026-09-24 - Dev relay and model-management fixes
 
 - The MirrorCoding model settings section now stays visible while the account
