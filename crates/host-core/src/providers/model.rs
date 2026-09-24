@@ -65,6 +65,14 @@ pub struct ProviderPublic {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
+pub struct MirrorCodingImageRoute {
+    pub generation: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reference: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
 pub struct MirrorCodingProvider {
     pub account_id: i64,
     pub group_id: String,
@@ -74,7 +82,7 @@ pub struct MirrorCodingProvider {
     pub dynamic_billing: bool,
     pub routes: BTreeMap<String, String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub image_routes: Option<BTreeMap<String, String>>,
+    pub image_routes: Option<BTreeMap<String, MirrorCodingImageRoute>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub image_capabilities: Option<BTreeMap<String, serde_json::Value>>,
 }

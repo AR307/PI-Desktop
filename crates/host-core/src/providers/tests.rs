@@ -1,4 +1,5 @@
 use super::*;
+use crate::providers::model::{MirrorCodingImageRoute, MirrorCodingProvider};
 use serde_json::json;
 use std::collections::BTreeMap;
 
@@ -7,6 +8,63 @@ fn test_context() -> (tempfile::TempDir, Database, SecretStore) {
     let db = Database::open(&dir.path().join("pi.sqlite")).unwrap();
     let secrets = SecretStore::open(dir.path()).unwrap();
     (dir, db, secrets)
+}
+
+#[test]
+fn mirrorcoding_sync_persists_group_and_model_bindings() {
+    let (_dir, db, secrets) = test_context();
+    sync_mirrorcoding(
+        &db,
+        MirrorCodingProviderSync {
+            account_id: Some(901),
+            groups: vec![MirrorCodingGroupSync {
+                metadata: MirrorCodingProvider {
+                    account_id: 901,
+                    group_id: "group-1".into(),
+                    group_name: "Group 1".into(),
+                    description: "Fixture group".into(),
+                    ratio: Some(0.06),
+                    dynamic_billing: false,
+                    routes: BTreeMap::from([("gpt-5".into(), "openai".into())]),
+                    image_routes: Some(BTreeMap::from([(
+                        "gpt-image-1".into(),
+                        MirrorCodingImageRoute {
+                            generation: "image-generation".into(),
+                            reference: Some("image-edit".into()),
+                        },
+                    )])),
+                    image_capabilities: Some(BTreeMap::from([(
+                        "gpt-image-1".into(),
+                        json!({
+                            "generationPath": "/v1/images/generations",
+                            "referencePath": "/v1/images/edits",
+                            "maxCount": 1,
+                            "supportsChat": false,
+                        }),
+                    )])),
+                },
+                models: vec![ModelBinding {
+                    id: "gpt-5".into(),
+                    alias: None,
+                    context_window_source: Some("catalog".into()),
+                    context_window: 128_000,
+                    max_tokens: 8_192,
+                    thinking_levels: vec!["off".into(), "medium".into()],
+                    default_thinking_level: Some("medium".into()),
+                    supports_images: None,
+                    supports_documents: None,
+                    available_for_subagents: None,
+                    native_web_search: None,
+                }],
+            }],
+        },
+    )
+    .unwrap();
+
+    let providers = list_providers(&db, &secrets, true).unwrap();
+    assert_eq!(providers.len(), 1);
+    assert_eq!(providers[0].auth_kind, "mirrorcoding");
+    assert_eq!(providers[0].models[0].id, "gpt-5");
 }
 
 #[test]

@@ -469,3 +469,7 @@ needed by an actual request rather than starting a repository-wide rewrite.
   used by managed-provider synchronization.
 - Removed a duplicate mobile IPC registration left by the relay merge; desktop
   startup now installs each mobile channel exactly once.
+- Added a host-core contract test for the MirrorCoding group/model sync payload
+  used by the desktop account catalog refresh.
+- Aligned Rust image-route deserialization with the shared route object shape so
+  image-capable groups no longer fail whole-catalog synchronization.
