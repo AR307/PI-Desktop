@@ -50,13 +50,6 @@ export type WindowControlAction = (typeof WINDOW_CONTROL_ACTIONS)[number];
 
 export const IPC = {
   invoke: {
-    mirrorCodingGetState: "pi-desktop/mirrorcoding/getState",
-    mirrorCodingLogin: "pi-desktop/mirrorcoding/login",
-    mirrorCodingCancelLogin: "pi-desktop/mirrorcoding/cancelLogin",
-    mirrorCodingRefresh: "pi-desktop/mirrorcoding/refresh",
-    mirrorCodingLogout: "pi-desktop/mirrorcoding/logout",
-    mirrorCodingRetryRevocation: "pi-desktop/mirrorcoding/retryRevocation",
-    mirrorCodingCompleteWelcome: "pi-desktop/mirrorcoding/completeWelcome",
     imageGenerate: "pi-desktop/image/generate",
     imageAbort: "pi-desktop/image/abort",
     appGetVersion: "pi-desktop/app/getVersion",
