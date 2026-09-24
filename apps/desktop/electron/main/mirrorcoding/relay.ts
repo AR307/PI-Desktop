@@ -206,8 +206,16 @@ export class MirrorCodingRelay {
       // The relay is authenticated by a per-binding random key. pi-ai may
       // attach an Origin header even though this is a sidecar request, so
       // Origin is not a reliable browser boundary here.
-      if (!binding || request.method !== "POST") {
-        response.writeHead(403).end();
+      if (!binding) {
+        response.writeHead(403, { "Content-Type": "application/json" }).end(
+          JSON.stringify({ error: { code: "relay_binding_missing", message: "relay binding missing" } }),
+        );
+        return;
+      }
+      if (request.method !== "POST") {
+        response.writeHead(403, { "Content-Type": "application/json" }).end(
+          JSON.stringify({ error: { code: "relay_method_forbidden", message: "relay method forbidden" } }),
+        );
         return;
       }
       const state = this.account.snapshot();

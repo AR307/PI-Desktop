@@ -485,6 +485,11 @@ needed by an actual request rather than starting a repository-wide rewrite.
   calls use the same main-owned MirrorCoding binding as direct image requests.
 - Removed the relay's incorrect Origin-header rejection; the per-binding
   random key remains the sidecar authentication boundary for pi-ai requests.
+- Avoided reloading MirrorCoding provider model rows when opening the picker;
+  the account catalog is already authoritative, preventing menu rows from being
+  detached during group selection.
+- Made local relay binding/method denials return non-secret diagnostic error
+  codes instead of an empty 403 body.
 
 ## Release Candidate
 
