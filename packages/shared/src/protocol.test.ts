@@ -73,6 +73,16 @@ describe("Plan protocol contracts", () => {
     expect(IPC_WHITELIST.has(IPC.invoke.speechTranscribe)).toBe(true);
     expect(IPC_WHITELIST.has(IPC.invoke.speechSynthesize)).toBe(true);
     expect(IPC_WHITELIST.has(IPC.invoke.speechGetStatus)).toBe(true);
+    for (const channel of [
+      IPC.invoke.mobileSyncStatus,
+      IPC.invoke.mobileSyncCreatePairing,
+      IPC.invoke.mobileSyncCancelPairing,
+      IPC.invoke.mobileSyncRevoke,
+      IPC.invoke.mobileSyncRefresh,
+      IPC.event.mobileSyncChanged,
+    ]) {
+      expect(IPC_WHITELIST.has(channel)).toBe(true);
+    }
   });
 
   it("exposes the vendor-account OAuth channels through the preload whitelist", () => {

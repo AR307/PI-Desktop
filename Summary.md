@@ -45,8 +45,19 @@ Capacitor application after the desktop relay contracts are in place.
    image feature tree.
 4. Mobile sync will reuse current RACP/remote-host primitives and enforce a
    scoped project/session relay.
-5. Window and Plan/Ask behavior will be ported as small, behavior-focused
-   changes after the provider foundation.
+5. Window sizing, panel dragging, and Plan prompt-question behavior have been
+   migrated with focused regression coverage.
 
 See `docs/mirrorcoding-v2-migration-audit.md` for evidence, boundaries, and
 the staged acceptance plan.
+
+## Mobile sync contract
+
+The mobile-sync contract adds restricted project/session sharing types and IPC
+channel names. `MobileDeviceCredentials` encrypts the MC desktop device
+identity with Electron `safeStorage` and writes it atomically. The optional
+`MobileSyncService` IPC seam validates pairing, cancellation, refresh, and
+grant-revocation inputs without changing the existing remote-host protocol.
+
+The relay, scope enforcement, Android client, and MC service implementation
+remain separate follow-up work.

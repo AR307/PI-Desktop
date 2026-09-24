@@ -26,6 +26,8 @@ import { registerConfigSyncIpc } from "./config-sync-ipc";
 import { registerSkillsIpc } from "./skills-ipc";
 import { registerAgentImportIpc } from "./agent-import-ipc";
 import { registerRemoteHostIpc } from "./remote-host-ipc";
+import { registerMobileSyncIpc } from "../mobile-sync/ipc";
+import type { MobileSyncService } from "../mobile-sync/service";
 import { fetchSkillMarketDocument, searchSkillMarket } from "../skill-market-catalog";
 import { registerWindowIpc } from "./window-ipc";
 import { createComposerTemplateLoader, registerWorkspaceIpc } from "./workspace-ipc";
@@ -36,6 +38,7 @@ import type { createTraySessions } from "../tray-sessions";
 
 export type RegisterIpcDependencies = {
   isQuitting: () => boolean;
+  mobileSync?: MobileSyncService;
   ipcMain: IpcMain;
   getMainWindow: () => BrowserWindow | null;
   getHost: () => HostProcess | null;
@@ -143,6 +146,7 @@ export function registerIpcHandlers(dependencies: RegisterIpcDependencies) {
     emitAgentEvent,
     userMcp,
     mcpOAuth,
+    mobileSync,
     refreshUserMcp,
     describeError,
     pluginViews,
@@ -214,6 +218,8 @@ export function registerIpcHandlers(dependencies: RegisterIpcDependencies) {
     handleWithEvent,
     assertMainWindowSender,
   };
+
+  if (mobileSync) registerMobileSyncIpc(registrar, mobileSync);
 
   registerAppIpc({
     registrar,

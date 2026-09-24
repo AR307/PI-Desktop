@@ -187,6 +187,11 @@ export const IPC = {
      * crosses this channel.
      */
     remoteHostBootstrap: "pi-desktop/remoteHost/bootstrap",
+    mobileSyncStatus: "pi-desktop/mobile-sync/status",
+    mobileSyncCreatePairing: "pi-desktop/mobile-sync/createPairing",
+    mobileSyncCancelPairing: "pi-desktop/mobile-sync/cancelPairing",
+    mobileSyncRevoke: "pi-desktop/mobile-sync/revoke",
+    mobileSyncRefresh: "pi-desktop/mobile-sync/refresh",
     providersList: "pi-desktop/providers/list",
     providersReorder: "pi-desktop/providers/reorder",
     providersCreate: "pi-desktop/providers/create",
@@ -373,6 +378,7 @@ export const IPC = {
     providersOauth: "pi-desktop/providers/oauth/event",
     mcpOauth: "pi-desktop/mcp/oauth/event",
     updatesState: "pi-desktop/updates/event/state",
+    mobileSyncChanged: "pi-desktop/mobile-sync/changed",
   },
 } as const;
 
