@@ -13,6 +13,7 @@ import type {
 import { validateImageOptions } from "@pi-desktop/shared";
 import type { MirrorCodingAccount } from "./account";
 import { ENDPOINTS, IMAGE_ENDPOINTS } from "./catalog";
+import { relayBindingKey } from "./relay-key";
 
 type Binding = {
   providerId: string;
@@ -230,8 +231,8 @@ export class MirrorCodingRelay {
     const disconnect = () => { if (!response.writableFinished) controller.abort(); };
     response.once("close", disconnect);
     try {
-      const key = request.headers["x-pi-mirrorcoding-key"];
-      const binding = typeof key === "string" ? this.bindings.get(key) : undefined;
+      const key = relayBindingKey(request.headers);
+      const binding = key ? this.bindings.get(key) : undefined;
       // The relay is authenticated by a per-binding random key. pi-ai may
       // attach an Origin header even though this is a sidecar request, so
       // Origin is not a reliable browser boundary here.

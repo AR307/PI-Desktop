@@ -1,5 +1,15 @@
 # PI-Desktop MirrorCoding Edition
 
+## 2026-09-25 - Relay binding carrier fallback
+
+- MirrorCoding relay binding lookup now accepts the explicit local binding
+  header plus the temporary local key carried in standard `Authorization`,
+  `x-api-key`, or `api-key` headers. These fallback values are consumed only
+  by the loopback relay and are never forwarded to MirrorCoding.
+- Added focused relay-key tests for explicit, adapter, and malformed headers.
+- Rebuilt the desktop main process and restarted the isolated preview after the
+  fix; the current test window is using the new relay code.
+
 ## 2026-09-24 - Native model configuration reuse
 
 - Replaced the custom MirrorCoding model form with the existing
