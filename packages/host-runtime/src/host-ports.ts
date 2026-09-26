@@ -84,14 +84,20 @@ export function createHostSessionPort(getHost: () => HostRpc | null): SessionPor
       const record = await fetchSession(sessionId);
       return record ? toSessionSummary(record) : null;
     },
-    async history(sessionId, { limit, beforeItemId }) {
+    async history(sessionId, { limit, beforeItemId, contentLimit }) {
       let messageBefore: number | undefined;
       if (beforeItemId) {
-        const anchor = await fetchSession(sessionId, { messageAround: beforeItemId, messageLimit: 1 });
+        const anchor = await fetchSession(sessionId, { messageAround: beforeItemId, messageLimit: 1, contentLimit: 1 });
         if (!anchor?.messages?.some((message) => message.id === beforeItemId)) throw new RacpError("NOT_FOUND", "history_anchor_not_found");
         messageBefore = anchor.messageStart;
       }
-      const record = await fetchSession(sessionId, { messageLimit: limit, ...(messageBefore !== undefined ? { messageBefore } : {}) });
+      const record = await fetchSession(sessionId, {
+        messageLimit: limit,
+        ...(messageBefore !== undefined ? { messageBefore } : {}),
+        // Presentation cap per field (host-core `content_limit`): without it a
+        // single multi-megabyte message bursts the transport frame limit.
+        ...(contentLimit !== undefined ? { contentLimit } : {}),
+      });
       return {
         items: (record?.messages ?? []).map(toRacpItem),
         hasMore: record?.hasMoreBefore === true,

@@ -8,6 +8,7 @@ import { Login } from "./components/Login";
 import { Home, Sessions } from "./components/Home";
 import { Conversation } from "./components/Conversation";
 import { applyNativeAppearance } from "./services/appearance";
+import { withViewTransition } from "./services/view-transition";
 import { AccountSheet } from "./components/AccountSheet";
 import { dismissTopSurface } from "./components/useBackDismiss";
 
@@ -33,7 +34,7 @@ export function App({ controller }: { controller: MobileController }) {
       if (menu) { setMenu(false); return; }
       const current = controller.getSnapshot();
       if (current.challenge) controller.cancelChallenge();
-      else if (current.grant) controller.back();
+      else if (current.grant) withViewTransition(() => controller.back());
       else if (Capacitor.isNativePlatform()) void NativeApp.minimizeApp();
     };
     const key = (event: KeyboardEvent) => { if (event.key === "Escape") handleBack(); };
@@ -48,10 +49,10 @@ export function App({ controller }: { controller: MobileController }) {
   const connectionLabel = t(view.connection === "connected" ? "online" : view.connection === "connecting" ? "connecting" : view.connection === "reconnecting" ? "reconnecting" : "offline");
   const headerTitle = selectedSession?.title ?? view.grant?.scope.label ?? t("title");
   return <div className="mobile-shell">
-    <header className="app-header">{view.grant ? <button className="icon-button" aria-label={t("back")} onClick={() => controller.back()}><ArrowLeft size={21}/></button> : <span className="wordmark">π</span>}<span className="app-heading"><strong>{headerTitle}</strong>{view.grant && <small>{desktop?.name ?? t("unavailable")} · {connectionLabel}</small>}</span><button className="icon-button" aria-label={t("menu")} onClick={() => setMenu(true)}><MoreHorizontal size={22}/></button></header>
+    <header className="app-header">{view.grant ? <button className="icon-button" aria-label={t("back")} onClick={() => withViewTransition(() => controller.back())}><ArrowLeft size={21}/></button> : <span className="wordmark">π</span>}<span className="app-heading"><strong>{headerTitle}</strong>{view.grant && <small>{desktop?.name ?? t("unavailable")} · {connectionLabel}</small>}</span><button className="icon-button" aria-label={t("menu")} onClick={() => setMenu(true)}><MoreHorizontal size={22}/></button></header>
     {view.grant && <div className={`connection-bar ${view.connection === "connected" ? "connected" : ""}`} role="status" aria-label={t("connectionStatus")}><span className="status-dot"/>{t(view.connection === "connected" ? "online" : view.connection === "connecting" ? "connecting" : view.connection === "reconnecting" ? "reconnecting" : "offline")}{view.connection === "error" && <button onClick={() => view.grant && void controller.openGrant(view.grant)}>{t("retry")}</button>}</div>}
     {(view.error || view.notice) && <div className={`notice ${view.error ? "error" : ""}`} role={view.error ? "alert" : "status"}><span>{t(view.error ?? view.notice ?? "request_failed", { defaultValue: view.error ?? view.notice })}</span><button className="icon-button" aria-label={t("close")} onClick={() => controller.clearError()}><X size={16}/></button></div>}
-    {view.loading && !view.signedIn ? <main className="empty-state">{t("working")}</main> : !view.signedIn ? <Login controller={controller} view={view}/> : view.selectedId ? <Conversation key={`${view.grant?.desktopDeviceId}:${view.selectedId}`} controller={controller} view={view}/> : view.grant ? <Sessions controller={controller} view={view}/> : <Home controller={controller} view={view}/>}
+    {view.loading && !view.signedIn ? <main className="empty-state">{t("working")}</main> : !view.signedIn ? <Login controller={controller} view={view}/> : view.selectedId ? <Conversation key={`${view.grant?.desktopDeviceId}:${view.selectedId}`} controller={controller}/> : view.grant ? <Sessions controller={controller} view={view}/> : <Home controller={controller} view={view}/>}
     <AccountSheet open={menu} close={() => setMenu(false)} controller={controller} theme={theme} setTheme={setTheme}/>
   </div>;
 }

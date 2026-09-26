@@ -1,0 +1,25 @@
+/* Login, shared-work list, and session list screens. */
+.login-page { padding: 38px 28px; overflow: auto; text-align: center; }
+.brand-mark { margin: 0 auto 22px; width: 78px; height: 78px; display: grid; place-items: center; border-radius: 22px; background: var(--ds-tile-deep); font-size: 50px; font-weight: 600; }
+.login-page > p { margin: 0; }
+.login-form { display: grid; gap: 20px; margin: 38px auto 0; text-align: left; max-width: 370px; }
+.login-form h2 { font-size: 17px; margin: 0; }
+.login-form .primary { margin-top: 5px; justify-content: space-between; }
+.login-note { display: flex; gap: 6px; align-items: center; justify-content: center; color: var(--ds-text-muted); font-size: 12px; }
+.work-list { padding: 24px 20px 32px; flex: 1; overflow: auto; }
+.section-title { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.section-title h1, .section-title h2 { margin: 0; }
+.empty-state { padding: 48px 14px; display: flex; align-items: center; justify-content: center; flex-direction: column; text-align: center; color: var(--ds-text-muted); gap: 12px; }
+.empty-state h2, .empty-state p { margin: 0; max-width: 310px; }
+.grant-list { display: grid; gap: 12px; margin: 24px 0; }
+.grant-card { display: flex; background: var(--ds-tile); border-radius: 16px; align-items: center; }
+.grant-open { display: flex; background: transparent; text-align: left; min-width: 0; padding: 17px 12px; flex: 1; gap: 12px; justify-content: flex-start; }
+.tile-icon { width: 42px; height: 42px; display: grid; place-items: center; background: var(--ds-tile-deep); border-radius: 12px; flex: none; }
+.grant-content { display: grid; gap: 7px; flex: 1; min-width: 0; }
+.grant-content strong { font-size: 15px; overflow-wrap: anywhere; }
+.grant-content .muted { font-size: 11px; }
+.grant-remove { margin-right: 4px; }
+.pair-button { width: 100%; border: 1px dashed var(--ds-border-strong); background: transparent; }
+.session-card { width: 100%; background: transparent; border-radius: 14px; text-align: left; padding: 18px 10px; gap: 14px; }
+.session-card span { display: grid; flex: 1; gap: 7px; min-width: 0; }
+.session-card strong { font-size: 14px; white-space: nowrap; text-overflow: ellipsis; overflow: hidden; }

@@ -27,6 +27,9 @@ export const mobileEn = {
   authentication_expired: "Your login expired. Sign in again.", request_failed: "The request failed. Please try again.",
   sharedWork: "Shared work", connectionStatus: "Connection status", menu: "Account and appearance", emptyHistory: "No messages yet.",
   logoutPending: "Signed out on this phone. Server sign-out could not be confirmed.", unavailable: "Unavailable",
+  loadFull: "Show full content", showMore: "Show more",
+  queuedMessages: "Queued messages", sendNow: "Send now", removeQueued: "Remove from queue",
+  subagent: "Subagent", compacted: "Context compacted",
   mode: "Mode", chooseMode: "Choose mode", modeAgentHint: "Chat, tools and task execution", modePlanHint: "Plan first, then review", modeGoalHint: "Define a goal and approve execution", modeImageHint: "Generate images with the selected model",
   model: "Model", chooseModel: "Choose model", chatModels: "Chat models", imageModels: "Image models", search: "Search models", apply: "Apply", groups: "Groups", dynamicBilling: "Dynamic billing", ratio: "Multiplier", thinkingLevel: "Thinking level", parameters: "Parameters", parametersAdjusted: "Unsupported parameters were reset for this model.", size: "Size", quality: "Quality", aspectRatio: "Aspect ratio", count: "Count", nextTurn: "Next turn", currentTask: "Current task", configurationSaved: "Configuration saved for the next turn.", configurationApplied: "Configuration updated.", configurationBusy: "Mode changes are unavailable while this task is running.", modelUnavailable: "This model or group is no longer available.", noModelMatches: "No matching models.", noImageModel: "Choose an image model before sending.", referenceUnsupported: "This model does not support reference images.", noOptions: "Use the service defaults", backToLatest: "Back to latest",
 };
@@ -60,6 +63,9 @@ export const mobileZhCN: typeof mobileEn = {
   authentication_expired: "登录已失效，请重新登录。", request_failed: "请求失败，请重试。",
   sharedWork: "已同步工作", connectionStatus: "连接状态", menu: "账号与外观", emptyHistory: "暂时没有消息。",
   logoutPending: "本机已退出，服务端退出尚未确认。", unavailable: "不可用",
+  loadFull: "加载完整内容", showMore: "展开更多",
+  queuedMessages: "排队消息", sendNow: "立即发送", removeQueued: "移出队列",
+  subagent: "子智能体", compacted: "上下文已压缩",
   mode: "模式", chooseMode: "选择模式", modeAgentHint: "对话、工具和任务执行", modePlanHint: "先生成计划，再确认执行", modeGoalHint: "设定目标并确认执行", modeImageHint: "使用所选模型生成图片",
   model: "模型", chooseModel: "选择模型", chatModels: "对话模型", imageModels: "生图模型", search: "搜索模型", apply: "应用", groups: "分组", dynamicBilling: "动态计费", ratio: "倍率", thinkingLevel: "推理等级", parameters: "参数", parametersAdjusted: "已按该模型能力重置不支持的参数。", size: "尺寸", quality: "质量", aspectRatio: "宽高比", count: "数量", nextTurn: "下一轮", currentTask: "当前任务", configurationSaved: "配置将在下一轮生效。", configurationApplied: "配置已更新。", configurationBusy: "任务运行时暂不能切换模式。", modelUnavailable: "该模型或分组已不可用。", noModelMatches: "没有匹配的模型。", noImageModel: "请先选择生图模型。", referenceUnsupported: "该模型不支持参考图。", noOptions: "使用服务端默认值", backToLatest: "回到最新",
 };

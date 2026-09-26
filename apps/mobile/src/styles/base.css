@@ -1,0 +1,51 @@
+/* Foundation: tokens, resets, typography, controls, app shell chrome. */
+@import "../../../desktop/src/styles/tokens.css";
+
+:root { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif; color: var(--ds-text-primary); background: var(--ds-bg-primary); font-synthesis: none; text-rendering: optimizeLegibility; }
+* { box-sizing: border-box; }
+body { margin: 0; overscroll-behavior: none; }
+button, input, textarea, select { font: inherit; }
+button { color: inherit; background: var(--ds-tile); border: 0; border-radius: 12px; min-height: 44px; padding: 10px 16px; cursor: pointer; display: inline-flex; align-items: center; justify-content: center; gap: 8px; transition: background 140ms ease, transform 120ms ease, opacity 140ms ease; }
+button:hover { background: var(--ds-tile-hover); }
+button:active { transform: scale(.97); }
+button:disabled { opacity: .45; cursor: default; }
+button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-visible, summary:focus-visible { outline: 2px solid var(--ds-focus); outline-offset: 2px; }
+input, textarea, select { width: 100%; min-height: 46px; border: 1px solid var(--ds-border-strong); border-radius: 10px; color: inherit; background: var(--ds-field-inset-bg); padding: 12px; }
+label { display: grid; gap: 8px; font-size: 14px; }
+input::placeholder, textarea::placeholder { color: var(--ds-placeholder-ink); }
+a { color: inherit; text-underline-offset: 3px; }
+h1 { font-size: 26px; letter-spacing: 0; font-weight: 600; margin: 0 0 10px; }
+h2 { font-size: 19px; font-weight: 600; margin: 0 0 12px; }
+h3 { font-size: 16px; margin: 0 0 10px; }
+h4 { font-size: 12px; margin: 12px 0 6px; color: var(--ds-text-muted); }
+p { line-height: 1.6; }
+pre { margin: 8px 0; padding: 12px; max-width: 100%; overflow: auto; background: var(--ds-bg-inset); border-radius: 10px; font-size: 12px; white-space: pre-wrap; overflow-wrap: anywhere; }
+summary { cursor: pointer; min-height: 40px; padding: 8px 0; }
+
+.mobile-shell { height: 100dvh; max-width: 900px; margin: 0 auto; display: flex; flex-direction: column; padding-top: var(--safe-area-inset-top, env(safe-area-inset-top)); padding-bottom: var(--safe-area-inset-bottom, env(safe-area-inset-bottom)); padding-left: var(--safe-area-inset-left, env(safe-area-inset-left)); padding-right: var(--safe-area-inset-right, env(safe-area-inset-right)); overflow: hidden; }
+.app-header { flex: none; min-height: 60px; padding: 7px 14px; display: flex; gap: 10px; align-items: center; }
+.wordmark { font-size: 29px; width: 44px; text-align: center; font-weight: 600; }
+.app-heading { flex: 1; min-width: 0; display: grid; gap: 2px; }
+.app-heading strong, .app-heading small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.app-heading strong { font-size: 15px; }
+.app-heading small { font-size: 10px; }
+.icon-button { width: 44px; height: 44px; flex: none; padding: 0; background: transparent; }
+.muted, small { color: var(--ds-text-muted); font-size: 13px; }
+.primary, .send-button { color: var(--ds-bg-primary); background: var(--ds-accent); font-weight: 600; }
+.primary:hover, .send-button:hover { background: var(--ds-accent-hover); }
+.danger, .error-text { color: var(--ds-error); }
+.status-dot { display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: var(--ds-text-muted); margin-right: 5px; flex: none; }
+.status-dot.online, .connected .status-dot { background: var(--ds-success); }
+.connection-bar { flex: none; display: flex; align-items: center; justify-content: center; gap: 4px; color: var(--ds-text-muted); background: var(--ds-tile); font-size: 11px; min-height: 26px; }
+.connection-bar.connected { display: none; }
+.connection-bar button { min-height: 24px; padding: 0 8px; }
+.notice { flex: none; display: flex; gap: 6px; align-items: center; margin: 4px 14px; padding: 6px 10px; border-radius: 10px; background: var(--ds-tile); font-size: 12px; line-height: 1.4; animation: rise-in 180ms ease both; }
+.notice span { flex: 1; overflow-wrap: anywhere; }
+.notice.error { color: var(--ds-error); }
+.spin { animation: rotate 1s linear infinite; }
+@keyframes rotate { to { transform: rotate(360deg); } }
+@keyframes rise-in { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: translateY(0); } }
+
+/* Shimmer skeletons shared by list and transcript loading states. */
+.skeleton { display: block; border-radius: 12px; background: linear-gradient(100deg, var(--ds-tile) 40%, var(--ds-tile-hover) 50%, var(--ds-tile) 60%); background-size: 200% 100%; animation: shimmer 1.4s ease-in-out infinite; }
+@keyframes shimmer { to { background-position-x: -200%; } }

@@ -19,6 +19,7 @@ Each ADR includes:
 ## Index
 
 - [Scoped MC relay for the Android companion](mobile-companion-relay.md)
+- [Mobile transcript cache and delta sync](mobile-transcript-cache-and-delta-sync.md)
 
 | ID | Title | Status |
 |---|---|---|

@@ -1,4 +1,4 @@
-import type { RacpSession, RacpSessionSnapshot } from "../racp.js";
+import type { RacpSession, RacpSessionSnapshot, RacpSessionState } from "../racp.js";
 import type { ImageGenerationCapability, ImageGenerationState, ImageSessionConfig } from "./images.js";
 import type { ModelModalities, SessionThinkingLevel, ThinkingLevel } from "./models.js";
 import type { PlanProposal } from "./plans.js";
@@ -60,10 +60,32 @@ export type MobileSession = RacpSession & {
   capabilities: { canPrompt: boolean; canStop: boolean };
 };
 
+/** One queued prompt with a bounded text preview, so the phone can manage the queue. */
+export type MobileQueuedPrompt = { turnId: string; content: string };
+
+/** Where a context compaction cut the transcript; the divider renders after `throughMessageId`. */
+export type MobileCompactionMark = { id: string; throughMessageId: string };
+
 export type MobileSessionSnapshot = Omit<RacpSessionSnapshot, "session"> & {
   session: MobileSession;
   imageJobs: MobileImageGenerationState[];
   plans: PlanProposal[];
+  /** Bounded previews of the queued turns, in delivery order. */
+  queuedPrompts?: MobileQueuedPrompt[];
+  compactions?: MobileCompactionMark[];
+};
+
+/**
+ * `session/state`: a snapshot without the transcript page, for clients that
+ * already hold the transcript (cursor replay or local cache) and only need the
+ * live turn/approval/input/plan/image state refreshed.
+ */
+export type MobileSessionState = Omit<RacpSessionState, "session"> & {
+  session: MobileSession;
+  imageJobs: MobileImageGenerationState[];
+  plans: PlanProposal[];
+  queuedPrompts?: MobileQueuedPrompt[];
+  compactions?: MobileCompactionMark[];
 };
 export type MobileModelChoice = {
   providerId: string;
@@ -149,3 +171,20 @@ export type MobileRelayEnvelope =
 
 /** Keep relay attachment frames below common proxy/WebSocket limits. */
 export const MOBILE_ATTACHMENT_CHUNK_BYTES = 192 * 1024;
+
+/**
+ * Presentation cap per transcript text/value field on the mobile read path,
+ * matching the desktop renderer window. Without a cap, one multi-megabyte
+ * message makes the snapshot response exceed `maxFrameBytes` and the phone
+ * cannot open the session at all. Full content stays reachable per item
+ * through `session/item`.
+ */
+export const MOBILE_ITEM_CONTENT_LIMIT = 64 * 1024;
+
+/**
+ * Marker host-core appends to display-capped text fields. Mirrors
+ * `DISPLAY_TRUNCATION_MARKER` in `crates/host-core/src/sessions.rs`; clients
+ * detect a capped field by this suffix and offer the full-content fetch.
+ */
+export const TRANSCRIPT_DISPLAY_TRUNCATION_MARKER =
+  "\n\n[truncated for display; the full content remains in the transcript]";

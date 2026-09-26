@@ -2,6 +2,7 @@ import { useState, type FormEvent } from "react";
 import { useTranslation } from "react-i18next";
 import { ChevronRight, Folder, MessageSquare, Monitor, Plus, RefreshCw, Unlink } from "lucide-react";
 import type { MobileController, MobileView } from "../state/controller";
+import { withViewTransition } from "../services/view-transition";
 import { Surface } from "./Surface";
 
 export function Home({ controller, view }: { controller: MobileController; view: MobileView }) {
@@ -15,7 +16,7 @@ export function Home({ controller, view }: { controller: MobileController; view:
     <div className="grant-list">{view.grants.map((grant) => {
       const desktop = view.devices.find((device) => device.deviceId === grant.desktopDeviceId);
       return <article className="grant-card" key={grant.id}>
-        <button className="grant-open" onClick={() => void controller.openGrant(grant)}>
+        <button className="grant-open" onClick={() => withViewTransition(() => void controller.openGrant(grant))}>
           <span className="tile-icon">{grant.scope.kind === "project" ? <Folder size={22}/> : <MessageSquare size={22}/>}</span>
           <span className="grant-content"><strong>{grant.scope.label}</strong><span className="muted"><span className={`status-dot ${desktop?.online ? "online" : ""}`}/>{desktop?.name ?? t("devices")} · {t(desktop?.online ? "online" : "offline")}</span></span><ChevronRight size={18}/>
         </button>
@@ -31,7 +32,9 @@ export function Home({ controller, view }: { controller: MobileController; view:
 export function Sessions({ controller, view }: { controller: MobileController; view: MobileView }) {
   const { t } = useTranslation("translation", { keyPrefix: "mobile" });
   return <main className="work-list"><h1>{view.grant?.scope.label}</h1><p className="muted">{t("conversations")}</p>
-    {view.sessions.map((session) => <button className="session-card" key={session.id} onClick={() => void controller.selectSession(session.id)}><MessageSquare size={20}/><span><strong>{session.title}</strong><small>{session.modelId} · {t(session.taskMode === "image" ? "imageGeneration" : session.taskMode)}</small></span>{session.activeTurnId ? <span className="status-dot online"/> : <ChevronRight size={17}/>}</button>)}
-    {view.sessions.length === 0 && <p className="empty-state">{t(view.connection === "connected" ? "noConversations" : "offlineHint")}</p>}
+    {view.sessions.map((session) => <button className="session-card" key={session.id} onClick={() => withViewTransition(() => void controller.selectSession(session.id))}><MessageSquare size={20}/><span><strong>{session.title}</strong><small>{session.modelId} · {t(session.taskMode === "image" ? "imageGeneration" : session.taskMode)}</small></span>{session.activeTurnId ? <span className="status-dot online"/> : <ChevronRight size={17}/>}</button>)}
+    {view.sessions.length === 0 && (view.connection === "connecting" || view.connection === "reconnecting"
+      ? <div className="grant-list" aria-hidden="true"><span className="skeleton" style={{ height: 64 }}/><span className="skeleton" style={{ height: 64 }}/><span className="skeleton" style={{ height: 64 }}/></div>
+      : <p className="empty-state">{t(view.connection === "connected" ? "noConversations" : "offlineHint")}</p>)}
   </main>;
 }

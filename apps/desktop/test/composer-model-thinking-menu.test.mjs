@@ -150,7 +150,9 @@ test("Composer uses alias labels while preserving the exact selected wire id", a
 test("reasoning projection uses the selected exact catalog row and binding", async () => {
   const source = await readComposerModule("model.ts");
   assert.match(source, /sameComposerModelId\(candidate\.modelId, modelId\)/);
-  assert.match(source, /sameComposerModelId\(candidate\.id, model\.modelId\)/);
+  // The binding lookup follows the catalog row when one exists and falls back
+  // to the requested id for rows without live discovery (MirrorCoding).
+  assert.match(source, /sameComposerModelId\(candidate\.id, model\?\.modelId \?\? modelId\)/);
 });
 
 test("a model row spends the panel's width instead of stacking at its left edge", () => {

@@ -22,6 +22,7 @@ import type {
   RacpRole,
   RacpSession,
   RacpSessionSnapshot,
+  RacpSessionState,
   RacpSessionStatus,
   RacpTurn,
   RacpTurnAdmission,
@@ -665,7 +666,7 @@ export class AgentHost {
 
   async history(
     principal: Principal,
-    params: { sessionId: string; beforeItemId?: string; limit?: number },
+    params: { sessionId: string; beforeItemId?: string; limit?: number; contentLimit?: number },
   ): Promise<{ items: RacpItemSummary[]; hasMore: boolean; revision: number }> {
     this.requireRole(principal, "session/history");
     const state = this.state(params.sessionId);
@@ -673,31 +674,51 @@ export class AgentHost {
     const page = await this.sessions.history(params.sessionId, {
       limit,
       ...(params.beforeItemId ? { beforeItemId: params.beforeItemId } : {}),
+      ...(params.contentLimit !== undefined ? { contentLimit: params.contentLimit } : {}),
     });
     return { ...page, revision: state.revision };
   }
 
-  async snapshot(sessionId: string, summary?: SessionSummary): Promise<RacpSessionSnapshot> {
+  /**
+   * Live session state without the transcript page: what a client that already
+   * holds the transcript (event replay or a local cache) needs to refresh, at a
+   * fraction of the snapshot payload.
+   */
+  async sessionState(sessionId: string, summary?: SessionSummary): Promise<RacpSessionState> {
     const resolved = summary ?? (await this.requireSession(sessionId));
     const state = this.state(sessionId);
     await this.approvals.syncPendingContracts(sessionId, {
       revision: state.revision,
       lifetimeMs: this.approvalLifetime(state),
     });
-    const page = await this.sessions.history(sessionId, { limit: this.snapshotItems });
     const activeTurn = state.activeTurnId ? state.turns.get(state.activeTurnId) : undefined;
     return {
       session: this.toRacpSession(resolved, state),
       ...(activeTurn ? { activeTurn: this.toRacpTurn(state, activeTurn) } : {}),
       queuedTurns: this.queue.list(sessionId).map((record) => this.toRacpTurn(state, this.ensureTurn(state, record.id))),
-      items: page.items,
       activeItems: [...state.activeItems.values()],
       pendingApprovals: this.approvals.list(sessionId),
       pendingInputs: [...state.pendingInputs.values()].map((entry) => entry.request),
-      hasMoreHistory: page.hasMore,
       cursor: this.hub.stream(sessionId).cursor(),
       revision: state.revision,
       generatedAt: new Date(this.clock.now()).toISOString(),
+    };
+  }
+
+  async snapshot(
+    sessionId: string,
+    summary?: SessionSummary,
+    options?: { contentLimit?: number },
+  ): Promise<RacpSessionSnapshot> {
+    const base = await this.sessionState(sessionId, summary);
+    const page = await this.sessions.history(sessionId, {
+      limit: this.snapshotItems,
+      ...(options?.contentLimit !== undefined ? { contentLimit: options.contentLimit } : {}),
+    });
+    return {
+      ...base,
+      items: page.items,
+      hasMoreHistory: page.hasMore,
     };
   }
 
