@@ -253,7 +253,7 @@ token rather than introducing a decorative palette:
 | State | Semantic color | Shape / motion | Meaning |
 |---|---|---|---|
 | Selected | neutral accent | static outlined ring | current conversation |
-| In progress | warning orange | filled dot with a restrained breathing pulse | agent is producing or executing |
+| In progress | warning orange | filled dot; two breathing cycles, then steady | agent is producing or executing |
 | Completed | success green | check mark | latest unread task turn completed |
 | Failed | error red | circled alert mark | latest unread task turn failed |
 
@@ -262,12 +262,17 @@ turn clears the prior terminal outcome; abort clears the live indicator without
 creating a failure. Opening a conversation acknowledges its unread terminal
 outcome: the terminal mark clears immediately and the matching durable task
 notification is marked read so the mark cannot return after a notification
-refresh or app restart. Outcomes already marked read never produce a terminal
-mark. Marking the row read, marking all rows read, or clearing the inbox also
-dismisses any matching task-native banner; a late event for that durable id
-cannot restore the mark, row, or banner. Reduced-motion mode disables the
-breathing animation while retaining its orange fill and localized accessible
-name.
+refresh or app restart. Restoring/focusing the app with that conversation still
+visible in the chat applies the same acknowledgement without requiring a
+session switch; other sessions remain unread. Outcomes already marked read
+never produce a terminal mark. Marking the row read, marking all rows read, or
+clearing the inbox also dismisses any matching task-native banner; a late event
+for that durable id cannot restore the mark, row, or banner. Reduced-motion mode
+disables the breathing animation while retaining its orange fill and localized
+accessible name. Running dots in task rows and related-session hover cards
+animate for two 1.6-second cycles when mounted or entering the running state,
+then remain steady until the status changes. They must not continuously
+submit frames while the rest of the window is idle.
 
 ### 4.6 Tailwind CSS variable stub
 
@@ -1210,6 +1215,86 @@ Full component contract and usage rules: [08-component-spec.md §17](08-componen
 | Motion | enter 200ms ease-out slide-down/fade, exit 150ms ease-in fade; reduced-motion → near-zero duration (not `none`, removal listens for `animationend`) |
 | Z-index | z-toast (50) |
 
+### 11.9 SettingsToggle
+
+Implementation: `components/ui.tsx → SettingsToggle`.
+
+| Property | Value |
+|---|---|
+| Size | 32×20, thumb 16px |
+| CSS class | `.settings-toggle` / `.settings-toggle.on` |
+| Role | `role="switch"` with `aria-checked` |
+| Variants | default, `busy` (`.is-busy`, `aria-busy`, disabled) |
+| Background | neutral accent when on (not green); theme-specific override in `theme-overrides.css` |
+
+Every boolean on/off control in Settings and editor sheets **must** use
+`SettingsToggle`. Inline `<button role="switch">` with manual class
+assembly is prohibited.
+
+### 11.10 SegmentedControl
+
+Implementation: `components/ui.tsx → SegmentedControl<T>`.
+
+| Property | Value |
+|---|---|
+| CSS class | `.settings-segment` / `.settings-segment-item.active` |
+| Roles | `radiogroup` (default), `group`, or `tablist` |
+| Item roles | `radio` / none / `tab` — derived from container role |
+| Generic | `<T extends string>` for type-safe value/onChange |
+| Options | `readonly { value: T; label: ReactNode; id?: string; controls?: string }[]` — label accepts JSX (e.g. count badge) |
+
+Tablist callers supply stable option `id` and `controls` values to connect
+each tab to its panel through `aria-controls` and the panel's
+`aria-labelledby`. These identifiers must not depend on translated labels.
+Import and Remote Hosts preserve these links when switching tabs or language.
+
+Every multi-option selector rendered as a row of equal buttons **must** use
+`SegmentedControl`. Inline `<div className="settings-segment">` with manual
+button loops is prohibited.
+
+### 11.11 Checkbox
+
+Implementation: `components/ui.tsx → Checkbox`.
+
+| Property | Value |
+|---|---|
+| CSS class | `.ui-checkbox` |
+| Anatomy | `<label> → <input type="checkbox"> + <span>{label}</span>` |
+| Props | Extends `InputHTMLAttributes` (minus `type`) + `label: ReactNode` |
+
+Every standalone labeled checkbox **must** use `Checkbox`. Inline
+`<label><input type="checkbox"/>…</label>` is prohibited.
+
+### 11.11b CheckboxGroup
+
+Implementation: `components/ui.tsx → CheckboxGroup<T>`.
+
+| Property | Value |
+|---|---|
+| CSS class | `.ui-checkbox-group` (container), items use `Checkbox` |
+| Generic | `<T extends string>` for type-safe values/onChange |
+| Props | `values: T[]`, `onChange(values: T[])`, `options: { value: T; label: ReactNode }[]`, `label`, `disabled`, `minSelected` |
+| Minimum selection | `minSelected` (default 0) prevents unchecking below a threshold |
+
+Use `CheckboxGroup` when a set of options maps to an array of selected
+values (e.g. voice languages). For independent boolean fields with
+heterogeneous state shapes, use individual `Checkbox` components.
+
+### 11.12 SettingsMenuSelect
+
+Implementation: `components/settings/SettingsMenuSelect.tsx`.
+
+| Property | Value |
+|---|---|
+| Trigger | Button showing the current label, `IconChevronDown` trailing |
+| Popup | `AnchoredMenu` — portaled, keyboard-navigable, current-value checkmark |
+| Props | `value`, `options: { id, label, disabled? }[]`, `onChange(id)`, `label`, `disabled`, `busy`, `fullWidth` |
+
+Every dropdown / option-list in Settings **must** use `SettingsMenuSelect`
+instead of the native `Select` (`<select>`) component. Native `Select`
+is reserved for non-Settings contexts where OS-level rendering is acceptable.
+
+
 ## 12. State patterns
 
 ### 12.1 Interactive states
@@ -1268,6 +1353,8 @@ Full component contract and usage rules: [08-component-spec.md §17](08-componen
 - Use Lucide/Heroicons SVG icons — never emoji as UI affordances
 - Use compact padding and tight spacing — developer density, not consumer spacing
 - First launch follows the system theme (see §Theme switching); dark is the primary design target
+- Use shared primitives from `components/ui.tsx` (`Button`, `Badge`, `SettingsToggle`, `SegmentedControl`, `Checkbox`, `Input`, `Textarea`, `Select`, `Field`, `Panel`, `HelpIcon`, `TooltipButton`) — never reimplement them inline
+- Use `SettingsMenuSelect` for all Settings dropdowns — never native `<select>` inside Settings
 
 ### Don't
 
@@ -1281,6 +1368,8 @@ Full component contract and usage rules: [08-component-spec.md §17](08-componen
 - Don't apply rounded corners to full-width panels (sidebar, topbar)
 - Don't use `border-radius: 0` on buttons and inputs (use `radius-sm` minimum)
 - Don't show raw API keys in any UI surface
+- Don't write inline `<button role="switch">`, `<div className="settings-segment">`, or `<label><input type="checkbox">` — use the corresponding shared component
+- Don't use native `Select` (`<select>`) in Settings pages — use `SettingsMenuSelect`
 
 ## 15. Acceptance criteria
 

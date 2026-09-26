@@ -1282,9 +1282,16 @@ Project drag/drop follows these patterns:
   the work panel follows the folder that answered: a file of the primary folder
   travels as a project-relative path, a file of a sibling folder of the same
   project as an absolute one, exactly as a scratch or attachment file does. A
-  chip whose reference matches nothing opens nothing and reports itself; the OS
-  default application is no longer what this click does, though that action
-  stays reachable from the file view's own context menu.
+  chip whose reference matches nothing opens nothing and reports itself, and so
+  does a right-click on it: the file-reference menu — offered on every
+  reference the transcript renders, a sent `@path` chip, an inline code span, a
+  local link, a local image, a tool row's own file path, a path in a tool
+  result's file or match list, and an image attachment's thumbnail — shows the
+  file in the system file manager through that same completion and that same
+  address, and copies that file's full path or its project-relative path. A file
+  outside the project has no relative path to copy and says so. The OS default
+  application is no longer what this click does, though that action stays
+  reachable from the file view's own context menu.
 - The same destination rule governs every other surface of the transcript that
   names a file, because one opener serves them all: clicking the file path in a
   tool row's summary (Read, Write, Edit, fetch) and clicking a path in a tool
@@ -1362,28 +1369,33 @@ Project drag/drop follows these patterns:
 - Button appears as soon as upward scrolling releases follow mode
 - Click button: scrolls to bottom, resumes auto-scroll
 - Button disappears when at bottom
-- The subagent task dock uses the same single-body scroll owner as the work
-  panel. It renders the task description followed by the delegate's live
-  thinking, tool, and answer rows in normal content flow; it does not mount a
-  nested `.subagent-run-rows` workflow scrollbar. While the panel is pinned,
-  new process rows stay in view; a real upward gesture pauses follow and shows
-  the standard jump-to-latest control. This keeps the process readable without
-  a second scrollbar or an empty tail.
-- Clicking a delegation topology node toggles an inset grouped side sheet in the
-  right-side work-panel dock instead of expanding the transcript. Clicking the
-  selected node again closes the side sheet; selecting another node replaces
-  the current detail in place. The dock has
-  a sticky identity header (avatar, name, and model caption on the left; status
-  capsule and elapsed time trailing on the same row), the Task call's selectable description as a full-width grouped
-  card under a Task section label, capped at four lines with an inline Show
-  more / Show less control for longer tasks, and its live process under an
-  Activity section on one subtle vertical timeline; it does not render separate
-  details, output, or workflow tabs. At the minimum panel width, long commands,
-  paths, and tool summaries remain contained by the dock instead of expanding
-  the side sheet past the client area.
-  Selecting another node replaces the task in place, closing it restores the
-  prior resource view when present, and switching sessions or routes hides the
-  selection. `Cmd/Ctrl + J` hides the whole dock.
+- A delegation tab uses the same single-body scroll owner as the work panel.
+  It renders the delegate's conversation — each `Task` call's prompt as a user
+  row followed by the delegate's live thinking, tool, and answer rows — in
+  normal content flow; it does not mount a nested `.subagent-run-rows`
+  workflow scrollbar. While the panel is pinned, new rows stay in view; a real
+  upward gesture pauses follow and shows the standard jump-to-latest control.
+  This keeps the conversation readable without a second scrollbar or an empty
+  tail.
+- Clicking a delegation topology node opens (or activates) a dedicated
+  `subagent` tab in the work panel instead of expanding the transcript or
+  replacing the tab strip. Multiple delegations coexist as independent tabs —
+  ten subagents yield ten tabs — with the standard tab affordances (activate,
+  drag-reorder, close via ×, middle-click, or Delete, and wheel overflow).
+  A tab shows the delegation as a message list: every `Task` call of the
+  resume chain renders its prompt as a user row, and the rows the delegate
+  produced under that call render with the main transcript's message-list
+  language, so a follow-up prompt reads as the next user turn. The tab is
+  display-only: a disabled two-row composer sits at the foot with an in-field
+  hint that subagents are driven by the main agent and cannot take input; no
+  send path exists. At the minimum panel width, long commands, paths, and
+  tool summaries wrap inside the committed width instead of expanding the
+  panel past the client area.
+  A tab is never opened automatically when a delegate starts; only a node
+  click opens one. Tabs persist after the delegate settles until the user
+  closes them, and they are scoped to their session like every other tab.
+  Switching sessions or routes hides the panel; `Cmd/Ctrl + J` toggles the
+  whole work panel.
 
 ### 9.1a Sidebar project path and open folder
 

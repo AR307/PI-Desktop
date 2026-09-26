@@ -19,6 +19,7 @@ export type SettingsTabId =
   | "projects"
   | "sync"
   | "remoteHosts"
+  | "voice"
   | "about";
 
 export type SettingsNavGroupId =
@@ -83,6 +84,9 @@ export const SETTINGS_NAV: SettingsNavEntry[] = [
       "settings.closeBehaviorTitle",
       "settings.closeBehaviorTray",
       "settings.closeBehaviorQuit",
+      "settings.power",
+      "settings.keepAwakeWhileRunning",
+      "settings.keepAwakeWhileRunningDesc",
       "settings.network",
       "settings.proxy",
       "settings.proxySystem",
@@ -92,6 +96,8 @@ export const SETTINGS_NAV: SettingsNavEntry[] = [
       "settings.networkRelaxedMode",
       "settings.networkRelaxedModeDesc",
       "settings.networkRelaxedModeStrictDesc",
+      "settings.preventScreenSleep",
+      "settings.preventScreenSleepDesc",
     ],
   },
   {
@@ -134,6 +140,22 @@ export const SETTINGS_NAV: SettingsNavEntry[] = [
     ],
   },
   {
+    id: "voice",
+    labelKey: "settings.nav.voice",
+    titleKey: "settings.voice",
+    group: "preferences",
+    developerOnly: true,
+    experimentalBadgeKey: "settings.voiceExperimental",
+    keywordKeys: [
+      "settings.voiceEnable",
+      "settings.voiceMicrophone",
+      "settings.voiceLanguages",
+      "settings.voiceChineseVariant",
+      "settings.voiceModel",
+      "settings.voiceLocalModels",
+    ],
+  },
+  {
     id: "shortcuts",
     labelKey: "settings.nav.shortcuts",
     titleKey: "settings.shortcuts",
@@ -168,6 +190,9 @@ export const SETTINGS_NAV: SettingsNavEntry[] = [
       "settings.apiKey",
       "settings.baseUrl",
       "settings.apiStyle",
+      // Subscription accounts share the service list (D625).
+      "settings.vendorAccounts",
+      "settings.vendorSubscription",
     ],
   },
   {

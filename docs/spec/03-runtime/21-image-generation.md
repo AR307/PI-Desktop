@@ -1,6 +1,6 @@
 # Image generation and editing
 
-The desktop exposes `AppSettings.imageGeneration` as the current default image-generation binding and `AppSettings.imageGenerationModels` as the optional list of models marked for image generation. The legacy single binding remains supported: when the list is absent, it is treated as the only candidate. A null or empty current binding means no default; host-core validates and persists both fields through the existing settings store. No schema bump is needed. Each candidate is independent of the conversation default and references an existing enabled API-key or no-auth provider and one of its configured models.
+The desktop exposes `AppSettings.imageGeneration` as the current default image-generation binding and `AppSettings.imageGenerationModels` as the optional list of models marked for image generation. The legacy single binding remains supported: when the list is absent, it is treated as the only candidate. A null or empty current binding means no default; host-core validates and persists both fields through the existing settings store. No schema bump is needed. A reference that no longer matches an existing provider row is not persisted: host-core drops the current binding and the matching candidate on every settings read and write, mirroring the reference rule config sync applies when it applies a bundle, so a deleted provider cannot leave behind a default the runtime must reject. Each candidate is independent of the conversation default and references an existing enabled API-key or no-auth provider and one of its configured models.
 
 ## Configuration
 
@@ -9,7 +9,7 @@ image capabilities were marked or unmarked. It must not claim that an image
 model was selected after deselection. Choosing an image default from the
 summary menu retains the image-selection confirmation.
 
-Model Advanced exposes **Set as image model** alongside the image and document attachment capabilities in the model capability group, not as a separate control row. The checkbox is multi-select: saving a provider persists every checked model in `imageGenerationModels`; Cancel leaves settings unchanged. Saving candidates does not replace the default conversation model. Unchecking every image model on the provider that holds the current default clears that default, even when another provider still has a runnable candidate. The Models page drops the check and does not select the other candidate automatically. Unchecking the current model while another model on the same provider stays marked moves the default to the first runnable marked candidate. The unmarked model is available for chat again after saving and reopening settings. Saving another provider preserves a still-runnable image default. Below the default model row in the same defaults panel, **Image generation model** shows the current default and offers a menu to choose one from all marked candidates. When no candidate is configured, or none of them can be selected, the summary row is hidden. An existing candidate that is missing, disabled, credential-less or removed displays only **Currently unavailable** while another marked candidate can still be selected. OAuth accounts are not eligible; there is no fallback.
+Model Advanced exposes **Set as image model** alongside the image and document attachment capabilities in the model capability group, not as a separate control row. The checkbox is multi-select: saving a provider persists every checked model in `imageGenerationModels`; Cancel leaves settings unchanged. Saving candidates does not replace the default conversation model. Unchecking every image model on the provider that holds the current default clears that default, even when another provider still has a runnable candidate. The Models page drops the check and does not select the other candidate automatically. Unchecking the current model while another model on the same provider stays marked moves the default to the first runnable marked candidate. The unmarked model is available for chat again after saving and reopening settings. Saving another provider preserves a still-runnable image default. Below the default model row in the same defaults panel, **Image generation model** shows the current default and offers a menu to choose one from all marked candidates. When no candidate is configured, or none of them can be selected, the summary row is hidden. A candidate whose provider still exists but is disabled, credential-less or otherwise unusable displays only **Currently unavailable** while another marked candidate can still be selected; a candidate whose provider row is gone is dropped from the stored list on the next settings read or write instead of staying listed. OAuth accounts are not eligible; there is no fallback.
 All marked provider/model pairs are excluded from the default conversation picker, provider quick-default action, and Composer model menu. Other providers with the same model ID remain independent. Existing conversation bindings and history are preserved; a conversation still pinned to any image candidate must select a chat model before sending. Runtime launch rejects every marked image model before inference.
 
 ### Provider model removal
@@ -20,7 +20,7 @@ touched. If it was the active image default, clear the default, even when anothe
 runnable candidate remains on this or another provider. Cancel preserves
 both the provider models and the image settings. Legacy single bindings follow
 the same rule. Unchanged image selections retain the ordinary provider-save
-path. External provider changes can still leave an unavailable binding visible.
+path. External provider changes can still leave an unavailable binding visible until the next settings read or write, which drops a binding whose provider row is gone.
 The existing chat-default repair still runs if the saved provider no longer
 contains its selected chat model; otherwise the chat default is preserved.
 
@@ -77,6 +77,24 @@ attachment store after realpath containment. Each edit input set is capped at
 32 MiB, with a 64 MiB input cache budget for the batch. Credentials remain outside the renderer and tool results.
 
 ## Results and recovery
+
+Successful results appear in one rounded image card. A batch with multiple
+successful images has a thumbnail strip beside the selected image; selecting a
+thumbnail updates the card and its download target without hiding failed-result
+messages. The strip remains reachable in narrow windows. Opening the card shows a
+full-window viewer with batch thumbnails, keyboard previous/next navigation,
+zoom and fit controls, and a way back to the existing file panel. Switching
+images never displays the previous image under the newly selected thumbnail.
+Switching between loaded images keeps the card and viewer image visible without a
+blank placeholder frame. The viewer keeps fitted dimensions stable while the
+next image decodes, and the latest navigation wins during rapid input. The selected
+thumbnail uses a light gray ring. Viewer selection remains selected in chat after closing.
+A bounded
+preview can be downloaded from the card or viewer using a safe MIME-derived
+filename. The viewer's Show in folder action uses the contained `fs/reveal`
+path. A missing or unreadable preview has no download action; revealing a
+missing file reports an error. These actions do not move or overwrite the
+original scratch file.
 
 Each result records index, status (`succeeded`, `failed`, `cancelled`), successful
 path/MIME type or a safe error code. New files get unique names in session scratch;

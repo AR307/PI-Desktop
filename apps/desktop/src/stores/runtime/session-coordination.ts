@@ -154,7 +154,7 @@ export function createSessionCoordination({
     const records =
       session?.compactions ??
       (session?.compaction ? [session.compaction] : []);
-    const marks = records.map(contextCompactionMark);
+    const marks = records.map((record) => ({ ...contextCompactionMark(record), summary: record.summary }));
     set((state) => ({
       sessionCompactions:
         marks.length > 0

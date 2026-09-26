@@ -101,17 +101,17 @@ test("the combined chip and menu meet the compact accessible visual contract", (
   assert.match(composerSource, /event\.key === "Escape"/);
   assert.match(stylesSource, /\.composer-model-thinking-menu\s*\{[\s\S]*?position:\s*fixed;/);
   assert.match(stylesSource, /\.composer-model-thinking-menu\s*\{[\s\S]*?top:\s*0;/);
-  assert.match(stylesSource, /\.composer-model-thinking-menu\s*\{[\s\S]*?width:\s*min\(300px,\s*calc\(100vw - 24px\)\)/);
+  assert.match(stylesSource, /\.composer-model-thinking-menu\s*\{[\s\S]*?width:\s*min\(280px,\s*calc\(100vw - 24px\)\)/);
   assert.match(composerSource, /className="composer-model-thinking-icon"[\s\S]*?<IconBot size=\{14\} \/>/);
   assert.doesNotMatch(stylesSource, /\.composer-model-thinking-icon\.is-off/);
   assert.match(stylesSource, /@media \(prefers-reduced-motion: reduce\)/);
 });
 
-test("model options are visually nested under their provider heading", () => {
+test("model options share the compact provider heading inset", () => {
   assert.match(composerSource, /composer-plus-item composer-model-option/);
   assert.match(
     stylesSource,
-    /\.composer-model-group \.composer-model-option\s*\{[\s\S]*?padding-left:\s*22px/,
+    /\.composer-model-group \.composer-model-option\s*\{[\s\S]*?padding-left:\s*8px/,
   );
 });
 
@@ -125,11 +125,11 @@ test("model groups use the account-aware display name", () => {
 test("provider headings establish a stronger type level than model rows", () => {
   assert.match(
     stylesSource,
-    /\.composer-model-group-label\s*\{[\s\S]*?font-size:\s*var\(--text-md\)/,
+    /\.composer-model-group-label\s*\{[^}]*font-size:\s*var\(--text-xs-plus\)[^}]*font-weight:\s*var\(--font-weight-strong\)/,
   );
   assert.match(
     stylesSource,
-    /\.composer-model-group \.composer-model-option\s*\{[\s\S]*?font-size:\s*var\(--text-sm\)[\s\S]*?font-weight:\s*var\(--font-weight-normal\)/,
+    /\.composer-model-group \.composer-model-option\s*\{[^}]*font-size:\s*var\(--text-sm\)[^}]*font-weight:\s*var\(--font-weight-normal\)/,
   );
   assert.match(
     stylesSource,
@@ -151,4 +151,46 @@ test("reasoning projection uses the selected exact catalog row and binding", asy
   const source = await readComposerModule("model.ts");
   assert.match(source, /sameComposerModelId\(candidate\.modelId, modelId\)/);
   assert.match(source, /sameComposerModelId\(candidate\.id, model\.modelId\)/);
+});
+
+test("a model row spends the panel's width instead of stacking at its left edge", () => {
+  // The label and the capability icons share one line, with the icons pinned to
+  // the trailing edge: stacking them in a column left the right half of the
+  // menu empty next to every row.
+  assert.match(
+    stylesSource,
+    /\.composer-model-option-main\s*\{[^}]*flex-direction:\s*row;/,
+  );
+  assert.match(
+    stylesSource,
+    /\.composer-model-option-main\s*\{[^}]*flex-wrap:\s*wrap;/,
+  );
+  assert.match(
+    stylesSource,
+    /\.composer-model-option-meta\s*\{[^}]*margin-left:\s*auto;/,
+  );
+  // One label per row, and a long name wraps in full rather than truncating.
+  assert.doesNotMatch(stylesSource, /\.composer-model-full-id/);
+  assert.doesNotMatch(stylesSource, /\.composer-model-display-name/);
+  assert.match(
+    stylesSource,
+    /\.composer-model-label\s*\{[^}]*overflow-wrap:\s*anywhere;[^}]*white-space:\s*normal;/,
+  );
+});
+
+test("an alias is told apart from the catalog name, and capabilities are icons", () => {
+  // A row shows one of the two names, never both: the alias the user set wins
+  // over the catalog's, and it carries its own chip so which one is on screen
+  // stays visible.
+  assert.match(listSource, /\?\.alias\?\.trim\(\)/);
+  assert.match(listSource, /\{alias \|\| optionDisplayName\}/);
+  assert.match(listSource, /composer-model-label \$\{alias \? "is-alias" : ""\}/);
+  assert.match(
+    stylesSource,
+    /\.composer-model-label\.is-alias\s*\{[^}]*background:\s*var\(--ds-tile-deep\);/,
+  );
+  // Capability markers are icons whose accessible name stays the translated
+  // label, because the spelled-out badges were the widest thing in a row.
+  assert.match(listSource, /IconSparkles size=\{12\}/);
+  assert.match(listSource, /IconEye size=\{12\}/);
 });

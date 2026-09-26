@@ -352,10 +352,9 @@ describe("custom system prompt files (issue #542)", () => {
     expect(prompt).toContain(persona);
     expect(prompt).not.toContain("You are PI-Desktop");
     // Operational rules from the default prompt must survive the replacement.
-    expect(prompt).toContain("Collaboration: answer in the same language");
-    expect(prompt).toContain("Searching and reading: prefer the Read");
-    expect(prompt).toContain("multi_tool_use.parallel");
-    expect(prompt).toContain("Editing workflow: use the built-in Edit or Write tool");
+    expect(prompt).toContain("Complete the requested work and relevant checks");
+    expect(prompt).toContain("Before each tool batch, briefly state its purpose");
+    expect(prompt).toContain("Editing workflow: inside the advertised workspace");
     expect(prompt).toContain("You are operating in Agent mode.");
 
     await runtime.dispose();
@@ -512,10 +511,10 @@ describe("DesktopAgentRuntime configuration matching", () => {
     const runtime = createRuntime();
     const prompt = (runtime as any).agent.state.systemPrompt as string;
 
-    expect(prompt).toContain("do not create or hand-edit unified-diff files");
-    expect(prompt).toContain("Do not invoke shell apply_patch, git apply, or patch commands");
-    expect(prompt).toContain("Never issue concurrent Write/Edit calls for the same path");
-    expect(prompt).toContain("A path may have three counted failures per prompt");
+    expect(prompt).toContain("hand-edited unified-diff files");
+    expect(prompt).toContain("Do not use shell apply_patch, git apply, patch");
+    expect(prompt).toContain("Never modify the same path concurrently");
+    expect(prompt).toContain("After three failed edit attempts on the same path");
 
     const edit = (runtime as any).agent.state.tools.find(
       (tool: any) => tool.name === "Edit",
@@ -543,45 +542,23 @@ describe("DesktopAgentRuntime configuration matching", () => {
     const runtime = createRuntime();
     const prompt = (runtime as any).agent.state.systemPrompt as string;
 
-    expect(prompt).toContain("answer in the same language the user writes in");
+    expect(prompt).toContain("Answer in the user's language");
+    expect(prompt).toContain("Keep the user informed during long work");
     expect(prompt).toContain(
-      "never leave the user with no new text for more than one tool batch or 60 seconds",
+      "The final response must state the outcome, verification, and remaining blockers",
     );
-    // The observed failure: a 2830-character conclusion written into thinking
-    // while the visible text stayed empty, twice in a row.
-    expect(prompt).toContain("must be answered in your visible text");
-    expect(prompt).toContain("Make the final message self-contained");
-    expect(prompt).toContain("Carry the work through end to end");
+    expect(prompt).toContain("Resolve recoverable blockers yourself");
 
     await runtime.dispose();
   });
 
-  it("steers search through the scopeable tools instead of shell pipelines", async () => {
+  it("provides ToolSearch so deferred tools can be activated on demand", async () => {
     const runtime = createRuntime();
-    const prompt = (runtime as any).agent.state.systemPrompt as string;
+    const tools = (runtime as any).agent.state.tools as Array<any>;
+    const toolSearch = tools.find((tool: any) => tool.name === "ToolSearch");
 
-    expect(prompt).toContain(
-      "prefer the Read, Grep, and Glob tools over shell",
-    );
-    expect(prompt).toContain("`outputMode`");
-    expect(prompt).toContain("always reports `totalLines`");
-    expect(prompt).toContain(
-      "paginates any supported text file however large",
-    );
-    expect(prompt).toContain(
-      "Read accepts only an existing regular text file, never a directory",
-    );
-    expect(prompt).toContain(
-      "in Agent mode, activate it with ToolSearch for the current prompt",
-    );
-    expect(prompt).toContain("Grep takes a file-or-directory `path`");
-    expect(prompt).toContain("Grep uses the system's `rg` when it is installed");
-    expect(prompt).toContain("Workspace-relative paths are portable");
-    expect(prompt).toContain(
-      "an explicit path outside the workspace and session scratch roots asks for permission",
-    );
-    expect(prompt).toContain("Do not re-run a search whose answer you already have");
-    expect(prompt).toContain("Never write a tool call as text");
+    expect(toolSearch).toBeDefined();
+    expect(toolSearch.description).toContain("on-demand tool");
 
     await runtime.dispose();
   });
@@ -10094,4 +10071,86 @@ describe("DesktopAgentRuntime delegation wait settlement safety", () => {
       await runtime.dispose();
     }
   }, 1_000);
+});
+
+/**
+ * The Google adapters reject any `fetch` that is not `globalThis.fetch`, so a
+ * turn bound for them must reach the adapter without one while still carrying
+ * the provider's own headers (issue #1072).
+ */
+describe("DesktopAgentRuntime Google Generative AI transport (#1072)", () => {
+  it("streams a turn through the native endpoint with the provider's headers", async () => {
+    const googleProvider: RuntimeProviderConfig = {
+      ...provider,
+      id: "google",
+      name: "Google Gemini",
+      vendorKey: "google",
+      apiStyle: "google_generative_ai",
+      baseUrl: "https://generativelanguage.googleapis.com/v1beta",
+      modelId: "gemini-3.8-flash",
+      apiKey: "AIza-test",
+      authKind: "api_key",
+      headers: { "X-Team": "platform" },
+      modelConfig: {
+        source: "generic",
+        name: "Gemini 3.8 Flash",
+        baseUrl: "https://generativelanguage.googleapis.com/v1beta",
+        reasoning: true,
+        input: ["text"],
+        cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+        contextWindow: 1_000_000,
+        maxTokens: 65_536,
+      },
+    };
+    const runtime = createRuntime({ provider: googleProvider, thinkingLevel: "off" });
+    const agent = (runtime as any).agent;
+    const requests: Array<{ url: string; headers: Record<string, string> }> = [];
+    vi.stubGlobal("fetch", async (input: RequestInfo | URL, init?: RequestInit) => {
+      const headers: Record<string, string> = {};
+      new Headers(init?.headers).forEach((value, key) => {
+        headers[key.toLowerCase()] = value;
+      });
+      requests.push({
+        url: input instanceof Request ? input.url : String(input),
+        headers,
+      });
+      const chunk = (body: unknown) => `data: ${JSON.stringify(body)}\n\n`;
+      return new Response(
+        chunk({
+          candidates: [{ content: { role: "model", parts: [{ text: "hello" }] }, index: 0 }],
+        }) +
+          chunk({
+            candidates: [
+              { content: { role: "model", parts: [] }, finishReason: "STOP", index: 0 },
+            ],
+            usageMetadata: { promptTokenCount: 3, candidatesTokenCount: 1, totalTokenCount: 4 },
+          }),
+        { status: 200, headers: { "content-type": "text/event-stream" } },
+      );
+    });
+
+    try {
+      const stream = agent.streamFunction(
+        agent.state.model,
+        {
+          systemPrompt: "system",
+          messages: [{ role: "user", content: "hello", timestamp: Date.now() }],
+          tools: [],
+        },
+        {},
+      );
+      const result = await stream.result();
+
+      expect(result.stopReason).toBe("stop");
+      expect(result.content).toEqual([{ type: "text", text: "hello" }]);
+      expect(requests).toHaveLength(1);
+      expect(requests[0].url).toBe(
+        "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:streamGenerateContent?alt=sse",
+      );
+      expect(requests[0].headers["x-team"]).toBe("platform");
+    } finally {
+      vi.unstubAllGlobals();
+      await runtime.dispose();
+    }
+  }, 20_000);
 });

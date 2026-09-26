@@ -148,6 +148,7 @@ import {
   createExtensionAgentModels,
   createProviderModels,
   DEFAULT_CONTEXT_WINDOW,
+  providerRequestFetch,
   providerRequestKey,
   type RuntimeProviderConfig,
 } from "./provider-binding.js";
@@ -1827,63 +1828,34 @@ export class DesktopAgentRuntime {
     // SYSTEM.md must not remove (tool guidance, delegation, scratch, skills).
     const defaultSystemPromptParts = [
       DEFAULT_RUNTIME_SYSTEM_PROMPT,
-      // Collaboration rules. Measured sessions ran hours with 380 assistant
-      // messages and exactly one non-empty text body: a reasoning model reads
-      // "prefer concise" as "say nothing", writes its conclusion into thinking
-      // (which the user never sees), and the user is left sending "继续" to
-      // find out whether anything happened. Every clause below is one of those
-      // observed failures stated as a hard rule.
-      "Collaboration: answer in the same language the user writes in. Before each batch of tool calls, write one short sentence saying what you are about to do in the same assistant message as those calls; never leave the user with no new text for more than one tool batch or 60 seconds of work. Whatever the user asked must be answered in your visible text — your reasoning is not shown to them, so a conclusion that lives only there never reached them. Make the final message self-contained: the outcome, what you changed, and anything still open, without asking the user to re-read intermediate updates. Carry the work through end to end; when you hit a blocker, try to clear it yourself and report what you tried, instead of stopping at analysis or a half-finished change.",
-      // Delegation steering (ADR 0089). The trigger patterns below are the
-      // proactive half of the Task tool's own description: models delegate
-      // when the system prompt names the situations, and keep doing everything
-      // inline when it only says "you may".
+      // Workflow rules.
+      "Complete the requested work and relevant checks without expanding scope. Preserve unrelated user changes. Resolve recoverable blockers yourself.",
+      // Visibility rules.
+      "Before each tool batch, briefly state its purpose. Keep the user informed during long work. The final response must state the outcome, verification, and remaining blockers. Never claim actions or checks you did not perform.",
+      // Delegation steering (ADR 0089).
       ...(this.subagents.length
         ? [
             `## Delegation
-Work splits into independent pieces — delegate, and keep your context for the synthesis. Subagents run in their own context and report back through TaskWait.
-
-Use the Task tool when:
-- Parallel exploration: two or more independent directions (for example one subagent per subsystem, or backend + frontend + tests). Start one Task per direction in the same assistant message.
-- Adversarial review: after implementing a non-trivial change, delegate a read-only review of it to code-reviewer before you commit.
-- Implementation: a multi-file change with a complete, self-contained spec — delegate to fixer, which may write inside the workspace.
-- Context economy: wide searches, long logs, multi-file surveys whose intermediate output you do not need — explorer / test-runner.
-- Batch sharding: the same bounded job repeated over many independent targets.
-
-Delegation rules:
-- Task returns immediately with a delegation id. Do not sit idle: keep working on your own independent line, then converge with TaskWait (mode="any" + minCompleted to converge early) when you need results, TaskList to check progress, TaskStop to stop.
-- Always fill Task's \`description\` so the user sees what each subagent is doing. Integrate findings and say which subagent produced what.
-- You may talk to the user while subagents run. Do not TaskStop unless you have decided the work should not continue. The runtime keeps them alive and delivers their reports when they finish — ending your turn does not abort them.
-- Never delegate what you can finish in a couple of tool calls, and never delegate anything that needs the user.`,
+Do the work yourself by default. Delegate only bounded, independent tasks with a clear benefit over direct execution.
+No recursive delegation, duplicate work, or agent debates.
+Allow at most one optional review pass unless the user requests more. Fix and retest concrete, in-scope defects without restarting broad reviews.
+Do not invent objections or turn speculative risks into blockers. Stop when the requested work is complete and relevant checks pass, or report a genuine blocker.`,
             ...(this.subagentModelSummary()
               ? [this.subagentModelSummary()!]
               : []),
           ]
         : []),
-      // Search-tool steering. Read/Grep/Glob are host-bounded and scopeable;
-      // hand-rolled shell pipelines are not, and unbounded shell output is
-      // what exhausted context and forced repeated re-searching.
-      "Searching and reading: prefer the Read, Grep, and Glob tools over shell `cat`, `sed`, `head`, `grep`, or `find`. Read accepts only an existing regular text file, never a directory. If a file name is uncertain or a directory must be listed, use Glob instead of guessing a file name or calling Read on the directory; in Agent mode, activate it with ToolSearch for the current prompt when it is unavailable. Scope every search with the native parameters: Grep takes a file-or-directory `path` plus `include`, `outputMode`, and `headLimit`; Glob takes a directory `path` and `limit`; Read takes `offset` and `limit`, always reports `totalLines`, and paginates any supported text file however large; for files beyond the default window, use Grep to locate the target lines first, then Read the relevant range. Use `outputMode: \"filesWithMatches\"` or `\"count\"` when file contents are not needed, and use `include` to avoid scanning generated or vendor trees. These tools bound their own output; a shell pipeline does not, and one unscoped search over a whole workspace costs context you will need later. Workspace-relative paths are portable across macOS, Linux, and Windows; an explicit path outside the workspace and session scratch roots asks for permission unless the effective mode is Auto, so do not retry a denied path blindly. Grep uses the system's `rg` when it is installed and an in-process searcher otherwise — call Grep, do not shell out to `rg`. When a search genuinely needs Bash, use the active shell's syntax and a bounded command, and never assume POSIX utilities, `/`-based paths, or PowerShell commands on every platform. Do not re-run a search whose answer you already have.",
-      // Observed leak: OpenAI-style models sometimes emit the internal
-      // `multi_tool_use.parallel` wrapper as assistant text. PI-Desktop has no
-      // such tool, so the whole batch is silently lost as prose.
-      "Call tools through the native tool-call interface only. Never write a tool call as text, and never emit a `multi_tool_use.parallel` / `{\"tool_uses\": [...]}` wrapper — there is no such tool here, and a call written as prose does not run. To run several tools at once, emit several real tool calls in one assistant message.",
-      "Editing workflow: use the built-in Edit or Write tool directly on the deliverable file whenever it is inside the advertised workspace. Use Edit for one small unique line-anchored change (path + tag + ops) and Write for a coherent whole-file rewrite. Do not invoke shell apply_patch, git apply, or patch commands; do not create or hand-edit unified-diff files in scratch or repeatedly repair their hunk headers. Treat an edit or shell patch failure as recoverable state: classify the error, perform the required fresh Read or use a complete reveal, regenerate the change, and retry with a corrected payload. A path may have three counted failures per prompt; stop after the third and report the exact mismatch instead of looping. Never issue concurrent Write/Edit calls for the same path. When a dedicated worktree is outside the advertised workspace, make one guarded, deterministic edit inside that worktree with Bash, then verify it with git diff or an equivalent check.",
-      // Work panel browser preview (D100): workspace HTML files render
-      // in the embedded browser with live reload on file changes.
-      `For user-visible HTML pages, call the BrowserPreview tool once after creating the page or making the first meaningful visual edit, using its workspace-relative path (e.g. \`index.html\` or \`demo/index.html\`) to show it in PI-Desktop's built-in browser panel. Reuse that preview while iterating: it live-reloads as you edit, so no repeat call or manual refresh is needed. Skip generated, test-only, and non-visual HTML files. If BrowserPreview is not in the current tool list, load it first with ${TOOL_SEARCH_NAME}.`,
+      // Editing workflow.
+      `Editing workflow: inside the advertised workspace, use Edit for small, uniquely anchored changes and Write for new files or intentional whole-file rewrites. Never modify the same path concurrently. Do not use shell apply_patch, git apply, patch, or hand-edited unified-diff files. On failure, diagnose the cause, refresh content or anchors with Read or a complete tool-provided reveal when needed, and correct the payload before retrying. After three failed edit attempts on the same path in one user turn, stop editing that path, report the exact error, and continue unblocked work. For an authorized worktree outside the advertised workspace, use a guarded, deterministic Bash edit that aborts on unexpected content, then verify the diff.`,
       // Shell dialect and scratch variable are selected by host-core.
       commandShellGuidance(this.commandShell, this.scratchDir),
-      // Session scratch directory (D114): temp files must not dirty
-      // the user's workspace or its git status.
+      // Session scratch directory (D114).
       ...(this.scratchDir
         ? [
-            `Your scratch directory for this session is \`${this.scratchDir}\` (in Bash: $PI_SCRATCH_DIR). Write ALL temporary and intermediate files there using absolute paths — one-off scripts, downloaded data, drafts, experiment output — never into the workspace. Only write into the workspace when the file is a deliverable the user asked for. Scratch files persist across turns of this session and are cleaned up automatically when the session is deleted.`,
+            `Your scratch directory for this session is \`${this.scratchDir}\` (in Bash: $PI_SCRATCH_DIR). Store ad-hoc temporary and intermediate files there using absolute paths. Workspace writes must be task-related project files or required toolchain outputs. Scratch persists across turns and is deleted with the session.`,
           ]
         : []),
-      // Plugin skills (D174): the catalog rides in the base prompt so a
-      // path-scoped instruction reload never drops it, and it stays ahead of
-      // the instruction chain so the user's own AGENTS.md keeps the last word.
+      // Plugin skills (D174).
       ...(skillsPrompt ? [skillsPrompt] : []),
     ];
     // A custom SYSTEM.md replaces only the product persona line, never the
@@ -1930,21 +1902,24 @@ Delegation rules:
               // failed response separately so a 429 can honor Retry-After headers,
               // and capture the transport cause of a rejection while the original
               // Error still exists (issue #234).
-              fetch: captureProviderResponse(
-                options?.fetch,
-                (response, requestBytes, failure) => {
-                  this.providerResponseStatus = response?.status;
-                  this.providerRequestBytes = requestBytes;
-                  this.providerFetchFailure = failure;
-                  if (failure) this.recoverProviderTransport(failure);
-                  // A gateway 502/503 can also state Retry-After, so keep headers
-                  // for every status whose delay is usable, not only for 429.
-                  this.providerRetryHeaders = carriesRetryDelayHeaders(
-                    response?.status,
-                  )
-                    ? response?.headers
-                    : undefined;
-                },
+              fetch: providerRequestFetch(
+                m.api,
+                captureProviderResponse(
+                  options?.fetch,
+                  (response, requestBytes, failure) => {
+                    this.providerResponseStatus = response?.status;
+                    this.providerRequestBytes = requestBytes;
+                    this.providerFetchFailure = failure;
+                    if (failure) this.recoverProviderTransport(failure);
+                    // A gateway 502/503 can also state Retry-After, so keep headers
+                    // for every status whose delay is usable, not only for 429.
+                    this.providerRetryHeaders = carriesRetryDelayHeaders(
+                      response?.status,
+                    )
+                      ? response?.headers
+                      : undefined;
+                  },
+                ),
               ),
               onResponse: async (response, responseModel) => {
                 this.providerResponseStatus = response.status;
@@ -1960,6 +1935,7 @@ Delegation rules:
             copilotRequestHeaders(this.provider, context),
             this.provider.headers,
           ),
+          m.api,
         );
         const hookedOptions = this.withExtensionProviderHooks(requestOptions, m);
         // The watchdog must be able to *stop* what it abandons. It wraps the
@@ -4135,8 +4111,8 @@ Delegation rules:
       name: SUBAGENT_TOOL_NAME,
       label: "Task",
       description: [
-        "Start one subagent in the background and return immediately; you keep working while it runs, then converge with TaskWait when you need its report.",
-        "Use it when the work is separable: parallel exploration of independent directions (one Task per direction in the same assistant message), a multi-file implementation with a complete spec (fixer), an adversarial read-only review of a change you just made (code-reviewer), or a wide search / long log / multi-file survey whose intermediate output would otherwise fill this context (explorer, test-runner).",
+        "Start one subagent in the background and return immediately; you keep working while it runs, then converge with TaskWait when you need its report.\n\nPrefer doing the work yourself. Only delegate when it saves significant context or enables genuine parallelism — not for tasks you can finish in a few tool calls.",
+        "Use it only when the work is genuinely separable and substantial: parallel exploration of independent directions that each need many tool calls (one Task per direction in the same assistant message), a large multi-file implementation with a complete spec (fixer), an adversarial read-only review of a non-trivial change you already finished (code-reviewer), or a wide search whose raw output would fill this context (explorer, test-runner). A single file lookup or a small edit does not warrant delegation.",
         "Do not delegate what you can finish in a couple of tool calls, and do not delegate anything that needs the user — a subagent cannot ask a question or propose a plan on your behalf.",
         ...(this.availableSubagentModelKeys().length
           ? [

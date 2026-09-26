@@ -1,11 +1,30 @@
 # Unreleased changes
 
+- Google Gemini rows send requests again. A provider row on the native
+  generative-AI endpoint no longer hands pi-ai's Google adapter the internal
+  response-capture `fetch` it refuses before the request leaves, custom provider
+  headers still reach Google, and an adapter refusal now fails the turn instead
+  of spending all ten transient retries on it (issue #1072).
+
+- Deleting a provider no longer leaves a dangling image-generation default.
+  An image default or marked candidate whose provider row is gone is dropped
+  on the next settings read or write, instead of staying stored as a binding
+  every generation request rejects as an unavailable model.
+
+- Subagent topology cards and their live process rows now follow the main
+  conversation's responsive width behavior: long descriptions, paths,
+  commands, and summaries wrap inside the dock instead of requiring repeated
+  divider dragging to read them.
+
 - Resuming a subagent no longer selects another definition's private model
   binding. On-demand delegation permissions are checked again on the next parent
   turn, so revoking automatic delegation takes effect without restarting the runtime.
 - Trusted extension cancellation now retires SDK commands, tool updates,
   subprocesses and queued or visible prompts. Late hook payload mutations are
   isolated; legitimate long commands and tools retain their runtime budget.
+
+- Copy individual Markdown tables, download them as CSV, or expand them for
+  reading without leaving the conversation.
 
 - A stored hosted web-search record that cannot be replayed no longer fails every
   later request in that conversation: the message continues without search replay,

@@ -3,7 +3,7 @@ import {
   SESSION_THINKING_LEVELS,
   defaultCommandShellForPlatform,
   isCommandShellId,
-  resolveBindingContextWindow,
+  resolveBindingLimits,
   validateNetworkProxy,
   validateSpeechSettings,
   type CommandShellId,
@@ -13,14 +13,13 @@ import {
 } from "@pi-desktop/shared";
 import {
   capabilitiesFromModelConfig,
-  genericModelConfig,
   modelConfigWithBinding,
   visionFromModelConfig,
   type ThinkingCapabilities,
 } from "@pi-desktop/agent-runtime";
 import type { HostProcess } from "../host-process";
 import {
-  modelConfigFromModelsDev,
+  catalogModelConfigFor,
   type ModelsDevCatalog,
 } from "../models-dev-catalog";
 
@@ -96,7 +95,7 @@ export function createProviderCatalogRuntime({
     modelId: string,
     catalogModelConfig: Parameters<typeof modelConfigWithBinding>[0],
   ) => {
-    const resolved = resolveBindingContextWindow(
+    const resolved = resolveBindingLimits(
       catalogModelConfig,
       bindingForModel(provider, modelId),
     );
@@ -121,11 +120,14 @@ export function createProviderCatalogRuntime({
       provider.defaultModelId ||
       "";
     const storedModel = bindingForModel(provider, modelId);
-    const modelsDevModel = modelsDevModelFor(provider, modelId);
-    const resolved = resolveBindingContextWindow(
-      modelsDevModel
-        ? modelConfigFromModelsDev(modelsDevModel, provider.baseUrl)
-        : genericModelConfig(modelId, provider.baseUrl ?? ""),
+    const catalogModelConfig = catalogModelConfigFor(modelsDevCatalog, {
+      vendorKey: provider.vendorKey,
+      baseUrl: provider.baseUrl,
+      apiStyle: provider.apiStyle,
+      modelId,
+    });
+    const resolved = resolveBindingLimits(
+      catalogModelConfig,
       storedModel,
     );
     const modelConfig = modelConfigWithBinding(
@@ -133,10 +135,14 @@ export function createProviderCatalogRuntime({
       resolved.binding,
     );
     const models = provider.models?.map((binding) => {
-      const catalogModel = modelsDevModelFor(provider, binding.id);
-      if (!catalogModel) return binding;
-      const bindingResolved = resolveBindingContextWindow(
-        modelConfigFromModelsDev(catalogModel, provider.baseUrl),
+      const catalogModelConfig = catalogModelConfigFor(modelsDevCatalog, {
+        vendorKey: provider.vendorKey,
+        baseUrl: provider.baseUrl,
+        apiStyle: provider.apiStyle,
+        modelId: binding.id,
+      });
+      const bindingResolved = resolveBindingLimits(
+        catalogModelConfig,
         binding,
       );
       const effective = modelConfigWithBinding(
@@ -158,7 +164,7 @@ export function createProviderCatalogRuntime({
     return {
       ...provider,
       ...(models ? { models } : {}),
-      ...(modelsDevModel
+      ...(catalogModelConfig.source !== "generic"
         ? {
             contextWindow: modelConfig.contextWindow,
             maxOutputTokens: modelConfig.maxTokens,
@@ -185,6 +191,8 @@ export function createProviderCatalogRuntime({
       ...(value as T),
       infiniteProviderRetry: (value as T & { infiniteProviderRetry?: unknown })
         .infiniteProviderRetry === true,
+      keepAwakeWhileRunning: (value as T & { keepAwakeWhileRunning?: unknown })
+        .keepAwakeWhileRunning === true,
       defaultCommandShell: isCommandShellId(value.defaultCommandShell)
         ? value.defaultCommandShell
         : defaultCommandShellForPlatform(process.platform),
@@ -198,6 +206,7 @@ export function createProviderCatalogRuntime({
     const value = settings as T & {
       defaultCommandShell?: unknown;
       infiniteProviderRetry?: unknown;
+      keepAwakeWhileRunning?: unknown;
       networkProxy?: unknown;
     };
     if (
@@ -213,6 +222,14 @@ export function createProviderCatalogRuntime({
       typeof value.infiniteProviderRetry !== "boolean"
     ) {
       throw Object.assign(new Error("infiniteProviderRetry is invalid"), {
+        errorCode: ErrorCodes.INVALID_PARAMS,
+      });
+    }
+    if (
+      Object.prototype.hasOwnProperty.call(value, "keepAwakeWhileRunning") &&
+      typeof value.keepAwakeWhileRunning !== "boolean"
+    ) {
+      throw Object.assign(new Error("keepAwakeWhileRunning is invalid"), {
         errorCode: ErrorCodes.INVALID_PARAMS,
       });
     }
@@ -321,11 +338,13 @@ export function createProviderCatalogRuntime({
       };
     }
     const { provider, modelId } = target;
-    const catalogModel = modelsDevModelFor(provider, modelId);
-    const resolved = resolveBindingContextWindow(
-      catalogModel
-        ? modelConfigFromModelsDev(catalogModel, provider.baseUrl)
-        : genericModelConfig(modelId, provider.baseUrl ?? ""),
+    const resolved = resolveBindingLimits(
+      catalogModelConfigFor(modelsDevCatalog, {
+        vendorKey: provider.vendorKey,
+        baseUrl: provider.baseUrl,
+        apiStyle: provider.apiStyle,
+        modelId,
+      }),
       bindingForModel(provider, modelId),
     );
     const modelConfig = modelConfigWithBinding(

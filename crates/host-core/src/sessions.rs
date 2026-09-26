@@ -148,6 +148,12 @@ pub struct UiMessage {
     pub id: String,
     pub role: String,
     pub content: String,
+    /// Original text for a slash template or Skill invocation.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub command: Option<String>,
+    /// Validated Skill tokens in `command`, with UTF-16 offsets for the renderer.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub skill_mentions: Option<Vec<SkillMention>>,
     /// Host-authenticated agent-to-agent origin, never a human authorization.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub session_message: Option<Value>,
@@ -220,6 +226,14 @@ pub struct UiMessage {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub struct SkillMention {
+    pub start: usize,
+    pub end: usize,
+    pub id: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct SessionDetail {
     #[serde(flatten)]
     pub summary: SessionSummary,
@@ -287,6 +301,12 @@ fn is_default_title(title: &str) -> bool {
 /// the search index row (None for tool rows, matching the FTS triggers).
 pub(crate) fn ui_to_record(message: &UiMessage) -> (MessageRecord, Option<String>) {
     let mut meta_obj = serde_json::Map::new();
+    if let Some(command) = &message.command {
+        meta_obj.insert("command".into(), json!(command));
+    }
+    if let Some(mentions) = &message.skill_mentions {
+        meta_obj.insert("skillMentions".into(), json!(mentions));
+    }
     if let Some(origin) = &message.session_message {
         meta_obj.insert("sessionMessage".into(), origin.clone());
     }
@@ -437,6 +457,13 @@ pub(crate) fn record_to_ui(record: MessageRecord) -> UiMessage {
         _ => Vec::new(),
     };
     let meta = record.meta.unwrap_or(Value::Null);
+    let command = meta
+        .get("command")
+        .and_then(Value::as_str)
+        .map(str::to_string);
+    let skill_mentions = meta
+        .get("skillMentions")
+        .and_then(|value| serde_json::from_value(value.clone()).ok());
     let session_message = meta.get("sessionMessage").cloned();
     let steering = meta.get("steering").and_then(Value::as_bool);
     let status = meta
@@ -544,6 +571,8 @@ pub(crate) fn record_to_ui(record: MessageRecord) -> UiMessage {
             id: record.id,
             role: record.role,
             content: text,
+            command: command.clone(),
+            skill_mentions: skill_mentions.clone(),
             session_message,
             attachments: None,
             steering,
@@ -594,6 +623,8 @@ pub(crate) fn record_to_ui(record: MessageRecord) -> UiMessage {
             id: record.id,
             role: record.role,
             content,
+            command,
+            skill_mentions,
             session_message,
             attachments,
             steering,
@@ -1508,8 +1539,8 @@ pub enum ForkSessionResult {
 /// Whether the session currently owns a running turn.
 ///
 /// A running turn owns its project's instructions, tools, and working
-/// directory, so an operation that crosses that boundary (fork, move, or the
-/// bulk delete of a project) is refused for as long as the turn lasts.
+/// directory, so moving or deleting that project is refused while it runs.
+/// A fork may copy a completed prefix without touching that live ownership.
 pub fn session_has_running_turn(db: &Database, id: &str) -> Result<bool> {
     let running: bool = db.conn().query_row(
         "SELECT EXISTS(
@@ -1534,21 +1565,61 @@ pub fn fork_session_through(
     let Some(source) = get_session(db, source_id)? else {
         return Ok(ForkSessionResult::NotFound);
     };
-    if session_has_running_turn(db, source_id)? {
+    let running = session_has_running_turn(db, source_id)?;
+    let anchor = through_message_id
+        .map(str::trim)
+        .filter(|id| !id.is_empty());
+    if running && anchor.is_none() {
         return Ok(ForkSessionResult::Busy);
     }
     let mut source_records =
         dedupe_records(transcripts::read_transcript(db.data_dir(), source_id)?);
-    if let Some(message_id) = through_message_id
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-    {
+    if let Some(message_id) = anchor {
         let Some(position) = source_records
             .iter()
             .position(|record| record.id == message_id)
         else {
             return Ok(ForkSessionResult::NotFound);
         };
+        if running {
+            let record = &source_records[position];
+            // An assistant message can be complete while its tool loop is still
+            // running. Reject any prefix containing rows owned by a live turn,
+            // not merely a streaming anchor. The RPC holds the host state lock
+            // across this check and publication, including transcript appends.
+            let settled_prefix: bool = db.conn().query_row(
+                "SELECT EXISTS (
+                    SELECT 1 FROM messages anchor
+                    WHERE anchor.session_id = ?1 AND anchor.id = ?2
+                    AND NOT EXISTS (
+                        SELECT 1 FROM messages m JOIN turns t ON t.id = m.turn_id
+                        WHERE m.session_id = ?1 AND t.status = 'running'
+                          AND m.seq <= anchor.seq
+                    )
+                 )",
+                params![source_id, message_id],
+                |row| row.get(0),
+            )?;
+            if record.role != "assistant"
+                || record.is_error
+                || !matches!(
+                    record
+                        .meta
+                        .as_ref()
+                        .and_then(|meta| meta.get("status"))
+                        .and_then(Value::as_str),
+                    None | Some("complete")
+                )
+                || record
+                    .meta
+                    .as_ref()
+                    .and_then(|meta| meta.get("error"))
+                    .is_some_and(|error| !error.is_null())
+                || !settled_prefix
+            {
+                return Ok(ForkSessionResult::Busy);
+            }
+        }
         source_records.truncate(position + 1);
     }
     let source_compactions = transcripts::read_compactions(db.data_dir(), source_id)?;
@@ -3796,6 +3867,8 @@ mod tests {
             id: id.into(),
             role: "user".into(),
             content: content.into(),
+            command: None,
+            skill_mentions: None,
             attachments: None,
             steering: None,
             created_at: ts.into(),
@@ -4441,6 +4514,8 @@ mod tests {
             id: "m2".into(),
             role: "tool".into(),
             content: "ok".into(),
+            command: None,
+            skill_mentions: None,
             attachments: None,
             steering: None,
             created_at: "2025-05-01T00:00:02Z".into(),
@@ -4871,6 +4946,8 @@ mod tests {
             id: "assistant-1".into(),
             role: "assistant".into(),
             content: "final answer".into(),
+            command: None,
+            skill_mentions: None,
             attachments: None,
             steering: None,
             created_at: "2025-05-01T00:00:01Z".into(),
@@ -4955,6 +5032,8 @@ mod tests {
             id: "assistant-search-1".into(),
             role: "assistant".into(),
             content: "answer with sources".into(),
+            command: None,
+            skill_mentions: None,
             attachments: None,
             steering: None,
             created_at: "2025-05-01T00:00:01Z".into(),
@@ -5581,6 +5660,107 @@ mod tests {
                 .len(),
             3
         );
+    }
+
+    #[test]
+    fn completed_reply_fork_during_later_turn_preserves_the_running_source() {
+        let db = test_db();
+        let source = create_session(&db, Some("Source".into()), None, None, None, None).unwrap();
+        let first = begin_turn(&db, &source.id, None, None).unwrap();
+        let mut reply = user_msg("reply", "finished reply", "2025-05-01T00:00:01Z");
+        reply.role = "assistant".into();
+        append_message(
+            &db,
+            &source.id,
+            &user_msg("first", "first prompt", "2025-05-01T00:00:00Z"),
+            Some(&first),
+        )
+        .unwrap();
+        append_message(&db, &source.id, &reply, Some(&first)).unwrap();
+        end_turn(&db, &first, "completed", None, None, false).unwrap();
+        let running = begin_turn(&db, &source.id, None, None).unwrap();
+        // Admission can precede persistence of the next user row.
+        let ForkSessionResult::Created(early) =
+            fork_session_through(&db, &source.id, None, Some("reply")).unwrap()
+        else {
+            panic!("completed history should fork during a later turn");
+        };
+        assert_eq!(early.messages.len(), 2);
+        append_message(
+            &db,
+            &source.id,
+            &user_msg("second", "second prompt", "2025-05-01T00:00:02Z"),
+            Some(&running),
+        )
+        .unwrap();
+        let mut current = reply.clone();
+        current.id = "current".into();
+        current.content = "intermediate completed response in a running tool loop".into();
+        append_message(&db, &source.id, &current, Some(&running)).unwrap();
+        let before = get_session(&db, &source.id).unwrap().unwrap();
+        let ForkSessionResult::Created(child) =
+            fork_session_through(&db, &source.id, None, Some("reply")).unwrap()
+        else {
+            panic!("completed history should fork while the source streams");
+        };
+        assert_eq!(child.messages.len(), 2);
+        assert_eq!(child.messages[1].content, "finished reply");
+        assert_ne!(child.messages[1].id, "reply");
+        assert!(session_has_running_turn(&db, &source.id).unwrap());
+        assert!(!session_has_running_turn(&db, &child.summary.id).unwrap());
+        assert_eq!(
+            get_session(&db, &source.id)
+                .unwrap()
+                .unwrap()
+                .messages
+                .len(),
+            before.messages.len()
+        );
+        for anchor in [
+            None,
+            Some(""),
+            Some("first"),
+            Some("second"),
+            Some("current"),
+        ] {
+            assert!(matches!(
+                fork_session_through(&db, &source.id, None, anchor).unwrap(),
+                ForkSessionResult::Busy
+            ));
+        }
+        assert!(matches!(
+            fork_session_through(&db, &source.id, None, Some("missing")).unwrap(),
+            ForkSessionResult::NotFound
+        ));
+        // The original turn can still finish after the child was published.
+        current.id = "final".into();
+        current.content = "source finished independently".into();
+        append_message(&db, &source.id, &current, Some(&running)).unwrap();
+        end_turn(&db, &running, "completed", None, None, false).unwrap();
+        assert_eq!(
+            get_session(&db, &source.id)
+                .unwrap()
+                .unwrap()
+                .messages
+                .len(),
+            5
+        );
+        assert_eq!(
+            get_session(&db, &child.summary.id)
+                .unwrap()
+                .unwrap()
+                .messages
+                .len(),
+            2
+        );
+        // A child has no copied turn ids, but its completed history remains forkable.
+        let child_turn = begin_turn(&db, &child.summary.id, None, None).unwrap();
+        assert!(matches!(
+            fork_session_through(&db, &child.summary.id, None, Some(&child.messages[1].id))
+                .unwrap(),
+            ForkSessionResult::Created(_)
+        ));
+        end_turn(&db, &child_turn, "aborted", None, None, false).unwrap();
     }
 
     #[test]

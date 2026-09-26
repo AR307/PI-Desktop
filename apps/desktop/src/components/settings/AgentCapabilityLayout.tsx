@@ -8,7 +8,7 @@ import { useTranslation } from "react-i18next";
 import type { ProjectRecord } from "@pi-desktop/shared";
 import { api } from "../../lib/api";
 import { useAppStore } from "../../stores/app-store";
-import { Button, TooltipButton, cx } from "../ui";
+import { Button, SegmentedControl, SettingsToggle, TooltipButton, cx } from "../ui";
 import { AnchoredMenu } from "./AnchoredMenu";
 import { SettingsMenuSelect } from "./SettingsMenuSelect";
 import {
@@ -166,18 +166,13 @@ export function CapabilityToggle({
   onChange: () => void;
 }) {
   return (
-    <button
-      type="button"
-      className={cx("settings-toggle", checked && "on", busy && "is-busy")}
-      role="switch"
-      aria-checked={checked}
-      aria-label={label}
-      aria-busy={busy || undefined}
-      disabled={disabled || busy}
-      onClick={onChange}
-    >
-      <span className="settings-toggle-thumb" />
-    </button>
+    <SettingsToggle
+      checked={checked}
+      label={label}
+      busy={busy}
+      disabled={disabled}
+      onChange={onChange}
+    />
   );
 }
 
@@ -247,29 +242,17 @@ export function CapabilityToolbar({
   return (
     <div className="agent-capability-toolbar">
       {filter && onFilterChange && segments.length > 0 ? (
-        <div
-          className="settings-segment agent-capability-segment"
-          role="radiogroup"
-          aria-label={t("settings.capabilityFilterLabel")}
-        >
-          {segments.map((segment) => (
-            <button
-              key={segment.id}
-              type="button"
-              role="radio"
-              aria-checked={filter === segment.id}
-              className={cx(
-                "settings-segment-item",
-                "agent-capability-segment-btn",
-                filter === segment.id && "active",
-              )}
-              onClick={() => onFilterChange(segment.id)}
-            >
-              {segment.label}
-              <span className="agent-capability-segment-count">{segment.count}</span>
-            </button>
-          ))}
-        </div>
+        <SegmentedControl
+          value={filter}
+          onChange={(value) => onFilterChange(value)}
+          options={segments.map((segment) => ({
+            value: segment.id,
+            label: (<>{segment.label}<span className="agent-capability-segment-count">{segment.count}</span></>),
+          }))}
+          label={t("settings.capabilityFilterLabel")}
+          className="agent-capability-segment"
+          itemClassName="agent-capability-segment-btn"
+        />
       ) : null}
       <div className="agent-capability-search-wrap">
         <IconSearch size={13} aria-hidden="true" />
@@ -446,18 +429,23 @@ export type CapabilityMenuItem = {
 /**
  * Overflow menu for one row. Open state is owned by the page so only one row's
  * menu can be open, and Escape or any outside press dismisses it.
+ *
+ * `restoreFocus` is false while the chosen item opens something that takes
+ * focus itself, such as a dialog, which the trigger would otherwise take back.
  */
 export function CapabilityRowMenu({
   label,
   items,
   open,
   disabled,
+  restoreFocus,
   onOpenChange,
 }: {
   label: string;
   items: readonly CapabilityMenuItem[];
   open: boolean;
   disabled?: boolean;
+  restoreFocus?: boolean;
   onOpenChange: (open: boolean) => void;
 }) {
   return (
@@ -469,6 +457,7 @@ export function CapabilityRowMenu({
       label={label}
       role="menu"
       align="end"
+      restoreFocus={restoreFocus}
       trigger={(ref) => (
         <TooltipButton
           ref={ref}

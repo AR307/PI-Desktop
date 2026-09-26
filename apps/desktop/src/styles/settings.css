@@ -423,7 +423,6 @@
 .settings-panel:has(> .settings-row),
 .settings-panel.shortcut-map,
 .settings-panel.agent-capability-panel,
-.settings-panel.provider-list-panel:has(> .provider-row-list),
 .settings-panel.model-provider-panel:has(> .model-provider-list) {
   gap: 6px;
   background: transparent;
@@ -490,7 +489,8 @@
   gap: 8px;
 }
 
-.settings-config-sync > .settings-card-block:first-child .settings-config-sync-actions {
+.settings-config-sync > .settings-card-block:first-child .settings-config-sync-actions,
+.settings-config-sync > .settings-card-block:first-of-type .settings-config-sync-actions {
   padding: 0 16px 14px;
 }
 
@@ -504,6 +504,15 @@
 .settings-config-sync-message.error,
 .settings-config-sync-error {
   color: var(--ds-danger);
+}
+
+.settings-config-sync-refresh {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0 16px;
+  color: var(--ds-text-muted);
+  font-size: var(--text-sm);
 }
 
 /*
@@ -907,6 +916,15 @@
   display: flex;
   align-items: center;
   justify-content: flex-end;
+}
+
+/*
+  A toggle is 20 px tall, while the field metric (select triggers, text inputs)
+  resolves to ~38 px. Give the control column a matching minimum so toggle rows
+  are the same height as select rows; the switch stays centred via align-items.
+*/
+.settings-row-control:has(> .settings-toggle) {
+  min-height: var(--ds-field-height);
 }
 
 /*
@@ -1695,7 +1713,7 @@
  * One workbench per page: a description line, a single toolbar (level filter
  * with counts, one search field, project picker, primary actions), then one
  * elevated panel whose rows are divided by level group headers. Rows follow
- * the provider-row rhythm, lists flow at natural height, and loading/empty
+ * the service-row rhythm, lists flow at natural height, and loading/empty
  * states reuse the same row anatomy.
  */
 
@@ -1982,7 +2000,7 @@
   gap: 6px;
 }
 
-/* Rows follow the provider-row rhythm: quiet icon, name + badges, meta. */
+/* Rows follow the service-row rhythm: quiet icon, name + badges, meta. */
 .agent-capability-row {
   display: flex;
   align-items: center;

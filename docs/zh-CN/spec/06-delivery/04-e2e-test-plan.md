@@ -9,6 +9,20 @@
 
 ---
 
+### E2E-POWER-keep-awake-setting
+
+- **前提：** 设置值缺失的隔离桌面配置；无需真实模型服务。
+- **步骤：** 在「设置 > 常规」开启「保持电脑唤醒」，确认主进程即使空闲也只持有
+  一个 `prevent-app-suspension` 阻止器。使用同一配置重启应用，确认恢复一个
+  阻止器。开启和关闭「阻止屏幕休眠」时，确认「保持电脑唤醒」的系统请求仍在。
+  关闭「保持电脑唤醒」，确认立即释放，并在退出时确认清理。
+- **预期：** 设置持久化并立即生效，不会重复创建阻止器；关闭开关或退出应用
+  时释放。屏幕开关拥有独立阻止器，不能关闭系统休眠阻止器。手动睡眠和合盖
+  不在该功能的保证范围内。
+- **状态：** `pnpm test:e2e:keep-awake` 使用隔离的真实 Electron/Host 配置；
+  当基线不存在其他 Electron 电源请求时，以 Windows `powercfg /requests`
+  验证系统请求。控制器生命周期和 Host 设置往返另有定向测试。
+
 ### E2E-IMAGES-provider-save-feedback
 
 - **前提：** 生图配置 UI fixture，中英文界面。
@@ -266,8 +280,8 @@ task-candidate E2E 从请求工作树运行，但使用主工作区已经准备�
 
 - **前提条件**：应用运行；提供商 A 已保存并设为应用默认模型；另有提供商 B 提供不同的模型；A 上配置了一个图片模型，另一家服务上也配置了一个。
 - **步骤**：1) 打开设置 → 模型配置，新增提供商 B，保存时不动「默认模型」行。2) 确认「默认模型」行仍是提供商 A 与其确切模型，且新建会话使用它。3) 将某个图片模型设为默认画图模型，再新增一个同样提供图片模型的服务并保存。4) 确认「默认画图模型」行仍指向原绑定，而选择器的候选里出现新提供商的图片模型。5) 删除拥有默认值的那家提供商，再新增一个既提供对话模型又提供图片模型的服务并保存。6) 确认两个默认值此时都解析到新增的服务。
-- **预期**：新增提供商保存后不会改写仍然可解析的应用默认值：默认模型保留「默认模型」行已经展示的那对提供商/模型，默认画图模型保留其存储绑定，同时候选列表继续增长。只有已无法解析的默认值（提供商被删除，或其模型已从提供商移除）才会由新增的提供商填补，因此只有在应用否则将无从运行时才会写入设置。显式的「设为默认」操作、编辑路径，以及回落到首个剩余绑定的行为都不变。
-- **链接规格**：`03-runtime/13-model-catalog-and-selection.md`
+- **预期**：新增提供商保存后不会改写仍然可解析的应用默认值：默认模型保留「默认模型」行已经展示的那对提供商/模型，默认画图模型保留其存储绑定，同时候选列表继续增长。只有已无法解析的默认值（提供商被删除，或其模型已从提供商移除）才会由新增的提供商填补，因此只有在应用否则将无从运行时才会写入设置。删除拥有生图默认值的服务商行本身无需手工修复：下一次设置读取或写入会丢弃服务商行已不存在的绑定与候选，因此「默认画图模型」行显示为未设置，而不是运行时必须拒绝的绑定。显式的「设为默认」操作、编辑路径，以及回落到首个剩余绑定的行为都不变。
+- **链接规格**：`03-runtime/13-model-catalog-and-selection.md`、`03-runtime/21-image-generation.md`
 - **接受**：B（模型选择）
 - **里程碑**：M6
 - **状态**：已文档化；由 `apps/desktop/test/default-model-display.test.mjs`、`apps/desktop/test/image-generation-default.test.mjs`、`apps/desktop/test/provider-model-config.test.mjs` 覆盖
@@ -277,6 +291,8 @@ task-candidate E2E 从请求工作树运行，但使用主工作区已经准备�
 - **前提条件**：应用运行；models.dev 快照随构建发布；已打开某个提供商编辑器。
 - **步骤**：1) 在「添加模型」输入框里输入模型库已发布的模型 id 并添加，确认新行的上下文长度、最大输出与思考等级与已发布记录一致，而不是 128,000 / 8,192 且无思考等级。2) 输入模型库未发布的 id 并添加，确认该行沿用通用种子 128,000 / 8,192 且无思考等级。3) 在服务模型列表不可用的状态下添加一个 id，确认该行仍然只出现一次且可编辑。4) 添加一个 id 后立刻修改其限额（此时查询尚未返回），确认手输的值被保留。
 - **预期**：`providers.lookupModel` 只从本地快照回答手输 id —— 不访问提供商网络、不调用主机 —— 命中时按「被勾选的模型」同样的口径播种绑定（已发布的上下文长度、最大输出、思考等级，`contextWindowSource: "catalog"`），而存储的 id 保持用户输入的原样。未命中、调用失败，或该 id 已被本次发现结果描述过时，行为与之前一致：一行可用，通用种子，列表既不卡住也不重复。
+  该 id 以另一种拼写发布（路由前缀、日期戳、部署自己追加的标记）同样算命中：
+  答复到达即就地升级该行，不必等到保存。
 - **链接规格**：`03-runtime/12-provider-config-schema.md`、`03-runtime/13-model-catalog-and-selection.md`
 - **接受**：B（多模型提供商配置）
 - **里程碑**：M2
@@ -345,6 +361,17 @@ task-candidate E2E 从请求工作树运行，但使用主工作区已经准备�
 - **验收**：B（提供商 Completions 兼容）
 - **里程碑**：M2
 - **状态**：单元覆盖（compat 注入 + convertMessages 空/非空补全 + 压缩保留推理上线证明）；现场 OpenCode/聚合端验证仍推迟；界面场景待完成
+
+#### E2E-005F：自定义端点输入护栏
+
+- **前提条件**：应用已运行；新增提供商对话框已打开并选中自定义端点。
+- **步骤**：1) 只填 `api.gateway.example.com`（不带协议），离开 Base URL 输入框。2) 确认输入框归位为 `https://api.gateway.example.com`，并开始发现。3) 粘贴 `https://api.gateway.example.com/v1/messages` 后离开输入框。4) 确认输入框归位为 `https://api.gateway.example.com/v1`，接口格式显示 Anthropic Messages，且表单提示该格式为自动识别。5) 手动把接口格式改为 OpenAI Chat Completions，再粘贴 `/v1/responses` 地址：确认手动选择的格式保持不变，后缀在应用建议前原样保留。6) 把值改成 `ftp://gateway.example.com` 后离开输入框。7) 重新填入有效地址，确认可以开始发现；粘贴完整 `/models` 路径后离开输入框。8) 指向一个仅在 `/v1` 下响应 `/models` 的网关，确认输入框与保存后的行都显示该地址。
+- **预期**：裸主机名会补上 `https://`，仍限定在用户填写的来源内；含凭据、查询或片段的地址一律拒绝。粘贴的接口路径既指明格式并自动选中，也会从基础地址中移除，`/models` 同样移除；只有当它与用户手动选择的格式冲突时才保留，并改为给出建议。当格式来自端点推断时，表单会在选择器旁说明。当只有 `/v1` 候选应答时，输入框与保存的行显示该地址，而不是隐藏改写，且每个被探测的候选都限定在用户填写的来源内。非 http(s) 地址显示内联可访问错误、不启动发现、保持保存禁用；有效地址恢复发现。较长的地址输入框在宽对话框下独占整行，并在响应式断点下与其他凭据自然堆叠。
+- **链接规格**：`04-ux/06-settings-ia.md`、
+  `03-runtime/12-provider-config-schema.md`
+- **验收**：B（自定义提供商配置）
+- **里程碑**：M2
+- **状态**：单元覆盖（端点解析与候选探测）；界面场景待完成
 
 #### E2E-005G：按供应商自定义 HTTP 请求头
 
@@ -1015,6 +1042,22 @@ task-candidate E2E 从请求工作树运行，但使用主工作区已经准备�
 - **里程碑**：M5
 - **状态**：自动化（host-core 单元测试：登录路径探测 + 子路径注入）
 
+#### E2E-MCP-stdio-windows-npx：官方 Node 与 fnm 都能启动 `npx` MCP（issue #789）
+
+- **先决条件**：Windows；Node 要么是官方 `Program Files\nodejs` 安装
+  （PATH 上有 `node.exe`、`npx.cmd`、`npx-cli.js`），要么由 fnm 管理且不在 GUI PATH 中。
+- **步骤**：1) 从 MCP 市场添加 Memory（`npx -y @modelcontextprotocol/server-memory`）。
+  2) 测试连接。3) 再用用户手写的 `npx` 服务器重复一次。
+- **预期**：官方 Node 改写为 `node.exe` + `npx-cli.js` 并完成握手。PATH 没有
+  node 时从 `%LOCALAPPDATA%\fnm\aliases\default` 发现 fnm。其余 `.cmd` 经
+  `cmd.exe /d /s /c` 启动，参数加引号保持字面量，不用 `shell: true`。
+  与 `npx.cmd` 同目录的 Git-Bash 无扩展名 `npx` 不会被选中。真正缺失时仍报告
+  `command not found: npx`。
+- **链接规格**：ADR 0038、D624、`07-plugins/04-plugin-security.md`
+- **接受**：质量
+- **里程碑**：M6+
+- **状态**：自动化（`apps/desktop/test/mcp-stdio-launch.test.mjs`）
+
 ### 会话持续性
 
 #### E2E-020：会话在重新启动后仍然存在
@@ -1386,11 +1429,19 @@ task-candidate E2E 从请求工作树运行，但使用主工作区已经准备�
 #### E2E-024K：插件 MCP 服务器工具到达代理
 
 - **先决条件**：针对可信局域网存根声明一个 `stdio` 和一个非回环 HTTP MCP 服务器的插件；已授予 `mcp.server.local` 和 `mcp.server.remote`；HTTP 主机已列入 `net.domains`；保存存根凭证的设置密钥。
-- **步骤**： 1) 启用插件并确认尚未启动服务器进程。 2) 要求代理调用已发现的工具。 3) 检查存根收到的 environment/headers。 4) 使存根调用失败并超时。 5) 让 stdio 存根的目录超过旧的 64 个工具上限并重新发现。 6) 禁用插件。
-- **预期**：服务器在首次使用时延迟连接；工具在 `risk: "medium"` 上显示为 `plugin_demo_*_<serverId>_<tool>`，并进行每次调用审核；stdio 子级仅接收声明的 `env` 值加上 PATH/temp/locale，从不接收主机提供程序密钥；非回环 HTTP 端点只有在主机列入白名单后才会接受，未加密传输会在审查中显示；跳转到未声明主机时会在第二次请求前阻止；失败和超时会返回工具错误，而不会导致插件或主机崩溃；大于旧的 64 个工具上限的目录会完整到达，而突破某项每服务器护栏（数量、页数、游标、遍历时间）的服务器会被拒绝，而不是贡献其目录的一个前缀；禁用会断开两个服务器的连接。
+- **步骤**： 1) 启用插件并确认尚未启动服务器进程。 2) 要求代理调用已发现的工具。 3) 检查存根收到的 environment/headers。 4) 使存根调用失败，再执行耗时超过 10 秒握手预算但少于 100 秒调用预算的 HTTP 工具，最后让另一次调用超过自身预算。 5) 让 stdio 存根的目录超过旧的 64 个工具上限并重新发现。 6) 禁用插件。
+- **预期**：服务器在首次使用时延迟连接；工具在 `risk: "medium"` 上显示为 `plugin_demo_*_<serverId>_<tool>`，并进行每次调用审核；stdio 子级仅接收声明的 `env` 值加上 PATH/temp/locale，从不接收主机提供程序密钥；非回环 HTTP 端点只有在主机列入白名单后才会接受，未加密传输会在审查中显示；跳转到未声明主机时会在第二次请求前阻止；HTTP 工具可在握手预算之后完成，超过自身预算的调用失败；其他失败和超时会返回工具错误，而不会导致插件或主机崩溃；大于旧的 64 个工具上限的目录会完整到达，而突破某项每服务器护栏（数量、页数、游标、遍历时间）的服务器会被拒绝，而不是贡献其目录的一个前缀；禁用会断开两个服务器的连接。
 - **链接规格**：`07-plugins/02-plugin-manifest-schema.md`、`07-plugins/04-plugin-security.md` §8.1、ADR 0038、ADR 0142、D176、D281、D452
 - **接受**：G（MCP 桥）+ E（工具和权限）+ 安全
 - **状态**：单位覆盖（`plugin-mcp.test.mjs` stdio + HTTP 存根）；面向代理的场景草稿
+
+#### E2E-MCP-CANCEL：停止操作只中断调用方会话的 MCP 请求
+
+- **先决条件**：两个 Agent 会话共用用户或插件 MCP 服务器，均有待处理工具调用，服务器记录取消通知。
+- **步骤**：两项调用待处理时停止第一个会话，再让第二项调用完成；分别对远程 HTTP 和 stdio 服务器重复。
+- **预期**：第一个请求收到 `notifications/cancelled`，停止后不会产生成功的工具结果；第二个会话的调用正常完成且连接可继续使用。关闭应用会取消其余请求并清理监听器。
+- **关联规格**：`03-runtime/01-ipc-protocol.md` §12a、`07-plugins/04-plugin-security.md` §8.1
+- **状态**：客户端及会话隔离已有单元测试；完整桌面流程待验证
 
 #### E2E-024L：常驻插件服务受监督且可见
 
@@ -3946,14 +3997,17 @@ eleven-tool-round desktop paths are verified by
 - **覆盖**：C、品质 / 浮动 Composer 与重试表面
 - **先决条件**：渲染器 CSS 为 `apps/desktop/src/styles` 下的生产源。
 - **步骤**：
-  1. 在两套内置主题和一套自定义主题中检查 `.composer-dock-docked` 的计算背景。
-  2. 滚动长会话，让一行正文经过悬浮 Composer 下方。
+  1. 用两个不同的 `--composer-dock-height` 值检查 `.composer-dock-docked` 的计算背景（应完全透明）与 `.thread-scroll` 的遮罩，覆盖两套内置主题与一套自定义主题。
+  2. 滚动长会话，让一行正文越过 Composer 边界。
   3. 检查 Composer 停靠栏样式中的 `.plan-approval-bar`。
   4. 检查记录样式中的 `.run-activity-error-popover.message-error`。
   5. 在实时会话中悬停或聚焦正在重试的活动行。
 - **预期**：
-  - 停靠区横跨整个宽度绘制不透明的 `--ds-bg-primary` 工作区表面；正文在
-    Composer 边界处消失，不会留在输入框下方或圆角外侧。
+  - 停靠区不绘制任何底衬。正文在 Composer 边界处经 `.thread-scroll` 的遮罩
+    淡出，不会留在输入框下方或圆角外侧；遮罩的两个色标分别位于滚动容器底边
+    之上 `--composer-dock-height + 16px` 与 `--composer-dock-height - 2px`，
+    因此滚到底时最后一行保持完全不透明，会话面板自己的表面（含主题铺的背景）
+    在停靠区后面保持可见。
   - Plan/Goal 审批条使用 `--ds-bg-composer` 加 `--ds-shadow-composer`，而不是正文流里的 `--ds-tile` 薄洗，因此在透明停靠栏上仍可读。
   - 重试 hover tooltip 把错误色混在 `--ds-bg-elevated-opaque` 上，记录正文不会透出。
   - 重试 tooltip 的高度被限制在尾部状态行上方的可用空间内，其余部分可滚动，
@@ -4653,6 +4707,7 @@ eleven-tool-round desktop paths are verified by
       调用之间终止 stub 服务器进程。在同一会话中再次调用该工具，不再搜索。
   11. 用重启后不再提供该工具的 stub 重复；以及在恢复前禁用或改出作用域。
       也试一次断开后的并发调用，以及恢复握手失败的服务器。
+  12. 连接 HTTP 服务器后将其停止，刷新 MCP 设置页；重启服务器后再次测试连接。
 - **预期**：
   - 传输重启后，已激活的工具无需再次搜索即可使用；并发调用共享一次握手。
     新的服务器列表仍须公布该工具。已移除的工具和未激活的服务器在不执行
@@ -4675,6 +4730,7 @@ eleven-tool-round desktop paths are verified by
   - 损坏的命令记录 `failed` 并带有一条消息，不提供任何工具，
      并且不会在下一次会议上重拨；压制测试
 重试。
+  - HTTP 服务器停止后，设置页刷新显示 `failed`；重启后“测试连接”恢复为 `ready`。
 - **链接规格**：`07-plugins/01-plugin-system.md` §12，
   `03-runtime/01-ipc-protocol.md` §12a、`08-meta/decisions-log.md`（D192、D193）
 - **验收**：E（工具和权限）、质量
@@ -6091,7 +6147,7 @@ eleven-tool-round desktop paths are verified by
 - 在浅色和深色主题中，在会话 A 进行时保持会话 B 处于选中状态
   通过正在进行、已完成、新的正在进行的转向、失败和中止
   州。启用减少运动后重复并检查键盘焦点。
-- 预计 A 在进行过程中会显示橙色呼吸点，绿色勾号
+- 预计 A 在进行过程中显示橙色圆点，先在 3.2 秒内呼吸两次，再保持常亮；绿色勾号
 完成，失败时出现红色圆圈警报。开始新回合清除
   A 较早的终止标记；中止不会留下已完成或失败的标记。
 - 预计选定的空闲 B 将显示静态重音蓝色轮廓环和活动环
@@ -6107,6 +6163,11 @@ eleven-tool-round desktop paths are verified by
   刷新通知并重新启动应用程序；认可的商标不得
   返回。标记为从收件箱中读取的终端通知同样会产生
   无侧边栏端子标记。
+
+- 对悬浮卡中的关联运行会话圆点重复检查。3.2 秒后，两处运行标记均无活动动画；
+  对其余内容空闲的原生 macOS 窗口录制时，标记不得持续产生绘制帧。
+  开始新一轮任务并重新打开悬浮卡，有限动画可以再次播放。
+  GPU 测量须区分应用提交帧与整机负载。
 
 ### US-UI-68 会话范围的内联权限和工件 (D138/D142)
 - 同时运行两个会话，并在 B 到达工具时保持 A 可见
@@ -6911,7 +6972,7 @@ eleven-tool-round desktop paths are verified by
 #### E2E-180：已发送的文件引用保持芯片并可点击打开
 
 - **前提条件**：Agent 会话所在工作区含有嵌套源文件、HTML 文件，以及文件名带空格的文件；该项目组还有一个第二文件夹，里面有一个属于它自己的源文件。输入框也可以把操作系统文件粘贴到会话临时目录。内置的文件管理器插件已加载。
-- **步骤**：1）通过输入框芯片引用工作区源文件、工作区 HTML、带空格的文件名，以及粘贴的临时文件，然后发送。2）查看用户气泡。3）点击 HTML 芯片，再点击工作区源文件芯片，最后点击临时目录芯片。4）附加上项目第二个文件夹里的文件，并点击它的芯片。
+- **步骤**：1）通过输入框芯片引用工作区源文件、工作区 HTML、带空格的文件名，以及粘贴的临时文件，然后发送。2）查看用户气泡。3）点击 HTML 芯片，再点击工作区源文件芯片，最后点击临时目录芯片。4）附加上项目第二个文件夹里的文件，并点击它的芯片。5）右键那条已发送的 `@path` 芯片、助手 Markdown 里的行内代码引用、文件链接、本地图片、工具行自己的文件路径、工具结果的文件列表，以及附件缩略图，再右键一个什么都没匹配到的引用。6）在那条芯片上依次复制完整地址与相对地址，再对临时目录里的引用做同样两步。
 - **预期**：
   - 每条已发送引用画成紧凑的叶子名芯片（图标 + 名称），而不是完整 `@path`。工具提示和无障碍名称保留规范路径。带引号路径和临时绝对路径也包括在内。
   - 芯片加上短提示时，用户气泡按内容收缩，而不是撑到 `min(82%, 600px)` 上限。
@@ -6919,6 +6980,7 @@ eleven-tool-round desktop paths are verified by
   - 点击工作区源文件芯片后，该文件在文件管理器工作面板视图中打开；芯片点击不再打开宿主的 `file:` 选项卡，也不再交给系统默认应用。
   - 点击临时目录芯片时，文件在宿主的 `file:` 选项卡中按其绝对路径打开——它位于文件管理器项目根之外。
   - 点击项目第二个文件夹里那个文件的芯片时，该文件在文件管理器视图中打开：补全会搜索整个项目组、主文件夹优先，同级文件夹里的文件用绝对路径寻址，因为相对路径永远指主文件夹（ADR 0263）。
+  - 右键文件引用会打开渲染器自己的菜单：在文件夹中显示该文件，并复制它的完整地址与相对地址；助手 Markdown 里的行内代码引用、文件链接与本地图片、工具行自己的文件路径、工具结果的文件列表或匹配列表中的路径、图片附件缩略图都提供这几项，而什么都没匹配到的引用会自己报告出来，而不是去显示别处同名的那份文件。复制写出的就是它说的地址：完整地址即绝对路径，相对地址即项目内相对写法；临时目录或附件文件没有相对地址，会直接说明，而不是把绝对路径当成相对地址写出去。
   - 持久化用户消息仍包含给模型用的规范 `@path` 文本。
 - **链接规格**：`04-ux/08-component-spec.md` §8.3 / §11.8、
   `04-ux/09-interaction-patterns.md` §8a.2、`03-runtime/01-ipc-protocol.md`、
@@ -8208,8 +8270,8 @@ runner 会在运行时的隔离临时目录中生成六个插件形态 fixture�
 - **Status**: Draft; native E2E requires an explicitly authorized run.
 #### E2E-MODEL-catalog-window-correction-reaches-saved-bindings：目录修正回流已保存绑定，且不覆盖用户手改值
 
-- **目标**：models.dev 修正某模型上限后回流到已保存的绑定（不必删除重建），
-  而用户在设置里手改的数值永不被覆盖。
+- **目标**：models.dev 修正某模型上限（上下文窗口或输出上限）后回流到已保存的绑定
+  （不必删除重建），而用户在设置里手改的数值永不被覆盖。
 - **步骤**：
   1. 配置一个提供商，勾选 models.dev 已发布 `limit.context` 的模型并保存。展开该行的
      高级区，读取上下文窗口字段与其提示。
@@ -8219,11 +8281,15 @@ runner 会在运行时的隔离临时目录中生成六个插件形态 fixture�
      重新打开设置与检查器。
   4. 保存并重新打开一个绑定不带 `contextWindowSource` 的提供商行：一次使用通用
      `128000` 种子，一次使用任意其它已存值。
+  5. 对存的是通用 `8192` 输出上限的行、以及用户手改过上限的行重复步骤 4，
+     读取设置行里的上限与新会话实际请求里的上限。
 - **预期**：步骤 1 显示发布值并带「跟随 models.dev」提示。步骤 2 在所有使用 effective
   window 的地方（设置行、上下文检查器、会话启动）都显示修正后的值，无需删除重建。
   步骤 3 在设置行、检查器和实际请求中都保留用户输入的值，包括在目录窗口更大时手输的
   `128000`，且提示消失。步骤 4 表现确定：`128000` 种子跟随目录，其它值保持原样。
-  每一步中标记都能在提供商行的保存/读取往返后保留，早于该标记写出的配置仍可读。
+  步骤 5 对输出上限套用同一套来源规则：`8192` 种子跟随已发布的 `limit.output`，
+  用户输入的上限保持不变。每一步中标记都能在提供商行的保存/读取往返后保留，
+  早于该标记写出的配置仍可读。
 - **关联规范**：`03-runtime/13-model-catalog-and-selection.md` §9.1、
   `03-runtime/12-provider-config-schema.md` §2、
   `03-runtime/11-provider-model-system.md` §2、`04-ux/06-settings-ia.md` §2
@@ -8635,6 +8701,15 @@ the latest destination. These assertions measure work counts, not device FPS.
 | Scenario | Acceptance | Specification | Automation |
 | --- | --- | --- | --- |
 | E2E-IMAGE-generation-and-editing | Image capability and recovery | 03-runtime/21-image-generation | Host and UI suites above |
+| E2E-IMAGES-result-download | 下载与定位生成图片 | 03-runtime/21-image-generation | `scripts/e2e-image-chat.mjs` |
+
+### E2E-IMAGES-result-download
+
+- **前提：** Agent 会话有两张已生成的 PNG，使用本地图片夹具。
+- **步骤：** 确认一张主图和右侧两张缩略图，下载第一张结果，选中并下载第二张，在窄窗口检查聊天布局；打开选中图片的全窗口预览，双向切换并放大，用 Escape 关闭，检查“在文件夹中显示”操作。
+- **预期：** 主图和下载目标随缩略图切换；选中缩略图显示浅灰色外框，切换已加载图片时卡片和预览不会短暂空白，预览保持适配尺寸；快速反向操作会取消尚未完成的图片解码；两张下载文件分别与原图字节相同，文件名安全。窄窗口中的聊天和预览缩略图仍可操作；预览切换、缩放和焦点恢复可用，关闭后对话保留选中项，原图仍可访问；定位操作使用受限文件接口。
+- **验收：** 结果操作和图片浏览不改变图片存储和预览权限。
+- **状态：** `scripts/e2e-image-chat.mjs` 自动验证下载和预览交互；定位复用现有受限 IPC。
 
 #### E2E-CHAT-parenthesized-url：用户消息中的完整网址
 
@@ -8781,6 +8856,27 @@ the latest destination. These assertions measure work counts, not device FPS.
 - **自动化**：`node --experimental-strip-types scripts/e2e-scheduled-paths.mjs`
   使用隔离的真实 Host 与 SQLite 配置，不向真实提供商发送推理请求。
 
+### E2E-MARKDOWN-table-actions
+
+- **Setup**: Render a conversation containing two Markdown tables, including
+  aligned columns, formatted text, Chinese text, commas, quotes, and `<br>` cells.
+- **Steps**: Copy the first table; download its CSV; expand it; use copy inside
+  the modal; close with Escape and with Close. Append a streamed row while the
+  preview is open. Repeat the preview at a narrow width in light/dark themes
+  and English/Chinese. Deny clipboard writes at the browser boundary.
+- **Expected**: Actions operate only on their own table. Markdown retains inline
+  syntax and alignment. CSV decodes as UTF-8 and preserves fields and line breaks.
+  The modal fits the viewport, traps focus, updates streamed rows, blocks native
+  work-panel surfaces, and returns focus on dismissal. Narrow previews keep short
+  headers on one line and scroll horizontally; sticky headers fully cover the
+  rows behind them. Failed copies report an
+  error, not success. Existing table wrapping remains intact.
+- **Automated coverage**: `node --test apps/desktop/test/markdown-table.test.mjs`
+  and `node scripts/test-markdown-table.mjs` after building the desktop. The
+  latter mounts the production Markdown component in an isolated Electron
+  window and exercises real clipboard/download boundaries. It does not call a
+  model or use the user's app profile.
+
 ## 原生搜索续跑契约（离线 sidecar）
 
 **范围：** ADR 0297；供应商原生搜索内容、估算、本地工具、Task 委派及历史恢复。不调用真实模型或搜索服务。
@@ -8804,6 +8900,22 @@ the latest destination. These assertions measure work counts, not device FPS.
 
 **证据：** 记录构建和测试退出码、基线 SHA、依赖版本、产物标识及独立评审，报告位于
 `docs/project/hosted-search-contract-verification.md`。不得记录真实会话或凭据。未执行明确标为 NOT RUN，不得标为 PASS。
+
+### E2E-CHAT-fork-completed-reply-while-running
+
+- **Preconditions:** Isolated real desktop profile, configured model, two turns
+  in one Desktop conversation; the first assistant reply has completed.
+- **Steps:** Send the second prompt. While it is still running, click **Branch
+  from this reply** on the first reply. Continue chatting in the child, then
+  return to the parent.
+- **Expected:** The child contains only history through the first reply, can
+  continue independently, and starts with no running turn. The parent keeps
+  running and retains its second prompt and reply. No live tail is overwritten.
+  A whole-session fork and a fork within the active tool loop remain rejected.
+  A navigation during the fork response records the child without stealing focus.
+- **Coverage:** Host fork regression, renderer session-fork-running tests,
+  session IPC contract tests, and real-model desktop acceptance. A local model
+  fixture or mocked component result is not real-model acceptance evidence.
 
 ### E2E-HOOKS-cancel-and-dispose
 

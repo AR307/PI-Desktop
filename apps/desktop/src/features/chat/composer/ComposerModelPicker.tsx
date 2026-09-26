@@ -100,7 +100,6 @@ export function ComposerModelPicker({
               showView("root");
               setQuery("");
               setModelHighlight(-1);
-              setThinkingHighlight(-1);
             }
             setOpen((current) => !current);
           }}

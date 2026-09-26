@@ -199,15 +199,14 @@ and removes a partial copy on failure. The generated destination is created
 atomically and must not be inside the selected source.
 
 This is an explicit local import, not a pi CLI package manager. It never
-automatically scans or imports `~/.pi`, does not read the CLI's installed
-package registry, and does not run npm lifecycle scripts. When dependencies
+automatically imports `~/.pi`, does not read the CLI's installed package
+registry, and does not run npm lifecycle scripts. The Skills page separately
+discovers global npm skill candidates as described below. When dependencies
 are declared, the bounded installer accepts only registry version specs and
 registry-resolved npm lockfiles, rejects unsafe package locations and nested
 dependency specs, disables git resolution, and isolates npm's config/cache from
 the user's credentials and proxy settings. Importing a package does not promise
 that every third-party extension dependency can execute.
-
-## 4. Loading and runtime
 
 ## 4. Loading and runtime
 

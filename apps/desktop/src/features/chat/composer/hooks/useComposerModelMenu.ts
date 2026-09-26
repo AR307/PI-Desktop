@@ -77,10 +77,10 @@ export function useComposerModelMenu({
   const [thinkingHighlight, setThinkingHighlight] = useState(-1);
   const [pendingMirrorModel, setPendingMirrorModel] = useState<string>();
   const groupListRef = useRef<HTMLDivElement>(null);
+  const thinkingListRef = useRef<HTMLDivElement>(null);
   const rootMenuRef = useRef<HTMLDivElement>(null);
   const modelSearchRef = useRef<HTMLInputElement>(null);
   const modelListRef = useRef<HTMLDivElement>(null);
-  const thinkingListRef = useRef<HTMLDivElement>(null);
   const thinkingConfigRef = useRef({
     mode,
     providerId: provider?.id,
@@ -234,13 +234,6 @@ export function useComposerModelMenu({
   }, [activeFlatIndex, flatModels.length, flatModelsKey, open, queryNeedle, view]);
 
   useEffect(() => {
-    if (!open || view !== "thinking") return;
-    setThinkingHighlight(
-      thinkingLevel ? thinkingMenuLevels.indexOf(thinkingLevel) : -1,
-    );
-  }, [open, thinkingLevel, thinkingMenuLevels, view]);
-
-  useEffect(() => {
     if (!open) return;
     for (const candidate of providers) {
       if (candidate.enabled &&
@@ -256,7 +249,6 @@ export function useComposerModelMenu({
     setView("root");
     setQuery("");
     setModelHighlight(-1);
-    setThinkingHighlight(-1);
   }, [open]);
   useEffect(() => {
     thinkingQueueRef.current?.invalidate();
@@ -280,11 +272,6 @@ export function useComposerModelMenu({
           ?.querySelector(`[data-model-index="${modelHighlight}"]`)
           ?.scrollIntoView({ block: "nearest" });
       }
-      if (view === "thinking" && thinkingHighlight >= 0) {
-        thinkingListRef.current
-          ?.querySelector(`[data-thinking-index="${thinkingHighlight}"]`)
-          ?.scrollIntoView({ block: "nearest" });
-      }
     });
   }, [open, view]);
 
@@ -294,13 +281,6 @@ export function useComposerModelMenu({
       ?.querySelector(`[data-model-index="${modelHighlight}"]`)
       ?.scrollIntoView({ block: "nearest" });
   }, [modelHighlight, open, view]);
-
-  useEffect(() => {
-    if (!open || view !== "thinking" || thinkingHighlight < 0) return;
-    thinkingListRef.current
-      ?.querySelector(`[data-thinking-index="${thinkingHighlight}"]`)
-      ?.scrollIntoView({ block: "nearest" });
-  }, [open, thinkingHighlight, view]);
 
   const showView = (nextView: ComposerMenuView) => {
     setView(nextView);
@@ -358,7 +338,6 @@ export function useComposerModelMenu({
       setQuery("");
       setView("root");
       setModelHighlight(-1);
-      setThinkingHighlight(-1);
     } catch (error) {
       showToast(error instanceof Error ? error.message : String(error), {
         variant: "error",

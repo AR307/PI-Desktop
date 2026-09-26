@@ -135,6 +135,14 @@ Settings is a **full-window page** that replaces the app sidebar + main chrome (
   - native select triggers and their opened option lists use the active theme's
     readable foreground/background pairing on macOS, Windows, and Linux; the
     shared native-select contract applies to every app surface
+- **Power** card: two independent opt-in switches. Keep computer awake uses
+  `prevent-app-suspension` to block idle system sleep for the lifetime of the
+  running desktop app, including between scheduled runs; the display may turn
+  off. Prevent screen sleep uses `prevent-display-sleep` to keep the display on.
+  Both are off when absent, persist separately as
+  `AppSettings.keepAwakeWhileRunning` and `AppSettings.preventScreenSleep`,
+  take effect immediately, restore on startup, and release their own blocker
+  when disabled or during shutdown. Manual sleep and lid close follow the OS.
 - **Network** card:
   - **Proxy**: a segmented control — System, Direct, Custom. System is the
     default and lets Chromium follow the OS proxy; Direct disables the proxy;
@@ -194,6 +202,13 @@ Settings is a **full-window page** that replaces the app sidebar + main chrome (
   Users can sync now, unlock, pause this device, approve/reject staged items,
   and disconnect. The page does not imply convergence from an old successful
   run while a pending state remains.
+- **Fast revisit and drafts**: render the last redacted state and history from
+  a short-lived local cache while the host refresh runs in the background. Keep
+  endpoint, username, remote directory, device label, compatibility mode, and
+  category choices in renderer-local storage so an unfinished form survives
+  navigation or reload. WebDAV app passwords remain in Host-owned secret
+  storage and are reused only for the same endpoint and account; vault
+  passwords are never written to renderer storage.
 
 ### 全局 AI (`ai` tab)
 - **Permissions** card: the global permission-mode control
@@ -805,9 +820,10 @@ system while preserving their different data ownership:
     clearing the search restores the complete index
 14. Info renders disabled, checking, up-to-date, available, downloading,
     downloaded, and error update states without adding another destination
-15. Native select option lists remain readable in both light and dark themes,
-    including when Chromium delegates the opened list surface to Windows; the
-    same global rule covers non-Settings native selects
+15. Settings dropdowns use `SettingsMenuSelect` (anchored menu), never native
+    `<select>`. Native select option lists outside Settings remain readable in
+    both light and dark themes, including when Chromium delegates the opened
+    list surface to Windows
 16. Shortcut recording rejects modifier-free non-function keys, reserved
     editor/OS chords, and conflicts; successful overrides immediately drive
     app behavior and macOS menu accelerators and survive restart
@@ -843,6 +859,17 @@ system while preserving their different data ownership:
 27. The Skills page Market view browses public-HTTPS catalogs, previews
     the assembled document, and installs only through `skills.create`; oversized
     expanded documents are refused and source badges follow `sourceId`
+28. All Settings UI must use shared primitives from `components/ui.tsx` and
+    `components/settings/`:
+    - Boolean toggles → `SettingsToggle` (not inline `<button role="switch">`)
+    - Multi-option selectors → `SegmentedControl` (not inline
+      `<div className="settings-segment">` with manual button loops)
+    - Dropdowns → `SettingsMenuSelect` (not native `Select` / `<select>`)
+    - Checkboxes → `Checkbox` (not inline `<label><input type="checkbox">`)
+    - Buttons → `Button` (not raw `<button>` with manual class names)
+    - Status indicators → `Badge` (not inline `<span>` with manual classes)
+    - Layout → `SettingsCard` + `SettingsRow` from `features/settings/primitives`
+    Inline reimplementation of any shared primitive is a spec violation.
 
 ## 5. General chrome metrics
 

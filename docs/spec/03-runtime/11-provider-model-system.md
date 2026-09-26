@@ -76,7 +76,14 @@ conversation id (or a per-call UUID when the caller has no session),
 host is `opencode.ai` receives the same headers. pi-ai is not relied on to
 emit `x-opencode-session`. Each provider row (AI service or OAuth account)
 may set optional `headers`; empty keeps adapter defaults. A fetch wrapper is
-the last writer so Codex and Anthropic cannot overwrite them.
+the last writer so Codex and Anthropic cannot overwrite them. pi-ai's Google
+adapters (`google-generative-ai`, `google-vertex`) reject any `fetch` that is
+not `globalThis.fetch`, so a request bound for them carries none — the merged
+`headers` still reach the SDK client — and a caller-supplied `fetch` is cleared
+rather than wrapped (issue #1072). Because those adapters never see the wrapper and never call
+`onResponse`, such a row reports no captured HTTP status and no captured
+transport cause: `Retry-After` falls back to the bounded backoff ladder, and
+the issue-234 transport diagnostics and rebuild do not fire for it.
 
 When an OAuth vendor is rebuilt around a local provider-row id, runtime keeps
 the native pi-ai transport metadata instead of treating the row as a generic
@@ -114,6 +121,16 @@ reject `thinking.type=enabled` with HTTP 400, and models.dev carries no pi-ai
 compat record, so without the flag pi-ai would fall back to budget thinking.
 Models that still publish `budget_tokens` keep budget thinking, and an
 explicit catalog `compat` record is preserved.
+
+An Anthropic Messages row the catalog cannot identify (for example a custom
+gateway URL serving an id several publishers list) still falls back to the
+generic model shape, but takes `reasoning_options` and the derived
+`thinkingLevelMap` from Anthropic's own models.dev record when that record
+has exactly the same model id. Which thinking shape a Claude id accepts is a
+property of the model, not of the deployment, so only those two fields
+transfer; limits and modalities stay generic, and aliases, renamed ids, other
+wire APIs, and non-Claude ids served over the Anthropic protocol are unchanged
+(#990).
 
 ## 5. Built-in vendor matrix (ship intent)
 

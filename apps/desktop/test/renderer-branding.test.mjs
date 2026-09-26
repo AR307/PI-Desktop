@@ -17,6 +17,7 @@ const [
   composer,
   styles,
   mascotLogo,
+  appLanguage,
 ] = await Promise.all([
     read("../../../packages/i18n/src/locales/en/index.ts"),
     read("../../../packages/i18n/src/locales/zh-CN/index.ts"),
@@ -28,6 +29,7 @@ const [
     readComposerSource(),
     loadStyles(),
     read("../src/components/HomeMascotLogo.tsx"),
+    read("../src/lib/app-language.ts"),
   ]);
 
 test("renderer surfaces the PI-Desktop brand instead of the Codex shell brand", () => {
@@ -92,6 +94,7 @@ test("app chrome uses the shared brand asset without branding the composer input
     styles,
     /@media \(prefers-reduced-motion: reduce\)[\s\S]*?\.home-mascot-still\.home-mascot-dark,[\s\S]*?\.home-mascot-still\.home-mascot-light[\s\S]*?display:\s*block;/,
   );
+  assert.match(appLanguage, /document\.documentElement\.lang\s*=\s*target/);
   assert.doesNotMatch(styles, /@keyframes home-mascot-orbit|@keyframes home-mascot-breathe|@keyframes home-mascot-blink/);
   assert.doesNotMatch(styles, /background-size:\s*5000px 100px|image-rendering:\s*pixelated/);
   assert.doesNotMatch(composer, /<BrandLogo/);

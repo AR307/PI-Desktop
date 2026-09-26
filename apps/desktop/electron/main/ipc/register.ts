@@ -34,10 +34,12 @@ import { registerWindowIpc } from "./window-ipc";
 import { createComposerTemplateLoader, registerWorkspaceIpc } from "./workspace-ipc";
 import { registerComposerIpc } from "./composer-ipc";
 import { registerSpeechIpc } from "./speech-ipc";
+import { registerVoiceIpc } from "./voice-ipc";
 import type { IpcRegistrar } from "./types";
 import type { createTraySessions } from "../tray-sessions";
 import { registerMirrorCodingIpc } from "../mirrorcoding/ipc";
 import type { MirrorCodingRuntime } from "../mirrorcoding/runtime";
+import type { createTaskbarUnreadBadge } from "../taskbar-unread-badge";
 
 export type RegisterIpcDependencies = {
   mirrorCoding: MirrorCodingRuntime;
@@ -47,6 +49,7 @@ export type RegisterIpcDependencies = {
   getMainWindow: () => BrowserWindow | null;
   getHost: () => HostProcess | null;
   traySessions: ReturnType<typeof createTraySessions>;
+  taskbarUnreadBadge: ReturnType<typeof createTaskbarUnreadBadge>;
   getSidecar: () => AgentSidecar | null;
   getAgentHostBridge: () => AgentHostBridge | null;
   /**
@@ -110,6 +113,8 @@ export function registerIpcHandlers(dependencies: RegisterIpcDependencies) {
     currentNetworkProxy,
     applyApplicationMenuSettings,
     applyDeveloperMode,
+    applyPreventScreenSleep,
+    applyKeepAwakeWhileRunning,
     resolveEffectiveCommandShell,
     modelsDevCatalog,
     vendorOAuth,
@@ -130,6 +135,7 @@ export function registerIpcHandlers(dependencies: RegisterIpcDependencies) {
     getCloseBehavior,
     markMenuRendererReady,
     traySessions,
+    taskbarUnreadBadge,
     executeNativeMenuAction,
     scheduledRunsBySession,
     isDevelopmentBuild,
@@ -162,6 +168,7 @@ export function registerIpcHandlers(dependencies: RegisterIpcDependencies) {
     getPluginPanelTheme,
     isDeveloperMode,
     sendToRenderer,
+    voiceService,
   } = dependencies;
 
 
@@ -171,6 +178,7 @@ export function registerIpcHandlers(dependencies: RegisterIpcDependencies) {
       const result = await fn(...args);
       traySessions.observeInvoke(channel);
       dependencies.mobileSync?.observeInvoke(channel);
+      taskbarUnreadBadge.observeInvoke(channel);
       return result;
     };
     ipcHandlers.set(channel, handler);
@@ -270,6 +278,8 @@ export function registerIpcHandlers(dependencies: RegisterIpcDependencies) {
     currentNetworkProxy,
     applyApplicationMenuSettings,
     applyDeveloperMode,
+    applyPreventScreenSleep,
+    applyKeepAwakeWhileRunning,
     resolveEffectiveCommandShell,
   });
   registerConfigSyncIpc({
@@ -382,7 +392,10 @@ export function registerIpcHandlers(dependencies: RegisterIpcDependencies) {
     getHost,
     getSidecar,
     getAgentHostBridge,
-    cancelSessionTools: (sessionId: string, reason?: string) => plugins.cancelSessionTools(sessionId, reason),
+    cancelSessionTools: (sessionId: string, reason?: string) => {
+      plugins.cancelSessionTools(sessionId, reason);
+      userMcp.cancelSessionCalls(sessionId);
+    },
     logger,
     vendorOAuth,
     agentExtensions,
@@ -470,6 +483,10 @@ export function registerIpcHandlers(dependencies: RegisterIpcDependencies) {
   });
 
   registerSpeechIpc({ registrar, speech });
+
+  if (voiceService) {
+    registerVoiceIpc({ registrar, voiceService });
+  }
 
   registerRemoteHostIpc({ registrar });
 
