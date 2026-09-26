@@ -15,11 +15,9 @@ import {
   upsertLiveSessionMessage,
 } from "../../lib/session-transcript";
 import { sessionReadLooksEmpty } from "../../lib/session-transcript-read";
-import { sessionIsArchived, type SessionMeta } from "../../lib/sidebar-preferences";
-import {
-  normalizeProjectPath,
-  sessionMatchesProject,
-} from "../../lib/sidebar-session-groups";
+import type { SessionMeta } from "../../lib/sidebar-preferences";
+import { normalizeProjectPath } from "../../lib/sidebar-session-groups";
+import { latestSessionInScope } from "../../lib/session-scope";
 import type { ComposerDraftSnapshot } from "../../lib/composer-smart-stop";
 import { formatToolValue } from "../../lib/tool-display";
 import { recordPaneTranscript } from "../../lib/session-panes";
@@ -401,16 +399,7 @@ export function createSessionRuntime({ get, set }: StoreAccess): SessionRuntime 
     newSessionScopeKey: (projectPath) =>
       normalizeProjectPath(projectPath) ?? "<temporary>",
     latestSessionInScope: (sessions, projectPath, sessionMeta) =>
-      sessions
-        .filter((session) => sessionMatchesProject(session, projectPath))
-        .sort((a, b) => {
-          const aUpdated = Date.parse(a.updatedAt);
-          const bUpdated = Date.parse(b.updatedAt);
-          const aTime = Number.isFinite(aUpdated) ? aUpdated : 0;
-          const bTime = Number.isFinite(bUpdated) ? bUpdated : 0;
-          return bTime - aTime || b.id.localeCompare(a.id);
-        })
-        .find((session) => !sessionIsArchived(session.id, sessionMeta)),
+      latestSessionInScope(sessions, projectPath, sessionMeta),
     liveMessageCountForSession: (id, state) =>
       state.activeSessionId === id
         ? state.messages.length

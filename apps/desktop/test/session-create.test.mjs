@@ -62,11 +62,12 @@ test("creating a session reveals the empty destination before host IO", () => {
   assert.match(persist, /commitCreatedEmptySession/);
   assert.match(sessionCoordination, /function commitCreatedEmptySession/);
   assert.match(sessionCoordination, /scheduleHomeDraftAdopt/);
-  assert.match(persist, /inheritedSessionModelBinding/);
+  assert.match(persist, /newConversationModelBinding/);
+  assert.match(persist, /latestSessionInScope/);
   assert.match(persist, /providerId: inherited\.providerId/);
   assert.match(persist, /modelId: inherited\.modelId/);
-  assert.doesNotMatch(persist, /providerId: draftConfig\?\.providerId/);
-  assert.doesNotMatch(persist, /modelId: draftConfig\?\.modelId/);
+  assert.match(persist, /draft: draftConfig/);
+  assert.match(persist, /latestSession: runtime\.latestSessionInScope/);
 });
 
 test("send and paste wait for an in-flight New Task instead of creating a second session", () => {
@@ -76,6 +77,15 @@ test("send and paste wait for an in-flight New Task instead of creating a second
     )?.[0] ?? "";
   assert.match(materialize, /pendingNewSessionRequests/);
   assert.match(materialize, /await pending/);
+});
+
+test("the home composer chip uses the same new-conversation model binding", async () => {
+  const composer = await readFile(
+    new URL("../src/components/Composer.tsx", import.meta.url),
+    "utf8",
+  );
+  assert.match(composer, /newConversationModelBinding/);
+  assert.match(composer, /latestSessionInScope/);
 });
 
 test("opening an unpinned session snapshots its first selected model", () => {

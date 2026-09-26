@@ -24,6 +24,7 @@ import type { PluginRuntime } from "../plugin-runtime";
 import type { UserMcpRuntime } from "../user-mcp";
 import type { RuntimeState } from "./context";
 import type { FinishTurn } from "./plans";
+import { isMirrorCodingImageOnlyModel } from "../mirrorcoding/catalog";
 import type { MirrorCodingRuntime } from "../mirrorcoding/runtime";
 
 export type SidecarRuntimeDependencies = {
@@ -410,17 +411,31 @@ export function createSidecarRuntime({
     const modelId = key.slice(slash + 1);
     if (!modelId) throw new Error("empty model id");
 
-    const allProviders = await listRuntimeProviders(false);
+    // MirrorCoding group rows only project the account's models for routing.
+    // Keep them out of alias matching so "mirrorcoding/<model>" resolves to
+    // the one account row that owns the delegation catalog.
+    const allProviders = (await listRuntimeProviders(false)).filter(
+      (row) => row.authKind !== "mirrorcoding" || row.mirrorCoding?.scope === "account",
+    );
     const provider = findSubagentProviderSource(providerPart, allProviders);
     if (!provider) {
       throw new Error(subagentProviderLookupError(providerPart, allProviders));
     }
 
-    // Check if the model has availableForSubagents enabled
-    const binding = provider.models?.find(
-      (m: any) => m.id === modelId || m.id.toLowerCase() === modelId.toLowerCase(),
+    const binding = (provider.models ?? []).find(
+      (model: { id: string; availableForSubagents?: boolean }) =>
+        model.id === modelId || model.id.toLowerCase() === modelId.toLowerCase(),
     );
-    if (!binding?.availableForSubagents) {
+    const isMirrorCodingAccount =
+      provider.authKind === "mirrorcoding" && provider.mirrorCoding?.scope === "account";
+    const imageOnly = isMirrorCodingImageOnlyModel(provider.mirrorCoding, modelId);
+    // MirrorCoding chat models are the account catalog; they have no API
+    // secret, so the generic opt-in flag is not required for Task.model.
+    if (
+      !binding ||
+      imageOnly ||
+      (!binding.availableForSubagents && !isMirrorCodingAccount)
+    ) {
       throw new Error(
         `model "${modelId}" on provider "${provider.name}" is not enabled for delegation`,
       );

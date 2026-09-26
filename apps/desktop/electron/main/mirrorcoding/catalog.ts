@@ -1,6 +1,6 @@
 import type {
   ImageGenerationCapability, MirrorCodingCatalog, MirrorCodingEndpoint,
-  MirrorCodingImageRoutes, MirrorCodingProviderSync, ModelBinding,
+  MirrorCodingImageRoutes, MirrorCodingProvider, MirrorCodingProviderSync, ModelBinding,
 } from "@pi-desktop/shared";
 import { genericModelConfig, type ModelConfig } from "@pi-desktop/agent-runtime";
 import { modelConfigFromModelsDev, type ModelsDevCatalog } from "../models-dev-catalog";
@@ -202,4 +202,23 @@ export function compileCatalog(catalog: MirrorCodingCatalog, modelsDev: ModelsDe
       };
     }),
   };
+}
+
+/** True when the model is image-only: no chat route on the account or its groups. */
+export function isMirrorCodingImageOnlyModel(
+  meta: MirrorCodingProvider | undefined,
+  modelId: string,
+): boolean {
+  if (!meta || !modelId) return false;
+  const hasChat =
+    Boolean(meta.routes?.[modelId]) ||
+    (meta.groups ?? []).some((group) => Boolean(group.routes?.[modelId]));
+  if (hasChat) return false;
+  return Boolean(
+    meta.imageModels?.[modelId] ||
+      meta.imageRoutes?.[modelId] ||
+      (meta.groups ?? []).some(
+        (group) => group.imageModels?.[modelId] || group.imageRoutes?.[modelId],
+      ),
+  );
 }

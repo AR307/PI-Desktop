@@ -18,7 +18,7 @@ import {
   FORKED_SESSION_WINDOW,
 } from "../../lib/session-fork";
 import { EMPTY_SESSION_WINDOW } from "../../lib/session-create";
-import { inheritedSessionModelBinding } from "../../lib/session-model";
+import { newConversationModelBinding } from "../../lib/session-model";
 import {
   clearSessionPanes,
   retainSessionPane,
@@ -274,14 +274,19 @@ export function createSessionCoordination({
     const settings = state.settings;
     const projectPath =
       options && "projectPath" in options
-        ? options.projectPath
+        ? options.projectPath ?? null
         : state.workspace?.path ?? null;
     const draftConfig =
       options && "draftConfiguration" in options
         ? options.draftConfiguration
         : state.draftConfiguration;
-    const inherited = inheritedSessionModelBinding({
+    const inherited = newConversationModelBinding({
       draft: draftConfig,
+      latestSession: runtime.latestSessionInScope(
+        state.sessions,
+        projectPath,
+        state.sessionMeta,
+      ),
       settings,
       providers: state.providers,
     });

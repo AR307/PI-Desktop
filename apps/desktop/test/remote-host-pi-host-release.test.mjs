@@ -22,11 +22,12 @@ const {
   targetKey,
   versionsMatch,
 } = await import("../electron/main/remote/pi-host-release.ts");
+const { GITHUB_REPO } = await import("@pi-desktop/shared");
 
 const VERSION = "0.15.1-beta.5";
 const LINUX_X64 = { platform: "linux", arch: "x64" };
 const ARTIFACT_NAME = "pi-host-0.15.1-beta.5-linux-x64.tar.gz";
-const RELEASE_BASE = "https://github.com/vastsa/PI-Desktop/releases/download/v0.15.1-beta.5";
+const RELEASE_BASE = `https://github.com/${GITHUB_REPO}/releases/download/v0.15.1-beta.5`;
 /** 64 hex characters, so it passes `normalizeChecksum`. */
 const DIGEST = "0123456789abcdef".repeat(4);
 /** Same length as {@link DIGEST}, one nibble different: a tampered download. */

@@ -208,8 +208,10 @@ a creation default only and never rewrites an existing session's stored choice.
 
 Unpinned sessions still advertise that inherited default model's reasoning
 capability on session list/get/create/fork/configure. Enrichment does not pin
-`providerId`/`modelId`; desktop session create does, by writing the then-current
-app default (or Composer draft override) into the durable ids. Later Settings
+`providerId`/`modelId`; desktop session create does, by writing the last
+in-scope conversation's provider/model, else the then-current app default
+(or an explicit Composer draft override) into the durable ids. The home
+Composer chip uses that same pair before a session exists. Later Settings
 default-model changes do not rewrite an already created session. Opening a
 legacy row whose ids are still empty snapshots the last used turn, else the
 current default, so it stops following Settings. The Composer never treats a
@@ -399,9 +401,11 @@ App-level default:
 - if none configured, onboarding checklist requires provider setup before first agent run
 
 Session-level:
-- inherits app default at creation and stores that `providerId`/`modelId` pair
-- later Settings default-model changes apply only to new sessions and the
-  unpersisted home draft, not to already created sessions
+- inherits the last in-scope conversation's model at creation, else the app
+  default, and stores that `providerId`/`modelId` pair
+- later Settings default-model changes apply only when no in-scope session
+  model exists, and to the unpersisted home draft; already created sessions
+  stay pinned
 - initializes thinking to the highest level enabled by the inherited model's
   binding; published levels seed a new binding, while an empty or `off`-only
   binding starts at `off`
@@ -595,7 +599,10 @@ same model to the check mark, the toggle and the duplicate guard.
       refresh keeps the cached picker populated
 - [ ] capability badges visible
 - [ ] session model change applies to next turn only
-- [ ] a newly created session stores the then-current default provider/model, and later default-model changes do not rewrite that session
+- [ ] a newly created session stores the last in-scope conversation model when
+      no composer draft overrides it, else the then-current default
+      provider/model; later default-model changes do not rewrite that session
+      and the home Composer chip shows the same pair before the session exists
 - [ ] a new session defaults a reasoning-capable inherited model to that
       binding's stored default thinking level (clamped onto the enabled set;
       strongest-enabled only when unset) and otherwise defaults to `off`

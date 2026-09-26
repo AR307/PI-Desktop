@@ -40,6 +40,7 @@ import type { HostProcess } from "../host-process";
 import type { Logger } from "../logger";
 import type { PluginRuntime } from "../plugin-runtime";
 import type { UserMcpRuntime } from "../user-mcp";
+import { isMirrorCodingImageOnlyModel } from "../mirrorcoding/catalog";
 import type { RuntimeState } from "./context";
 import type { RuntimeProvider } from "./provider-catalog";
 
@@ -523,16 +524,29 @@ export function createSessionLaunchRuntime({
             };
       },
     });
-    // Delegation model catalog: every model binding flagged
-    // `availableForSubagents` is pre-resolved so the system prompt can list
-    // them and the parent agent can pass them to `Task.model` without an
-    // extra RPC round-trip. Statically pinned entries from definitions take
-    // precedence — they were resolved above with stricter diagnostics.
+    // Delegation model catalog: opted-in bindings are pre-resolved so the
+    // system prompt can list them and the parent agent can pass them to
+    // `Task.model` without an extra RPC round-trip. MirrorCoding chat models
+    // on the account row are also listed: they have no API secret, so the
+    // generic opt-in path never resolved them and Task.model always reported
+    // an empty catalog. Statically pinned definition entries take precedence.
+    const imageCandidates = imageGenerationBindings(
+      settings.imageGenerationModels,
+      settings.imageGeneration,
+    );
     const subagentModelKeys: string[] = [];
     for (const row of providers.providers) {
       if (!row.enabled) continue;
+      const isMirrorCodingRow = row.authKind === "mirrorcoding";
+      // Group rows only project the account's models for routing; the account
+      // row owns the delegation catalog and its bindings carry the chosen group.
+      if (isMirrorCodingRow && row.mirrorCoding?.scope !== "account") continue;
       for (const binding of row.models ?? []) {
-        if (!binding.availableForSubagents) continue;
+        const mirrorCodingChat =
+          isMirrorCodingRow &&
+          !isImageGenerationModel(imageCandidates, row.id, binding.id) &&
+          !isMirrorCodingImageOnlyModel(row.mirrorCoding, binding.id);
+        if (!binding.availableForSubagents && !mirrorCodingChat) continue;
         let key = `${row.vendorKey ?? row.name}/${binding.id}`;
         // Two provider rows can share a vendor alias. Opting in one row must
         // not authorize the credential-bearing pin resolved from another row.
@@ -542,6 +556,24 @@ export function createSessionLaunchRuntime({
         if (subagentBindings.providers[key]) {
           subagentModelKeys.push(key);
           continue; // already resolved, and independently opted in
+        }
+        if (isMirrorCodingRow) {
+          // MirrorCoding credentials never leave main: the delegation catalog
+          // carries a local relay binding instead of a raw secret, exactly
+          // like the session's own MirrorCoding launch path.
+          if (!mirrorCodingBindingFor) continue;
+          try {
+            subagentBindings.providers[key] = await mirrorCodingBindingFor(
+              row.id,
+              binding.id,
+              sessionId,
+            );
+            subagentModelKeys.push(key);
+          } catch {
+            // Account disconnected or the route is gone; the model simply
+            // stays out of this launch's delegation catalog.
+          }
+          continue;
         }
         const isVendorAccount = row.authKind === OAUTH_AUTH_KIND;
         let apiKey = "";
