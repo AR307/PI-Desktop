@@ -835,7 +835,9 @@ core set rather than the on-demand catalog of §7.1:
   (`"provider/modelId"`) that overrides the delegate's model for that run.
   Resolution priority: Task.model parameter → definition frontmatter pin →
   session model. The parent agent sees a model summary in the system prompt
-  listing all models marked `availableForSubagents` in provider settings. If
+  listing all models marked `availableForSubagents` in provider settings, plus
+  MirrorCoding account chat models (they have no API secret, so the generic
+  opt-in path never resolved them). If
   the delegation catalog is empty, the prompt tells the model to omit `model`
   and use the definition pin, or inherit the session model when unpinned; an
   explicit key that exactly names the current session provider/model is treated as the same inheritance case. Other

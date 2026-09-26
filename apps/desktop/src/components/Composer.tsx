@@ -26,6 +26,8 @@ import { isActivePlanExecution } from "../lib/plan-mode-state";
 import { headAsk, queuedAskCount } from "../lib/pending-asks";
 import type { QueuedPrompt } from "../lib/queued-prompts";
 import { composerModelDisplayName, sameComposerModelId } from "../lib/composer-models";
+import { newConversationModelBinding } from "../lib/session-model";
+import { latestSessionInScope } from "../lib/session-scope";
 import {
   providerThinkingLevels,
   resolveComposerThinkingProvider,
@@ -109,6 +111,7 @@ export function Composer({
     nativeSession && activeSessionSummary.capabilities?.canPrompt !== true;
   const nativeInputBlocked = nativeReadOnly || (nativeSession && isRunning);
   const workspacePath = useAppStore((s) => s.workspace?.path ?? "");
+  const sessionMeta = useAppStore((s) => s.sessionMeta);
   const providers = useAppStore((s) => s.providers);
   const providerModels = useAppStore((s) => s.providerModels);
   const liveMessages = useAppStore((s) => s.messages);
@@ -332,16 +335,38 @@ export function Composer({
       : sessionPermissionMode;
   const composerPermissionMode: Exclude<PermissionMode, "inherit"> =
     mode === "goal" ? "auto" : effectivePermissionMode;
+  const inheritedDraftModel = useMemo(
+    () =>
+      activeSession
+        ? null
+        : newConversationModelBinding({
+            draft: draftConfiguration,
+            latestSession: latestSessionInScope(
+              sessions,
+              workspacePath || null,
+              sessionMeta,
+            ),
+            settings,
+            providers,
+          }),
+    [
+      activeSession,
+      draftConfiguration,
+      sessions,
+      workspacePath,
+      sessionMeta,
+      settings,
+      providers,
+    ],
+  );
   const provider = providers.find(
     (candidate) =>
       candidate.id ===
-      (activeSession?.providerId ??
-        (!activeSession ? draftConfiguration?.providerId : undefined) ??
-        settings?.defaultProviderId),
+      (activeSession?.providerId ?? inheritedDraftModel?.providerId),
   );
   const modelId =
     activeSession?.modelId ??
-    (!activeSession ? draftConfiguration?.modelId : undefined) ??
+    inheritedDraftModel?.modelId ??
     (settings?.defaultModelId?.trim() || provider?.models?.[0]?.id || provider?.defaultModelId);
   const selectedModelCatalog = provider ? providerModels[provider.id] : undefined;
   const catalogThinkingProvider = thinkingProviderForModel(

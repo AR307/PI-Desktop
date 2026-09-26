@@ -43,8 +43,15 @@ function windowsIconPath(): string | undefined {
   const resourceRoot = app.isPackaged
     ? process.resourcesPath
     : join(app.getAppPath(), "build");
-  const iconPath = join(resourceRoot, app.isPackaged ? "app-icon.ico" : "icon.ico");
-  return existsSync(iconPath) ? iconPath : undefined;
+  const candidates = app.isPackaged
+    ? [join(resourceRoot, "app-icon.ico"), join(resourceRoot, "icon.ico")]
+    : [
+        join(resourceRoot, "icon.ico"),
+        join(app.getAppPath(), "icon.ico"),
+        join(__dirname, "../../build/icon.ico"),
+        join(process.cwd(), "build", "icon.ico"),
+      ];
+  return candidates.find((iconPath) => existsSync(iconPath));
 }
 
 export type WindowLifecycleState = {

@@ -32,6 +32,16 @@
 - Keep browser pages responsive when screenshot capture overlaps panel or
   window resizing, including concurrent and failed captures.
 
+## Branch follow-up
+
+- Point in-app updates and GitHub issue feedback at AR307/PI-Desktop.
+- Let a parent model start a subagent on another MirrorCoding chat model
+  without an empty delegation-catalog error.
+- Use the last in-scope conversation's model when opening a new chat, including
+  the home Composer chip before the session is persisted.
+- Load the PI-Desktop source icon for Windows windows when Electron's
+  default executable icon would otherwise appear.
+
 ## MirrorCoding account integration
 
 - Added optional first-launch authorization and Settings → Account.

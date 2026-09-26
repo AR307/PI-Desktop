@@ -1713,7 +1713,7 @@ app/openFeedback() -> { ok: true }
 ```
 
 Electron Main 构造固定的 GitHub bug 表单 URL
-（`https://github.com/vastsa/PI-Desktop/issues/new?template=bug_report.yml`），
+（`https://github.com/AR307/PI-Desktop/issues/new?template=bug_report.yml`），
 并用 `shell.openExternal` 打开。查询字段 `app-version`、`os` 和 `environment`
 由主进程版本信息填充。渲染器不能提供 URL。离开该 origin 或模板的构造会被拒绝。
 此通道不进入 host-core，也不改变 host RPC 协议版本。
