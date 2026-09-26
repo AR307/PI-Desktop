@@ -797,7 +797,7 @@ describe("rebuildChainsFromTranscript restart status (ADR 0279)", () => {
     }
   });
 
-  it("keeps a stopped or aborted chain out of the resumable set", () => {
+  it("keeps a stopped or aborted chain resumable (D628)", () => {
     for (const status of ["stopped", "aborted"]) {
       const chains = rebuildChainsFromTranscript([
         restartedTaskRow("call-1", {
@@ -807,14 +807,11 @@ describe("rebuildChainsFromTranscript restart status (ADR 0279)", () => {
         }),
       ]);
       expect(chains[0].latestStatus).toBe(status);
-      expect(resolveRebuilt(chains, "d1")).toEqual({
-        ok: false,
-        error: { kind: "not-resumable", status },
-      });
+      expect(resolveRebuilt(chains, "d1").ok).toBe(true);
     }
   });
 
-  it("normalizes a Task row the app closed mid-run to interrupted", () => {
+  it("normalizes a Task row the app closed mid-run to interrupted and resumes it", () => {
     const chains = rebuildChainsFromTranscript([
       restartedTaskRow("call-1", {
         delegationId: "d1",
@@ -823,10 +820,9 @@ describe("rebuildChainsFromTranscript restart status (ADR 0279)", () => {
       }),
     ]);
     expect(chains[0].latestStatus).toBe("interrupted");
-    expect(resolveRebuilt(chains, "d1")).toEqual({
-      ok: false,
-      error: { kind: "not-resumable", status: "interrupted" },
-    });
+    // An interrupted chain keeps its persisted transcript, so a resume can
+    // replay it the same way a completed one replays (D628).
+    expect(resolveRebuilt(chains, "d1").ok).toBe(true);
   });
 
   it("normalizes an errored Task row without a status to failed", () => {

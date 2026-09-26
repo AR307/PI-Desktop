@@ -237,6 +237,7 @@ export function Sidebar({
   const sessionView = useAppStore((s) => s.sessionView);
   const projectSort = useAppStore((s) => s.projectSort);
   const runningSessions = useAppStore((s) => s.runningSessions);
+  const backgroundDelegations = useAppStore((s) => s.backgroundDelegations);
   const sessionOutcomes = useAppStore((s) => s.sessionOutcomes);
   const pendingPermissions = useAppStore((s) => s.pendingPermissions);
   const setPage = useAppStore((s) => s.setPage);
@@ -1067,28 +1068,38 @@ export function Sidebar({
     if (changed) setSelectedIds(next);
   }, [sessionIdSet]); // intentionally not including selectedIds to avoid loop
 
-  const renderSessionStatus = (status: SidebarSessionStatus) => {
+  const renderSessionStatus = (
+    status: SidebarSessionStatus,
+    backgroundCount = 0,
+  ) => {
     const labelKey =
       status === "running"
         ? "nav.sessionRunning"
-        : status === "selected"
-          ? "nav.sessionSelected"
-          : status === "completed"
-            ? "nav.sessionCompleted"
-            : status === "failed"
-              ? "nav.sessionFailed"
-              : "nav.sessionPermission";
+        : status === "subagents"
+          ? "chat.backgroundSubagents"
+          : status === "selected"
+            ? "nav.sessionSelected"
+            : status === "completed"
+              ? "nav.sessionCompleted"
+              : status === "failed"
+                ? "nav.sessionFailed"
+                : "nav.sessionPermission";
     const fallback =
       status === "running"
         ? "In progress"
-        : status === "selected"
-          ? "Selected"
-          : status === "completed"
-            ? "Completed"
-            : status === "failed"
-              ? "Failed"
-              : "Permission required";
-    const label = t(labelKey, { defaultValue: fallback });
+        : status === "subagents"
+          ? "Subagents running in background"
+          : status === "selected"
+            ? "Selected"
+            : status === "completed"
+              ? "Completed"
+              : status === "failed"
+                ? "Failed"
+                : "Permission required";
+    const label =
+      status === "subagents"
+        ? t(labelKey, { defaultValue: fallback, count: backgroundCount })
+        : t(labelKey, { defaultValue: fallback });
     return (
       <span className={`thread-item-status ${status}`} aria-label={label} title={label}>
         {status === "completed" ? <IconCheck size={10} aria-hidden /> : null}
@@ -1691,11 +1702,13 @@ export function Sidebar({
     const archived = sessionArchived(session, meta);
     const running = Boolean(runningSessions[session.id]);
     const hasPendingPermission = (pendingPermissions[session.id]?.length ?? 0) > 0;
+    const backgroundCount = backgroundDelegations[session.id] ?? 0;
     const status = sidebarSessionStatus({
       running,
       selected: active,
       outcome: sessionOutcomes[session.id],
       hasPendingPermission,
+      backgroundDelegations: backgroundCount,
     });
     return (
       <div
@@ -1738,7 +1751,7 @@ export function Sidebar({
           );
         }}
       >
-        {status ? renderSessionStatus(status) : null}
+        {status ? renderSessionStatus(status, backgroundCount) : null}
         <button
           type="button"
           className="thread-item-main"

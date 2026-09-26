@@ -454,6 +454,8 @@ export const ptBR = {
     subagentsFinishedWithWarnings_other: "Subagentes finalizados com avisos",
     subagentCount_one: "{{count}} subagente",
     subagentCount_other: "{{count}} subagentes",
+    backgroundSubagents_one: "{{count}} subagente em execução em segundo plano",
+    backgroundSubagents_other: "{{count}} subagentes em execução em segundo plano",
     subagentFinishedCount: "{{finished}}/{{total}} finalizados",
     subagentCreating: "Iniciando subagente…",
     subagentStatus: {

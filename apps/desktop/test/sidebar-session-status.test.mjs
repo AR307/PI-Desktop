@@ -66,6 +66,43 @@ test("prioritizes in-progress and selected states over terminal outcomes", () =>
   assert.equal(sidebarSessionStatus({ running: false, selected: false }), null);
 });
 
+test("shows background subagents on an idle session but yields to a running turn (D628)", () => {
+  assert.equal(
+    sidebarSessionStatus({
+      running: false,
+      selected: true,
+      outcome: "completed",
+      backgroundDelegations: 2,
+    }),
+    "subagents",
+  );
+  assert.equal(
+    sidebarSessionStatus({
+      running: true,
+      selected: false,
+      backgroundDelegations: 2,
+    }),
+    "running",
+  );
+  assert.equal(
+    sidebarSessionStatus({
+      running: false,
+      selected: false,
+      hasPendingPermission: true,
+      backgroundDelegations: 2,
+    }),
+    "permission",
+  );
+  assert.equal(
+    sidebarSessionStatus({
+      running: false,
+      selected: true,
+      backgroundDelegations: 0,
+    }),
+    "selected",
+  );
+});
+
 test("opening a conversation acknowledges its outcome badge before loading details", () => {
   const sessionSource = readStoreModuleSync("slices/session-slice.ts");
   const catalogSource = readStoreModuleSync("slices/catalog-slice.ts");
@@ -108,6 +145,7 @@ test("renders semantic, shape-distinct sidebar status indicators", () => {
   assert.match(sidebar, /sessionSelected[\s\S]*sessionCompleted[\s\S]*sessionFailed/);
   assert.match(sidebar, /IconCheck[\s\S]*IconCircleAlert/);
   assert.match(styles, /thread-item-status\.running::before[\s\S]*--ds-warning/);
+  assert.match(styles, /thread-item-status\.subagents::before[\s\S]*--ds-warning/);
   assert.match(styles, /thread-item-status\.selected::before[\s\S]*--ds-accent/);
   assert.match(styles, /thread-item-status\.completed[\s\S]*--ds-success/);
   assert.match(styles, /thread-item-status\.failed[\s\S]*--ds-error/);

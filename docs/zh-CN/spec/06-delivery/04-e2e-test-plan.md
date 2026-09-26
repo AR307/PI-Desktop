@@ -4446,8 +4446,9 @@ eleven-tool-round desktop paths are verified by
     没有关联。不传 id 就绝不继承上下文，无论提示怎么写。
   - 步骤 4 两次都以工具错误失败。仍在运行的委派被报告为仍在运行，并提示先用 `TaskWait` 收敛；
     不会启动任何东西，也不会排队，运行中的委派继续工作。
-  - 步骤 5 把 `stopped`、`aborted`，以及应用在它仍在工作时被关掉的运行（重启后读作
-    `interrupted`）一律拒绝为不可恢复，各自说明该原因并指向新建委派；没有任何运行被启动。
+  - 步骤 5 三个全部可恢复（D628）：`stopped`、`aborted` 的链，以及应用在它仍在工作时被
+    关掉的运行（重启后读作 `interrupted`），都像 `completed` 链一样以持久化的行作为种子
+    续跑。恢复前，`TaskList` 会把 `stopped`/`aborted` 的记录标注为 `(resumable)`。
   - 步骤 6 像 `completed` 一样恢复失败的链：它已经做出的读取成为新运行的种子，而它失败的助手行
     不会被重放。
   - 步骤 7 以工具错误拒绝：恢复后的运行沿用链的模型，错误信息指向「换模型要新建委派」。
@@ -4471,15 +4472,56 @@ eleven-tool-round desktop paths are verified by
   - 全程中，转录把该链显示为最新 Task 卡片下的一段连续多轮对话，没有任何「已恢复」标记；恢复后的
     运行计数器从 0 开始，因此它的轮次、工具与用量数字描述的是新的运行，而更早的轮次仍可读地留在
     上方。
-- **链接规格**：`03-runtime/02-agent-runtime.md` §5f、ADR 0279
+- **链接规格**：`03-runtime/02-agent-runtime.md` §5f、ADR 0279、D628
 - **验收**：C（对话）、品质
 - **里程碑**：M6+
-- **不覆盖（二期）**：唤醒被 `stopped`/`aborted` 的委派、链内压缩、任务排队，以及跨会话恢复。
+- **不覆盖（二期）**：链内压缩、任务排队，以及跨会话恢复。
 - **状态**：草稿——链解析、恢复校验、可复用清单与转录链分组已有单元/回归覆盖
   （`packages/agent-runtime/src/delegation-chain.test.ts`、
   `delegation-history.test.ts`、`runtime.test.ts`、
   `apps/desktop/test/assistant-turns.test.mjs`）；桌面旅程需要具备条件的环境。必需套件：
   `test:e2e`、`test:e2e:subagents`、`test:e2e:transcript`。
+
+#### E2E-SUBAGENT-detached-wake
+
+- **先决条件**：一个使用确定性本地传输的 Agent 会话，父级回复脚本在一条助手消息里
+  启动一长一短两个委派，然后不调用 `TaskWait` 直接结束回合。短的那个在父级
+  `agent_end` 后几秒结算，长的几分钟后结算。同一项目下的第二个会话可以在第一个
+  会话空闲时接收提示。
+- **步骤**：
+  1. 发送委派这两件工作的提示，让父级在两个委派仍在运行时结束回合。
+  2. 观察此刻空闲会话的侧栏行与聊天界面。
+  3. 让短委派在会话空闲时结算，读取随后出现的回合。
+  4. 在该唤醒回合运行期间，让长委派也结算。
+  5. 在之后某个仍有委派运行的父级回合里按 Stop，然后让该委派结算。
+  6. 重复步骤 1，但在短委派结算时让会话正忙于一个较长的用户回合。
+  7. 在仍有委派运行时退出并重启应用，重新打开会话，用该委派的 id 调用
+     `Task.resume`。
+- **预期**：
+  - 步骤 1 正常结束回合：输入框回到空闲，会话行不再以运行态呼吸，新提示不被任何
+    忙碌状态阻挡。
+  - 步骤 2 显示后台工作：侧栏行出现 subagents 状态点，空闲聊天界面显示
+    “N 个 Subagent 后台运行中”芯片；没有委派运行时两者都消失。
+  - 步骤 3 只唤醒一次：一个排队回合，其用户行是 `Subagent reports ready:` 标记行
+    加已结算的 id，其模型上下文恰好收到一次完整报告，Task 卡片显示结算结果。队列
+    内容里没有报告正文。
+  - 步骤 4 不再排入第二个唤醒回合就送达第二份报告——它搭上正在运行的唤醒回合的
+    边界投递。
+  - 步骤 5 只停父级回合：委派继续运行，`TaskStop` 仍是取消它的方式，它之后的结算
+    像步骤 3 一样唤醒会话。
+  - 步骤 6 会话忙时不排队；报告在该回合边界注入，唤醒队列保持为空。
+  - 步骤 7 不复活委派：该运行读作 `interrupted` 且可恢复，`Task.resume` 从持久转录
+    续跑（见 E2E-SUBAGENT-resume-a-settled-delegation 步骤 5）。
+- **链接规格**：`03-runtime/02-agent-runtime.md` §5f（委托后台化与唤醒）、
+  `docs/adr/detached-delegation-and-wake.md`、D628、D386
+- **验收**：C（对话）、品质
+- **里程碑**：M6+
+- **状态**：草稿——回合分离、唤醒排队、标记预检注入、单次交付、Stop 语义、收养与
+  可恢复状态已在 `packages/agent-runtime/src/runtime.test.ts`（“detached
+  delegation and wake (D628)”）、`delegation-chain.test.ts` 与
+  `delegation-history.test.ts` 回归覆盖；侧栏状态点与空闲芯片在
+  `apps/desktop/test/sidebar-session-status.test.mjs`。桌面旅程需要具备条件的
+  环境。必需套件：`test:e2e`、`test:e2e:subagents`。
 
 #### E2E-SUBAGENT-context-overflow-compacts-before-failing
 

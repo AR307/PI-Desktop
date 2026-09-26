@@ -479,12 +479,9 @@ export type DelegationRecord = {
   lastToolName?: string;
   lastPhase?: AgentActivityAgentPhase;
   lastActivityAt: number;
-  /** `prompt()` / `executeApprovedPlan()` generation that started this run.
-   * Resume-after-idle only waits for the current turn's delegates (D352). */
-  startedEpoch: number;
   /** The settled report reached the parent's context once: through a
-   * `TaskWait` result or the resume-after-idle prompt. Auto-delivery is a
-   * single shot per record. */
+   * `TaskWait` result, the turn-boundary delivery, or a wake turn (D628).
+   * Auto-delivery is a single shot per record. */
   reportDelivered: boolean;
   /** Stable chain identity; never appears in a tool parameter (ADR 0279). */
   delegateSessionId: string;
@@ -581,6 +578,18 @@ function formatDelegationHeartbeat(record: DelegationRecord): string {
 
 const DELEGATION_RESUME_PROMPT =
   "The following subagents have finished. Integrate their reports and continue the user's original task. Call TaskStop only if you have decided a still-running delegate should not continue.";
+
+/**
+ * Stable first line of the wake turn a settled delegation queues while the
+ * session is idle (D628). The runtime recognizes a wake turn by this exact
+ * prefix — never by loose matching over arbitrary user text — and expands it
+ * with the undelivered reports at prompt preflight. The queued content carries
+ * only this marker and the delegation ids; report bodies stay out of the queue.
+ */
+export const DELEGATION_WAKE_PREFIX = "Subagent reports ready:";
+
+const DELEGATION_WAKE_PROMPT =
+  "The subagent reports below settled while the session was idle. Integrate them and continue the user's original task. Call TaskStop only if you have decided a still-running delegate should not continue.";
 
 /** Join delegation results into one bounded text block for the model. */
 function formatDelegationResults(
@@ -1620,6 +1629,15 @@ export class DesktopAgentRuntime {
   private resumablePromptStale = false;
   /** Set by `abort` / `dispose` so a finishing delegate cannot restart the parent. */
   private runCancelled = false;
+  /** A `prompt()` / `executeApprovedPlan()` call is between entry and return,
+   * so a settlement defers its wake to that call's boundary delivery (D628). */
+  private turnActive = false;
+  /** The current run's `agent_end` reached listeners: the visible turn is
+   * closed, so a boundary delivery must fall back to the wake queue (D628). */
+  private turnEndEmitted = false;
+  /** A wake turn is queued and not yet consumed; further settlements ride it
+   * instead of queueing their own (D628). Reset when any turn starts. */
+  private queuedDelegationWake = false;
   /**
    * Permission scope of the delegate currently executing one tool call,
    * keyed by tool call id (ADR 0089). The host reads it on `tools.execute` and
@@ -1839,7 +1857,8 @@ export class DesktopAgentRuntime {
 Do the work yourself by default. Delegate only bounded, independent tasks with a clear benefit over direct execution.
 No recursive delegation, duplicate work, or agent debates.
 Allow at most one optional review pass unless the user requests more. Fix and retest concrete, in-scope defects without restarting broad reviews.
-Do not invent objections or turn speculative risks into blockers. Stop when the requested work is complete and relevant checks pass, or report a genuine blocker.`,
+Do not invent objections or turn speculative risks into blockers. Stop when the requested work is complete and relevant checks pass, or report a genuine blocker.
+You may end your turn while delegates run: they keep working in the background and their reports are delivered automatically — at your turn's boundary, or by waking the session when it is idle. Use TaskWait only when the next step needs a report.`,
             ...(this.subagentModelSummary()
               ? [this.subagentModelSummary()!]
               : []),
@@ -3971,12 +3990,12 @@ Do not invent objections or turn speculative risks into blockers. Stop when the 
           message: `Delegation ${error.delegationId} is still running. Call TaskWait to converge with it first, or start a new delegation. Resuming a running delegation is not queued.`,
         };
       case "not-resumable":
+        // Every settled status is resumable (D628), so this only fires for a
+        // chain whose recorded status is still "running" while the runtime has
+        // no live record for it — a stale registry entry, not a settled run.
         return {
           ok: false,
-          message:
-            error.status === "interrupted"
-              ? `Delegation ${resume} was interrupted — the app closed while it worked — so there is nothing to continue. Start a new delegation instead.`
-              : `Delegation ${resume} ended as "${error.status}" and cannot be resumed. Only completed or failed delegations continue; start a new delegation instead.`,
+          message: `Delegation ${resume} reads as "${error.status}" and cannot be resumed right now. Call TaskList to check its state, or start a new delegation.`,
         };
       case "agent-mismatch":
         return {
@@ -4122,7 +4141,7 @@ Do not invent objections or turn speculative risks into blockers. Stop when the 
               "No delegation model overrides are configured. Omit `model` to use the definition's default, or the parent model when no default is pinned. Repeating a definition's own Default model key is the same as omitting `model`; never invent a provider/model key.",
             ]),
         "`task` is the delegate's only instruction. It cannot see this conversation, and you cannot correct it while it runs, so state the goal, the paths and facts it cannot infer, and exactly what to report back.",
-        "To run delegates concurrently, emit several Task calls in one assistant message. A message that mixes Task with any other tool runs one call at a time. You may keep working or talk to the user while they run; the runtime delivers their reports when they finish. Call TaskStop only to cancel.",
+        "To run delegates concurrently, emit several Task calls in one assistant message. A message that mixes Task with any other tool runs one call at a time. You may keep working, talk to the user, or end your turn while they run: delegates continue in the background and the runtime delivers their reports when they finish — at your turn's boundary, or by waking the session when it is idle. Call TaskStop only to cancel.",
         "To continue a previous subagent, pass its `resume` id (the `delegationId` returned by Task). Saying \"reuse\" in prose is not enough. Do not pass `model` when resuming; start a new delegation to change models.",
         `Available subagents:\n${catalog}`,
       ].join("\n\n"),
@@ -4312,10 +4331,10 @@ Do not invent objections or turn speculative risks into blockers. Stop when the 
                 provider,
                 definition.thinkingLevel ?? this.thinkingLevel,
               );
-        // Only TaskStop, user Stop, dispose, and a parent fatal error abort a
-        // delegate (D328 / D352). The Task tool call returns immediately; tying
-        // the background run to that call's signal would kill it when the parent
-        // loop idled.
+        // Only TaskStop and dispose abort a delegate (D628): user Stop and a
+        // parent fatal error end the parent turn alone, and the run detaches.
+        // The Task tool call returns immediately; tying the background run to
+        // that call's signal would kill it when the parent loop idled.
         const abortSignal = controller.signal;
         let resolveCompletion: () => void = () => {};
         const completion = new Promise<void>((resolve) => {
@@ -4353,7 +4372,6 @@ Do not invent objections or turn speculative risks into blockers. Stop when the 
           toolCalls: 0,
           lastActivityAt: startedAt,
           lastPhase: "waiting-model",
-          startedEpoch: this.turnEpoch,
           reportDelivered: false,
           delegateSessionId: chain.delegateSessionId,
           ...(resumedChain ? { resumedFrom: resume } : {}),
@@ -4460,7 +4478,7 @@ Do not invent objections or turn speculative risks into blockers. Stop when the 
           content: [
             {
               type: "text",
-              text: `Delegation ${delegationId} started: the ${definition.name} subagent is working in the background${label ? ` (${label})` : ""}. Continue your own independent work, then call TaskWait with this delegationId to converge, or TaskStop to stop it.`,
+              text: `Delegation ${delegationId} started: the ${definition.name} subagent is working in the background${label ? ` (${label})` : ""}. Continue your own independent work and call TaskWait with this delegationId when you need its report, or simply end your turn — the subagent keeps running and the runtime delivers its report when it settles. Call TaskStop only to cancel it.`,
             },
           ],
           details: {
@@ -4534,6 +4552,8 @@ Do not invent objections or turn speculative risks into blockers. Stop when the 
       this.refreshDelegationWait();
       this.refreshResumablePrompt();
       this.pruneFinishedDelegations();
+      this.publishBackgroundDelegationStatus();
+      this.maybeQueueDelegationWake();
     }
   }
 
@@ -4552,13 +4572,21 @@ Do not invent objections or turn speculative risks into blockers. Stop when the 
   }
 
   /** Cap retained history so a long session cannot grow the registry forever.
-   * Finished records are dropped oldest-first; running ones never are. */
+   * Finished records are dropped oldest-first; running ones never are, and
+   * settled records whose report was never delivered go last, so a burst of
+   * settlements cannot prune a report before its wake turn reads it (D628). */
   private pruneFinishedDelegations(): void {
     const finished = [...this.delegations.values()]
       .filter((record) => record.status !== "running")
       .sort((left, right) => (left.completedAt ?? 0) - (right.completedAt ?? 0));
     const excess = finished.length - MAX_RETAINED_DELEGATIONS;
-    for (const record of finished.slice(0, Math.max(0, excess))) {
+    if (excess <= 0) return;
+    const undelivered = new Set(this.undeliveredSettledDelegations());
+    const pruneOrder = [
+      ...finished.filter((record) => !undelivered.has(record)),
+      ...finished.filter((record) => undelivered.has(record)),
+    ];
+    for (const record of pruneOrder.slice(0, excess)) {
       this.delegations.delete(record.delegationId);
     }
   }
@@ -4569,65 +4597,143 @@ Do not invent objections or turn speculative risks into blockers. Stop when the 
     );
   }
 
-  /** Abort every running delegation (user Stop, dispose, parent fatal error). */
+  /** Abort every running delegation. Only `dispose` takes this path (D628):
+   * user Stop, parent fatal errors, and new prompts leave delegates running. */
   private abortRunningDelegations(): void {
     for (const record of this.runningDelegations()) {
       record.abort();
     }
   }
 
-  private currentTurnDelegations(): DelegationRecord[] {
-    return this.runningDelegations().filter(
-      (record) => record.startedEpoch === this.turnEpoch,
-    );
-  }
-
   /**
-   * Current-turn delegates whose report the parent has not seen yet: still
-   * running, or settled before the parent idled and never read through
-   * `TaskWait`. A delegate that finished in a few hundred milliseconds is
-   * "done and unpublished", not "unfinished"; keying the idle resume on
-   * running delegates alone dropped such reports (#226). Stopped and
-   * aborted runs are not auto-delivered.
+   * Settled delegates whose report never reached the parent: not read through
+   * `TaskWait` and not yet injected by a boundary delivery or wake turn. A
+   * delegate that finished in a few hundred milliseconds is "done and
+   * unpublished", not "unfinished" (#226). Turn epochs no longer gate this
+   * (D628): a report that settled during an earlier turn is still owed to the
+   * parent. Stopped and aborted runs are not auto-delivered — cancellation is
+   * explicit, and their chains stay resumable instead.
    */
-  private pendingCurrentTurnDelegations(): DelegationRecord[] {
+  private undeliveredSettledDelegations(): DelegationRecord[] {
     return [...this.delegations.values()].filter(
       (record) =>
-        record.startedEpoch === this.turnEpoch &&
+        record.status !== "running" &&
         !record.reportDelivered &&
         record.status !== "stopped" &&
         record.status !== "aborted",
     );
   }
 
-  private abortDelegationsFromPreviousTurns(): void {
-    for (const record of this.runningDelegations()) {
-      if (record.startedEpoch !== this.turnEpoch) record.abort();
-    }
-  }
-
   /**
-   * Parent fatal error: abort leftover delegates so the session can go idle
-   * and Continue is not rejected as `AGENT_BUSY` (D352).
+   * Parent fatal error: end the turn's own bookkeeping. Delegates detach and
+   * keep running (D628); their reports arrive through the wake queue, and the
+   * session reads idle because `getStatus` no longer counts them.
    */
   private terminateParentTurn(): void {
     this.turnHadError = true;
     this.acceptingSteering = false;
     this.steeringWaitAbort?.abort();
     this.retainPendingSteering();
-    this.abortRunningDelegations();
     this.delegationWaitTargets = undefined;
     this.clearAgentActivity();
   }
 
-  /** D328 keeps the turn open on parent idle, not on a fatal parent error. */
-  private keepTurnOpenForDelegates(): boolean {
+  /**
+   * D628: the turn stays open only long enough to deliver reports that already
+   * settled — a bounded continuation, not an open-ended wait. Running delegates
+   * never hold the turn; they wake the session when they settle.
+   */
+  private holdTurnForUndeliveredReports(): boolean {
     return (
-      (this.runningDelegations().length > 0 ||
-        this.pendingCurrentTurnDelegations().length > 0) &&
+      this.undeliveredSettledDelegations().length > 0 &&
       !this.runCancelled &&
       !this.turnHadError
     );
+  }
+
+  /**
+   * Queue one wake turn through the host-owned queue (D386) when a settled
+   * report has no turn to ride: the session is idle, so the queued marker
+   * starts a turn whose preflight injects the undelivered reports. One queued
+   * wake serves every settlement until a turn consumes it; the queue push is
+   * idempotent on the settled ids.
+   */
+  private maybeQueueDelegationWake(): void {
+    if (this.disposed || this.turnActive || this.queuedDelegationWake) return;
+    const undelivered = this.undeliveredSettledDelegations();
+    if (undelivered.length === 0) return;
+    const ids = undelivered.map((record) => record.delegationId).sort();
+    this.queuedDelegationWake = true;
+    void this.host
+      .call("session.queuePush", {
+        sessionId: this.sessionId,
+        idempotencyKey: `delegation-wake:${ids.join("+")}`,
+        content: `${DELEGATION_WAKE_PREFIX} ${ids.join(", ")}`,
+      })
+      .catch(() => {
+        // The next settlement or turn boundary retries; losing one push must
+        // not strand the reports.
+        this.queuedDelegationWake = false;
+        process.stderr.write(
+          `[agent-runtime] delegation wake push failed (session=${this.sessionId})\n`,
+        );
+      });
+  }
+
+  /**
+   * Recognize a queued wake turn by its stable marker prefix and expand the
+   * prompt with every undelivered report before the model reads it (D628).
+   * Reports are marked delivered only once the turn actually starts, so a
+   * preflight failure (compaction, context budget) leaves them claimable by
+   * the next wake.
+   */
+  private prepareDelegationWakeDelivery(
+    input: string | RuntimePrompt,
+  ):
+    | { input: string | RuntimePrompt; markDelivered: () => void }
+    | undefined {
+    const text = typeof input === "string" ? input : input.text;
+    if (!text.startsWith(DELEGATION_WAKE_PREFIX)) return undefined;
+    const settled = this.undeliveredSettledDelegations();
+    const still = this.runningDelegations();
+    const formatted = formatDelegationResults(
+      settled.map((record) => ({
+        delegationId: record.delegationId,
+        agent: record.agentName,
+        status: record.status,
+        report: record.result?.report ?? `(${record.status} without a report)`,
+      })),
+    );
+    const heartbeat =
+      still.length > 0
+        ? `Still running:\n${still.map(formatDelegationHeartbeat).join("\n")}`
+        : "";
+    const body =
+      settled.length > 0
+        ? [DELEGATION_WAKE_PROMPT, formatted.text, heartbeat]
+            .filter((part) => part.trim())
+            .join("\n\n")
+        : still.length > 0
+          ? `No new subagent reports; they were already delivered.\n\n${heartbeat}`
+          : "All subagent reports were already delivered. Continue the user's original task.";
+    const expanded = `${text}\n\n${body}`;
+    return {
+      input:
+        typeof input === "string" ? expanded : { ...input, text: expanded },
+      markDelivered: () => {
+        for (const record of settled) {
+          if (formatted.includedDelegationIds.has(record.delegationId)) {
+            record.reportDelivered = true;
+          }
+        }
+      },
+    };
+  }
+
+  /** Background delegates changed: let status listeners re-read the count (D628). */
+  private publishBackgroundDelegationStatus(): void {
+    if (this.disposed) return;
+    this.emit({ type: "status", status: this.getStatus() });
   }
 
   private noteDelegationActivity(
@@ -4780,12 +4886,14 @@ Do not invent objections or turn speculative risks into blockers. Stop when the 
   }
 
   /**
-   * Keep the parent turn open until running delegates finish, then feed their
-   * reports back so the main agent can continue (D328). User Stop / dispose
-   * set `runCancelled` and abort the delegates instead. A parent fatal error
-   * aborts leftover delegates and returns without a resume prompt (D352).
+   * Turn-boundary delivery (D628): inject reports that settled while the
+   * parent worked and were never read through `TaskWait`, then let the turn
+   * close. This is a bounded continuation — running delegates never hold the
+   * turn open; they detach and wake the idle session through the host queue
+   * when they settle. When the run's `agent_end` already reached listeners,
+   * the visible turn is closed and delivery falls back to the wake queue too.
    */
-  private async resumeAfterDelegations(): Promise<void> {
+  private async deliverSettledDelegationReports(): Promise<void> {
     if (this.disposed || this.runCancelled || this.turnHadError) {
       if (this.turnHadError) this.terminateParentTurn();
       return;
@@ -4796,37 +4904,14 @@ Do not invent objections or turn speculative risks into blockers. Stop when the 
       !this.runCancelled &&
       !this.turnHadError &&
       epoch === this.turnEpoch &&
-      this.pendingCurrentTurnDelegations().length > 0
+      !this.turnEndEmitted
     ) {
-      const targets = this.pendingCurrentTurnDelegations();
-      this.beginDelegationWait(targets);
-      const waitAbort = new AbortController();
-      this.steeringWaitAbort = waitAbort;
-      try {
-        if (!this.pendingSteering.size) {
-          await this.waitForDelegations(targets, targets.length, null, waitAbort.signal);
-        }
-      } finally {
-        if (this.steeringWaitAbort === waitAbort) this.steeringWaitAbort = undefined;
-        this.endDelegationWait();
-      }
-      if (this.pendingSteering.size && !this.runCancelled && !this.turnHadError) {
+      if (this.pendingSteering.size) {
         await this.waitForIdleAndSteering();
         if (!(await this.runPendingRecoveries())) return;
         continue;
       }
-      if (
-        this.disposed ||
-        this.runCancelled ||
-        this.turnHadError ||
-        epoch !== this.turnEpoch
-      ) {
-        if (this.turnHadError) this.terminateParentTurn();
-        return;
-      }
-      const settled = targets.filter(
-        (record) => record.status !== "running" && !record.reportDelivered,
-      );
+      const settled = this.undeliveredSettledDelegations();
       if (settled.length === 0) return;
       const results = settled.map((record) => ({
         delegationId: record.delegationId,
@@ -4835,7 +4920,7 @@ Do not invent objections or turn speculative risks into blockers. Stop when the 
         report:
           record.result?.report ?? `(${record.status} without a report)`,
       }));
-      const still = this.currentTurnDelegations();
+      const still = this.runningDelegations();
       const heartbeat =
         still.length > 0
           ? `Still running:\n${still.map(formatDelegationHeartbeat).join("\n")}`
@@ -5011,7 +5096,7 @@ Do not invent objections or turn speculative risks into blockers. Stop when the 
   /**
    * Resolve once `targetCompleted` of the targets are settled, or the deadline
    * passes, or the calling run aborts. Returns true on timeout/abort.
-   * `deadline` null waits until they settle (D328 auto-resume).
+   * `deadline` null waits until they settle.
    */
   private waitForDelegations(
     targets: DelegationRecord[],
@@ -5065,7 +5150,14 @@ Do not invent objections or turn speculative risks into blockers. Stop when the 
           delegations.length === 0
             ? "No subagents have been started in this session."
             : delegations
-                .map((record) => `- ${formatDelegationHeartbeat(record)}`)
+                .map(
+                  (record) =>
+                    `- ${formatDelegationHeartbeat(record)}${
+                      record.status === "stopped" || record.status === "aborted"
+                        ? " (resumable)"
+                        : ""
+                    }`,
+                )
                 .join("\n");
         return {
           content: [{ type: "text", text }],
@@ -7653,7 +7745,7 @@ Do not invent objections or turn speculative risks into blockers. Stop when the 
           this.suppressProviderRetryRunEnd ||
           this.suppressSilentTurnRunEnd ||
           this.suppressProgressTurnRunEnd ||
-          this.keepTurnOpenForDelegates()
+          this.holdTurnForUndeliveredReports()
         )
           break;
         const subagentUsage = this.turnSubagentUsage;
@@ -7672,7 +7764,7 @@ Do not invent objections or turn speculative risks into blockers. Stop when the 
           this.suppressProviderRetryRunEnd ||
           this.suppressSilentTurnRunEnd ||
           this.suppressProgressTurnRunEnd ||
-          this.keepTurnOpenForDelegates()
+          this.holdTurnForUndeliveredReports()
         )
           break;
         this.acceptingSteering = false;
@@ -7680,6 +7772,7 @@ Do not invent objections or turn speculative risks into blockers. Stop when the 
         this.autonomousExecution = false;
         this.clearAgentActivity();
         this.reportMutationTermination();
+        this.turnEndEmitted = true;
         this.emit({
           type: "agent_end",
           messageIds: [],
@@ -7840,12 +7933,28 @@ Do not invent objections or turn speculative risks into blockers. Stop when the 
     this.runCancelled = false;
     this.resetRunRecoveryState();
     this.turnEpoch += 1;
-    this.abortDelegationsFromPreviousTurns();
+    // Delegates from previous turns are adopted, not aborted (D628). This turn
+    // consumes a queued wake: its boundary delivery takes over the reports.
+    this.queuedDelegationWake = false;
+    this.turnEndEmitted = false;
     this.currentAssistant = undefined;
     this.requestStartedAt = Date.now();
     this.setMode("agent");
     this.autonomousExecution = true;
+    this.turnActive = true;
+    try {
+      return await this.runApprovedPlanTurn(execution, durableTurnId);
+    } finally {
+      this.turnActive = false;
+      this.maybeQueueDelegationWake();
+    }
+  }
 
+  /** Turn body of `executeApprovedPlan`, inside the D628 turn scope. */
+  private async runApprovedPlanTurn(
+    execution: PlanExecution,
+    turnId: string,
+  ): Promise<{ turnId: string }> {
     const kind = execution.kind === "goal" ? "goal" : "plan";
     const instruction =
       kind === "goal"
@@ -7892,7 +8001,7 @@ Do not invent objections or turn speculative risks into blockers. Stop when the 
         if (this.compactionAborted) {
           this.terminateParentTurn();
           this.finalizeCurrentAssistant("aborted");
-          return { turnId: this.turnId };
+          return { turnId };
         }
         if (this.automaticCompactionWouldExceedHardLimit()) {
           this.failCurrentPreflight({
@@ -7901,7 +8010,7 @@ Do not invent objections or turn speculative risks into blockers. Stop when the 
               "Automatic context compaction failed before approved plan execution",
             retriable: false,
           });
-          return { turnId: this.turnId };
+          return { turnId };
         }
       }
     }
@@ -7912,20 +8021,20 @@ Do not invent objections or turn speculative risks into blockers. Stop when the 
           "The approved plan still exceeds the safe model context budget after compaction",
         retriable: false,
       });
-      return { turnId: this.turnId };
+      return { turnId };
     }
     await this.agent.continue();
     await this.waitForIdleAndSteering();
     // Same recovery contract as a user prompt: a plan execution that overflows,
     // hits a retriable stream failure, or comes back silent must not end as a
     // run with no end events at all.
-    if (!(await this.runPendingRecoveries())) return { turnId: this.turnId };
+    if (!(await this.runPendingRecoveries())) return { turnId };
     if (this.turnHadError) {
       this.terminateParentTurn();
-      return { turnId: this.turnId };
+      return { turnId };
     }
-    await this.resumeAfterDelegations();
-    return { turnId: this.turnId };
+    await this.deliverSettledDelegationReports();
+    return { turnId };
   }
 
   async prompt(
@@ -7935,7 +8044,7 @@ Do not invent objections or turn speculative risks into blockers. Stop when the 
   ): Promise<{ turnId: string }> {
     if (this.disposed) throw new Error("runtime disposed");
     this.assertNotRunning();
-    const modelInput = typeof input !== "string" && input.sessionMessage
+    let modelInput = typeof input !== "string" && input.sessionMessage
       ? { ...input, text: formatSessionMessage(input.text, input.sessionMessage), sessionMessage: undefined }
       : input;
     this.retainPendingSteering();
@@ -7945,7 +8054,6 @@ Do not invent objections or turn speculative risks into blockers. Stop when the 
     this.acceptingSteering = true;
     this.gracefulStopRequested = false;
     this.runCancelled = false;
-    this.turnSubagentUsage = undefined;
     // Capabilities and path-scoped instruction claims belong to one prompt.
     this.subagentOverrideProviders = {};
     this.resetDeferredToolsForPrompt();
@@ -7961,9 +8069,17 @@ Do not invent objections or turn speculative risks into blockers. Stop when the 
       origin.targetSessionId === this.sessionId &&
       Boolean(origin.messageId?.trim() && origin.replyToMessageId?.trim());
     this.turnEpoch += 1;
-    this.abortDelegationsFromPreviousTurns();
+    // Any turn consumes a queued wake: running delegates were adopted, and
+    // reports settled by now leave through this turn's boundary delivery.
+    this.queuedDelegationWake = false;
+    this.turnEndEmitted = false;
+    // A queued wake turn expands here, before the compaction preflight, so the
+    // injected reports count against the context budget (D628).
+    const wakeDelivery = this.prepareDelegationWakeDelivery(modelInput);
+    if (wakeDelivery) modelInput = wakeDelivery.input;
     this.requestStartedAt = Date.now();
     this.setAgentActivity({ phase: "starting", since: Date.now() });
+    this.turnActive = true;
     try {
       const content = promptContent(modelInput);
       const incomingUserMessage: AgentMessage = {
@@ -8018,6 +8134,9 @@ Do not invent objections or turn speculative risks into blockers. Stop when the 
         this.keepPreflightUserMessage(incomingUserMessage);
         throw turnAbortedError("Turn aborted during extension hooks");
       }
+      // Every preflight passed: the wake turn's reports are now part of the
+      // model request, so their single delivery shot is spent (D628).
+      wakeDelivery?.markDelivered();
       if (typeof modelInput === "string") {
         await this.agent.prompt(modelInput);
       } else {
@@ -8031,7 +8150,7 @@ Do not invent objections or turn speculative risks into blockers. Stop when the 
         this.terminateParentTurn();
         return { turnId: this.turnId };
       }
-      await this.resumeAfterDelegations();
+      await this.deliverSettledDelegationReports();
     } catch (err) {
       const classifiedError = classifyAgentError(err);
       const diagnosticError =
@@ -8051,6 +8170,11 @@ Do not invent objections or turn speculative risks into blockers. Stop when the 
       );
       if (classifiedError.code === "TURN_ABORTED") throw err;
       throw Object.assign(new Error(diagnosticError.message), diagnosticError);
+    } finally {
+      this.turnActive = false;
+      // Reports that settled after the boundary delivery checked (or on an
+      // aborted/failed turn) still need a ride: queue the wake now (D628).
+      this.maybeQueueDelegationWake();
     }
     return { turnId: this.turnId };
   }
@@ -8213,8 +8337,9 @@ Do not invent objections or turn speculative risks into blockers. Stop when the 
     this.steeringWaitAbort?.abort();
     this.extensionRunner?.cancelPending();
     this.resolvePendingAskTools();
-    this.abortRunningDelegations();
-    this.turnSubagentUsage = undefined;
+    // User Stop ends the parent turn only (D628): delegates keep running in
+    // the background, and TaskStop or the Task card stays the way to cancel
+    // one. Their accumulated usage is consumed by the next turn_end.
     this.agent.abort();
     this.providerRetryAbort?.abort();
     if (this.compactionInProgress) this.compactionAborted = true;
@@ -8232,19 +8357,23 @@ Do not invent objections or turn speculative risks into blockers. Stop when the 
   }
 
   getStatus(): AgentStatus {
+    // Detached delegates do not make the session busy (D628): the queue can
+    // start the next turn — including their wake turn — while they run. Their
+    // count rides along so surfaces can show the background work.
+    const backgroundDelegations = this.runningDelegations().length;
     return {
       sessionId: this.sessionId,
       isRunning:
         this.agent.state.isStreaming ||
         this.compactionInProgress ||
-        this.agentActivity !== undefined ||
-        (!this.turnHadError && !this.runCancelled && this.runningDelegations().length > 0),
+        this.agentActivity !== undefined,
       currentTurnId: this.turnId,
       modelId: this.provider.modelId,
       pendingToolConfirmations: 0,
       planningState: this.planningState,
       ...(this.pendingPlanId ? { pendingPlanId: this.pendingPlanId } : {}),
       ...(this.agentActivity ? { activity: this.agentActivity } : {}),
+      ...(backgroundDelegations > 0 ? { backgroundDelegations } : {}),
     };
   }
 

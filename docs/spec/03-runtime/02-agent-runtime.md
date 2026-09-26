@@ -76,8 +76,9 @@ when another input arrives before the initial user message has been consumed.
 An admission after pi's last queue poll suppresses the terminal event and
 continues once pi has released the run, with the same turn identity and without
 a second public `agent_start`. Existing context/provider recovery takes
-precedence over that continuation. Steering also wakes a parent that is idle
-waiting for background delegates; it does not cancel those delegates.
+precedence over that continuation. Background delegates never hold a turn open
+(D628), so steering has no delegate wait to wake, and it never cancels
+delegates.
 
 Abort, graceful stop, fatal errors and terminal settlement close admission.
 Accepted but unconsumed input remains transcript/context history and is removed
@@ -868,14 +869,15 @@ core set rather than the on-demand catalog of §7.1:
   Settled delegations return immediately, so re-reading a report by id is
   cheap. The joined result is bounded to `MAX_TASKWAIT_RESULT_CHARS` (50k); if
   the bound omits finished reports, those reports remain undelivered and the
-  runtime sends them on the idle resume (or they can be re-read by id).
-  `timeoutSeconds` defaults to 600 and is clamped to 900: the wait blocks the
-  turn, so the ceiling is what bounds how long a session can look hung. Expiry
-  is not a failure and does not stop the delegates (D328) — the wait returns a
-  heartbeat (agent, status, elapsed, turns, last tool) plus any finished
-  reports. The runtime keeps the parent turn open and delivers remaining
-  reports when they finish, even if the parent already stopped calling tools.
-  Only `TaskStop` or user Stop aborts a delegate.
+  runtime delivers them at a later turn boundary or through the wake turn
+  (D628) — or they can be re-read by id. `timeoutSeconds` defaults to 600 and
+  is clamped to 900: the wait blocks the turn, so the ceiling is what bounds
+  how long a session can look hung. Expiry is not a failure and does not stop
+  the delegates (D328) — the wait returns a heartbeat (agent, status, elapsed,
+  turns, last tool) plus any finished reports. Unfinished delegates keep
+  running detached after the turn ends, and their reports arrive through the
+  boundary delivery or the wake turn (D628). Only `TaskStop` or runtime
+  disposal aborts a delegate.
 - `TaskList()` — reports every delegation of the session with status and a
   running heartbeat.
 - `TaskStop(delegationIds?)` — stops running delegations (defaults to all);
@@ -903,8 +905,9 @@ explicitly selected delegation model uses the exact provider/model binding
 saved in Settings for its effective thinking capability; models.dev supplies
 the baseline only. It runs under
 the same bounded provider retry policy as the parent. A delegate has no turn
-limit: it ends when it finishes, when the parent calls `TaskStop`, when the user
-Stops, or when a terminal parent error aborts it (ADR 0253). A document that
+limit: it ends when it finishes, when the parent calls `TaskStop`, or when the
+runtime is disposed — user Stop and terminal parent errors no longer abort it
+(D628 amends ADR 0253). A document that
 still declares `maxTurns` loads normally and the key is ignored like any other
 unrecognized frontmatter key. `maxTokens` is an optional per-definition
 output cap (maximum 200000); omitted, `none`, or `0` follows the model's
@@ -932,27 +935,50 @@ delegation views do not re-derive them from definitions or parent settings.
 truth for renderer delegation duration; the immediate `Task` tool-call
 duration only covers starting the background work.
 
-**Delegate lifetime (D328).** The runtime does not idle-timeout or
-duration-timeout a delegate. `idle-timeout` / `max-duration` frontmatter still
-parses so old documents load, but those values are not armed. A delegate runs
-until it finishes, fails, is `TaskStop`'d, or the user Stops / the runtime is
-disposed. The parent agent judges whether to cancel via `TaskStop`; a one-line
-heartbeat (who, status, elapsed, turns, last tool) is what it has to go on while
-the delegate is running.
+**Delegate lifetime (D328, amended by D628).** The runtime does not
+idle-timeout or duration-timeout a delegate. `idle-timeout` / `max-duration`
+frontmatter still parses so old documents load, but those values are not
+armed. A delegate runs until it finishes, fails, is `TaskStop`'d, or the
+runtime is disposed. The parent agent judges whether to cancel via `TaskStop`;
+a one-line heartbeat (who, status, elapsed, turns, last tool) is what it has
+to go on while the delegate is running.
 
-When the parent stops calling tools while delegates are still running, the
-runtime swallows that `agent_end`, keeps the durable turn open, waits for the
-delegates, and prompts the parent with their reports. Every terminal result
-resolves the parent wait before best-effort transcript publication; a failed
-`SubagentRun` initialization returns a tool error and never leaves a running
-record. User Stop and runtime disposal also abort the parent wait signal, so
-they can end the parent turn even if a delegate ignores its abort. Ending the
-parent loop does not otherwise abort delegates.
+**Detached delegation and wake (D628, amends D328/D352).** When the parent
+stops calling tools while delegates are still running, the turn ends normally:
+`turn_end` / `agent_end` are emitted, the session reads idle —
+`AgentStatus.isRunning` excludes running delegates, and the optional
+`AgentStatus.backgroundDelegations` count carries them for status surfaces —
+and the delegates keep working in the background. Reports that settled during
+the turn and were never read through `TaskWait` are injected at that turn's
+boundary: the runtime holds the turn open only for that bounded continuation
+(one delivery shot per record, joined under `MAX_TASKWAIT_RESULT_CHARS`, with
+a heartbeat for still-running delegates). Turn epochs no longer gate delivery;
+a report that settled in an earlier turn is delivered at the next boundary.
 
-Fatal provider/stream errors (including exhausted HTTP 429) and parent aborts
-retain their existing `failed` and `aborted` outcomes. A terminal parent error
-also aborts leftover delegates, skips the resume prompt, and returns the
-session to idle so Continue is not `AGENT_BUSY` (D352).
+A report that settles while the session is idle queues one wake turn through
+the host-owned queue (`session.queuePush`, D386). The queued content is the
+stable `Subagent reports ready:` marker line plus the settled delegation ids —
+report bodies stay out of the queue — and one queued wake serves every
+settlement until a turn consumes it (the push is idempotent on the settled
+ids). At the wake turn's prompt preflight the runtime recognizes the marker by
+its exact prefix, never by loose matching over arbitrary user text, and
+expands the prompt with every undelivered report plus a heartbeat before the
+model reads it. Reports are marked delivered only after the preflight passes,
+so a compaction or context-budget failure leaves them claimable by the next
+wake. Stopped and aborted runs are never auto-delivered; their chains stay
+resumable instead. New prompts adopt running delegates rather than aborting
+them, and `MAX_SUBAGENT_CONCURRENCY` counts every running delegate.
+
+Every terminal result resolves the parent wait before best-effort transcript
+publication; a failed `SubagentRun` initialization returns a tool error and
+never leaves a running record. User Stop ends only the parent turn. A terminal
+parent error (including exhausted HTTP 429) likewise detaches the delegates
+and returns the session to idle — Continue is admitted because `isRunning` no
+longer counts delegates (amends D352). Only `TaskStop` and runtime disposal
+abort a delegate; disposal settles it as `aborted`, which remains resumable.
+Delegates do not survive an app restart: a run the app closed while it worked
+rebuilds from the transcript as an `interrupted`, resumable chain, and the
+wake applies only while the app runs.
 
 **Resumable delegations (ADR 0279).** `Task` accepts an optional `resume`
 parameter carrying the `delegationId` of a settled delegation in the same
@@ -975,10 +1001,12 @@ name normalized on rebuild — so resumability survives a sidecar restart.
 Chain identity (`delegateSessionId`) stays internal; the parent only
 ever passes a `delegationId`, and the reverse map resolves it.
 
-Only `completed` and `failed` chains are resumable; `stopped` and `aborted` runs
-are terminal and revive only by starting a new delegation, and a run the app
-closed while it still worked rebuilds as `interrupted`, which is not resumable
-either. A chain whose read-only tool output exceeds `MAX_RESUMABLE_READ_LINES`
+Every settled chain is resumable (D628): `completed`, `failed`, `timed_out`,
+`stopped`, `aborted`, and the restart-rebuilt `interrupted` all continue
+through `Task.resume`, which replays the chain's persisted transcript. Only a
+chain whose latest run is still live refuses to resume, and `TaskList` marks
+stopped/aborted records as `(resumable)`.
+A chain whose read-only tool output exceeds `MAX_RESUMABLE_READ_LINES`
 (50000) leaves the reusable list without an in-chain trim, so a resume never
 silently drops history. The registry keeps at most
 `MAX_RESUMABLE_CHAINS_PER_AGENT` (2) reusable chains per definition name and

@@ -140,6 +140,8 @@ export type AppState = {
   runningSessions: Record<string, boolean>;
   /** Runtime-owned phase for explaining quiet intervals in active turns. */
   agentStatuses: Record<string, AgentStatus>;
+  /** Detached delegates still running per session (D628); survives turn end. */
+  backgroundDelegations: Record<string, number>;
   /** Latest in-memory result for each session, used by the active transcript. */
   latestTurnResults: Record<string, AgentTurnResult>;
   /** Latest terminal outcome per session for compact sidebar feedback. */

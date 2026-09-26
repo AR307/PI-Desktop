@@ -58,6 +58,7 @@ export function createInitialState(): AppStateData {
     isRunning: false,
     runningSessions: {},
     agentStatuses: {},
+    backgroundDelegations: {},
     latestTurnResults: {},
     sessionOutcomes: {},
     sessionCompactions: {},
