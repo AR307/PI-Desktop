@@ -1,10 +1,13 @@
 import assert from "node:assert/strict";
+import { register } from "node:module";
 import test from "node:test";
 import {
   applyOptimisticSessionConfiguration,
   providerThinkingLevels,
   resolveComposerThinkingProvider,
 } from "../src/lib/session-thinking.ts";
+register(new URL("./helpers/ts-import-hooks.mjs", import.meta.url));
+const { thinkingProviderForModel } = await import("../src/features/chat/composer/model.ts");
 
 const reasoningProvider = {
   id: "bigmodel",
@@ -15,6 +18,39 @@ const reasoningProvider = {
 const catalogThinkingProvider = {
   ...reasoningProvider,
 };
+
+test("a stored binding drives the draft thinking menu without a live catalog", () => {
+  // MirrorCoding rows never publish a /models endpoint, so the composer has no
+  // live catalog for them. The provider-level flag reflects the row's default
+  // model; a group whose default is non-reasoning must not lock the menu for
+  // its other, reasoning-capable models (fresh-profile draft regression).
+  const provider = {
+    id: "mc-group",
+    supportsReasoning: false,
+    supportedThinkingLevels: ["off"],
+    models: [
+      { id: "codex-auto-review", thinkingLevels: [] },
+      { id: "gpt-5.4", thinkingLevels: ["off", "low", "medium", "high", "xhigh"] },
+    ],
+  };
+  const picked = thinkingProviderForModel(provider, "gpt-5.4", undefined);
+  assert.equal(picked?.supportsReasoning, true);
+  assert.deepEqual(providerThinkingLevels(picked), ["off", "low", "medium", "high", "xhigh"]);
+  // A binding whose levels exclude reasoning stays locked.
+  const nonReasoning = thinkingProviderForModel(provider, "codex-auto-review", undefined);
+  assert.equal(nonReasoning?.supportsReasoning, false);
+  assert.deepEqual(providerThinkingLevels(nonReasoning), []);
+  // No catalog and no binding: the provider passes through unchanged.
+  assert.equal(thinkingProviderForModel(provider, "unknown-model", undefined), provider);
+  // A live catalog entry still wins for capability metadata when present.
+  const catalogued = thinkingProviderForModel(
+    { ...provider, models: [] },
+    "gpt-5.4",
+    [{ modelId: "gpt-5.4", reasoning: true, capabilities: ["reasoning"], supportedThinkingLevels: ["low", "high"] }],
+  );
+  assert.equal(catalogued?.supportsReasoning, true);
+  assert.deepEqual(providerThinkingLevels(catalogued), ["low", "high"]);
+});
 
 test("unpinned degraded session caps stay on the catalog thinking menu", () => {
   const thinkingProvider = resolveComposerThinkingProvider({

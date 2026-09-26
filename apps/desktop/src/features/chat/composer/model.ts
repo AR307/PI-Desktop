@@ -130,22 +130,27 @@ export function thinkingProviderForModel(
 ): ProviderPublic | null | undefined {
   if (!provider || !modelId) return provider;
   const model = modelCatalog?.find((candidate) => sameComposerModelId(candidate.modelId, modelId));
-  if (!model) return provider;
-
+  // The stored binding decides even without a live discovery entry. Rows that
+  // never publish a /models endpoint (MirrorCoding) have no catalog, and the
+  // provider-level flag reflects the row's default model — falling back to it
+  // locked the draft thinking menu for every other model in the group.
   const binding = provider.models.find((candidate) =>
-    sameComposerModelId(candidate.id, model.modelId),
+    sameComposerModelId(candidate.id, model?.modelId ?? modelId),
   );
+  if (!model && !binding) return provider;
   const configuredLevels = binding
     ? THINKING_LEVELS.filter((level) => binding.thinkingLevels.includes(level))
     : undefined;
   const supportsReasoning = configuredLevels
     ? configuredLevels.some((level) => level !== "off")
-    : model.reasoning === true || model.capabilities.includes("reasoning");
+    : model
+      ? model.reasoning === true || model.capabilities.includes("reasoning")
+      : provider.supportsReasoning === true;
   return {
     ...provider,
     supportsReasoning,
     supportedThinkingLevels:
-      configuredLevels ?? model.supportedThinkingLevels ?? provider.supportedThinkingLevels,
+      configuredLevels ?? model?.supportedThinkingLevels ?? provider.supportedThinkingLevels,
   };
 }
 
