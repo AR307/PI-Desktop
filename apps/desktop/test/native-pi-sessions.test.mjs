@@ -400,6 +400,29 @@ test("a duplicate historical completion keeps an unrelated live stream", async (
   assert.deepEqual(replayed.map((row) => row.id), ["old-answer", "new-durable"]);
 });
 
+test("an aborted empty image result stays live so its download can be retried", async () => {
+  const { projectMessageEnd } = await import("../src/lib/session-transcript.ts");
+  const historical = assistantRow("old-answer", "complete", "old reply");
+  const stopped = {
+    ...assistantRow("image-aborted", "aborted", ""),
+    imageGeneration: {
+      kind: "image-generation",
+      prompt: "URL image stopped during download",
+      options: { count: 1 },
+      images: [{ id: "image-aborted-1", downloadUrl: "https://127.0.0.1/image.png", error: "image_download_failed" }],
+      error: "image_aborted",
+    },
+  };
+  const settled = projectMessageEnd([historical], { type: "message_end", message: stopped });
+  assert.deepEqual(settled.map((row) => row.id), ["old-answer", "image-aborted"]);
+  // A text-free failure without an image card still clears its row.
+  const bare = projectMessageEnd([historical], {
+    type: "message_end",
+    message: assistantRow("bare-aborted", "aborted", ""),
+  });
+  assert.deepEqual(bare.map((row) => row.id), ["old-answer"]);
+});
+
 test("a generic Desktop completion never touches parallel delegate streams", async () => {
   const { projectMessageEnd } = await import("../src/lib/session-transcript.ts");
   const delegateA = assistantRow("delegate-a", "streaming", "A");

@@ -76,6 +76,31 @@ test("errors and aborted partial replies remain outside the process", () => {
   );
 });
 
+test("a text-free image result stays outside the process for retryable downloads", () => {
+  const stopped = message("image-stop", "assistant", "", {
+    status: "aborted",
+    imageGeneration: {
+      kind: "image-generation",
+      prompt: "URL image stopped during download",
+      options: { count: 1 },
+      images: [{ id: "img-1", downloadUrl: "https://127.0.0.1/image.png", error: "image_download_failed" }],
+      error: "image_aborted",
+    },
+  });
+  const trailing = projectTurnProcess(turn([stopped]));
+  assert.deepEqual(
+    trailing.responses.map((part) => part.message.id),
+    ["image-stop"],
+  );
+  const followed = projectTurnProcess(
+    turn([stopped, message("tool", "tool", "result", { toolName: "Read" })]),
+  );
+  assert.deepEqual(
+    followed.responses.map((part) => part.message.id),
+    ["image-stop"],
+  );
+});
+
 test("compact thinking disappears after reasoning ends without removing stored data", () => {
   const thinking = message("think", "assistant", "", {
     thinking: "Private reasoning",

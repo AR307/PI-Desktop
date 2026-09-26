@@ -34,30 +34,21 @@ export class ImageTasks {
       api: { async generateImages(selected, context, request) {
         const refs = context.input.filter((entry) => entry.type === "image");
         const path = refs.length ? binding.model.capability.reference_path! : binding.model.capability.generation_path;
-        const headers = { ...binding.headers };
-        let body: BodyInit;
         const prompt = context.input.filter((entry) => entry.type === "text").map((entry) => entry.text).join("\n");
-        if (path === "/v1/images/edits" && refs.length) {
-          const form = new FormData();
-          form.set("model", selected.id);
-          form.set("prompt", prompt);
-          form.set("n", String(options.count));
-          if (options.size) form.set("size", options.size);
-          if (options.quality) form.set("quality", options.quality);
-          if (options.aspectRatio) form.set("aspect_ratio", options.aspectRatio);
-          refs.forEach((ref, index) => form.append("image", new Blob([Buffer.from(ref.data, "base64")], { type: ref.mimeType }), `reference-${index + 1}`));
-          body = form;
-        } else {
-          headers["Content-Type"] = "application/json";
-          body = JSON.stringify({
-            model: selected.id, prompt,
-            n: options.count,
-            ...(options.size ? { size: options.size } : {}),
-            ...(options.quality ? { quality: options.quality } : {}),
-            ...(options.aspectRatio ? { aspect_ratio: options.aspectRatio } : {}),
-            ...(refs.length ? { images: refs.map((ref) => ({ image_url: `data:${ref.mimeType};base64,${ref.data}` })) } : {}),
-          });
-        }
+        // MirrorCoding accepts one JSON shape on both image endpoints and
+        // converts `/v1/images/edits` to upstream multipart on the server
+        // (docs/mirrorcoding-image-generation-requirements.md). The local
+        // relay refuses multipart bodies, so references always travel as
+        // `image_url` data URLs.
+        const headers = { ...binding.headers, "Content-Type": "application/json" };
+        const body = JSON.stringify({
+          model: selected.id, prompt,
+          n: options.count,
+          ...(options.size ? { size: options.size } : {}),
+          ...(options.quality ? { quality: options.quality } : {}),
+          ...(options.aspectRatio ? { aspect_ratio: options.aspectRatio } : {}),
+          ...(refs.length ? { images: refs.map((ref) => ({ image_url: `data:${ref.mimeType};base64,${ref.data}` })) } : {}),
+        });
         const response = await fetch(`${selected.baseUrl}${path}`, { method: "POST", signal: request?.signal, headers, body });
         if (!response.ok) {
           const code = ({ 401: "reauthorization_required", 403: "model_or_group_unavailable", 429: "rate_limited", 503: "service_unavailable" } as Record<number, string>)[response.status];
