@@ -7,6 +7,9 @@ import { Surface } from "./Surface";
 
 type Panel = "mode" | "model";
 
+/** The sheet reads only these view slices; the conversation passes them through. */
+export type SessionConfigView = Pick<MobileView, "snapshot" | "catalog" | "configuring">;
+
 const modes: Array<{ id: MobileTaskMode; icon: typeof Sparkles; title: string; hint: string }> = [
   { id: "agent", icon: Sparkles, title: "agent", hint: "modeAgentHint" },
   { id: "plan", icon: SlidersHorizontal, title: "plan", hint: "modePlanHint" },
@@ -15,7 +18,7 @@ const modes: Array<{ id: MobileTaskMode; icon: typeof Sparkles; title: string; h
 ];
 
 export function SessionConfigSheet({ open, panel, close, controller, view }: {
-  open: boolean; panel: Panel; close(): void; controller: MobileController; view: MobileView;
+  open: boolean; panel: Panel; close(): void; controller: MobileController; view: SessionConfigView;
 }) {
   const session = view.snapshot?.session;
   const { t } = useTranslation("translation", { keyPrefix: "mobile" });

@@ -1,5 +1,25 @@
 ## v0.15.6-mirrorcoding.1
 
+## Android companion update
+
+- Cache each conversation's recent transcript on the phone and resume from the
+  last event cursor, so reopening or reconnecting costs deltas instead of a
+  full history download; the cache is cleared on logout and revocation.
+- Refresh live session state through a light `session/state` call and reload
+  the model catalog only when the configuration changes.
+- Cap transcript fields at the desktop display window so long sessions with
+  oversized messages open reliably, and fetch any capped card's full content
+  on demand in chunks.
+- Load earlier history automatically when scrolling to the top.
+- Group subagent work into collapsible cards, render Edit/Write tool results
+  as line diffs, and mark context compactions in the transcript.
+- Manage queued prompts from the phone: preview, remove, and "send now" into
+  the running turn.
+- Keep streaming smooth on long conversations: per-frame event batching,
+  memoized message rendering, and offscreen paint skipping.
+- Refresh the UI with modular styles, screen transitions, loading skeletons,
+  and a streaming caret, honoring reduced-motion settings.
+
 ## Android companion
 
 - Share a project or session through an eight-digit, same-account MC pairing.

@@ -49,10 +49,22 @@ their host expiry and using the existing plan resolution flow. A full desktop
 restart preserves the existing Rust behavior: pending proposals become
 interrupted and cannot be approved as if they were still pending.
 Mobile backgrounding may suspend its connection. Foreground/reconnect restores
-snapshots and events. Lost send acknowledgements are reconciled through
+live state and events. Lost send acknowledgements are reconciled through
 `message/status` (`running`, `queued`, `persisted`, or `unknown`); uncertain sends
 are not replayed automatically. Revoking
 access closes mobile streams without stopping an existing desktop task.
+
+The phone keeps a bounded per-session transcript cache (IndexedDB, newest ~500
+rows with the last durable event cursor). Reopening a conversation renders the
+cached tail immediately, attaches with `includeSnapshot: false`, and resumes
+`events/subscribe` from the stored cursor, so a stable session costs deltas
+instead of a full snapshot; within one app run a reconnect resumes from the
+live in-memory transcript the same way. When the cursor left the replay window
+(`replayComplete: false`), when the desktop predates the light path, or when no
+cache exists, the client falls back to the full snapshot and rebuilds the
+cache. Cached transcripts never outlive the share that authorized them: they
+are cleared on logout, on revocation from either side, and whenever a grant
+disappears from the account.
 
 Process ownership remains renderer/preload/main/Rust+Node. MC owns native login,
 device identity, pairings and online relay only. The runtime exposes an allowed
@@ -60,15 +72,43 @@ operation subset, never raw IPC, a terminal or unrestricted filesystem access.
 MC credentials never enter mobile transcript state or desktop Node sidecar.
 
 `session/list` optionally filters to one grant. Enriched session snapshots include
-the actual provider/model/group, task mode, image configuration, pending plans
-and current image jobs. They distinguish the running task's captured selection
+the actual provider/model/group, task mode, image configuration, pending plans,
+current image jobs, bounded queued-prompt previews and compaction marks. They
+distinguish the running task's captured selection
 when known from the persisted next-turn selection and preserve separate chat and
 image choices. `session/modelCatalog` exposes only selectable display/capability
-metadata. `session/configure` validates an atomic provider/model choice and
+metadata, and the phone refreshes it only on open, after `session/configure`,
+and on a `configurationChanged` activity push. `session/configure` validates an
+atomic provider/model choice and
 updates only the authorized session. Mobile responds to image progress and
 desktop configuration changes through ephemeral `turn.activity` events, then
-reads the current snapshot. History pages use bounded Rust queries. Each command,
+reads the current live state. History pages use bounded Rust queries. Each command,
 subscription and outbound event rechecks current project/session membership.
+
+`connection/initialize` advertises the additions with the optional
+`sessionState` and `itemContent` capability flags; a client that does not see
+them uses the original full-snapshot contract unchanged.
+
+`session/state` returns the snapshot minus its transcript page (session
+description, active/queued turns, pending approvals/inputs, plans, image jobs,
+queued-prompt previews, compaction marks, cursor, revision). The phone uses it
+for every live-state refresh so a running conversation no longer re-downloads
+its transcript per event. `session/attach` with `includeSnapshot: false`
+returns that state in place of the snapshot for cursor-resuming clients.
+
+Transcript reads on the mobile profile apply a per-field presentation cap
+(`MOBILE_ITEM_CONTENT_LIMIT`, 64 KiB — the desktop renderer's window), so one
+oversized message can no longer burst the relay frame limit and make a long
+session unopenable. host-core marks a capped field by appending its display
+truncation marker; the phone shows the full content on demand through
+`session/item`, which streams the complete item JSON in relay-safe chunks like
+`attachment/read`. The uncapped transcript remains desktop-owned.
+
+Queue management uses the shared turn vocabulary: `turn/cancel` removes a
+queued turn and `turn/prioritize` is "send now" — the promoted prompt joins the
+running turn when the runtime supports steering (ADR 0265). The transcript
+groups delegate-produced rows by their `parentToolCallId` into collapsible
+subagent cards and renders compaction dividers from the projected marks.
 
 Chat model and reasoning changes may be saved while a task is active and apply
 to the next admitted turn; the active turn and its tool continuations keep their

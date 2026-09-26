@@ -389,6 +389,24 @@ export const RacpSessionSnapshotSchema = Type.Object({
 });
 export type RacpSessionSnapshot = Static<typeof RacpSessionSnapshotSchema>;
 
+/**
+ * A snapshot without the transcript page: everything a client needs to refresh
+ * live session state (turns, approvals, inputs, cursor) when it already holds
+ * the transcript, at a fraction of the payload of `session/snapshot`.
+ */
+export const RacpSessionStateSchema = Type.Object({
+  session: RacpSessionSchema,
+  activeTurn: Type.Optional(RacpTurnSchema),
+  queuedTurns: Type.Array(RacpTurnSchema),
+  activeItems: Type.Array(RacpItemSummarySchema),
+  pendingApprovals: Type.Array(RacpApprovalRequestSchema),
+  pendingInputs: Type.Array(RacpInputRequestSchema),
+  cursor: RacpCursorSchema,
+  revision: Type.Integer({ minimum: 0 }),
+  generatedAt: Type.String(),
+});
+export type RacpSessionState = Static<typeof RacpSessionStateSchema>;
+
 // ---------------------------------------------------------------------------
 // Initialization (spec §3)
 // ---------------------------------------------------------------------------
@@ -419,6 +437,10 @@ export const RacpServerCapabilitiesSchema = Type.Object({
   toolRelay: Type.Boolean(),
   terminal: Type.Boolean(),
   notifications: Type.Boolean(),
+  /** `session/state` light refresh is served (mobile profile addition). */
+  sessionState: Type.Optional(Type.Boolean()),
+  /** `session/item` chunked full-content reads are served (mobile profile addition). */
+  itemContent: Type.Optional(Type.Boolean()),
   bindings: Type.Array(Type.Union([Type.Literal("RACP-WS"), Type.Literal("RACP-HTTP"), Type.Literal("RACP-GRPC")])),
 });
 export type RacpServerCapabilities = Static<typeof RacpServerCapabilitiesSchema>;
@@ -836,6 +858,7 @@ export const RACP_SCHEMAS = {
   EventEnvelope: RacpEventEnvelopeSchema,
   ItemSummary: RacpItemSummarySchema,
   SessionSnapshot: RacpSessionSnapshotSchema,
+  SessionState: RacpSessionStateSchema,
   ApprovalRequest: RacpApprovalRequestSchema,
   ApprovalResponse: RacpApprovalResponseSchema,
   ApprovalResult: RacpApprovalResultSchema,

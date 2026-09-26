@@ -3,9 +3,10 @@ import { RacpError, type AgentHost, type Principal } from "@pi-desktop/agent-hos
 import { toSessionSummary, type HostRpc } from "@pi-desktop/host-runtime";
 import { encodeFrame, errorObjectFrom, isRequest, parseFrame } from "@pi-desktop/racp/framing";
 import {
-  APP_VERSION, RACP_DEFAULT_LIMITS, RACP_DEFAULT_POLICY, RACP_EVENT_NOTIFICATION, RACP_PROTOCOL_VERSION, RACP_SUBSCRIPTION_CLOSED_NOTIFICATION,
+  APP_VERSION, MOBILE_ATTACHMENT_CHUNK_BYTES, MOBILE_ITEM_CONTENT_LIMIT,
+  RACP_DEFAULT_LIMITS, RACP_DEFAULT_POLICY, RACP_EVENT_NOTIFICATION, RACP_PROTOCOL_VERSION, RACP_SUBSCRIPTION_CLOSED_NOTIFICATION,
   SESSION_THINKING_LEVELS, validateImageOptions,
-  protocolVersionsCompatible, type AppSettings, type MobileGrant, type MobileSession, type MobileSessionConfiguration, type MobileSessionConfigureInput, type MobileSessionSnapshot,
+  protocolVersionsCompatible, type AppSettings, type MobileGrant, type MobileSession, type MobileSessionConfiguration, type MobileSessionConfigureInput, type MobileSessionSnapshot, type MobileSessionState,
   type RacpApprovalResponse, type RacpCursor, type RacpEventEnvelope, type RacpInitializeResult, type RacpInputResponse,
   type ProviderPublic, type SessionSummary, type SessionDetail, type PlanProposal, type ThinkingLevel,
 } from "@pi-desktop/shared";
@@ -100,15 +101,24 @@ export class MobilePeer {
       case "session/configure": return { session: await this.configure(session, params) };
       case "session/attach": {
         const result = await agent.attach(this.principal, { sessionId, includeSnapshot: false, ...(params.after ? { after: cursor(params.after) } : {}) });
+        // A client holding a cached transcript attaches with
+        // `includeSnapshot: false` and replays the gap through its event
+        // subscription; the reply then carries only the light state instead of
+        // the transcript page.
+        if (params.includeSnapshot === false) {
+          return { ...result, session: await this.describe(session), state: await this.state(session) };
+        }
         return { ...result, session: await this.describe(session), snapshot: await this.snapshot(session) };
       }
       case "session/snapshot": return { snapshot: await this.snapshot(session) };
-      case "session/history": return agent.history(this.principal, { sessionId, ...(params.beforeItemId ? { beforeItemId: string(params.beforeItemId, "before_item_id") } : {}), limit: integer(params.limit ?? 50, "limit", 200) || 1 });
+      case "session/state": return { state: await this.state(session) };
+      case "session/history": return agent.history(this.principal, { sessionId, ...(params.beforeItemId ? { beforeItemId: string(params.beforeItemId, "before_item_id") } : {}), limit: integer(params.limit ?? 50, "limit", 200) || 1, contentLimit: MOBILE_ITEM_CONTENT_LIMIT });
+      case "session/item": return this.itemContent(sessionId, params);
       case "message/status": {
         const messageId = string(params.messageId, "message_id");
-        const snapshot = await agent.snapshot(sessionId);
-        if (snapshot.activeTurn?.idempotencyKey === messageId || this.deps.images.states().some((job) => job.sessionId === sessionId && job.jobId === messageId)) return { status: "running" };
-        if (snapshot.queuedTurns.some((turn) => turn.idempotencyKey === messageId)) return { status: "queued" };
+        const state = await agent.sessionState(sessionId);
+        if (state.activeTurn?.idempotencyKey === messageId || this.deps.images.states().some((job) => job.sessionId === sessionId && job.jobId === messageId)) return { status: "running" };
+        if (state.queuedTurns.some((turn) => turn.idempotencyKey === messageId)) return { status: "queued" };
         const result = await this.deps.host().call<{ session?: SessionDetail }>("session.get", { id: sessionId, messageAround: messageId, messageLimit: 1, contentLimit: 1 });
         return { status: result.session?.messages.some((message) => message.id === messageId) ? "persisted" : "unknown" };
       }
@@ -127,14 +137,21 @@ export class MobilePeer {
       case "turn/interrupt": {
         if (session.capabilities?.canStop === false) throw new RacpError("FORBIDDEN", "session_read_only");
         if (this.deps.images.abortSession(sessionId)) return { requested: true };
-        const snapshot = await agent.snapshot(sessionId);
-        if (!snapshot.activeTurn) return { requested: false };
-        return method === "turn/interrupt" ? agent.interruptTurn(this.principal, snapshot.activeTurn.id) : agent.stopTurn(this.principal, snapshot.activeTurn.id);
+        const state = await agent.sessionState(sessionId);
+        if (!state.activeTurn) return { requested: false };
+        return method === "turn/interrupt" ? agent.interruptTurn(this.principal, state.activeTurn.id) : agent.stopTurn(this.principal, state.activeTurn.id);
       }
       case "turn/cancel": {
         const turnId = string(params.turnId, "turn_id");
         if (agent.getTurn(turnId).sessionId !== sessionId) throw new RacpError("FORBIDDEN", "turn_not_in_session");
         return agent.cancelTurn(this.principal, turnId);
+      }
+      case "turn/prioritize": {
+        // "Send now": the promoted queued message is steered into the running
+        // turn when the runtime supports it (ADR 0265), exactly like desktop.
+        const turnId = string(params.turnId, "turn_id");
+        if (agent.getTurn(turnId).sessionId !== sessionId) throw new RacpError("FORBIDDEN", "turn_not_in_session");
+        return { turn: await agent.prioritizeTurn(this.principal, turnId) };
       }
       case "approval/respond": {
         const approvalId = string(params.approvalId, "approval_id");
@@ -148,8 +165,8 @@ export class MobilePeer {
       }
       case "input/respond": {
         const inputId = string(params.inputId, "input_id");
-        const snapshot = await agent.snapshot(sessionId);
-        if (!snapshot.pendingInputs.some((input) => input.id === inputId)) throw new RacpError("CONFLICT", "input_already_resolved");
+        const state = await agent.sessionState(sessionId);
+        if (!state.pendingInputs.some((input) => input.id === inputId)) throw new RacpError("CONFLICT", "input_already_resolved");
         if (!Array.isArray(params.answers) || !params.answers.every((answer) => answer === null || Array.isArray(answer) && answer.every((value) => typeof value === "string"))) throw new RacpError("INVALID_ARGUMENT", "invalid_answers");
         return agent.respondInput(this.principal, { inputId, answers: params.answers as RacpInputResponse["answers"], context: { requestId: randomUUID() } });
       }
@@ -166,7 +183,7 @@ export class MobilePeer {
     this.initialized = true;
     return { protocolVersion: RACP_PROTOCOL_VERSION, server: { name: "PI Desktop Mobile", version: APP_VERSION, hostId: this.deps.desktopDeviceId }, connectionId: this.deps.peerId,
       principal: { subject: this.principal.subject, roles: [...this.principal.roles] }, limits: RACP_DEFAULT_LIMITS, policy: RACP_DEFAULT_POLICY,
-      capabilities: { eventReplay: true, snapshot: true, approvals: true, inputRequests: true, attachments: true, serverRequests: false, turnQueue: true, hostEvents: false, history: true, remoteHostProfile: false, toolRelay: false, terminal: false, notifications: false, bindings: ["RACP-WS"] } };
+      capabilities: { eventReplay: true, snapshot: true, approvals: true, inputRequests: true, attachments: true, serverRequests: false, turnQueue: true, hostEvents: false, history: true, remoteHostProfile: false, toolRelay: false, terminal: false, notifications: false, sessionState: true, itemContent: true, bindings: ["RACP-WS"] } };
   }
   private async require(sessionId: string) {
     if (this.closed) throw new RacpError("HOST_DISCONNECTED", "connection_closed");
@@ -179,10 +196,10 @@ export class MobilePeer {
     const input = parseConfiguration(params);
     const requestedMode = input.mode ?? current.taskMode;
     const currentMode = current.taskMode;
-    const snapshot = await this.deps.agent().snapshot(record.id);
+    const state = await this.deps.agent().sessionState(record.id);
     const imageBusy = this.deps.images.states().some((job) => job.sessionId === record.id && job.status === "running");
-    const busy = Boolean(snapshot.activeTurn || snapshot.queuedTurns.length || imageBusy);
-    const approvalPending = snapshot.session.planningState === "awaiting_approval" || snapshot.pendingApprovals.length > 0;
+    const busy = Boolean(state.activeTurn || state.queuedTurns.length || imageBusy);
+    const approvalPending = state.session.planningState === "awaiting_approval" || state.pendingApprovals.length > 0;
     if (requestedMode !== currentMode && (busy || approvalPending)) {
       throw new RacpError("CONFLICT", approvalPending ? "SESSION_CONFIGURATION_APPROVAL_PENDING" : "SESSION_CONFIGURATION_BUSY");
     }
@@ -288,8 +305,51 @@ export class MobilePeer {
       capabilities: { canPrompt: canPrompt(record), canStop: record.capabilities?.canStop ?? record.source !== "pi-native" } };
   }
   private async snapshot(record: SessionSummary): Promise<MobileSessionSnapshot> {
-    const { plans } = await this.deps.host().call<{ plans: PlanProposal[] }>("plans.pending", { sessionId: record.id });
-    return { ...await this.deps.agent().snapshot(record.id), session: await this.describe(record), imageJobs: this.deps.images.states().filter((job) => job.sessionId === record.id), plans };
+    // The per-field cap keeps one oversized message from bursting the relay
+    // frame limit; full content stays reachable per item via `session/item`.
+    const [context, snapshot, session] = await Promise.all([
+      this.sessionContext(record.id),
+      this.deps.agent().snapshot(record.id, undefined, { contentLimit: MOBILE_ITEM_CONTENT_LIMIT }),
+      this.describe(record),
+    ]);
+    return { ...snapshot, session, ...context };
+  }
+  /** The snapshot minus its transcript page: live state for cached clients. */
+  private async state(record: SessionSummary): Promise<MobileSessionState> {
+    const [context, state, session] = await Promise.all([
+      this.sessionContext(record.id),
+      this.deps.agent().sessionState(record.id),
+      this.describe(record),
+    ]);
+    return { ...state, session, ...context };
+  }
+  /** Session-scoped extras both projections carry: plans, image jobs, queue previews, compaction marks. */
+  private async sessionContext(sessionId: string) {
+    const [{ plans }, detail] = await Promise.all([
+      this.deps.host().call<{ plans: PlanProposal[] }>("plans.pending", { sessionId }),
+      this.deps.host().call<{ session?: SessionDetail }>("session.get", { id: sessionId, messageLimit: 1, contentLimit: 1 }),
+    ]);
+    return {
+      plans,
+      imageJobs: this.deps.images.states().filter((job) => job.sessionId === sessionId),
+      queuedPrompts: this.deps.agent().queueEntries(sessionId).map((entry) => ({ turnId: entry.turn.id, content: entry.content.slice(0, 280) })),
+      compactions: (detail.session?.compactions ?? []).map((record) => ({ id: record.id, throughMessageId: record.throughMessageId })),
+    };
+  }
+  /**
+   * Chunked read of one item's complete JSON, for a card the snapshot capped.
+   * The payload is the UTF-8 JSON of the uncapped `UiMessage`, sliced into
+   * relay-safe chunks like `attachment/read`.
+   */
+  private async itemContent(sessionId: string, params: Record<string, unknown>) {
+    const itemId = string(params.itemId, "item_id");
+    const result = await this.deps.host().call<{ session?: SessionDetail }>("session.get", { id: sessionId, messageAround: itemId, messageLimit: 1 });
+    const message = result.session?.messages.find((candidate) => candidate.id === itemId);
+    if (!message) throw new RacpError("NOT_FOUND", "item_not_found");
+    const payload = Buffer.from(JSON.stringify(message), "utf8");
+    const offset = integer(params.offset ?? 0, "offset", payload.length);
+    const chunk = payload.subarray(offset, Math.min(offset + MOBILE_ATTACHMENT_CHUNK_BYTES, payload.length));
+    return { data: chunk.toString("base64"), offset, nextOffset: offset + chunk.length, size: payload.length, eof: offset + chunk.length === payload.length };
   }
   private modelCatalog() {
     return buildMobileModelCatalog({
@@ -357,9 +417,9 @@ export class MobilePeer {
   private async deliverActivity(sessionId: string, payload: unknown) {
     try {
       await this.require(sessionId);
-      const snapshot = await this.deps.agent().snapshot(sessionId);
-      this.deliver({ eventId: randomUUID(), scope: "session", sessionId, epoch: snapshot.cursor.epoch, afterSequence: snapshot.cursor.sequence,
-        revision: snapshot.revision, kind: "turn.activity", occurredAt: new Date().toISOString(), payload });
+      const state = await this.deps.agent().sessionState(sessionId);
+      this.deliver({ eventId: randomUUID(), scope: "session", sessionId, epoch: state.cursor.epoch, afterSequence: state.cursor.sequence,
+        revision: state.revision, kind: "turn.activity", occurredAt: new Date().toISOString(), payload });
     } catch { this.deps.close("share_revoked"); }
   }
 }

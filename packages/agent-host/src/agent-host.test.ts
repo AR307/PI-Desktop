@@ -79,10 +79,15 @@ class FakeRuntime implements RuntimePort {
 class FakeSessions implements SessionPort {
   summaries = new Map<string, SessionSummary>();
   items: RacpItemSummary[] = [];
+  historyCalls: Array<{ limit: number; beforeItemId?: string; contentLimit?: number }> = [];
   async get(sessionId: string): Promise<SessionSummary | null> {
     return this.summaries.get(sessionId) ?? null;
   }
-  async history(): Promise<{ items: RacpItemSummary[]; hasMore: boolean }> {
+  async history(
+    _sessionId: string,
+    options: { limit: number; beforeItemId?: string; contentLimit?: number },
+  ): Promise<{ items: RacpItemSummary[]; hasMore: boolean }> {
+    this.historyCalls.push(options);
     return { items: this.items, hasMore: false };
   }
 }
@@ -744,5 +749,35 @@ describe("AgentHost queue extras", () => {
     host.ingest(envelope("s1", undefined, { type: "planning_state", state: "inactive" }));
     await new Promise((resolve) => setTimeout(resolve, 0));
     expect(runtime.prompts.map((prompt) => prompt.content)).toEqual(["later"]);
+  });
+});
+
+describe("AgentHost session state and content caps", () => {
+  it("serves the live state without fetching a transcript page", async () => {
+    const { host, sessions } = build();
+    host.ingest(envelope("s1", "rt_1", { type: "agent_start" }));
+    host.ingest(envelope("s1", "rt_1", { type: "message_start", message: message("m1", "streaming") }));
+    const state = await host.sessionState("s1");
+    expect(sessions.historyCalls).toHaveLength(0);
+    expect(state.activeItems.map((item) => item.id)).toEqual(["m1"]);
+    expect(state.session.id).toBe("s1");
+    expect(state).not.toHaveProperty("items");
+    expect(state).not.toHaveProperty("hasMoreHistory");
+    const snapshot = await host.snapshot("s1");
+    expect(snapshot.cursor.epoch).toBe(state.cursor.epoch);
+    expect(snapshot.items).toEqual([]);
+    expect(sessions.historyCalls).toHaveLength(1);
+  });
+
+  it("forwards the caller's presentation cap to the session port", async () => {
+    const { host, sessions } = build();
+    await host.snapshot("s1", undefined, { contentLimit: 64 * 1024 });
+    expect(sessions.historyCalls.at(-1)).toEqual({ limit: 50, contentLimit: 64 * 1024 });
+    await host.snapshot("s1");
+    expect(sessions.historyCalls.at(-1)).toEqual({ limit: 50 });
+    await host.history(owner, { sessionId: "s1", limit: 10, contentLimit: 2_048 });
+    expect(sessions.historyCalls.at(-1)).toEqual({ limit: 10, contentLimit: 2_048 });
+    await host.history(owner, { sessionId: "s1", limit: 10 });
+    expect(sessions.historyCalls.at(-1)).toEqual({ limit: 10 });
   });
 });

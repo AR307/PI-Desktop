@@ -125,7 +125,12 @@ export interface SessionPort {
   get(sessionId: string): Promise<SessionSummary | null>;
   history(
     sessionId: string,
-    options: { limit: number; beforeItemId?: string },
+    options: {
+      limit: number;
+      beforeItemId?: string;
+      /** Presentation cap per text/value field; omitted reads stay uncapped. */
+      contentLimit?: number;
+    },
   ): Promise<{ items: RacpItemSummary[]; hasMore: boolean }>;
 }
 

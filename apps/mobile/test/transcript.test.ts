@@ -27,4 +27,29 @@ describe("live conversation", () => {
     const canonical: UiMessage = { ...pending, id: "desktop-id", status: "complete" };
     expect(applyTranscriptEvent([pending], event({ type: "user_message_persisted", optimisticMessageId: pending.id, message: canonical }))).toEqual([canonical]);
   });
+
+  it("keeps unchanged rows identical so memoized components skip re-rendering", () => {
+    const older: UiMessage = { ...message, id: "older", createdAt: "2026-09-21T09:00:00.000Z", status: "complete" };
+    const tail: UiMessage = { ...message, id: "tail", createdAt: "2026-09-21T11:00:00.000Z" };
+    const merged = mergeMessages([older, message], [tail]);
+    expect(merged.map((row) => row.id)).toEqual(["older", "assistant-one", "tail"]);
+    // Append fast path: existing rows keep identity, no re-sort of the head.
+    expect(merged[0]).toBe(older);
+    expect(merged[1]).toBe(message);
+    // A tool update without a matching row changes nothing, including identity.
+    const untouched = applyTranscriptEvent(merged, event({ type: "tool_update", toolCallId: "missing", partialResult: "x" }));
+    expect(untouched).toBe(merged);
+    // A matching update replaces only its own row.
+    const started = applyTranscriptEvent(merged, event({ type: "tool_start", toolCallId: "call-1", toolName: "Read", args: {} }));
+    const updated = applyTranscriptEvent(started, event({ type: "tool_update", toolCallId: "call-1", partialResult: "x" }));
+    expect(updated[0]).toBe(started[0]);
+    expect(updated.find((row) => row.toolCallId === "call-1")?.toolResult).toBe("x");
+  });
+
+  it("orders an out-of-order backfill without dropping rows", () => {
+    const tail: UiMessage = { ...message, id: "tail", createdAt: "2026-09-21T11:00:00.000Z" };
+    const early: UiMessage = { ...message, id: "early", createdAt: "2026-09-21T08:00:00.000Z" };
+    const merged = mergeMessages([message, tail], [early]);
+    expect(merged.map((row) => row.id)).toEqual(["early", "assistant-one", "tail"]);
+  });
 });

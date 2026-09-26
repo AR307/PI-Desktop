@@ -1,8 +1,16 @@
-import { useEffect, useRef, useState } from "react";
+import { memo, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Download, ImagePlus, FileText, ChevronDown, LoaderCircle } from "lucide-react";
+import { Bot, Download, ImagePlus, FileText, ChevronDown, LoaderCircle, Scissors, UnfoldVertical } from "lucide-react";
 import type { ImageGenerationResult, MessageAttachment, UiMessage } from "@pi-desktop/shared";
 import type { MobileController } from "../state/controller";
+import {
+  buildDiffLines,
+  extractToolDiff,
+  isDisplayTruncated,
+  messageHasTruncatedContent,
+  toolPayloadFull,
+  toolPayloadPreview,
+} from "../state/transcript-view";
 import { saveAttachment, type PickedAttachment } from "../services/attachments";
 import { Markdown } from "./Markdown";
 import { useBackDismiss } from "./useBackDismiss";
@@ -36,17 +44,95 @@ function AttachmentCard({ controller, messageId, id, attachment, reference }: { 
   </div>;
 }
 
-export function Message({ message, controller, reference }: { message: UiMessage; controller: MobileController; reference(file: PickedAttachment): void }) {
+/** "Show full content" for a field host-core capped for display. */
+function LoadFullButton({ controller, messageId }: { controller: MobileController; messageId: string }) {
+  const { t } = useTranslation("translation", { keyPrefix: "mobile" });
+  const [loading, setLoading] = useState(false);
+  return <button className="load-full" disabled={loading} onClick={() => void controller.action(async () => {
+    setLoading(true);
+    try { await controller.itemContent(messageId); } finally { setLoading(false); }
+  })}>{loading ? <LoaderCircle size={14} className="spin"/> : <UnfoldVertical size={14}/>}{t("loadFull")}</button>;
+}
+
+function DiffBlock({ before, after, path }: { before: string; after: string; path?: string }) {
+  const lines = buildDiffLines(before, after);
+  return <div className="tool-diff">
+    {path && <div className="tool-diff-path">{path}</div>}
+    <pre>{lines.map((line, index) => <span key={index} className={`diff-line diff-${line.kind}`}>{line.kind === "added" ? "+ " : line.kind === "removed" ? "− " : "  "}{line.text}{"\n"}</span>)}</pre>
+  </div>;
+}
+
+/** Tool payload with a cheap collapsed preview and full text only on demand. */
+function ToolPayload({ label, value }: { label: string; value: unknown }) {
+  const { t } = useTranslation("translation", { keyPrefix: "mobile" });
+  const [expanded, setExpanded] = useState(false);
+  const preview = toolPayloadPreview(value);
+  return <>
+    <h4>{label}</h4>
+    <pre>{expanded ? toolPayloadFull(value) : preview.text}</pre>
+    {preview.truncated && !expanded && <button className="load-full" onClick={() => setExpanded(true)}><UnfoldVertical size={14}/>{t("showMore")}</button>}
+  </>;
+}
+
+function ToolCard({ message, controller }: { message: UiMessage; controller: MobileController }) {
+  const { t } = useTranslation("translation", { keyPrefix: "mobile" });
+  const running = message.toolStatus === "running";
+  const [open, setOpen] = useState(running);
+  useEffect(() => { if (running) setOpen(true); }, [running]);
+  const diff = extractToolDiff(message.toolName, message.toolArgs);
+  return <details className="tool-card" open={open} onToggle={(event) => setOpen((event.target as HTMLDetailsElement).open)}>
+    <summary><span>{running ? <LoaderCircle size={15} className="spin"/> : <ChevronDown size={15}/>} {message.toolName ?? t("tool")}</span><small>{message.toolStatus}</small></summary>
+    {open && <>
+      {diff ? <DiffBlock before={diff.before} after={diff.after} path={diff.path}/> : message.toolArgs !== undefined && <ToolPayload label={t("input")} value={message.toolArgs}/>}
+      {message.toolResult !== undefined && <ToolPayload label={t("result")} value={message.toolResult}/>}
+      {messageHasTruncatedContent(message) && <LoadFullButton controller={controller} messageId={message.id}/>}
+    </>}
+  </details>;
+}
+
+function ThinkingCard({ text }: { text: string }) {
+  const { t } = useTranslation("translation", { keyPrefix: "mobile" });
+  const [open, setOpen] = useState(false);
+  return <details className="thinking" open={open} onToggle={(event) => setOpen((event.target as HTMLDetailsElement).open)}>
+    <summary>{t("thinking")}</summary>
+    {open && <Markdown>{text}</Markdown>}
+  </details>;
+}
+
+export const Message = memo(function Message({ message, controller, reference }: { message: UiMessage; controller: MobileController; reference(file: PickedAttachment): void }) {
   const { t } = useTranslation("translation", { keyPrefix: "mobile" });
   const generated = message.imageGeneration ?? imageResult(message.toolResult);
+  const truncatedBody = isDisplayTruncated(message.content) || isDisplayTruncated(message.thinking);
   return <article className={`message message-${message.role}`} data-message-id={message.id}>
-    {message.role === "tool" ? <details className="tool-card" open={message.toolStatus === "running"}><summary><span>{message.toolStatus === "running" ? <LoaderCircle size={15} className="spin"/> : <ChevronDown size={15}/>} {message.toolName ?? t("tool")}</span><small>{message.toolStatus}</small></summary>{message.toolArgs !== undefined && <><h4>{t("input")}</h4><pre>{typeof message.toolArgs === "string" ? message.toolArgs : JSON.stringify(message.toolArgs, null, 2)}</pre></>}{message.toolResult !== undefined && <><h4>{t("result")}</h4><pre>{typeof message.toolResult === "string" ? message.toolResult : JSON.stringify(message.toolResult, null, 2)}</pre></>}</details> : <>
-      <div className="message-label">{message.agentName ?? t(message.role === "user" ? "you" : "assistant")}{message.status === "streaming" && <span className="status-dot online"/>}</div>
-      {message.thinking && <details className="thinking"><summary>{t("thinking")}</summary><Markdown>{message.thinking}</Markdown></details>}
+    {message.role === "tool" ? <ToolCard message={message} controller={controller}/> : <>
+      <div className="message-label">{message.agentName ?? t(message.role === "user" ? "you" : "assistant")}{message.status === "streaming" && <span className="streaming-caret" aria-hidden="true"/>}</div>
+      {message.thinking && <ThinkingCard text={message.thinking}/>}
       {message.content && <Markdown>{message.content}</Markdown>}
+      {truncatedBody && <LoadFullButton controller={controller} messageId={message.id}/>}
     </>}
     {message.attachments?.map((attachment) => <AttachmentCard key={attachment.ref} controller={controller} messageId={message.id} id={attachment.ref} attachment={attachment} reference={reference}/>)}
     {generated && <section className="image-result"><p className="muted">{t("generatedWith")} {generated.model.displayName} · {generated.model.groupName}</p>{generated.images.map((image) => image.attachment ? <AttachmentCard key={image.id} controller={controller} messageId={message.id} id={image.id} attachment={image.attachment} reference={reference}/> : <div key={image.id} className="image-pending"><p>{image.error}</p><button onClick={() => void controller.retryImage(message.id, image.id)}>{t("retryDownload")}</button></div>)}</section>}
     {(message.error || generated?.error) && <p className="error-text">{message.error?.message ?? generated?.error}</p>}
   </article>;
+});
+
+/** Collapsible run of messages one delegate produced (`parentToolCallId`). */
+export const DelegationCard = memo(function DelegationCard({ id, agentName, running, messages, controller, reference }: {
+  id: string; agentName?: string; running: boolean; messages: UiMessage[]; controller: MobileController; reference(file: PickedAttachment): void;
+}) {
+  const { t } = useTranslation("translation", { keyPrefix: "mobile" });
+  const [open, setOpen] = useState(false);
+  return <details className="delegation-card" data-delegation-id={id} open={open} onToggle={(event) => setOpen((event.target as HTMLDetailsElement).open)}>
+    <summary>
+      <span className="delegation-title">{running ? <LoaderCircle size={15} className="spin"/> : <Bot size={15}/>} {agentName ?? t("subagent")}</span>
+      <small>{t(running ? "working" : "ready")} · {messages.length}</small>
+    </summary>
+    {open && <div className="delegation-body">{messages.map((message) => <Message key={message.id} message={message} controller={controller} reference={reference}/>)}</div>}
+  </details>;
+});
+
+/** Divider where a context compaction cut the transcript. */
+export function CompactionDivider() {
+  const { t } = useTranslation("translation", { keyPrefix: "mobile" });
+  return <div className="compaction-divider" role="separator"><Scissors size={13}/><span>{t("compacted")}</span></div>;
 }

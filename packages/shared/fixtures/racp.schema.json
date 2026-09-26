@@ -1264,6 +1264,700 @@
       }
     }
   },
+  "SessionState": {
+    "type": "object",
+    "required": [
+      "session",
+      "queuedTurns",
+      "activeItems",
+      "pendingApprovals",
+      "pendingInputs",
+      "cursor",
+      "revision",
+      "generatedAt"
+    ],
+    "properties": {
+      "session": {
+        "type": "object",
+        "required": [
+          "id",
+          "title",
+          "mode",
+          "status",
+          "planningState",
+          "permissionMode",
+          "queuedTurnIds",
+          "revision",
+          "createdAt",
+          "updatedAt"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "title": {
+            "type": "string"
+          },
+          "projectId": {
+            "type": "string"
+          },
+          "workspaceLabel": {
+            "type": "string"
+          },
+          "mode": {
+            "anyOf": [
+              {
+                "type": "string",
+                "const": "agent"
+              },
+              {
+                "type": "string",
+                "const": "plan"
+              },
+              {
+                "type": "string",
+                "const": "goal"
+              }
+            ]
+          },
+          "status": {
+            "anyOf": [
+              {
+                "type": "string",
+                "const": "idle"
+              },
+              {
+                "type": "string",
+                "const": "running"
+              },
+              {
+                "type": "string",
+                "const": "waiting_permission"
+              },
+              {
+                "type": "string",
+                "const": "aborted"
+              },
+              {
+                "type": "string",
+                "const": "error"
+              }
+            ]
+          },
+          "planningState": {
+            "anyOf": [
+              {
+                "type": "string",
+                "const": "inactive"
+              },
+              {
+                "type": "string",
+                "const": "planning"
+              },
+              {
+                "type": "string",
+                "const": "awaiting_approval"
+              }
+            ]
+          },
+          "permissionMode": {
+            "anyOf": [
+              {
+                "type": "string",
+                "const": "ask"
+              },
+              {
+                "type": "string",
+                "const": "accept-edits"
+              },
+              {
+                "type": "string",
+                "const": "auto"
+              }
+            ]
+          },
+          "activeTurnId": {
+            "type": "string"
+          },
+          "queuedTurnIds": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "revision": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "createdAt": {
+            "type": "string"
+          },
+          "updatedAt": {
+            "type": "string"
+          }
+        }
+      },
+      "activeTurn": {
+        "type": "object",
+        "required": [
+          "id",
+          "sessionId",
+          "status",
+          "admission",
+          "effectivePermissionMode"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "sessionId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "status": {
+            "anyOf": [
+              {
+                "type": "string",
+                "const": "queued"
+              },
+              {
+                "type": "string",
+                "const": "running"
+              },
+              {
+                "type": "string",
+                "const": "waiting_approval"
+              },
+              {
+                "type": "string",
+                "const": "waiting_input"
+              },
+              {
+                "type": "string",
+                "const": "completed"
+              },
+              {
+                "type": "string",
+                "const": "interrupted"
+              },
+              {
+                "type": "string",
+                "const": "failed"
+              },
+              {
+                "type": "string",
+                "const": "canceled"
+              }
+            ]
+          },
+          "admission": {
+            "anyOf": [
+              {
+                "type": "string",
+                "const": "reject_if_busy"
+              },
+              {
+                "type": "string",
+                "const": "queue"
+              }
+            ]
+          },
+          "queuePosition": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "effectivePermissionMode": {
+            "anyOf": [
+              {
+                "type": "string",
+                "const": "ask"
+              },
+              {
+                "type": "string",
+                "const": "accept-edits"
+              },
+              {
+                "type": "string",
+                "const": "auto"
+              }
+            ]
+          },
+          "idempotencyKey": {
+            "type": "string"
+          },
+          "startedAt": {
+            "type": "string"
+          },
+          "endedAt": {
+            "type": "string"
+          },
+          "error": {
+            "type": "object",
+            "required": [
+              "code",
+              "message",
+              "retriable",
+              "traceId"
+            ],
+            "properties": {
+              "code": {
+                "type": "string",
+                "minLength": 1
+              },
+              "message": {
+                "type": "string"
+              },
+              "retriable": {
+                "type": "boolean"
+              },
+              "traceId": {
+                "type": "string"
+              },
+              "details": {}
+            }
+          }
+        }
+      },
+      "queuedTurns": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "required": [
+            "id",
+            "sessionId",
+            "status",
+            "admission",
+            "effectivePermissionMode"
+          ],
+          "properties": {
+            "id": {
+              "type": "string",
+              "minLength": 1
+            },
+            "sessionId": {
+              "type": "string",
+              "minLength": 1
+            },
+            "status": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "const": "queued"
+                },
+                {
+                  "type": "string",
+                  "const": "running"
+                },
+                {
+                  "type": "string",
+                  "const": "waiting_approval"
+                },
+                {
+                  "type": "string",
+                  "const": "waiting_input"
+                },
+                {
+                  "type": "string",
+                  "const": "completed"
+                },
+                {
+                  "type": "string",
+                  "const": "interrupted"
+                },
+                {
+                  "type": "string",
+                  "const": "failed"
+                },
+                {
+                  "type": "string",
+                  "const": "canceled"
+                }
+              ]
+            },
+            "admission": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "const": "reject_if_busy"
+                },
+                {
+                  "type": "string",
+                  "const": "queue"
+                }
+              ]
+            },
+            "queuePosition": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "effectivePermissionMode": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "const": "ask"
+                },
+                {
+                  "type": "string",
+                  "const": "accept-edits"
+                },
+                {
+                  "type": "string",
+                  "const": "auto"
+                }
+              ]
+            },
+            "idempotencyKey": {
+              "type": "string"
+            },
+            "startedAt": {
+              "type": "string"
+            },
+            "endedAt": {
+              "type": "string"
+            },
+            "error": {
+              "type": "object",
+              "required": [
+                "code",
+                "message",
+                "retriable",
+                "traceId"
+              ],
+              "properties": {
+                "code": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "message": {
+                  "type": "string"
+                },
+                "retriable": {
+                  "type": "boolean"
+                },
+                "traceId": {
+                  "type": "string"
+                },
+                "details": {}
+              }
+            }
+          }
+        }
+      },
+      "activeItems": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "required": [
+            "id",
+            "turnId",
+            "itemType",
+            "status",
+            "createdAt",
+            "content"
+          ],
+          "properties": {
+            "id": {
+              "type": "string",
+              "minLength": 1
+            },
+            "turnId": {
+              "type": "string",
+              "minLength": 1
+            },
+            "itemType": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "const": "message"
+                },
+                {
+                  "type": "string",
+                  "const": "tool"
+                },
+                {
+                  "type": "string",
+                  "const": "compaction"
+                }
+              ]
+            },
+            "status": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "const": "streaming"
+                },
+                {
+                  "type": "string",
+                  "const": "completed"
+                }
+              ]
+            },
+            "sequence": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "createdAt": {
+              "type": "string"
+            },
+            "parentToolCallId": {
+              "type": "string"
+            },
+            "agentName": {
+              "type": "string"
+            },
+            "content": {}
+          }
+        }
+      },
+      "pendingApprovals": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "required": [
+            "id",
+            "sessionId",
+            "turnId",
+            "kind",
+            "summary",
+            "expiresAt",
+            "revision",
+            "allowedDecisions"
+          ],
+          "properties": {
+            "id": {
+              "type": "string",
+              "minLength": 1
+            },
+            "sessionId": {
+              "type": "string",
+              "minLength": 1
+            },
+            "turnId": {
+              "type": "string",
+              "minLength": 1
+            },
+            "kind": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "const": "tool"
+                },
+                {
+                  "type": "string",
+                  "const": "plan"
+                },
+                {
+                  "type": "string",
+                  "const": "goal"
+                }
+              ]
+            },
+            "summary": {
+              "type": "string"
+            },
+            "expiresAt": {
+              "type": "string"
+            },
+            "revision": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "toolName": {
+              "type": "string"
+            },
+            "risk": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "const": "low"
+                },
+                {
+                  "type": "string",
+                  "const": "medium"
+                },
+                {
+                  "type": "string",
+                  "const": "high"
+                }
+              ]
+            },
+            "agentName": {
+              "type": "string"
+            },
+            "parentToolCallId": {
+              "type": "string"
+            },
+            "title": {
+              "type": "string"
+            },
+            "question": {
+              "type": "string"
+            },
+            "artifact": {
+              "type": "object",
+              "required": [
+                "relativePath",
+                "sha256",
+                "sizeBytes"
+              ],
+              "properties": {
+                "relativePath": {
+                  "type": "string"
+                },
+                "sha256": {
+                  "type": "string"
+                },
+                "sizeBytes": {
+                  "type": "integer",
+                  "minimum": 0
+                }
+              }
+            },
+            "allowedDecisions": {
+              "type": "array",
+              "items": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "const": "allow-once"
+                  },
+                  {
+                    "type": "string",
+                    "const": "allow-session"
+                  },
+                  {
+                    "type": "string",
+                    "const": "deny"
+                  },
+                  {
+                    "type": "string",
+                    "const": "approve"
+                  },
+                  {
+                    "type": "string",
+                    "const": "reject"
+                  }
+                ]
+              },
+              "minItems": 1
+            },
+            "allowedPermissionModes": {
+              "type": "array",
+              "items": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "const": "ask"
+                  },
+                  {
+                    "type": "string",
+                    "const": "accept-edits"
+                  },
+                  {
+                    "type": "string",
+                    "const": "auto"
+                  }
+                ]
+              }
+            }
+          }
+        }
+      },
+      "pendingInputs": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "required": [
+            "id",
+            "sessionId",
+            "turnId",
+            "expiresAt",
+            "questions"
+          ],
+          "properties": {
+            "id": {
+              "type": "string",
+              "minLength": 1
+            },
+            "sessionId": {
+              "type": "string",
+              "minLength": 1
+            },
+            "turnId": {
+              "type": "string",
+              "minLength": 1
+            },
+            "expiresAt": {
+              "type": "string"
+            },
+            "agentName": {
+              "type": "string"
+            },
+            "parentToolCallId": {
+              "type": "string"
+            },
+            "questions": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "required": [
+                  "id",
+                  "question",
+                  "options",
+                  "multiSelect"
+                ],
+                "properties": {
+                  "id": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "question": {
+                    "type": "string"
+                  },
+                  "options": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "multiSelect": {
+                    "type": "boolean"
+                  }
+                }
+              },
+              "minItems": 1
+            }
+          }
+        }
+      },
+      "cursor": {
+        "type": "object",
+        "required": [
+          "epoch",
+          "sequence"
+        ],
+        "properties": {
+          "epoch": {
+            "type": "string",
+            "minLength": 1
+          },
+          "sequence": {
+            "type": "integer",
+            "minimum": 0
+          }
+        }
+      },
+      "revision": {
+        "type": "integer",
+        "minimum": 0
+      },
+      "generatedAt": {
+        "type": "string"
+      }
+    }
+  },
   "ApprovalRequest": {
     "type": "object",
     "required": [
@@ -2021,6 +2715,12 @@
             "type": "boolean"
           },
           "notifications": {
+            "type": "boolean"
+          },
+          "sessionState": {
+            "type": "boolean"
+          },
+          "itemContent": {
             "type": "boolean"
           },
           "bindings": {
