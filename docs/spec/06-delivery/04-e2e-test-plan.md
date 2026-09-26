@@ -10636,10 +10636,11 @@ This test plan spec is accepted when:
     still running, with the instruction to converge through `TaskWait` first;
     nothing is started, nothing is queued, and the running delegate keeps
     working.
-  - Step 5 refuses `stopped`, `aborted`, and the run the app closed while it was
-    still working (which reads as `interrupted` after relaunch) as not
-    resumable, each naming that reason and the fresh-delegation path instead. No
-    run starts.
+  - Step 5 resumes all three (D628): the `stopped` and `aborted` chains and the
+    run the app closed while it was still working (which reads as
+    `interrupted` after relaunch) each seed a new run from their persisted
+    rows, exactly like a completed chain. `TaskList` marks the stopped and
+    aborted records as `(resumable)` before the resume.
   - Step 6 resumes the failed chain like a completed one: the reads it already
     made seed the new run, and its failed assistant row is not replayed.
   - Step 7 is refused as a tool error: a resumed run keeps the chain's model, and
@@ -10675,11 +10676,11 @@ This test plan spec is accepted when:
     conversation under its newest Task card, with no "resumed" marker, and the
     resumed run's counters start at 0 so its turn, tool, and usage numbers
     describe the new run while the earlier rounds stay readable above it.
-- **Specs linked**: `03-runtime/02-agent-runtime.md` §5f, ADR 0279
+- **Specs linked**: `03-runtime/02-agent-runtime.md` §5f, ADR 0279, D628
 - **Acceptance**: C (conversation), Quality
 - **Milestone**: M6+
-- **Not covered (二期)**: reviving a `stopped`/`aborted` delegation, in-chain
-  compaction, task queuing, and cross-session resumption.
+- **Not covered (二期)**: in-chain compaction, task queuing, and cross-session
+  resumption.
 - **Status**: Draft — chain resolution, resume validation, the reusable list, and
   transcript chain grouping are unit/regression covered
   (`packages/agent-runtime/src/delegation-chain.test.ts`,
@@ -10687,6 +10688,61 @@ This test plan spec is accepted when:
   `apps/desktop/test/assistant-turns.test.mjs`); the desktop journey needs a
   capable environment. Required suites: `test:e2e`, `test:e2e:subagents`,
   `test:e2e:transcript`.
+
+#### E2E-SUBAGENT-detached-wake
+
+- **Preconditions**: An Agent session on a deterministic local transport whose
+  parent reply script starts one long and one short delegate in a single
+  assistant message and then ends its turn without calling `TaskWait`. The
+  short delegate settles seconds after the parent's `agent_end`; the long one
+  minutes later. A second session in the same project can receive prompts
+  while the first is idle.
+- **Steps**:
+  1. Send the prompt that delegates both pieces of work and let the parent end
+     its turn while both delegates run.
+  2. Observe the sidebar row and the chat surface of the now-idle session.
+  3. Let the short delegate settle while the session is idle and read the turn
+     that follows.
+  4. While that wake turn runs, let the long delegate settle too.
+  5. Press Stop during a later parent turn that has a delegate running, then
+     let that delegate settle.
+  6. Repeat step 1, but keep the session busy with a long user turn when the
+     short delegate settles.
+  7. Quit and relaunch the app while a delegate is still running, reopen the
+     session, and call `Task.resume` with that delegation's id.
+- **Expected**:
+  - Step 1 ends the turn normally: the composer returns to idle, the session
+    row stops pulsing as running, and no busy state blocks a new prompt.
+  - Step 2 shows the background work: the sidebar row carries the subagents
+    dot and the idle chat surface shows the "N subagents running in
+    background" chip; both disappear when no delegate runs.
+  - Step 3 wakes the session once: one queued turn whose user row is the
+    `Subagent reports ready:` marker line with the settled id, whose model
+    context received the full report exactly once, and whose Task card shows
+    the settled outcome. No report body appears in the queue content.
+  - Step 4 delivers the second report without a second queued wake turn — it
+    rides the running wake turn's boundary delivery.
+  - Step 5 stops only the parent turn: the delegate keeps running, `TaskStop`
+    remains the way to cancel it, and its later settlement wakes the session
+    as in step 3.
+  - Step 6 queues nothing while the session is busy; the report is injected at
+    that turn's boundary and the wake queue stays empty.
+  - Step 7 does not revive the delegate: the run reads as `interrupted`,
+    resumable, and `Task.resume` continues it from the persisted transcript
+    (see E2E-SUBAGENT-resume-a-settled-delegation step 5).
+- **Specs linked**: `03-runtime/02-agent-runtime.md` §5f (detached delegation
+  and wake), `docs/adr/detached-delegation-and-wake.md`, D628, D386
+- **Acceptance**: C (conversation), Quality
+- **Milestone**: M6+
+- **Status**: Draft — turn detachment, wake queueing, marker preflight
+  injection, single-shot delivery, stop semantics, adoption, and resumable
+  statuses are regression covered in
+  `packages/agent-runtime/src/runtime.test.ts` ("detached delegation and wake
+  (D628)"), `delegation-chain.test.ts`, and `delegation-history.test.ts`; the
+  sidebar dot and idle chip in
+  `apps/desktop/test/sidebar-session-status.test.mjs`. The desktop journey
+  needs a capable environment. Required suites: `test:e2e`,
+  `test:e2e:subagents`.
 
 #### E2E-SUBAGENT-context-overflow-compacts-before-failing
 

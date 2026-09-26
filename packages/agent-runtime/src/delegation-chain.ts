@@ -17,7 +17,21 @@ import {
   type ResumableChain,
 } from "./delegation-history.js";
 
-const RESUMABLE_STATUSES = new Set(["completed", "failed", "timed_out"]);
+/**
+ * Every settled status is resumable (D628): a stopped, aborted, or
+ * restart-interrupted delegate keeps its persisted transcript, and `Task.resume`
+ * replays it the same way it replays a completed one. Only a run that is still
+ * live stays out — the registry checks `runningDelegationIds` first, and
+ * "running" here covers a stale chain whose runtime records are gone.
+ */
+const RESUMABLE_STATUSES = new Set([
+  "completed",
+  "failed",
+  "timed_out",
+  "stopped",
+  "aborted",
+  "interrupted",
+]);
 
 export type ChainLookupError =
   | { kind: "unknown" }

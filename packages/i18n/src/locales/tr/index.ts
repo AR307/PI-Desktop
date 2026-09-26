@@ -465,6 +465,8 @@ export const tr = {
     subagentsFinishedWithWarnings_other: "Alt ajanlar uyarılarla bitti",
     subagentCount_one: "{{count}} alt ajan",
     subagentCount_other: "{{count}} alt ajan",
+    backgroundSubagents_one: "{{count}} alt ajan arka planda çalışıyor",
+    backgroundSubagents_other: "{{count}} alt ajan arka planda çalışıyor",
     subagentFinishedCount: "{{finished}}/{{total}} bitti",
     subagentCreating: "Alt ajan başlatılıyor…",
     subagentStatus: {

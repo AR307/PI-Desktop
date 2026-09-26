@@ -970,3 +970,35 @@
     padding-bottom: 18px;
   }
 }
+
+/* Idle-session hint above the docked composer: detached delegates still run (D628). */
+.background-delegations-chip {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  align-self: center;
+  margin: 0 16px 2px;
+  padding: 3px 10px;
+  border-radius: var(--radius-full);
+  border: 1px solid color-mix(in oklab, var(--ds-warning) 35%, transparent);
+  background: color-mix(in oklab, var(--ds-warning) 10%, transparent);
+  color: var(--ds-text-muted);
+  font-size: var(--text-xs);
+  line-height: var(--leading-compact);
+  width: max-content;
+  max-width: 100%;
+}
+
+.background-delegations-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: var(--radius-full);
+  background: var(--ds-warning);
+  animation: sidebar-status-breathe 1.6s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .background-delegations-dot {
+    animation: none;
+  }
+}

@@ -463,6 +463,8 @@ export const en = {
     subagentsFinishedWithWarnings_other: "Subagents finished with warnings",
     subagentCount_one: "{{count}} subagent",
     subagentCount_other: "{{count}} subagents",
+    backgroundSubagents_one: "{{count}} subagent running in background",
+    backgroundSubagents_other: "{{count}} subagents running in background",
     subagentFinishedCount: "{{finished}}/{{total}} finished",
     subagentCreating: "Starting subagent…",
     subagentStatus: {

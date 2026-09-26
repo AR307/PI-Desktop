@@ -1,5 +1,20 @@
 ## v0.15.6-mirrorcoding.1
 
+## Subagents run detached and wake the session
+
+- Let the agent finish its turn while subagents keep working: delegates no
+  longer hold the turn open or make the session read busy, so new prompts,
+  queued work and Continue stay available.
+- Wake the idle session automatically when background subagents finish: one
+  queued marker turn delivers every undelivered report exactly once, and
+  reports that settle during a busy turn arrive at that turn's boundary.
+- Make Stop safe around delegation: stopping a turn (or a fatal turn error)
+  no longer kills running subagents — TaskStop and the task card stay the
+  explicit cancel — and stopped, aborted or restart-interrupted delegations
+  can now be continued with `Task.resume`.
+- Show background work while the session is idle: a sidebar status dot and a
+  chip above the composer count the subagents still running.
+
 ## Android companion update
 
 - Cache each conversation's recent transcript on the phone and resume from the

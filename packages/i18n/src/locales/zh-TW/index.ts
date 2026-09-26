@@ -460,6 +460,8 @@ export const zhTW = {
     subagentsFinishedWithWarnings_other: "Subagent 完成，但存在警告",
     subagentCount_one: "{{count}} 個 Subagent",
     subagentCount_other: "{{count}} 個 Subagent",
+    backgroundSubagents_one: "{{count}} 個 Subagent 背景執行中",
+    backgroundSubagents_other: "{{count}} 個 Subagent 背景執行中",
     subagentFinishedCount: "已完成 {{finished}}/{{total}}",
     subagentCreating: "正在建立子智能體…",
     subagentStatus: {

@@ -5064,3 +5064,28 @@ Markdown 源码，不是 `text/html` 负载；对禁用行内 HTML 的外部编�
   `includeNonChat` 补上被隐藏的端点且不丢 id、不重复），另有
   `scripts/e2e/provider-api-style.tsx` 与 `scripts/e2e/image-generation-ui.tsx`
   探针——它们不再点击「管理模型」。
+
+## 2026-09-26 —— 委托脱离回合后台运行，并在会话空闲时唤醒（D628）
+
+- 修订 D328 / D352 与 ADR 0089；记录于
+  `docs/adr/detached-delegation-and-wake.md`。后台委托不再让父级回合保持打开：
+  父级停止调用工具时照常发出 `turn_end` / `agent_end`，
+  `AgentStatus.isRunning` 不再计入运行中的委托，可选的
+  `AgentStatus.backgroundDelegations` 计数供侧栏状态点与空闲会话芯片使用。回合
+  期间已结算的报告在该回合边界注入一次（每条记录单次交付、合并上限
+  `MAX_TASKWAIT_RESULT_CHARS`、附仍在运行者的心跳）；回合 epoch 不再限制交付。
+- 会话空闲时的结算经 Host 队列（`session.queuePush`，D386）排入一个唤醒回合：
+  队列内容是稳定的 `Subagent reports ready:` 标记加已结算 id，以这些 id 幂等，
+  一次排队的唤醒服务其后所有结算。唤醒回合预检按精确前缀识别标记——绝不对任意
+  用户文本宽松匹配——并把未交付报告展开进提示，报告只在预检通过后记为已交付。
+- Stop 语义：用户 Stop 与父级终态错误只结束父级回合；委托继续运行，
+  `TaskStop`（或任务卡片）仍是显式取消。只有运行时销毁会中止委托并把它们结算为
+  `aborted`。新提示收养运行中的委托，并发上限计入它们。每个已结算状态——
+  `completed`、`failed`、`timed_out`、`stopped`、`aborted` 以及重启重建的
+  `interrupted`——都可经 `Task.resume` 续跑；委托不跨应用重启存续，唤醒只在
+  应用运行期间生效。
+- 覆盖：`packages/agent-runtime/src/runtime.test.ts`（“detached delegation and
+  wake (D628)”及重塑后的 Stop/错误/边界用例）、`delegation-chain.test.ts`、
+  `delegation-history.test.ts`，更新后的
+  `apps/desktop/test/sidebar-session-status.test.mjs`；E2E 计划场景
+  `E2E-SUBAGENT-detached-wake`。

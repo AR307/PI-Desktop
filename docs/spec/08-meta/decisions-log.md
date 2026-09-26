@@ -7155,3 +7155,35 @@ must keep splitting are covered by `markdown-blocks.test.mjs`.
   duplicating an id), plus the `scripts/e2e/provider-api-style.tsx` and
   `scripts/e2e/image-generation-ui.tsx` probes, which no longer click Manage
   models.
+
+## 2026-09-26 — Delegates detach from the turn and wake the idle session (D628)
+
+- Amends D328 / D352 and ADR 0089; recorded in
+  `docs/adr/detached-delegation-and-wake.md`. Background delegates no longer
+  hold the parent turn open: when the parent stops calling tools, `turn_end` /
+  `agent_end` are emitted, `AgentStatus.isRunning` stops counting running
+  delegates, and the optional `AgentStatus.backgroundDelegations` count carries
+  them for the sidebar dot and the idle-session chip. Reports that settled
+  during the turn are injected once at that turn's boundary (single delivery
+  shot per record, `MAX_TASKWAIT_RESULT_CHARS` bound, heartbeat for the rest);
+  turn epochs no longer gate delivery.
+- A settlement while the session is idle queues one wake turn through the
+  host-owned queue (`session.queuePush`, D386): the queued content is the
+  stable `Subagent reports ready:` marker plus the settled ids, idempotent on
+  those ids, and one queued wake serves every settlement until a turn consumes
+  it. The wake turn's preflight recognizes the exact marker prefix — never
+  loose matching over user text — and expands the prompt with the undelivered
+  reports, marking them delivered only after preflight passes.
+- Stop semantics: user Stop and terminal parent errors end only the parent
+  turn; delegates keep running and `TaskStop` (or the Task card) stays the
+  explicit cancel. Only runtime disposal aborts delegates, settling them as
+  `aborted`. New prompts adopt running delegates, and the concurrency cap
+  counts them. Every settled status — `completed`, `failed`, `timed_out`,
+  `stopped`, `aborted`, and the restart-rebuilt `interrupted` — is resumable
+  through `Task.resume`; delegates do not survive an app restart, so the wake
+  applies only while the app runs.
+- Covered by `packages/agent-runtime/src/runtime.test.ts` ("detached
+  delegation and wake (D628)" plus the reshaped stop/error/boundary tests),
+  `delegation-chain.test.ts`, `delegation-history.test.ts`, and the updated
+  `apps/desktop/test/sidebar-session-status.test.mjs`; scenario
+  `E2E-SUBAGENT-detached-wake` in the E2E plan.

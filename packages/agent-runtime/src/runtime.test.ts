@@ -6743,7 +6743,13 @@ describe("DesktopAgentRuntime subagents", () => {
       await taskTool(runtime).execute(id, { agent: "explorer", task: "Search.", model: "new/new-model" });
     }
     expect(subagentRuns.calls).toHaveLength(2);
-    expect(host.call).toHaveBeenCalledTimes(1);
+    // Settlements may queue a wake push (D628); only the authorization RPC
+    // proves the cache, so count that method alone.
+    expect(
+      host.call.mock.calls.filter(
+        ([method]) => method === "provider.resolveSubagentModel",
+      ),
+    ).toHaveLength(1);
     expect((runtime as any).availableSubagentModelKeys()).toEqual(["new/new-model"]);
     expect((runtime as any).subagentModelKeys.has("new/new-model")).toBe(false);
     expect(runtimeMatches(runtime)).toBe(true);
@@ -7455,7 +7461,7 @@ describe("DesktopAgentRuntime subagents", () => {
     await runtime.dispose();
   });
 
-  it("aborts running delegates on user abort or dispose, not on parent idle", async () => {
+  it("keeps delegates running through user Stop; only dispose aborts them", async () => {
     const runtime = createRuntime({ subagents: [explorer] });
     subagentRuns.calls.length = 0;
     subagentRuns.instances.length = 0;
@@ -7469,7 +7475,15 @@ describe("DesktopAgentRuntime subagents", () => {
     });
     const delegationId = (started.details as any).delegationId as string;
 
+    // User Stop ends the parent turn only; the delegate detaches and keeps
+    // working in the background (D628). TaskStop stays the explicit cancel.
     await runtime.abort();
+    expect((runtime as any).delegations.get(delegationId).status).toBe(
+      "running",
+    );
+    expect((runtime as any).runningDelegations()).toHaveLength(1);
+
+    await runtime.dispose();
     await vi.waitFor(() => {
       expect((runtime as any).delegations.get(delegationId).status).toBe(
         "aborted",
@@ -7478,10 +7492,325 @@ describe("DesktopAgentRuntime subagents", () => {
     expect((runtime as any).runningDelegations()).toHaveLength(0);
 
     subagentRuns.deferred = false;
-    await runtime.dispose();
   });
 
-  it("aborts leftover delegates on parent rate-limit exhaustion so the session can continue", async () => {
+  describe("detached delegation and wake (D628)", () => {
+    const WAKE_PREFIX = "Subagent reports ready:";
+
+    it("emits turn_end and agent_end while delegates run and stops counting them as busy", async () => {
+      const onEvent = vi.fn();
+      const runtime = createRuntime({ subagents: [explorer], onEvent });
+      subagentRuns.calls.length = 0;
+      subagentRuns.instances.length = 0;
+      subagentRuns.deferred = true;
+      subagentRuns.resolveRun = undefined;
+      try {
+        await taskTool(runtime).execute("task-1", {
+          agent: "explorer",
+          task: "Find it.",
+        });
+
+        await (runtime as any).handleAgentEvent({ type: "turn_end" });
+        await (runtime as any).handleAgentEvent({ type: "agent_end", messages: [] });
+
+        const events = onEvent.mock.calls.map(
+          ([envelope]) => (envelope as any).event.type,
+        );
+        expect(events).toContain("turn_end");
+        expect(events).toContain("agent_end");
+        const status = runtime.getStatus();
+        expect(status.isRunning).toBe(false);
+        expect(status.backgroundDelegations).toBe(1);
+      } finally {
+        subagentRuns.deferred = false;
+        await runtime.dispose();
+      }
+    });
+
+    it("queues one coalesced wake turn when delegates settle while the session is idle", async () => {
+      const host = {
+        call: vi.fn(async (_method: string, _params?: Record<string, unknown>) => ({ id: "queued-wake" })),
+        onNotification: vi.fn(() => () => {}),
+      };
+      const runtime = createRuntime({ subagents: [explorer], host });
+      subagentRuns.calls.length = 0;
+      subagentRuns.instances.length = 0;
+      subagentRuns.deferred = true;
+      subagentRuns.resolveRun = undefined;
+      try {
+        const first = await taskTool(runtime).execute("task-1", {
+          agent: "explorer",
+          task: "Find it.",
+        });
+        const second = await taskTool(runtime).execute("task-2", {
+          agent: "explorer",
+          task: "Find the other one.",
+        });
+        const firstId = (first.details as any).delegationId as string;
+        const secondId = (second.details as any).delegationId as string;
+        host.call.mockClear();
+
+        subagentRuns.resolveRun!({
+          agentName: "explorer",
+          status: "completed",
+          report: "first report",
+          turns: 1,
+          toolCalls: 1,
+        });
+        subagentRuns.resolveRun!({
+          agentName: "explorer",
+          status: "completed",
+          report: "second report",
+          turns: 1,
+          toolCalls: 1,
+        });
+        await vi.waitFor(() => {
+          expect((runtime as any).delegations.get(secondId).status).toBe(
+            "completed",
+          );
+        });
+
+        const pushes = host.call.mock.calls.filter(
+          ([method]) => method === "session.queuePush",
+        );
+        expect(pushes).toHaveLength(1);
+        const params = pushes[0][1] as Record<string, unknown>;
+        expect(params.sessionId).toBe("session-1");
+        expect(String(params.content).startsWith(WAKE_PREFIX)).toBe(true);
+        expect(String(params.content)).toContain(firstId);
+        expect(String(params.idempotencyKey)).toContain(firstId);
+      } finally {
+        subagentRuns.deferred = false;
+        await runtime.dispose();
+      }
+    });
+
+    it("does not queue a wake for stopped delegates", async () => {
+      const host = {
+        call: vi.fn(async (_method: string, _params?: Record<string, unknown>) => ({ id: "queued-wake" })),
+        onNotification: vi.fn(() => () => {}),
+      };
+      const runtime = createRuntime({ subagents: [explorer], host });
+      subagentRuns.calls.length = 0;
+      subagentRuns.instances.length = 0;
+      subagentRuns.deferred = true;
+      subagentRuns.resolveRun = undefined;
+      try {
+        const started = await taskTool(runtime).execute("task-1", {
+          agent: "explorer",
+          task: "Find it.",
+        });
+        const delegationId = (started.details as any).delegationId as string;
+        host.call.mockClear();
+        const stop = (runtime as any).agent.state.tools.find(
+          (tool: any) => tool.name === "TaskStop",
+        );
+        await stop.execute("stop-1", { delegationIds: [delegationId] });
+        await vi.waitFor(() => {
+          expect((runtime as any).delegations.get(delegationId).status).toBe(
+            "stopped",
+          );
+        });
+        const pushes = host.call.mock.calls.filter(
+          ([method]) => method === "session.queuePush",
+        );
+        expect(pushes).toHaveLength(0);
+      } finally {
+        subagentRuns.deferred = false;
+        await runtime.dispose();
+      }
+    });
+
+    it("injects undelivered reports once at the wake turn preflight", async () => {
+      const host = {
+        call: vi.fn(async (_method: string, _params?: Record<string, unknown>) => ({ id: "queued-wake" })),
+        onNotification: vi.fn(() => () => {}),
+      };
+      const runtime = createRuntime({ subagents: [explorer], host });
+      subagentRuns.calls.length = 0;
+      subagentRuns.instances.length = 0;
+      subagentRuns.deferred = true;
+      subagentRuns.resolveRun = undefined;
+      try {
+        const started = await taskTool(runtime).execute("task-1", {
+          agent: "explorer",
+          task: "Find it.",
+        });
+        const delegationId = (started.details as any).delegationId as string;
+        subagentRuns.resolveRun!({
+          agentName: "explorer",
+          status: "completed",
+          report: "src/app.ts:12 misses the null check.",
+          turns: 1,
+          toolCalls: 1,
+        });
+        await vi.waitFor(() => {
+          expect((runtime as any).delegations.get(delegationId).status).toBe(
+            "completed",
+          );
+        });
+
+        const agentPrompt = vi.fn(async (_text?: string) => undefined);
+        (runtime as any).agent.prompt = agentPrompt;
+        (runtime as any).agent.waitForIdle = vi.fn(async () => undefined);
+        await runtime.prompt(
+          `${WAKE_PREFIX} ${delegationId}`,
+          "wake-user",
+          "wake-turn",
+        );
+        expect(agentPrompt).toHaveBeenCalledTimes(1);
+        const delivered = String(agentPrompt.mock.calls[0][0]);
+        expect(delivered.startsWith(WAKE_PREFIX)).toBe(true);
+        expect(delivered).toContain("src/app.ts:12 misses the null check.");
+        expect((runtime as any).delegations.get(delegationId).reportDelivered).toBe(
+          true,
+        );
+
+        // Single shot: a second wake turn does not replay the report.
+        await (runtime as any).handleAgentEvent({ type: "agent_end", messages: [] });
+        await runtime.prompt(
+          `${WAKE_PREFIX} ${delegationId}`,
+          "wake-user-2",
+          "wake-turn-2",
+        );
+        expect(agentPrompt).toHaveBeenCalledTimes(2);
+        expect(String(agentPrompt.mock.calls[1][0])).not.toContain(
+          "src/app.ts:12 misses the null check.",
+        );
+      } finally {
+        subagentRuns.deferred = false;
+        await runtime.dispose();
+      }
+    });
+
+    it("delivers reports settled in earlier turns at the next turn boundary", async () => {
+      const host = {
+        call: vi.fn(async (_method: string, _params?: Record<string, unknown>) => ({ id: "queued-wake" })),
+        onNotification: vi.fn(() => () => {}),
+      };
+      const runtime = createRuntime({ subagents: [explorer], host });
+      subagentRuns.calls.length = 0;
+      subagentRuns.instances.length = 0;
+      subagentRuns.deferred = true;
+      subagentRuns.resolveRun = undefined;
+      try {
+        const started = await taskTool(runtime).execute("task-1", {
+          agent: "explorer",
+          task: "Find it.",
+        });
+        const delegationId = (started.details as any).delegationId as string;
+        subagentRuns.resolveRun!({
+          agentName: "explorer",
+          status: "completed",
+          report: "src/app.ts:12 misses the null check.",
+          turns: 1,
+          toolCalls: 1,
+        });
+        await vi.waitFor(() => {
+          expect((runtime as any).delegations.get(delegationId).status).toBe(
+            "completed",
+          );
+        });
+
+        // An ordinary user prompt that merely mentions the marker text is not
+        // a wake turn: nothing is injected into its own text, and the report
+        // arrives through the boundary delivery instead (relaxed epochs).
+        const agentPrompt = vi.fn(async (_text?: string) => undefined);
+        (runtime as any).agent.prompt = agentPrompt;
+        (runtime as any).agent.waitForIdle = vi.fn(async () => undefined);
+        const text = `Please explain what "${WAKE_PREFIX}" means.`;
+        await runtime.prompt(text, "user-1", "turn-1");
+
+        expect(agentPrompt).toHaveBeenCalledTimes(2);
+        expect(String(agentPrompt.mock.calls[0][0])).toBe(text);
+        const delivered = String(agentPrompt.mock.calls[1][0]);
+        expect(delivered).toContain("src/app.ts:12 misses the null check.");
+        expect(delivered).toContain("Integrate their reports");
+        expect((runtime as any).delegations.get(delegationId).reportDelivered).toBe(
+          true,
+        );
+      } finally {
+        subagentRuns.deferred = false;
+        await runtime.dispose();
+      }
+    });
+
+    it("adopts running delegates on a new prompt instead of aborting them", async () => {
+      const runtime = createRuntime({ subagents: [explorer] });
+      subagentRuns.calls.length = 0;
+      subagentRuns.instances.length = 0;
+      subagentRuns.deferred = true;
+      subagentRuns.resolveRun = undefined;
+      try {
+        const started = await taskTool(runtime).execute("task-1", {
+          agent: "explorer",
+          task: "Find it.",
+        });
+        const delegationId = (started.details as any).delegationId as string;
+
+        (runtime as any).agent.prompt = vi.fn(async () => undefined);
+        (runtime as any).agent.waitForIdle = vi.fn(async () => undefined);
+        await runtime.prompt("hello", "user-1", "turn-1");
+
+        expect((runtime as any).delegations.get(delegationId).status).toBe(
+          "running",
+        );
+        expect((runtime as any).runningDelegations()).toHaveLength(1);
+
+        // The adopted delegate still occupies a concurrency slot.
+        for (let index = 1; index < MAX_SUBAGENT_CONCURRENCY; index += 1) {
+          await taskTool(runtime).execute(`task-${index + 1}`, {
+            agent: "explorer",
+            task: "Find more.",
+          });
+        }
+        const over = await taskTool(runtime).execute("task-over", {
+          agent: "explorer",
+          task: "Find too many.",
+        });
+        expect(over.content[0].text).toContain(
+          `${MAX_SUBAGENT_CONCURRENCY} subagents are already running`,
+        );
+      } finally {
+        subagentRuns.deferred = false;
+        await runtime.dispose();
+      }
+    });
+
+    it("marks stopped records as resumable in TaskList", async () => {
+      const runtime = createRuntime({ subagents: [explorer] });
+      subagentRuns.calls.length = 0;
+      subagentRuns.instances.length = 0;
+      subagentRuns.deferred = true;
+      subagentRuns.resolveRun = undefined;
+      try {
+        const started = await taskTool(runtime).execute("task-1", {
+          agent: "explorer",
+          task: "Find it.",
+        });
+        const delegationId = (started.details as any).delegationId as string;
+        const stop = (runtime as any).agent.state.tools.find(
+          (tool: any) => tool.name === "TaskStop",
+        );
+        await stop.execute("stop-1", { delegationIds: [delegationId] });
+        await vi.waitFor(() => {
+          expect((runtime as any).delegations.get(delegationId).status).toBe(
+            "stopped",
+          );
+        });
+        const list = (runtime as any).agent.state.tools.find(
+          (tool: any) => tool.name === "TaskList",
+        );
+        const listed = await list.execute("list-1", {});
+        expect(listed.content[0].text).toContain("(resumable)");
+      } finally {
+        subagentRuns.deferred = false;
+        await runtime.dispose();
+      }
+    });
+  });
+
+  it("keeps delegates running through parent rate-limit exhaustion and frees the session", async () => {
     const onEvent = vi.fn();
     const runtime = createRuntime({ subagents: [explorer], onEvent });
     subagentRuns.calls.length = 0;
@@ -7534,24 +7863,28 @@ describe("DesktopAgentRuntime subagents", () => {
     expect(events.some((event) => event.type === "agent_end")).toBe(true);
     expect(runtime.getStatus().isRunning).toBe(false);
 
-    await vi.waitFor(() => {
-      expect((runtime as any).delegations.get(delegationId).status).toBe(
-        "aborted",
-      );
-    });
+    // The fatal parent error no longer takes the delegate down with it: the
+    // run detaches and its report arrives through the wake queue (D628).
+    expect((runtime as any).delegations.get(delegationId).status).toBe(
+      "running",
+    );
 
     const prompt = vi.fn(async () => undefined);
     (runtime as any).agent.prompt = prompt;
     (runtime as any).agent.waitForIdle = vi.fn(async () => undefined);
-    await (runtime as any).resumeAfterDelegations();
+    await (runtime as any).deliverSettledDelegationReports();
     expect(prompt).not.toHaveBeenCalled();
 
     subagentRuns.deferred = false;
     await runtime.dispose();
   });
 
-  it("feeds finished reports back after the parent run ends", async () => {
-    const runtime = createRuntime({ subagents: [explorer] });
+  it("does not hold the turn open for running delegates at the turn tail", async () => {
+    const host = {
+      call: vi.fn(async (_method: string, _params?: Record<string, unknown>) => ({ id: "queued-wake" })),
+      onNotification: vi.fn(() => () => {}),
+    };
+    const runtime = createRuntime({ subagents: [explorer], host });
     subagentRuns.calls.length = 0;
     subagentRuns.instances.length = 0;
     subagentRuns.deferred = true;
@@ -7562,12 +7895,22 @@ describe("DesktopAgentRuntime subagents", () => {
     (runtime as any).agent.prompt = prompt;
     (runtime as any).agent.waitForIdle = waitForIdle;
 
-    await tool.execute("task-1", {
+    const started = await tool.execute("task-1", {
       agent: "explorer",
       task: "Find it.",
     });
+    const delegationId = (started.details as any).delegationId as string;
 
-    const resume = (runtime as any).resumeAfterDelegations();
+    // The boundary delivery returns immediately while the delegate still
+    // works; nothing is injected and the turn is free to close (D628).
+    await (runtime as any).deliverSettledDelegationReports();
+    expect(prompt).not.toHaveBeenCalled();
+    expect((runtime as any).delegations.get(delegationId).status).toBe(
+      "running",
+    );
+
+    // The report settles later, while the session is idle: the runtime queues
+    // a wake turn instead of restarting the parent itself.
     subagentRuns.resolveRun!({
       agentName: "explorer",
       status: "completed",
@@ -7575,14 +7918,15 @@ describe("DesktopAgentRuntime subagents", () => {
       turns: 2,
       toolCalls: 3,
     });
-    await resume;
-
-    expect(prompt).toHaveBeenCalledTimes(1);
-    const delivered = String(
-      (prompt.mock.calls as unknown as unknown[][])[0]?.[0] ?? "",
+    await vi.waitFor(() => {
+      expect((runtime as any).delegations.get(delegationId).status).toBe(
+        "completed",
+      );
+    });
+    const pushes = host.call.mock.calls.filter(
+      ([method]) => method === "session.queuePush",
     );
-    expect(delivered).toContain("src/app.ts:12 misses the null check.");
-    expect(delivered).toContain("Integrate their reports");
+    expect(pushes).toHaveLength(1);
 
     subagentRuns.deferred = false;
     await runtime.dispose();
@@ -7618,21 +7962,21 @@ describe("DesktopAgentRuntime subagents", () => {
         "completed",
       );
     });
-    expect((runtime as any).keepTurnOpenForDelegates()).toBe(true);
+    expect((runtime as any).holdTurnForUndeliveredReports()).toBe(true);
 
     // …and the parent then idles without a TaskWait. The settled report is
     // "done and unpublished", not "unfinished": it must still reach the parent.
-    await (runtime as any).resumeAfterDelegations();
+    await (runtime as any).deliverSettledDelegationReports();
 
     expect(prompt).toHaveBeenCalledTimes(1);
     const delivered = String(
       (prompt.mock.calls as unknown as unknown[][])[0]?.[0] ?? "",
     );
     expect(delivered).toContain("src/app.ts:12 misses the null check.");
-    expect((runtime as any).keepTurnOpenForDelegates()).toBe(false);
+    expect((runtime as any).holdTurnForUndeliveredReports()).toBe(false);
 
-    // Single shot: a later idle does not replay it.
-    await (runtime as any).resumeAfterDelegations();
+    // Single shot: a later boundary delivery does not replay it.
+    await (runtime as any).deliverSettledDelegationReports();
     expect(prompt).toHaveBeenCalledTimes(1);
 
     subagentRuns.deferred = false;
@@ -7673,9 +8017,9 @@ describe("DesktopAgentRuntime subagents", () => {
 
     const result = await wait.execute("wait-1", { delegationIds: [delegationId] });
     expect(result.content[0].text).toContain("src/app.ts:12 misses the null check.");
-    expect((runtime as any).keepTurnOpenForDelegates()).toBe(false);
+    expect((runtime as any).holdTurnForUndeliveredReports()).toBe(false);
 
-    await (runtime as any).resumeAfterDelegations();
+    await (runtime as any).deliverSettledDelegationReports();
     expect(prompt).not.toHaveBeenCalled();
 
     subagentRuns.deferred = false;
@@ -7723,9 +8067,9 @@ describe("DesktopAgentRuntime subagents", () => {
     expect(result.content[0].text).toContain("more result");
     expect((runtime as any).delegations.get(ids[0]).reportDelivered).toBe(true);
     expect((runtime as any).delegations.get(ids[4]).reportDelivered).toBe(false);
-    expect((runtime as any).keepTurnOpenForDelegates()).toBe(true);
+    expect((runtime as any).holdTurnForUndeliveredReports()).toBe(true);
 
-    await (runtime as any).resumeAfterDelegations();
+    await (runtime as any).deliverSettledDelegationReports();
 
     expect(prompt).toHaveBeenCalledTimes(1);
     const delivered = String(
@@ -7733,7 +8077,7 @@ describe("DesktopAgentRuntime subagents", () => {
     );
     expect(delivered).toContain("report-4-");
     expect((runtime as any).delegations.get(ids[4]).reportDelivered).toBe(true);
-    expect((runtime as any).keepTurnOpenForDelegates()).toBe(false);
+    expect((runtime as any).holdTurnForUndeliveredReports()).toBe(false);
 
     subagentRuns.deferred = false;
     await runtime.dispose();
@@ -8229,13 +8573,42 @@ describe("DesktopAgentRuntime subagents", () => {
       await runtime.dispose();
     });
 
-    it("refuses to resume a chain a restart rebuilt from a stopped Task row", async () => {
+    it.each(["stopped", "aborted"])(
+      "resumes a chain a restart rebuilt from a %s Task row (D628)",
+      async (status) => {
+        const history: UiMessage[] = [
+          restartedTaskRow("task-1", "del-1", { status }),
+          delegateRow("child-1", "task-1"),
+        ];
+        const runtime = createRuntime({ subagents: [explorer], history });
+        subagentRuns.calls.length = 0;
+        subagentRuns.result = undefined;
+        subagentRuns.deferred = false;
+
+        const result = await startTask(runtime, "task-2", {
+          agent: "explorer",
+          task: "Continue.",
+          resume: "del-1",
+        });
+
+        expect((result.details as any).error).toBeUndefined();
+        expect((result.details as any).resumedFrom).toBe("del-1");
+        expect(subagentRuns.calls).toHaveLength(1);
+        expect(subagentRuns.calls[0].initialMessages).toBeDefined();
+        await runtime.dispose();
+      },
+    );
+
+    it("resumes a chain a restart rebuilt from a Task row still marked running", async () => {
+      // The app died while the delegate worked: the persisted row still says
+      // "running" and the rebuild reads it as "interrupted" (ADR 0279 §12).
       const history: UiMessage[] = [
-        restartedTaskRow("task-1", "del-1", { status: "stopped" }),
+        restartedTaskRow("task-1", "del-1", { status: "running" }),
         delegateRow("child-1", "task-1"),
       ];
       const runtime = createRuntime({ subagents: [explorer], history });
       subagentRuns.calls.length = 0;
+      subagentRuns.result = undefined;
       subagentRuns.deferred = false;
 
       const result = await startTask(runtime, "task-2", {
@@ -8244,11 +8617,31 @@ describe("DesktopAgentRuntime subagents", () => {
         resume: "del-1",
       });
 
-      expect(String((result.details as any).error)).toContain(
-        'ended as "stopped"',
-      );
-      expect(String((result.details as any).error)).toContain("cannot be resumed");
-      expect(subagentRuns.calls).toHaveLength(0);
+      expect((result.details as any).error).toBeUndefined();
+      expect((result.details as any).resumedFrom).toBe("del-1");
+      expect(subagentRuns.calls).toHaveLength(1);
+      await runtime.dispose();
+    });
+
+    it("resumes a chain whose restart row recorded no status", async () => {
+      const history: UiMessage[] = [
+        restartedTaskRow("task-1", "del-1"),
+        delegateRow("child-1", "task-1"),
+      ];
+      const runtime = createRuntime({ subagents: [explorer], history });
+      subagentRuns.calls.length = 0;
+      subagentRuns.result = undefined;
+      subagentRuns.deferred = false;
+
+      const result = await startTask(runtime, "task-2", {
+        agent: "explorer",
+        task: "Continue.",
+        resume: "del-1",
+      });
+
+      expect((result.details as any).error).toBeUndefined();
+      expect((result.details as any).resumedFrom).toBe("del-1");
+      expect(subagentRuns.calls).toHaveLength(1);
       await runtime.dispose();
     });
 
@@ -10004,33 +10397,36 @@ describe("DesktopAgentRuntime delegation wait settlement safety", () => {
 
       expect(String((started.details as any)?.error)).toMatch(/initialize/i);
       expect((runtime as any).runningDelegations()).toHaveLength(0);
-      await expect((runtime as any).resumeAfterDelegations()).resolves.toBeUndefined();
+      await expect(
+        (runtime as any).deliverSettledDelegationReports(),
+      ).resolves.toBeUndefined();
     } finally {
       subagentRuns.constructorError = undefined;
       await runtime.dispose();
     }
   });
 
-  it("wakes the parent even when settlement publication throws", async () => {
-    const runtime = createRuntime({ subagents: [explorer] });
+  it("still queues the wake when settlement publication throws", async () => {
+    const host = {
+      call: vi.fn(async (_method: string, _params?: Record<string, unknown>) => ({ id: "queued-wake" })),
+      onNotification: vi.fn(() => () => {}),
+    };
+    const runtime = createRuntime({ subagents: [explorer], host });
     subagentRuns.calls.length = 0;
     subagentRuns.instances.length = 0;
     subagentRuns.deferred = true;
     subagentRuns.resolveRun = undefined;
-    const prompt = vi.fn(async () => undefined);
-    (runtime as any).agent.prompt = prompt;
-    (runtime as any).agent.waitForIdle = vi.fn(async () => undefined);
     try {
       const started = await taskTool(runtime).execute("task-publish-failed", {
         agent: "explorer",
         task: "Find it.",
       });
       const delegationId = (started.details as any).delegationId as string;
+      host.call.mockClear();
       vi.spyOn(runtime as any, "publishDelegationSettlement").mockImplementation(() => {
         throw new Error("event publication failed");
       });
 
-      const resume = (runtime as any).resumeAfterDelegations();
       subagentRuns.resolveRun!({
         agentName: "explorer",
         status: "completed",
@@ -10038,39 +10434,21 @@ describe("DesktopAgentRuntime delegation wait settlement safety", () => {
         turns: 1,
         toolCalls: 1,
       });
-      await resume;
+      await vi.waitFor(() => {
+        expect((runtime as any).delegations.get(delegationId).status).toBe(
+          "completed",
+        );
+      });
 
-      expect((runtime as any).delegations.get(delegationId).status).toBe("completed");
-      expect(prompt).toHaveBeenCalledOnce();
+      const pushes = host.call.mock.calls.filter(
+        ([method]) => method === "session.queuePush",
+      );
+      expect(pushes).toHaveLength(1);
     } finally {
       subagentRuns.deferred = false;
       await runtime.dispose();
     }
   });
-
-  it("lets user Stop interrupt auto-resume even if a delegate ignores abort", async () => {
-    const runtime = createRuntime({ subagents: [explorer] });
-    subagentRuns.calls.length = 0;
-    subagentRuns.instances.length = 0;
-    subagentRuns.deferred = true;
-    subagentRuns.ignoreAbort = true;
-    subagentRuns.resolveRun = undefined;
-    try {
-      await taskTool(runtime).execute("task-stop-wait", {
-        agent: "explorer",
-        task: "Find it.",
-      });
-      const resume = (runtime as any).resumeAfterDelegations();
-      await Promise.resolve();
-
-      await runtime.abort();
-      await resume;
-    } finally {
-      subagentRuns.ignoreAbort = false;
-      subagentRuns.deferred = false;
-      await runtime.dispose();
-    }
-  }, 1_000);
 });
 
 /**

@@ -143,6 +143,12 @@ export type AgentStatus = {
   planningState?: PlanningState;
   pendingPlanId?: string;
   activity?: AgentActivity;
+  /**
+   * Delegations still running detached from any turn (D628). They do not make
+   * the session busy — `isRunning` stays false while only delegates work — but
+   * surfaces can show that background work continues. Omitted when zero.
+   */
+  backgroundDelegations?: number;
 };
 
 /** Bounded provider diagnostics shown while the runtime waits before retrying. */

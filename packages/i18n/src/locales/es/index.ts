@@ -456,6 +456,8 @@ export const es = {
     "subagentsFinishedWithWarnings_other": "Subagentes terminados con advertencias",
     "subagentCount_one": "{{count}} subagente",
     "subagentCount_other": "{{count}} subagentes",
+    "backgroundSubagents_one": "{{count}} subagente ejecutándose en segundo plano",
+    "backgroundSubagents_other": "{{count}} subagentes ejecutándose en segundo plano",
     "subagentFinishedCount": "{{finished}}/{{total}} finalizado",
     "subagentCreating": "Iniciando subagente…",
     "subagentStatus": {

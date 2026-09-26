@@ -460,6 +460,8 @@ export const zhCN = {
     subagentsFinishedWithWarnings_other: "Subagent 完成，但存在警告",
     subagentCount_one: "{{count}} 个 Subagent",
     subagentCount_other: "{{count}} 个 Subagent",
+    backgroundSubagents_one: "{{count}} 个 Subagent 后台运行中",
+    backgroundSubagents_other: "{{count}} 个 Subagent 后台运行中",
     subagentFinishedCount: "已完成 {{finished}}/{{total}}",
     subagentCreating: "正在创建子智能体…",
     subagentStatus: {

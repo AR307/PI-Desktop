@@ -93,23 +93,27 @@ describe("resolveResume", () => {
     });
   });
 
-  it("reports a settled chain whose status is not resumable", () => {
-    for (const status of ["stopped", "aborted", "interrupted"]) {
-      const registry = new DelegationChainRegistry();
-      start(registry, { delegateSessionId: "res-1", delegationId: "del-1" });
-      registry.settle("res-1", status);
-      expect(
-        registry.resolveResume({
-          resume: "del-1",
-          agentName: "explorer",
-          runningDelegationIds: NONE,
-        }),
-      ).toEqual({ ok: false, error: { kind: "not-resumable", status } });
-    }
+  it("reports a stale chain still marked running with no live record", () => {
+    const registry = new DelegationChainRegistry();
+    start(registry, { delegateSessionId: "res-1", delegationId: "del-1" });
+    expect(
+      registry.resolveResume({
+        resume: "del-1",
+        agentName: "explorer",
+        runningDelegationIds: NONE,
+      }),
+    ).toEqual({ ok: false, error: { kind: "not-resumable", status: "running" } });
   });
 
-  it("accepts every settled status a delegate can end on", () => {
-    for (const status of ["completed", "failed", "timed_out"]) {
+  it("accepts every settled status a delegate can end on (D628)", () => {
+    for (const status of [
+      "completed",
+      "failed",
+      "timed_out",
+      "stopped",
+      "aborted",
+      "interrupted",
+    ]) {
       const registry = new DelegationChainRegistry();
       start(registry, { delegateSessionId: "res-1", delegationId: "del-1" });
       registry.settle("res-1", status);
@@ -167,7 +171,7 @@ describe("resolveResume", () => {
 });
 
 describe("resumableList / promptBlock", () => {
-  it("excludes running, non-resumable and over-budget chains, newest first", () => {
+  it("excludes running and over-budget chains, newest first", () => {
     vi.useFakeTimers({ now: 1_700_000_000_000 });
     const registry = new DelegationChainRegistry();
     // One agent per excluded case: eviction is per agent, so a third settled
@@ -190,6 +194,7 @@ describe("resumableList / promptBlock", () => {
         lastActivityAt: 1_700_000_009_000,
       }),
     ]);
+    // Stopped chains are resumable (D628) and list like any settled chain.
     start(registry, {
       delegateSessionId: "res-d",
       delegationId: "del-d",
@@ -208,13 +213,13 @@ describe("resumableList / promptBlock", () => {
       registry
         .resumableList({ runningDelegationIds: new Set(["del-c"]) })
         .map((entry) => entry.latestDelegationId),
-    ).toEqual(["del-b", "del-a"]);
+    ).toEqual(["del-b", "del-d", "del-a"]);
     // A chain whose status is unknown is only held back while it is running.
     expect(
       registry
         .resumableList({ runningDelegationIds: NONE })
         .map((entry) => entry.latestDelegationId),
-    ).toEqual(["del-c", "del-b", "del-a"]);
+    ).toEqual(["del-c", "del-b", "del-d", "del-a"]);
   });
 
   it("prompts with the agent, the id, the objective and the files it read", () => {

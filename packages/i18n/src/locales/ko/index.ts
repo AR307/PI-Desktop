@@ -465,6 +465,8 @@ export const ko = {
     subagentsFinishedWithWarnings_other: "서브에이전트가 경고와 함께 완료됨",
     subagentCount_one: "서브에이전트 {{count}}개",
     subagentCount_other: "서브에이전트 {{count}}개",
+    backgroundSubagents_one: "서브에이전트 {{count}}개 백그라운드 실행 중",
+    backgroundSubagents_other: "서브에이전트 {{count}}개 백그라운드 실행 중",
     subagentFinishedCount: "{{finished}}/{{total}} 완료",
     subagentCreating: "하위 에이전트 생성 중…",
     subagentStatus: {

@@ -150,6 +150,10 @@ function clearLocalSessionState(
     delete runningSessions[id];
     const agentStatuses = { ...state.agentStatuses };
     delete agentStatuses[id];
+    const backgroundDelegations = withoutRecordKey(
+      state.backgroundDelegations,
+      id,
+    );
     const sessionOutcomes = { ...state.sessionOutcomes };
     delete sessionOutcomes[id];
     const queuedPrompts = withoutRecordKey(state.queuedPrompts, id);
@@ -176,6 +180,7 @@ function clearLocalSessionState(
       sessions,
       runningSessions,
       agentStatuses,
+      backgroundDelegations,
       sessionOutcomes,
       queuedPrompts,
       workPanelContexts,

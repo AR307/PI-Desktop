@@ -228,12 +228,27 @@ export function createEventsSlice({
         runtime.liveSessionTranscripts.add(envelope.sessionId);
       }
       if (event.type === "status") {
-        set((state) => ({
-          agentStatuses: {
-            ...state.agentStatuses,
-            [envelope.sessionId]: event.status,
-          },
-        }));
+        set((state) => {
+          const count = event.status.backgroundDelegations ?? 0;
+          return {
+            agentStatuses: {
+              ...state.agentStatuses,
+              [envelope.sessionId]: event.status,
+            },
+            // Kept separately from agentStatuses: detached delegates outlive
+            // the turn, so agent_end must not clear this map (D628).
+            backgroundDelegations:
+              count > 0
+                ? {
+                    ...state.backgroundDelegations,
+                    [envelope.sessionId]: count,
+                  }
+                : withoutRecordKey(
+                    state.backgroundDelegations,
+                    envelope.sessionId,
+                  ),
+          };
+        });
       }
       if (
         event.type === "agent_start" ||
