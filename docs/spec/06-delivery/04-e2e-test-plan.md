@@ -2339,20 +2339,20 @@ identify the platform validation still needed.
 - **Milestone**: M2
 - **Status**: Draft (run only in a capable environment when this surface changes)
 
-#### E2E-021b: Developer mode copies a conversation id and opens session scratch
+#### E2E-021b: Copy a conversation id without developer mode; gate scratch access
 
-- **Preconditions**: Developer mode is enabled. A session exists, including one
+- **Preconditions**: Developer mode is disabled. A session exists, including one
   whose scratch directory has not been created yet.
-- **Steps**: 1) Open a conversation overflow menu. 2) Confirm Copy conversation
-  ID and Open session path appear after Create branch and before Delete, and
-  that Copy session path is absent. 3) Choose Copy conversation ID and paste
-  the clipboard. 4) Choose Open session path. 5) Disable developer mode and
-  reopen the menu.
+- **Steps**: 1) Right-click a conversation or open its overflow menu. 2) Confirm
+  Copy conversation ID appears after Create branch and before Delete; Open
+  session path and Copy session path are absent. 3) Choose Copy conversation
+  ID and paste the clipboard. 4) Enable developer mode, reopen the menu and
+  choose Open session path. 5) Disable developer mode and reopen the menu.
 - **Expected**: The clipboard contains the exact session id. The system file
   manager opens `<data_dir>/scratch/<sessionId>/`, creating that directory if
   it was missing. The renderer does not send a filesystem path; Main opens
   only a resolved scratch directory for that session id. With developer mode
-  off, both actions are absent.
+  off, Copy conversation ID remains available and Open session path is absent.
 - **Specs linked**: `03-runtime/01-ipc-protocol.md`,
   `04-ux/08-component-spec.md`, `04-ux/06-settings-ia.md`
 - **Acceptance**: C (sessions), Quality (developer tools)

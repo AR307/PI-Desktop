@@ -737,8 +737,9 @@ system while preserving their different data ownership:
     `AppSettings.developerMode` value is `true`
   - the developer mode switch unlocks the Open console button, F12 on every
     platform, Ctrl+Shift+I on Windows/Linux, the macOS View-menu developer
-    tools item, Copy conversation ID / Open session path on the conversation
+    tools item, Open session path on the conversation
     overflow menu, and the Cloud sync / Remote Hosts destinations on the rail
+  - Copy conversation ID remains available with developer mode off
   - disabling developer mode closes an open console and disables or removes
     every entry point; Settings search indexes the card, switch, and console
     action

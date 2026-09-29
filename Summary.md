@@ -601,3 +601,11 @@ needed by an actual request rather than starting a repository-wide rewrite.
   20 native desktop/mobile checks, five ordinary-provider flows, targeted
   runtime/relay/locale tests, builds and types. Two source-confirmed baseline
   test inconsistencies and production/native-Android boundaries remain explicit.
+
+## 2026-09-30 - Conversation ID access
+
+- Restored Copy conversation ID in the sidebar context and overflow menu for
+  ordinary users. Only Open session path remains developer-only.
+- Updated the regression test and UX/E2E specifications. Confirmed the exact
+  session ID reaches the native clipboard from the actual Electron menu with
+  developer mode disabled; no credentials or session content are copied.

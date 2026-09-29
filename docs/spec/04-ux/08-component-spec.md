@@ -558,9 +558,9 @@ visually distinct from list content.
   project row.
 - Conversation overflow: pin/unpin, archive/restore, Create branch, delete.
   Create branch is disabled while that conversation is running; success
-  activates the independent child session and focuses the composer. When
-  developer mode is on, the menu also offers Copy conversation ID (clipboard)
-  and Open session path (the session scratch directory in the system file
+  activates the independent child session and focuses the composer. Copy
+  conversation ID (clipboard) is always available. Developer mode additionally
+  offers Open session path (the session scratch directory in the system file
   manager).
 - Pinned conversations appear once in a global section above Sessions and
   Projects, independent of date buckets, project collapse, retained tabs, and
@@ -1365,10 +1365,11 @@ near-zero duration. A folded group keeps its rows mounted, `aria-hidden`, and
   into an independent session. The child stays in the same project or
   standalone Sessions section and becomes active; later transcript/configuration changes
   do not affect the source. The action is disabled for a running source.
-- Copy conversation ID writes the durable session id to the clipboard. Open
+- Copy conversation ID is available without developer mode and writes the
+  durable session id to the clipboard. Open
   session path opens `<data_dir>/scratch/<sessionId>/` in the system file
-  manager, creating the directory if it does not exist yet. Both actions
-  appear only while developer mode is on.
+  manager, creating the directory if it does not exist yet. Only Open session
+  path requires developer mode.
 - Selecting a conversation with a different project first activates that
   project's workspace. A running turn in the previously selected session is
   not aborted.

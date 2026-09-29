@@ -2194,17 +2194,17 @@ export function Sidebar({
                 {t("nav.createBranch")}
               </button>
             ) : null}
+            <button
+              type="button"
+              role="menuitem"
+              data-action="copy-conversation-id"
+              onClick={() => void copyConversationId(session)}
+            >
+              <IconCopy size={14} />
+              {t("nav.copyConversationId")}
+            </button>
             {settings?.developerMode === true ? (
               <>
-                <button
-                  type="button"
-                  role="menuitem"
-                  data-action="copy-conversation-id"
-                  onClick={() => void copyConversationId(session)}
-                >
-                  <IconCopy size={14} />
-                  {t("nav.copyConversationId")}
-                </button>
                 <button
                   type="button"
                   role="menuitem"
