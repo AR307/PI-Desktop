@@ -597,3 +597,7 @@ needed by an actual request rather than starting a repository-wide rewrite.
   localized Continue control is actionable, including long mobile history.
 - Explicitly use the shared primary-button variant for Continue, avoiding the
   secondary hover fill that reduced text contrast in the light theme.
+- Recorded final candidate evidence in docs/response-recovery-acceptance.md:
+  20 native desktop/mobile checks, five ordinary-provider flows, targeted
+  runtime/relay/locale tests, builds and types. Two source-confirmed baseline
+  test inconsistencies and production/native-Android boundaries remain explicit.
