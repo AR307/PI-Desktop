@@ -595,3 +595,5 @@ needed by an actual request rather than starting a repository-wide rewrite.
   potentially earlier idle relay snapshot; cancellation waits for its abort row.
 - Bilingual screenshots wait for the startup surface to dismiss and verify the
   localized Continue control is actionable, including long mobile history.
+- Explicitly use the shared primary-button variant for Continue, avoiding the
+  secondary hover fill that reduced text contrast in the light theme.

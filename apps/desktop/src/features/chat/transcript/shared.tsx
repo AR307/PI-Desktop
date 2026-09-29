@@ -271,7 +271,7 @@ export function AssistantErrorMessage({ message }: { message: UiMessage }) {
             <IconChevronRight size={12} aria-hidden />
             {open ? t("chat.hideErrorDetails") : t("chat.showErrorDetails")}
           </button>
-          <Button type="button" className="copy-btn primary" disabled={continueDisabled} onClick={() => void continueTask()}>
+          <Button type="button" variant="primary" className="copy-btn primary" disabled={continueDisabled} onClick={() => void continueTask()}>
             {t("errors.action.continue")}
           </Button>
           {configurationError ? (
