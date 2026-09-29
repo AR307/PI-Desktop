@@ -257,6 +257,8 @@ fn parse_message(
         is_error: None,
         parent_tool_call_id: None,
         agent_name: None,
+        response_diagnostics: None,
+        assistant_replay: None,
         hosted_search: None,
         image_generation: None,
         session_message: None,

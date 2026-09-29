@@ -2518,6 +2518,8 @@ importConfirm: "İçe aktarılan uzantılar ajan sürecinde, ajanın kendi araç
     NETWORK_POLICY_BLOCKED: "Uygulamanın adres denetimi bu isteği engelledi. Proxy veya VPN kullanıyorsanız Ayarlar → Genel → Ağ bölümüne bakın.",
     TIMEOUT: "AI servisine istek zaman aşımına uğradı.",
     STREAM_FAILED: "Yanıt kesildi.",
+    MODEL_THINKING_ONLY: "Model yalnızca düşünce üretti, yanıt vermedi. İçerik korundu; Devam seçeneğini kullanın.",
+    MODEL_OUTPUT_TRUNCATED: "Sağlayıcının çıktı sınırına ulaşıldı. Kısmi yanıt korundu; Devam seçeneğini kullanın.",
     EMPTY_MODEL_RESPONSE:
       "Model iki tur üst üste hiçbir şey söylemeden bitirdi. Yeniden deneyin veya isteği başka türlü sorun.",
     MUTATION_RETRY_BUDGET_EXHAUSTED:

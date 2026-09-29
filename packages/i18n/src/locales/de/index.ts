@@ -2492,6 +2492,8 @@ sklm: {
     NETWORK_POLICY_BLOCKED: "Die Adressprüfung der App hat diese Anfrage blockiert. Bei Proxy oder VPN: Einstellungen → Allgemein → Netzwerk prüfen.",
     "TIMEOUT": "Bei der Anfrage an den KI-Anbieter ist eine Zeitüberschreitung aufgetreten.",
     "STREAM_FAILED": "Die Antwort wurde unterbrochen.",
+    MODEL_THINKING_ONLY: "Das Modell hat nur Überlegungen, aber keine Antwort geliefert. Der Inhalt bleibt erhalten; wählen Sie Fortsetzen.",
+    MODEL_OUTPUT_TRUNCATED: "Der Anbieter hat das Ausgabelimit erreicht. Der bisherige Inhalt bleibt erhalten; wählen Sie Fortsetzen.",
     "EMPTY_MODEL_RESPONSE": "Das Modell beendete seinen Zug zweimal hintereinander, ohne etwas zu sagen. Versuchen Sie es erneut oder formulieren Sie Ihre Anfrage um.",
     "MUTATION_RETRY_BUDGET_EXHAUSTED": "Die gleiche Bearbeitung schlug dreimal fehl, daher wurde dieser Zug abgebrochen, anstatt es erneut zu versuchen. Bitten Sie erneut, fortzufahren.",
     "CONTEXT_TOO_LARGE": "Dieser Chat ist nach der Kontextwiederherstellung immer noch zu lang. Kürzen Sie Ihre Nachricht oder starten Sie einen neuen Chat.",

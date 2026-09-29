@@ -2533,6 +2533,8 @@ importConfirm: "Imported extensions run inside the agent process with the same a
     NETWORK_POLICY_BLOCKED: "The app's address check blocked this request. Behind a proxy or VPN, check Settings → General → Network.",
     TIMEOUT: "The request to the AI provider timed out.",
     STREAM_FAILED: "The reply was interrupted.",
+    MODEL_THINKING_ONLY: "The model returned thinking but no answer. Your partial response is preserved; choose Continue to request an answer.",
+    MODEL_OUTPUT_TRUNCATED: "The provider reported its output limit was reached. Your partial response is preserved; choose Continue to proceed.",
     EMPTY_MODEL_RESPONSE:
       "The model finished its turn without saying anything, twice in a row. Try again, or rephrase your request.",
     MUTATION_RETRY_BUDGET_EXHAUSTED:

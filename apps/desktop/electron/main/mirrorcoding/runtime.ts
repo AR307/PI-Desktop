@@ -76,7 +76,7 @@ export function createMirrorCodingRuntime(deps: Dependencies) {
     const capabilities = capabilitiesFromModelConfig(modelConfig);
     return {
       id: providerId, name: provider.name, vendorKey: "mirrorcoding", authKind: "mirrorcoding",
-      modelId, ...binding, modelConfig, temperature: model.temperature,
+      modelId, ...binding, mirrorCodingGroupId: groupId, modelConfig, temperature: model.temperature,
       defaultThinkingLevel: model.defaultThinkingLevel,
       ...capabilities, supportedThinkingLevels: [...capabilities.supportedThinkingLevels],
     };

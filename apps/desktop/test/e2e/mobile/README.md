@@ -139,3 +139,14 @@ boundary. They do not establish that MirrorCoding has implemented or deployed
 the service. Joint MC acceptance must run separately against the MC team's
 local service using the [handoff contract](../../../../../docs/mirrorcoding-mobile-sync-requirements.md).
 Record those results separately from fixture runs and production deployment.
+
+## Native Messages response recovery
+
+Run `node apps/desktop/test/e2e/mobile/response-recovery.mjs` after the builds
+above. This uses a separate isolated profile and controlled native Messages
+upstream. It checks original MC model/group routing, adaptive max effort,
+thinking-only/truncated/interrupted/empty outcomes, explicit Continue across
+desktop restart, draft preservation, cancellation and bilingual light/dark
+screenshots on desktop and phone-sized Chromium. Artifacts and the candidate
+revision are recorded under `.artifacts/response-recovery-*`. This is not
+native Android or production MC/Kiro acceptance.

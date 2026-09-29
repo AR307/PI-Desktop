@@ -3,8 +3,8 @@ import type {
   MirrorCodingImageRoutes, MirrorCodingProvider, MirrorCodingProviderSync, ModelBinding,
 } from "@pi-desktop/shared";
 import { genericModelConfig, type ModelConfig } from "@pi-desktop/agent-runtime";
-import { modelConfigFromModelsDev, type ModelsDevCatalog } from "../models-dev-catalog";
-import { mirrorCodingChatRoute } from "./chat-route";
+import { catalogModelConfigFor, modelConfigFromModelsDev, type ModelsDevCatalog } from "../models-dev-catalog";
+import { isMirrorCodingClaudeModel, mirrorCodingChatRoute } from "./chat-route";
 
 export const ENDPOINTS = {
   "openai-response": { api: "openai-responses", style: "responses", path: "/v1/responses", prefix: "/v1" },
@@ -114,6 +114,11 @@ export function modelMetadata(catalog: ModelsDevCatalog, modelId: string): Model
     const native = catalog.findModel({ vendorKey, modelId });
     if (native?.providerKey === vendorKey) return { ...modelConfigFromModelsDev(native), api };
   }
+  // Use the established Messages capability resolver for catalog aliases as
+  // well as exact native records. Never guess an effort ladder from a name.
+  if (isMirrorCodingClaudeModel(modelId)) {
+    return catalogModelConfigFor(catalog, { vendorKey: "anthropic", apiStyle: "anthropic_messages", modelId });
+  }
   const known = catalog.findModel({ modelId });
   return known ? modelConfigFromModelsDev(known) : genericModelConfig(modelId, "");
 }
@@ -147,7 +152,7 @@ export function compileCatalog(catalog: MirrorCodingCatalog, modelsDev: ModelsDe
         const endpoint = mirrorCodingChatRoute(model.id, candidates.find((kind) => {
           const advertised = catalog.supportedEndpoints[kind];
           return model.image?.supportsChat !== false && model.supportedEndpointTypes.includes(kind) && advertised?.method === "POST" && advertised.path === ENDPOINTS[kind].path;
-        }));
+        }), model.image?.supportsChat !== false && model.supportedEndpointTypes.some(kind => kind in ENDPOINTS));
         // Image routes are only usable when the server supplied the image
         // capability object. Endpoint type names alone are not sufficient:
         // the capability carries the generation/reference path contract.

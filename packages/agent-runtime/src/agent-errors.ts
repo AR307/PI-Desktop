@@ -31,7 +31,7 @@ const CONTEXT_PATTERN =
   /context[ _-]?length|maximum context|context window|too many tokens|prompt is too long|input token count|exceeds the (?:maximum|model)|token limit/i;
 
 const STREAM_TERMINATION_PATTERN =
-  /\bterminated\b|stream ended without finish_reason|premature(?:ly)?\s+(?:closed|ended)|(?:stream|response).*(?:closed|interrupted)/i;
+  /\bterminated\b|stream ended (?:without|before)|premature(?:ly)?\s+(?:closed|ended)|(?:stream|response).*(?:closed|interrupted)/i;
 
 /** An adapter refusing a request option, e.g. "Custom fetch is not supported
  * by the Google Generative AI adapter" (issue #1072). */

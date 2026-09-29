@@ -2652,7 +2652,7 @@ describe("DesktopAgentRuntime plan transitions", () => {
     // `message_end`, so an entry point that never acts on it leaves the run
     // with no `turn_end`, no `agent_end`, and nothing for the user to retry.
     const silentMessage = assistantMessage({
-      content: [{ type: "thinking", thinking: "the plan is already done" }],
+      content: [],
     });
     const recoveredMessage = assistantMessage({
       content: [{ type: "text", text: "Implemented the approved plan." }],
@@ -2835,7 +2835,7 @@ describe("DesktopAgentRuntime plan transitions", () => {
       content: [{ type: "text", text: "Writing the remaining note." }],
     });
     const silentMessage = assistantMessage({
-      content: [{ type: "thinking", thinking: "the work is complete" }],
+      content: [],
     });
     const finalMessage = assistantMessage({
       content: [{ type: "text", text: "Implemented the approved plan." }],
@@ -3361,8 +3361,13 @@ describe("DesktopAgentRuntime session collaboration provenance", () => {
       expect(buildSessionContext((runtime as any).fullEntries).messages).toEqual([]);
       onEvent.mockClear();
       await runtime.prompt("Please answer", "human-user", "human-turn");
-      expect(agent.continue).toHaveBeenCalledOnce();
-      expect(eventsOf(onEvent)).toContainEqual(emptyModelResponse);
+      if (content.some(block => block.type === "thinking")) {
+        expect(agent.continue).not.toHaveBeenCalled();
+        expect(eventsOf(onEvent)).toContainEqual(expect.objectContaining({ type: "error", error: expect.objectContaining({ code: "MODEL_THINKING_ONLY" }) }));
+      } else {
+        expect(agent.continue).toHaveBeenCalledOnce();
+        expect(eventsOf(onEvent)).toContainEqual(emptyModelResponse);
+      }
     } finally {
       await runtime.dispose();
     }
@@ -4155,14 +4160,14 @@ describe("DesktopAgentRuntime assistant thinking events", () => {
     await runtime.dispose();
   });
 
-  it("retries one transient stream failure without duplicating the assistant bubble", async () => {
+  it("retries one transient pre-output failure without duplicating the assistant bubble", async () => {
     const onEvent = vi.fn();
     const runtime = createRuntime({ onEvent });
     const agent = (runtime as any).agent;
     const handleAgentEvent = (runtime as any).handleAgentEvent.bind(runtime);
     const failedMessage = {
       role: "assistant",
-      content: [{ type: "text", text: "partial response" }],
+      content: [],
       api: "openai-completions",
       provider: "local",
       model: "local-model",
@@ -4308,7 +4313,7 @@ describe("DesktopAgentRuntime assistant thinking events", () => {
     expect(claim(gateway502, "request")).toBeUndefined();
 
     (runtime as any).resetRunRecoveryState();
-    // A mid-stream 502 is now retried; it used to be excluded outright.
+    // A pre-output 502 is now retried; it used to be excluded outright.
     expect(claim(gateway502, "stream")).toBe(1);
 
     (runtime as any).resetRunRecoveryState();
@@ -4360,14 +4365,14 @@ describe("DesktopAgentRuntime assistant thinking events", () => {
     await runtime.dispose();
   });
 
-  it("retries a mid-stream rate-limit (429) failure in the same turn", async () => {
+  it("retries a pre-output rate-limit (429) failure in the same turn", async () => {
     const onEvent = vi.fn();
     const runtime = createRuntime({ onEvent });
     const agent = (runtime as any).agent;
     const handleAgentEvent = (runtime as any).handleAgentEvent.bind(runtime);
     const rateLimitedMessage = {
       role: "assistant",
-      content: [{ type: "text", text: "partial response" }],
+      content: [],
       api: "openai-completions",
       provider: "local",
       model: "local-model",
@@ -4453,14 +4458,14 @@ describe("DesktopAgentRuntime assistant thinking events", () => {
     await runtime.dispose();
   });
 
-  it("replays repeated mid-stream 502s in place and surfaces only the exhausted failure", async () => {
+  it("replays repeated pre-output 502s in place and surfaces only the exhausted failure", async () => {
     const onEvent = vi.fn();
     const runtime = createRuntime({ onEvent });
     const agent = (runtime as any).agent;
     const handleAgentEvent = (runtime as any).handleAgentEvent.bind(runtime);
     const gatewayMessage = (timestamp: number) => ({
       role: "assistant",
-      content: [{ type: "text", text: "partial response" }],
+      content: [],
       api: "openai-completions",
       provider: "local",
       model: "local-model",
@@ -4539,7 +4544,7 @@ describe("DesktopAgentRuntime assistant thinking events", () => {
     const handleAgentEvent = (runtime as any).handleAgentEvent.bind(runtime);
     const rateLimitedMessage = {
       role: "assistant",
-      content: [{ type: "text", text: "partial response" }],
+      content: [],
       api: "openai-completions",
       provider: "local",
       model: "local-model",
@@ -4629,7 +4634,7 @@ describe("DesktopAgentRuntime assistant thinking events", () => {
     // The observed shape: a full conclusion in reasoning, empty visible text,
     // no tool call — the turn ends and the user sees nothing.
     const silentMessage = assistantMessage({
-      content: [{ type: "thinking", thinking: "the answer is provider B" }],
+      content: [],
     });
     const recoveredMessage = assistantMessage({
       content: [{ type: "text", text: "provider B, because …" }],

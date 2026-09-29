@@ -19,6 +19,7 @@ import {
 import { captureProviderResponse, carriesRetryDelayHeaders, createProviderRetryStream } from "./provider-retry.js";
 import type { AgentOptions } from "@earendil-works/pi-agent-core";
 import type { SubagentThinkingLevel } from "@pi-desktop/shared";
+import { upstreamRequestDiagnostics, type RequestDiagnostics } from "./request-diagnostics.js";
 import type { ClassifiedAgentError } from "./agent-errors.js";
 import type { ProviderFetchFailure } from "./provider-transport-recovery.js";
 
@@ -26,6 +27,11 @@ export type SubagentProviderRetryState = {
   headers?: Record<string, string>;
   status?: number;
   failure?: ProviderFetchFailure;
+  meaningful?: boolean;
+  request?: RequestDiagnostics;
+  attempts?: number;
+  requestId?: string;
+  startedAt?: number;
   claim: (error: ClassifiedAgentError, phase: "request" | "stream") => number | undefined;
 };
 
@@ -59,6 +65,15 @@ export function subagentModelBinding(opts: {
     model,
     agentThinkingLevel,
     streamFn: (m, context, options) => {
+      // Empty or pre-content retries belong to the same response. A completed
+      // tool/answer starts a new response with its own counters.
+      if (retry.meaningful !== false) {
+        retry.startedAt = Date.now();
+        retry.attempts = 0;
+      }
+      retry.meaningful = false;
+      retry.requestId = undefined;
+      retry.request = undefined;
       retry.headers = undefined;
       retry.status = undefined;
       retry.failure = undefined;
@@ -77,12 +92,13 @@ export function subagentModelBinding(opts: {
               captureProviderResponse(options?.fetch, (response, _bytes, failure) => {
                 retry.failure = failure;
                 retry.status = response?.status;
+                retry.requestId = response?.headers["x-request-id"] ?? response?.headers["request-id"];
                 retry.headers = carriesRetryDelayHeaders(
                   response?.status,
                 )
                   ? response?.headers
                   : undefined;
-              }),
+              }, (request) => { retry.request = upstreamRequestDiagnostics(request, opts.provider); retry.attempts = (retry.attempts ?? 0) + 1; }),
             ),
           },
           {

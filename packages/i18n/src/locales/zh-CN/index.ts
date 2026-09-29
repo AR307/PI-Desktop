@@ -2481,6 +2481,8 @@ sklm: {
     NETWORK_POLICY_BLOCKED: "应用的地址校验阻止了该请求。若使用代理或 VPN,请检查 设置 → 常规 → 网络。",
     TIMEOUT: "请求 AI 服务超时。",
     STREAM_FAILED: "回复中断了。",
+    MODEL_THINKING_ONLY: "模型只返回了思考，没有生成回答。已保留现有内容，可点击“继续”请求回答。",
+    MODEL_OUTPUT_TRUNCATED: "服务商报告已达到输出长度上限。已保留现有内容，可点击“继续”接着回答。",
     EMPTY_MODEL_RESPONSE: "模型连续两轮都没有输出内容。可以重试，或换一种说法。",
     MUTATION_RETRY_BUDGET_EXHAUSTED:
       "同一处修改连续失败三次，本轮已停止，不再盲目重试。再说一次即可继续。",

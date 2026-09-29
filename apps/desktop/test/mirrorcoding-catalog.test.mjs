@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { registerHooks } from "node:module";
 import test from "node:test";
+import { fileURLToPath } from "node:url";
 
 const moduleUrl = new URL("../electron/main/mirrorcoding/catalog.ts", import.meta.url);
 const hooks = registerHooks({
@@ -14,9 +15,19 @@ const hooks = registerHooks({
     return nextResolve(specifier, context);
   },
 });
-const { compileCatalog, parseCatalog } = await import(moduleUrl.href).finally(() => hooks.deregister());
+const { compileCatalog, parseCatalog, modelMetadata } = await import(moduleUrl.href).finally(() => hooks.deregister());
 
-const emptyModelsDev = { findModel: () => undefined };
+test("uses published Messages reasoning options for the existing dotted Claude alias", async () => {
+  const { ModelsDevCatalog } = await import("../electron/main/models-dev-catalog.ts");
+  const catalog = new ModelsDevCatalog({ catalogPath: fileURLToPath(new URL("../resources/models.dev/api.json", import.meta.url)) });
+  assert.equal(await catalog.ensureLoaded(), true);
+  const metadata = modelMetadata(catalog, "claude-opus-5.5-thinking");
+  assert(metadata.reasoningOptions.some(option => option.type === "effort"));
+  assert(!metadata.reasoningOptions.some(option => option.type === "budget_tokens"));
+  assert.equal(metadata.thinkingLevelMap.max, "max");
+});
+
+const emptyModelsDev = { findModel: () => undefined, anthropicThinkingFor: () => undefined };
 
 test("MC Claude IDs use Messages despite legacy OpenAI catalog annotations", () => {
   const ids = ["claude-opus-5.5", "vendor/CLAUDE-Sonnet-thinking", "claude-future", "other-chat"];
@@ -52,6 +63,16 @@ test("parses MirrorCoding catalog fields and preserves group routing data", () =
   assert.equal(catalog.user.displayName, "tester");
   assert.equal(catalog.groups[0].dynamicBilling, false);
   assert.deepEqual(catalog.groups[0].models[0].supportedEndpointTypes, ["openai"]);
+});
+
+test("MC Claude chat eligibility does not depend on a stale global endpoint annotation", () => {
+  const catalog = { user: { id: 42, displayName: "QA" }, supportedEndpoints: {},
+    groups: [{ id: "qa", name: "QA", description: "", ratio: 1, dynamicBilling: false,
+      models: [{ id: "Claude-fixture", supportedEndpointTypes: ["openai"] },
+        { id: "other-chat", supportedEndpointTypes: ["openai"] },
+        { id: "claude-video", supportedEndpointTypes: ["video"] }] }] };
+  const group = compileCatalog(catalog, emptyModelsDev).groups[0];
+  assert.deepEqual(group.metadata.routes, { "Claude-fixture": "anthropic" });
 });
 
 test("parses documented image capability fields without inventing defaults", () => {

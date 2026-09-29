@@ -161,7 +161,7 @@ disabled for this path so the runtime can share one budget across both phases.
 
 `PROVIDER_RATE_LIMITED` receives at most ten retries after the initial
 attempt, for eleven provider attempts total. A setup 429 is retried inside the
-provider stream adapter. A mid-stream 429 removes the failed assistant from
+provider stream adapter. A mid-stream 429 with no substantive content removes the failed assistant from
 the next model context and calls `continue()` in the same turn. Both phases
 claim the same counter, so a setup 429 followed by a stream 429 cannot reset or
 multiply the budget. The captured response status is applied before classifying
@@ -173,7 +173,7 @@ session and builtin subagents use the same controller and policy.
 error, lifecycle `error`, `turn_end`, `agent_end`, or duplicate assistant
 bubble reaches the UI. A normalized `status` event identifies the retry
 backoff so the user can tell that the turn is still active. The visible
-assistant message id is reused when a retry starts, replacing any partial
+assistant message id is reused when an output-free retry starts, retaining no substantive
 content in one bubble. End events are emitted once by the final successful or
 exhausted attempt. An abort during the wait cancels the timer and prevents the
 next provider request.
@@ -269,48 +269,44 @@ the previous dispatcher and closes it gracefully, and it reproduces the
 configured route, so another session's in-flight request finishes on the pool it
 started on and a proxy is never silently dropped.
 
-### 5e. Silent-turn recovery
+### 5e. Response completion and explicit continuation
 
-An ordinary turn that ends with no tool call and no visible assistant text is invisible
-to the user: reasoning is never rendered, so a conclusion written only there
-did not arrive. 15 of 255 recorded sessions ended a turn that way, and the
-user's only recourse was typing "继续".
+A normal response is complete when it contains visible text or a legal tool
+round. Only a normally terminated response with no nonblank text, thinking,
+redacted thinking or tool activity is empty. Heartbeats, start events and empty
+blocks do not count. An empty response retries once per user submission using
+the same model, group and parameters. A second empty response is persisted as
+EMPTY_MODEL_RESPONSE with a visible error; it is not retried indefinitely.
 
-The runtime detects it at `message_end`: the stop was neither an error nor an
-abort, the message requested no tools (no `toolCall` content part), and the
-visible text is blank after trimming. Reasoning content does not exempt a turn
-— a thinking-only turn is exactly the case that needs recovery.
+The runtime classifies cancellation and provider failures before examining
+content. Explicit length/max_tokens termination becomes MODEL_OUTPUT_TRUNCATED.
+A normally ended thinking-only response becomes MODEL_THINKING_ONLY. A missing
+required protocol terminator or broken stream keeps its underlying failure code.
+Unknown stop reasons and unavailable usage fields are not invented or inferred
+from elapsed time or character count.
 
-Recovery mirrors §5d and is bounded the same way: at most one re-run per run.
-The silent assistant is dropped from the model context (`continue()`
-refuses a transcript ending in an assistant message, and an empty one is not
-worth resending), a short no-output instruction is appended to the system
-prompt for that one continuation, and the bubble id is reused so a recovered
-turn leaves no empty row behind. The silent attempt's `turn_end` and
-`agent_end` are suppressed; the re-run emits the single terminal lifecycle.
+Once a request produces text, thinking or tool content, no automatic replay is
+allowed, including under infinite retry. Output-free temporary failures still
+use section 5d budgets and Retry-After. Neither a lower reasoning level nor an
+alternative model, group or protocol is selected to conceal an interrupted turn.
+Legal tool-result continuations and approved Plan/Goal progress steps are not
+failed-request replays and keep their existing behavior.
 
-Recovery is armed inside `message_end` and carried out once the loop is idle,
-so it belongs to every entry point that drives the loop — a user prompt and an
-approved plan or goal execution alike. Each entry point clears the recovery
-state before it starts and runs the pending recovery after `waitForIdle`,
-through one shared implementation of each half. The shared drain also handles
-recoveries armed by a recovery attempt before it returns, so a chained failure
-cannot leave lifecycle suppression active with no recovery or terminal event.
-Skipping either half ends the run with its lifecycle still suppressed and no
-recovery attempted, which reaches the user as a session that stopped mid-work
-with no error and no retry action. §5d overflow and provider-stream retry ride
-the same contract, and a suppression flag left behind would swallow the
-*next* run's terminal events.
+The desktop and mobile Continue action appends a new user turn; it is not
+regenerate and does not truncate history. Partial text/thinking remain visible,
+including after restart. Existing message meta stores normalized diagnostics and
+minimal adapter-native text/thinking replay blocks. Only valid native metadata is
+passed through pi's converter: no fabricated thinking signature, no promoted
+system instruction and no incomplete tool execution. Completed tool results are
+preserved. Unsigned partial thinking is display-only. Mobile Continue preserves
+an unsent draft even when delivery confirmation is delayed by reconnection.
 
-The one-shot instruction rides on the agent's system prompt rather than the
-`prepareNextTurn` hook, because that hook only shapes turns inside a live run
-and this run has already ended. It is removed afterwards unless a path-scoped
-instruction reload rewrote the prompt meanwhile, in which case the newer
-rebuild wins.
-
-If the re-run is silent too, the turn ends as a visible assistant error with
-retriable `EMPTY_MODEL_RESPONSE`, which gives the transcript its normal retry
-action. No empty assistant message is persisted in either case.
+One-shot completions and delegates use the same outcome classification. The
+runtime's existing lifecycle drain runs pending empty retries after idle, at
+most once, without leaving suppression flags active. Diagnostics record the
+actual wire path, protocol, model, group, reasoning/output parameters, reported
+stop reasons, content counters, available usage and attempts; never credentials,
+full prompts or raw response bodies. See ADR response-completion-recovery.
 
 A Host-ledger completion notice (ADR 0239, D446) is the narrow exception:
 its prompt already permits no acknowledgement. Main resolves the queued message

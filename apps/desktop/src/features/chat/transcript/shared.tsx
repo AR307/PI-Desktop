@@ -59,7 +59,7 @@ import {
   IconWrench,
   IconX,
 } from "../../../components/icons";
-import { TooltipButton } from "../../../components/ui";
+import { Button, TooltipButton } from "../../../components/ui";
 
 /**
  * Legacy message navigation reveals the row it names, at message precision.
@@ -202,6 +202,15 @@ export function AssistantErrorMessage({ message }: { message: UiMessage }) {
   const dismissAssistantErrorMessage = useAppStore(
     (state) => state.dismissAssistantErrorMessage,
   );
+  const continueDisabled = useAppStore(state => state.isRunning || Boolean(message.parentToolCallId) ||
+    state.messages.filter(item => !item.parentToolCallId && item.role !== "tool").at(-1)?.id !== message.id ||
+    Boolean(state.activeSessionId && state.pendingPlans[state.activeSessionId]?.status === "pending"));
+  const continueTask = async () => {
+    const state = useAppStore.getState();
+    const sessionId = state.activeSessionId;
+    if (!sessionId || continueDisabled || state.isRunning) return;
+    await state.sendPrompt(t("chat.continueCurrentTaskPrompt"), undefined, sessionId);
+  };
   const error = message.error;
   if (!error || dismissed) return null;
   const networkDetails = error.details;
@@ -262,17 +271,9 @@ export function AssistantErrorMessage({ message }: { message: UiMessage }) {
             <IconChevronRight size={12} aria-hidden />
             {open ? t("chat.hideErrorDetails") : t("chat.showErrorDetails")}
           </button>
-          <button
-            type="button"
-            className="copy-btn primary"
-            onClick={() =>
-              void useAppStore
-                .getState()
-                .sendPrompt(t("chat.continueCurrentTaskPrompt"))
-            }
-          >
+          <Button type="button" className="copy-btn primary" disabled={continueDisabled} onClick={() => void continueTask()}>
             {t("errors.action.continue")}
-          </button>
+          </Button>
           {configurationError ? (
             <button
               type="button"
@@ -317,6 +318,7 @@ export function AssistantErrorMessage({ message }: { message: UiMessage }) {
         </dl>
         <div className="message-error-raw">
           <pre className="selectable">{error.message}</pre>
+          {message.responseDiagnostics && <pre className="selectable">{JSON.stringify(message.responseDiagnostics, null, 2)}</pre>}
           <CopyButton text={error.message} label={t("chat.copyErrorDetails")} />
         </div>
       </div>

@@ -5,6 +5,39 @@ import type { ImageGenerationResult } from "./images.js";
 
 export type UiMessageRole = "user" | "assistant" | "system" | "tool";
 
+/** Safe completion facts, not a capture of the request or response body. */
+export type ResponseDiagnostics = {
+  end: "complete" | "empty" | "thinking-only" | "truncated" | "interrupted" | "aborted";
+  stopReason?: string;
+  rawStopReason?: string;
+  api?: string;
+  path?: string;
+  model?: string;
+  group?: string;
+  reasoning?: Record<string, string | number | boolean>;
+  outputLimit?: number;
+  httpStatus?: number;
+  requestId?: string;
+  textLength: number;
+  thinkingLength: number;
+  toolCallCount: number;
+  attempts: number;
+  durationMs?: number;
+  usage?: Record<string, number>;
+};
+
+/** Adapter-native text/thinking metadata only; incomplete tools never replay. */
+export type AssistantReplay = {
+  api: string;
+  provider: string;
+  model: string;
+  providerThinkingLevel?: string;
+  blocks: Array<
+    { type: "text"; text: string; textSignature?: string } |
+    { type: "thinking"; thinking: string; thinkingSignature?: string; redacted?: boolean }
+  >;
+};
+
 export type MessageUsage = {
   inputTokens: number;
   outputTokens: number;
@@ -92,6 +125,8 @@ export type UiMessage = {
   responseOutputTokens?: number;
   /** Structured failure attached to the assistant turn that failed. */
   error?: AppError;
+  responseDiagnostics?: ResponseDiagnostics;
+  assistantReplay?: AssistantReplay;
   /** Stable regenerate-family key shared across rewritten user prompts. */
   revisionRootId?: string;
   /** Total regenerate variants for this user root turn. */

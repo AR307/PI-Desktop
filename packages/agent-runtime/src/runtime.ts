@@ -1,3 +1,5 @@
+import { assistantReplay, canRestorePartialResponse, responseContentFacts, responseDiagnostics, responseOutcome, responseOutcomeError, restoredAssistantBlocks } from "./response-outcome.js";
+import { upstreamRequestDiagnostics, type RequestDiagnostics } from "./request-diagnostics.js";
 import { restoreHostedSearchReplay } from "./hosted-search-replay.js";
 import { requestExtensionUi } from "./extensions/ui-request.js";
 import { readLocalRequestErrorDetails } from "./local-request-errors.js";
@@ -752,16 +754,13 @@ function pathInstructionScope(path: string): string {
 }
 
 /**
- * Appended for one automatic re-run after a turn that produced nothing the
- * user can see. Two shapes were observed: a wholly empty response, and a
- * finished conclusion written into reasoning while the visible text stayed
- * empty. The same nudge covers both, because both need the same next move.
+ * Appended only for the single retry of a normally completed, wholly empty
+ * response. Thinking-only and partial responses require explicit Continue.
  */
 const SILENT_TURN_NUDGE = [
   "<no_output_recovery>",
-  "Your previous turn ended with no visible text and no tool call, so the user saw nothing happen.",
-  "Your reasoning is never shown to the user. If you already reached the answer, state it now in plain text.",
-  "Otherwise continue the unfinished work, starting with one sentence about what you are doing.",
+  "Your previous response ended without text, thinking, or a tool call.",
+  "Respond to the user's request with an answer or the necessary tool calls.",
   "</no_output_recovery>",
 ].join("\n");
 
@@ -1715,12 +1714,14 @@ export class DesktopAgentRuntime {
   private providerRetryInProgress = false;
   private suppressProviderRetryRunEnd = false;
   private providerRetryAbort?: AbortController;
-  /* Silent-turn recovery: a turn that ends with no tool call and no visible
-   * text is invisible to the user. 15 of 255 recorded sessions ended a turn
-   * that way, and every one of them was followed by the user typing "继续".
-   * One automatic re-run per prompt, then the failure becomes visible. */
+  /* Wholly empty completion retries once per prompt. Thinking or partial
+   * output is preserved and never enters this automatic recovery path. */
   private pendingSilentTurnRerun = false;
   private silentTurnRerunAttempted = false;
+  private providerHasContent = false;
+  private providerRequestDiagnostics?: RequestDiagnostics;
+  private providerRequestId?: string;
+  private providerRequestAttempts = 0;
   /**
    * The first settled reply to a current Host-ledger completion notice may
    * need no acknowledgement (D446). Spent by that reply, and revoked as soon
@@ -1891,6 +1892,10 @@ You may end your turn while delegates run: they keep working in the background a
     this.agent = new Agent({
       streamFn: (m, context, options) => {
         this.setAgentActivity({ phase: "waiting-model", since: Date.now() });
+        this.providerHasContent = false;
+        this.providerRequestDiagnostics = undefined;
+        this.providerRequestId = undefined;
+        if (!this.currentAssistant) this.providerRequestAttempts = 0;
         this.providerResponseStatus = undefined;
         this.providerRetryHeaders = undefined;
         this.providerRequestBytes = undefined;
@@ -1927,6 +1932,7 @@ You may end your turn while delegates run: they keep working in the background a
                   options?.fetch,
                   (response, requestBytes, failure) => {
                     this.providerResponseStatus = response?.status;
+                    this.providerRequestId = response?.headers["x-request-id"] ?? response?.headers["request-id"];
                     this.providerRequestBytes = requestBytes;
                     this.providerFetchFailure = failure;
                     if (failure) this.recoverProviderTransport(failure);
@@ -1938,6 +1944,7 @@ You may end your turn while delegates run: they keep working in the background a
                       ? response?.headers
                       : undefined;
                   },
+                  (request) => { this.providerRequestDiagnostics = upstreamRequestDiagnostics(request, this.provider); this.providerRequestAttempts++; },
                 ),
               ),
               onResponse: async (response, responseModel) => {
@@ -2739,11 +2746,13 @@ You may end your turn while delegates run: they keep working in the background a
         append(m.id, { role: "user", content, timestamp });
       } else if (m.role === "assistant") {
         toolCarrier = undefined;
-        // Failed provider responses belong in the transcript for diagnosis,
-        // but must never become model context on the next turn.
-        if (m.status === "error" || m.isError || m.error) continue;
+        // Replay only valid partial content. Error strings and incomplete
+        // tool calls remain display-only; native blocks use pi's converter.
+        if ((m.status === "error" || m.isError || m.error) && !canRestorePartialResponse(m)) continue;
         const content: AssistantMessage["content"] = [];
-        if (m.thinking?.trim()) {
+        if (m.assistantReplay) {
+          content.push(...restoredAssistantBlocks(m.assistantReplay));
+        } else if (m.thinking?.trim() && !m.error) {
           // Completions DeepSeek replay needs thinkingSignature so convertMessages
           // maps the block to reasoning_content instead of dropping it (#296).
           content.push({
@@ -2755,7 +2764,7 @@ You may end your turn while delegates run: they keep working in the background a
           });
         }
         content.push(...restoreHostedSearchReplay(m.hostedSearch));
-        if (m.content?.trim()) {
+        if (!m.assistantReplay && m.content?.trim()) {
           content.push({ type: "text" as const, text: m.content });
         }
         // Kept even when empty: a call-only turn has no text of its own and
@@ -2764,9 +2773,10 @@ You may end your turn while delegates run: they keep working in the background a
         const assistant: AssistantMessage = {
           role: "assistant",
           content,
-          api,
-          provider: this.provider.id,
-          model: this.provider.modelId,
+          api: m.assistantReplay?.api ?? api,
+          provider: m.assistantReplay?.provider ?? this.provider.id,
+          model: m.assistantReplay?.model ?? this.provider.modelId,
+          ...(m.assistantReplay?.providerThinkingLevel ? { providerThinkingLevel: m.assistantReplay.providerThinkingLevel } : {}),
           usage: usageToPi(m.usage),
           stopReason: "stop",
           timestamp,
@@ -5663,7 +5673,7 @@ You may end your turn while delegates run: they keep working in the background a
     error: ReturnType<typeof classifyAgentError>,
     phase: "request" | "stream",
   ): number | undefined {
-    if (!error.retriable || error.details?.origin === "local") return undefined;
+    if (this.providerHasContent || !error.retriable || error.details?.origin === "local") return undefined;
     const infinite = this.infiniteProviderRetry;
     if (error.code === "PROVIDER_RATE_LIMITED") {
       if (
@@ -5835,7 +5845,11 @@ You may end your turn while delegates run: they keep working in the background a
     // A failed stream can be represented by more than one trailing assistant
     // message after a tool round. Remove the whole failed suffix before
     // continuing; pi-agent-core rejects any assistant-terminated transcript.
-    while (messages.at(-1)?.role === "assistant") messages.pop();
+    while (messages.at(-1)?.role === "assistant") {
+      const last = messages.at(-1);
+      if (last?.role !== "assistant" || responseContentFacts(last).meaningful) break;
+      messages.pop();
+    }
     this.setAgentMessages(messages);
 
     this.providerRetryInProgress = true;
@@ -5895,7 +5909,8 @@ You may end your turn while delegates run: they keep working in the background a
     // agentLoopContinue refuses a transcript ending in an assistant message,
     // and this one carries nothing worth resending anyway.
     const messages = [...this.agent.state.messages];
-    while (messages.at(-1)?.role === "assistant") messages.pop();
+    const last = messages.at(-1);
+    if (last?.role === "assistant" && !responseContentFacts(last).meaningful) messages.pop();
     this.setAgentMessages(messages);
 
     const promptBefore = this.agentSystemPromptContent();
@@ -7268,6 +7283,7 @@ You may end your turn while delegates run: they keep working in the background a
         break;
       case "message_start": {
         if (event.message.role === "assistant") {
+          this.providerHasContent = responseContentFacts(event.message).meaningful;
           this.clearAgentActivity();
           this.streamStartedAt = Date.now();
           const content = assistantContent((event.message as any).content);
@@ -7316,6 +7332,7 @@ You may end your turn while delegates run: they keep working in the background a
       }
       case "message_update": {
         if (this.currentAssistant && event.message.role === "assistant") {
+          this.providerHasContent ||= responseContentFacts(event.message).meaningful;
           this.applyHostedSearch(event.message);
           const content = assistantContent((event.message as any).content);
           const previousText = this.currentAssistant.content;
@@ -7384,9 +7401,11 @@ You may end your turn while delegates run: they keep working in the background a
           // pi-agent-core encodes stream failures in the final message
           // (stopReason "error"/"aborted" + errorMessage) and resolves the
           // prompt normally, so this is where provider/model errors surface.
+          this.providerHasContent ||= responseContentFacts(event.message).meaningful;
+          const outcome = responseOutcome(event.message);
           const stopReason = event.message.stopReason;
           const localError = readLocalRequestErrorDetails(event.message);
-          const overflow = !localError && isContextOverflow(
+          const overflow = !localError && stopReason !== "length" && isContextOverflow(
             event.message,
             effectiveModelContextWindow(this.model) || DEFAULT_CONTEXT_WINDOW,
           );
@@ -7422,7 +7441,13 @@ You may end your turn while delegates run: they keep working in the background a
           // from an earlier recovery attempt. Recovery classification must
           // inspect only the response that just ended, or a silent retry after
           // progress text would look non-silent forever.
-          const responseText = content.hasText ? content.text : "";
+          const finalDiagnostics = {
+            ...responseDiagnostics(event.message, Math.max(1, this.providerRequestAttempts)),
+            ...this.providerRequestDiagnostics,
+            ...(this.provider.mirrorCodingGroupId ? { group: this.provider.mirrorCodingGroupId } : {}),
+            ...(this.providerResponseStatus !== undefined ? { httpStatus: this.providerResponseStatus } : {}),
+            ...(this.providerRequestId ? { requestId: this.providerRequestId } : {}),
+          };
           if (looksLikePseudoToolCall(nextText)) {
             // The visible text is a lost tool batch, not an answer. Logging it
             // separates "the model went quiet" from "the model tried to act and
@@ -7462,6 +7487,7 @@ You may end your turn while delegates run: they keep working in the background a
             this.streamStartedAt !== undefined
               ? Math.max(0, endedAt - this.streamStartedAt)
               : undefined;
+          if (!(this.allowSilentCompletion && outcome === "thinking-only")) classifiedError ??= responseOutcomeError(outcome);
           if (classifiedError) {
             classifiedError = this.providerErrorWithDiagnostics(
               classifiedError,
@@ -7480,21 +7506,22 @@ You may end your turn while delegates run: they keep working in the background a
           const silence =
             !failed &&
             !aborted &&
-            responseText.trim().length === 0 &&
-            !messageRequestsTools(event.message);
+            outcome === "empty" &&
+            !this.providerHasContent;
           // A completion notice needs no acknowledgement, so its own reply may
           // stay silent (D446). The exception covers exactly that reply: the
           // first settled response spends it, whether silent, textual, or a
           // tool batch, so later replies in the same run answer tool results
           // or user input under the ordinary contract. A provider failure
           // keeps it for the retried attempt.
-          const exemptSilence = silence && this.allowSilentCompletion;
+          const exemptSilence = !failed && !aborted && (silence || outcome === "thinking-only") && this.allowSilentCompletion;
           if (!failed && !aborted) this.allowSilentCompletion = false;
           const silentTurn = silence && !exemptSilence;
           if (silentTurn && !this.silentTurnRerunAttempted) {
             this.silentTurnRerunAttempted = true;
             this.pendingSilentTurnRerun = true;
             this.suppressSilentTurnRunEnd = true;
+            this.setAgentActivity({ phase: "retrying", since: Date.now(), attempt: 1 });
             // Hold the bubble open. The re-run streams into this same one, so
             // a recovered turn leaves no empty message behind in the
             // transcript and the user never learns it happened.
@@ -7537,6 +7564,7 @@ You may end your turn while delegates run: they keep working in the background a
             !failed &&
             !aborted &&
             !silentTurn &&
+            !classifiedError &&
             this.autonomousExecution &&
             !this.silentTurnRerunAttempted &&
             !this.progressTurnRerunAttempted &&
@@ -7612,7 +7640,9 @@ You may end your turn while delegates run: they keep working in the background a
               : content.hasThinking
                 ? { thinking: undefined }
                 : {}),
-            status: failed || emptyResponse
+            responseDiagnostics: { ...finalDiagnostics, ...(streamMs !== undefined ? { durationMs: streamMs } : {}) },
+            assistantReplay: assistantReplay(event.message),
+            status: failed || emptyResponse || classifiedError !== undefined
               ? "error"
               : aborted
                 ? "aborted"
@@ -7629,6 +7659,13 @@ You may end your turn while delegates run: they keep working in the background a
               : {}),
             ...(hostedSearch ? { hostedSearch } : {}),
           };
+          if (classifiedError) {
+            this.currentAssistant.error = { ...classifiedError, details: { ...classifiedError.details, response: this.currentAssistant.responseDiagnostics } };
+            // Stop pi's tool/continuation loop on a truncated or thinking-only
+            // answer. The original termination is retained in diagnostics.
+            event.message.stopReason = "error";
+            event.message.errorMessage = classifiedError.message;
+          }
           this.emit({ type: "message_end", message: this.currentAssistant });
           this.activeProviderRetryAttempt = 0;
           this.streamStartedAt = undefined;
@@ -7636,6 +7673,7 @@ You may end your turn while delegates run: they keep working in the background a
           const canRecoverOverflow =
             this.compactionEnabled &&
             overflow &&
+            !this.providerHasContent &&
             !this.overflowRecoveryAttempted;
           if (exemptSilence) {
             // Accepted silence is still nothing worth resending: keep it out
@@ -7648,10 +7686,18 @@ You may end your turn while delegates run: they keep working in the background a
             if (messages.at(-1) === event.message) {
               this.setAgentMessages(messages.slice(0, -1));
             }
-          } else if (!failed && !aborted && !emptyResponse) {
+          } else if (!failed && !aborted && !emptyResponse && !classifiedError) {
             this.appendLiveEntry(assistantId, event.message);
           } else {
             this.turnHadError = true;
+            // The UI keeps the failure; model history receives only valid native
+            // text/thinking, never an incomplete tool call or an error string.
+            const replayContent = restoredAssistantBlocks(assistantReplay(event.message));
+            if (!aborted && this.providerHasContent && replayContent.length) {
+              const retained: AssistantMessage = { ...event.message, content: replayContent, stopReason: "stop", errorMessage: undefined };
+              this.appendLiveEntry(assistantId, retained);
+              this.setAgentMessages(this.agent.state.messages.map(message => message === event.message ? retained : message));
+            }
           }
           if (canRecoverOverflow) {
             this.pendingOverflow = true;

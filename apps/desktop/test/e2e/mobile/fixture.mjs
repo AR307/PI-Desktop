@@ -7,7 +7,7 @@ import { imageFixture } from "../images/fixture.mjs";
 const { WebSocketServer, WebSocket } = createRequire(import.meta.url)("ws");
 
 /** Controlled MC boundary for actual desktop/mobile acceptance, never production. */
-export async function mobileFixture({ port = 0 } = {}) {
+export async function mobileFixture({ port = 0, messageHandler } = {}) {
   const upstream = await imageFixture();
   const devices = new Map(), sessions = new Map(), refreshTokens = new Map();
   const pairings = new Map(), grants = new Map(), tickets = new Map(), desktops = new Map(), peers = new Map();
@@ -38,6 +38,7 @@ export async function mobileFixture({ port = 0 } = {}) {
   };
   const server = createServer(async (req, res) => {
     const url = new URL(req.url, origin);
+    if (url.pathname === "/v1/messages" && messageHandler) { await messageHandler(req, res); return; }
     res.setHeader("Access-Control-Allow-Origin", req.headers.origin ?? "*");
     res.setHeader("Access-Control-Allow-Headers", "Authorization, Content-Type");
     res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");

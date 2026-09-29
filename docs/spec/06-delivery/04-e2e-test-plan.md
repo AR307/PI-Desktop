@@ -15424,3 +15424,27 @@ renderer's durable transcript reads. No real model or provider is contacted.
   to the installed Playwright module path if needed; PI_TEST_OUTPUT selects the
   isolated artifact/profile folder. This is PI-side protocol acceptance only;
   real MirrorCoding channel conversion and deployment are server-team work.
+
+## E2E-MC-native-response-recovery (2026-09-29)
+
+Run apps/desktop/test/e2e/mobile/response-recovery.mjs with the documented mobile
+acceptance prerequisites. Use isolated Electron, Rust, Node, a phone-sized browser
+and the local MC authorization/relay fixture, never production credentials.
+
+- Pair desktop/mobile; send an MC Claude model advertised as OpenAI. Verify
+  /v1/messages, exact ID, selected encoded group, Bearer and no SDK API key.
+- Send max using the configured capability mapping; do not inject a budget.
+- Normal thinking-only stops once, remains visible and offers Continue.
+- Restart desktop, reconnect phone, Continue; keep prior thought/native replay,
+  append a user message and preserve an unsent mobile draft.
+- Explicit length is truncated; missing message_stop is interrupted; empty
+  succeeds only within the single-empty retry budget. Keep partial content.
+- Desktop Continue reaches the phone; phone Stop cancels without replay.
+- Inspect English/Chinese light/dark error cards, thought disclosure and buttons.
+
+The native runtime suite additionally checks completed-tool context, unsigned
+thought exclusion, unfinished tool suppression and infinite-retry boundaries.
+The provider recovery Electron suite checks real pre-output network backoff,
+post-output interruption followed by explicit Continue, and tool-round budgets.
+Record actual passed assertions and screenshots separately from production
+MC/Kiro testing; do not claim the latter from controlled fixtures.

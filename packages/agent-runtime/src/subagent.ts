@@ -19,6 +19,7 @@
  *   already stopped calling tools. Only user Stop or `TaskStop` aborts it.
  */
 
+import { assistantReplay, responseContentFacts, responseDiagnostics, responseOutcome, responseOutcomeError } from "./response-outcome.js";
 import { randomUUID } from "node:crypto";
 import {
   Agent,
@@ -233,6 +234,7 @@ export class SubagentRun {
   private pendingContextOverflow?: { code: "SUBAGENT_CONTEXT_OVERFLOW"; message: string };
   private pendingProviderRetry?: ReturnType<typeof classifyAgentError>;
   private providerRetryInProgress = false;
+  private emptyResponseRetried = false;
   private providerTransientRetryAttempt = 0;
   private providerRateLimitRetryAttempt = 0;
   private provider: RuntimeProviderConfig;
@@ -475,6 +477,8 @@ export class SubagentRun {
     // An aborted turn never continues, whether the signal flipped yet or the
     // cancel was only visible on the settled message.
     if (this.runSignal().aborted || this.turnAborted || !this.streamError || this.streamError.code === "TURN_ABORTED") return false;
+    if (this.retryState.meaningful || this.provider.authKind === "mirrorcoding" ||
+        this.streamError.code === "EMPTY_MODEL_RESPONSE") return false;
     if (!this.opts.fallbackModels?.length) return false;
     const failed = this.agent.state.messages.at(-1);
     // Only a provider's terminal assistant error permits fallback. Host/tool
@@ -546,7 +550,7 @@ export class SubagentRun {
     error: ReturnType<typeof classifyAgentError>,
     phase: "request" | "stream",
   ): number | undefined {
-    if (!error.retriable) return undefined;
+    if (this.retryState.meaningful || !error.retriable) return undefined;
     const infinite = this.opts.infiniteProviderRetry === true;
     if (error.code === "PROVIDER_RATE_LIMITED") {
       if (!infinite && this.providerRateLimitRetryAttempt >= PROVIDER_RATE_LIMIT_MAX_RETRIES) {
@@ -574,7 +578,11 @@ export class SubagentRun {
     }
     // A failed provider stream can leave more than one assistant row after a
     // tool round. Remove the entire failed suffix before continuing.
-    while (messages.at(-1)?.role === "assistant") messages.pop();
+    while (messages.at(-1)?.role === "assistant") {
+      const last = messages.at(-1);
+      if (last?.role !== "assistant" || responseContentFacts(last).meaningful) break;
+      messages.pop();
+    }
     this.agent.state.messages = messages;
     this.providerRetryInProgress = true;
     try {
@@ -739,6 +747,7 @@ export class SubagentRun {
       }
       case "message_update": {
         if (!this.currentAssistant || event.message.role !== "assistant") break;
+        this.retryState.meaningful ||= responseContentFacts(event.message).meaningful;
         const content = assistantContent((event.message as AssistantMessage).content);
         const previousText = this.currentAssistant.content;
         const previousThinking = this.currentAssistant.thinking ?? "";
@@ -779,6 +788,8 @@ export class SubagentRun {
         if (event.message.role !== "assistant") break;
         const message = event.message as AssistantMessage;
         const content = assistantContent(message.content);
+        this.retryState.meaningful ||= responseContentFacts(message).meaningful;
+        const outcome = responseOutcome(message);
         const stopReason = message.stopReason as string | undefined;
         // Read the cancel off the settled message, the same way the session
         // runtime does: pi-ai wraps an AbortError that fired before the signal
@@ -789,10 +800,17 @@ export class SubagentRun {
         const aborted =
           stopReason === "aborted" || localError?.causeName === "AbortError";
         if (aborted) this.turnAborted = true;
-        const failed = !aborted && stopReason === "error";
+        const failed = !aborted && (stopReason === "error" || outcome === "thinking-only" || outcome === "truncated" || outcome === "empty");
         let classifiedError: ReturnType<typeof classifyAgentError> | undefined;
         let retryAttempt: number | undefined;
-        if (failed) {
+        if (outcome === "empty" && !aborted) {
+          classifiedError = { code: "EMPTY_MODEL_RESPONSE", message: "The model ended its turn without producing any output", retriable: true };
+          if (!this.emptyResponseRetried && !this.retryState.meaningful) {
+            this.emptyResponseRetried = true;
+            retryAttempt = 1;
+            this.pendingProviderRetry = classifiedError;
+          } else this.streamError = classifiedError;
+        } else if (failed) {
           const overflow = this.pendingContextOverflow;
           this.pendingContextOverflow = undefined;
           if (overflow) {
@@ -801,7 +819,7 @@ export class SubagentRun {
             // actionable code instead of classifying it as a provider error.
             this.streamError = overflow;
           } else {
-            classifiedError = withProviderFetchFailure(
+            classifiedError = responseOutcomeError(outcome) ?? withProviderFetchFailure(
               classifyProviderError(message, this.retryState.status),
               this.retryState.failure,
             );
@@ -851,12 +869,20 @@ export class SubagentRun {
             ? { thinking: content.thinking }
             : {}),
           status: failed ? "error" : aborted ? "aborted" : "complete",
+          responseDiagnostics: {
+            ...responseDiagnostics(message, Math.max(1, this.retryState.attempts ?? 0)),
+            ...this.retryState.request,
+            ...(this.retryState.status !== undefined ? { httpStatus: this.retryState.status } : {}),
+            ...(this.retryState.requestId ? { requestId: this.retryState.requestId } : {}),
+            ...(this.retryState.startedAt !== undefined ? { durationMs: Math.max(0, Date.now() - this.retryState.startedAt) } : {}),
+            ...(this.provider.mirrorCodingGroupId ? { group: this.provider.mirrorCodingGroupId } : {}),
+          },
+          assistantReplay: assistantReplay(message),
           ...(messageUsage ? { usage: messageUsage } : {}),
           ...(failed ? { isError: true } : {}),
-          ...(classifiedError?.details?.origin === "local" ||
-              isCertificateVerificationError(classifiedError?.details?.networkCode)
-            ? { error: classifiedError } : {}),
+          ...(classifiedError ? { error: classifiedError } : {}),
         };
+        if (failed) { message.stopReason = "error"; message.errorMessage = classifiedError?.message ?? message.errorMessage; }
         this.currentAssistant = undefined;
         this.emit({ type: "message_end", message: row });
         break;

@@ -504,7 +504,7 @@ describe("SubagentRun provider rate-limit recovery", () => {
     const { run, events } = createRun();
     const failure = {
       ...assistantMessage({
-        content: [{ type: "text", text: "partial" }],
+        content: [],
         stopReason: "error",
       }),
       errorMessage: "upstream unavailable",
@@ -901,7 +901,7 @@ describe("SubagentRun context budget (ADR 0299)", () => {
 });
 
 describe("SubagentRun retries before fallback", () => {
-  it("removes every trailing failed assistant before retrying", async () => {
+  it("removes every trailing empty failed assistant before retrying", async () => {
     const { run } = createRun();
     const user = { role: "user", content: "task", timestamp: 1 };
     const toolUse = {
@@ -915,7 +915,7 @@ describe("SubagentRun retries before fallback", () => {
       timestamp: 2,
     };
     const failed = {
-      ...assistantMessage({ content: [{ type: "text", text: "partial" }], stopReason: "error" }),
+      ...assistantMessage({ content: [], stopReason: "error" }),
       errorMessage: "stream terminated",
     };
     const continued = vi.fn(async () => {
@@ -958,7 +958,7 @@ describe("SubagentRun retries before fallback", () => {
       attempts.push(state.model.id);
       run.retryState.status = primary ? status : 200;
       const message = {
-        ...assistantMessage({ content: [{ type: "text", text: primary ? "partial" : "Done" }], stopReason: primary ? "error" : "stop" }),
+        ...assistantMessage({ content: [{ type: "text", text: primary ? "" : "Done" }], stopReason: primary ? "error" : "stop" }),
         ...(primary ? { errorMessage: `${status}: upstream unavailable` } : {}),
       };
       state.messages = [...state.messages, message];

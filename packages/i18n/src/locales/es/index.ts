@@ -2492,6 +2492,8 @@ sklm: {
     NETWORK_POLICY_BLOCKED: "La comprobación de direcciones de la aplicación bloqueó esta solicitud. Si usas proxy o VPN, revisa Configuración → General → Red.",
     "TIMEOUT": "Se agotó el tiempo de espera de la solicitud al proveedor de IA.",
     "STREAM_FAILED": "La respuesta fue interrumpida.",
+    MODEL_THINKING_ONLY: "El modelo devolvió razonamiento, pero ninguna respuesta. El contenido se conserva; elija Continuar.",
+    MODEL_OUTPUT_TRUNCATED: "El proveedor alcanzó el límite de salida. El contenido parcial se conserva; elija Continuar.",
     "EMPTY_MODEL_RESPONSE": "El modelo terminó su turno sin decir nada, dos veces seguidas. Inténtelo de nuevo o reformule su solicitud.",
     "MUTATION_RETRY_BUDGET_EXHAUSTED": "La misma edición falló tres veces, por lo que este turno se detuvo en lugar de volver a intentarlo a ciegas. Pregunta nuevamente para continuar.",
     "CONTEXT_TOO_LARGE": "Este chat aún dura demasiado después de la recuperación del contexto. Acorta tu mensaje o inicia un nuevo chat.",

@@ -2528,6 +2528,8 @@ importConfirm: "가져온 확장은 에이전트 프로세스 안에서 에이�
     NETWORK_POLICY_BLOCKED: "앱의 주소 검사가 이 요청을 차단했습니다. 프록시나 VPN을 사용한다면 설정 → 일반 → 네트워크를 확인하세요.",
     TIMEOUT: "AI 프로바이더 요청 시간이 초과되었습니다.",
     STREAM_FAILED: "답변이 중단되었습니다.",
+    MODEL_THINKING_ONLY: "모델이 사고 내용만 반환하고 답변하지 않았습니다. 내용은 보존되었습니다. 계속을 선택하세요.",
+    MODEL_OUTPUT_TRUNCATED: "제공자의 출력 한도에 도달했습니다. 부분 답변은 보존되었습니다. 계속을 선택하세요.",
     EMPTY_MODEL_RESPONSE:
       "모델이 두 번 연속 아무 말 없이 턴을 완료했습니다. 다시 시도하거나 요청을 바꿔 표현하세요.",
     MUTATION_RETRY_BUDGET_EXHAUSTED:

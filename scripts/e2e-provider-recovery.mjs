@@ -296,7 +296,7 @@ async function run(name, mode, style = "chat_completions") {
   await screenshot(`${name}-settled`);
   await waitFor(async () => {
     const text = await bodyText();
-    return mode === "always"
+    return mode === "stream" ? text.includes("STREAM_FAILED") && text.includes("PARTIAL_699") : mode === "always"
       ? text.includes("NETWORK_ERROR")
       : text.includes("RECOVERED_699");
   }, "final UI");
@@ -356,6 +356,11 @@ async function continueAfterFailure(record) {
     text: await bodyText(),
   };
   assert.equal(record.continuation.requests, 1);
+  const continued = await ipc("sessionGet", { id: record.sessionId });
+  assert(continued.session.messages.filter(message => message.role === "user").length >= 2, "Continue appends a user message");
+  if (record.mode === "stream") {
+    assert(continued.session.messages.some(message => message.content === "PARTIAL_699" && message.status === "error"), "Partial response is not regenerated away");
+  }
   assert(!record.continuation.events.some((e) => e.event?.type === "error"));
   await writeFile(join(artifacts, "results.json"), JSON.stringify(results, null, 2));
 }
@@ -395,7 +400,7 @@ try {
   await ipc("settingsSet", { ...settings, language: "zh-CN", autoGenerateTitle: false });
   console.log("ARTIFACTS", artifacts);
   await run("01-network-recovery", "recover");
-  await run("02-stream-recovery", "stream");
+  await continueAfterFailure(await run("02-stream-recovery", "stream"));
   await run("03-responses-recovery", "recover", "responses");
   await continueAfterFailure(await run("04-network-exhaustion", "always"));
   await run("05-cumulative-budget", "cumulative");

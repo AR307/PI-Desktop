@@ -502,6 +502,7 @@ export function createSidecarRuntime({
       modelId,
       apiKey,
       ...(provider.authKind ? { authKind: provider.authKind } : {}),
+      ...(managedBinding?.mirrorCodingGroupId !== undefined ? { mirrorCodingGroupId: managedBinding.mirrorCodingGroupId } : {}),
       ...(managedBinding?.baseUrl ?? provider.baseUrl ? { baseUrl: managedBinding?.baseUrl ?? provider.baseUrl } : {}),
       ...(managedBinding?.apiStyle ?? provider.apiStyle ? { apiStyle: managedBinding?.apiStyle ?? provider.apiStyle } : {}),
       ...(isMirrorCoding ? { headers: { ...(provider.headers ?? {}), ...(managedBinding?.headers ?? {}) } } : {}),

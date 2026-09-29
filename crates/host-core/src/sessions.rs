@@ -219,6 +219,11 @@ pub struct UiMessage {
     /// as an additive `hostedSearch` transcript block; no SQL migration.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub hosted_search: Option<Value>,
+    /// Safe response facts and native replay metadata stored in message meta.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub response_diagnostics: Option<Value>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub assistant_replay: Option<Value>,
     /// Durable image results and pending anonymous downloads.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub image_generation: Option<Value>,
@@ -340,6 +345,12 @@ pub(crate) fn ui_to_record(message: &UiMessage) -> (MessageRecord, Option<String
     }
     if let Some(tokens) = message.response_output_tokens {
         meta_obj.insert("responseOutputTokens".into(), json!(tokens));
+    }
+    if let Some(value) = &message.response_diagnostics {
+        meta_obj.insert("responseDiagnostics".into(), value.clone());
+    }
+    if let Some(value) = &message.assistant_replay {
+        meta_obj.insert("assistantReplay".into(), value.clone());
     }
     if let Some(error) = &message.error {
         meta_obj.insert("error".into(), error.clone());
@@ -494,6 +505,8 @@ pub(crate) fn record_to_ui(record: MessageRecord) -> UiMessage {
             total_tokens,
         })
     });
+    let response_diagnostics = meta.get("responseDiagnostics").cloned();
+    let assistant_replay = meta.get("assistantReplay").cloned();
     let error = meta.get("error").cloned();
     let response_duration_ms = meta.get("responseDurationMs").and_then(|v| v.as_i64());
     let response_output_tokens = meta.get("responseOutputTokens").and_then(|v| v.as_i64());
@@ -608,6 +621,8 @@ pub(crate) fn record_to_ui(record: MessageRecord) -> UiMessage {
             parent_tool_call_id,
             agent_name,
             hosted_search: hosted_search.clone(),
+            response_diagnostics: response_diagnostics.clone(),
+            assistant_replay: assistant_replay.clone(),
             image_generation: image_generation.clone(),
         }
     } else {
@@ -651,6 +666,8 @@ pub(crate) fn record_to_ui(record: MessageRecord) -> UiMessage {
             parent_tool_call_id,
             agent_name,
             hosted_search,
+            response_diagnostics,
+            assistant_replay,
             image_generation,
         }
     }
@@ -3894,6 +3911,8 @@ mod tests {
             parent_tool_call_id: None,
             agent_name: None,
             image_generation: None,
+            response_diagnostics: None,
+            assistant_replay: None,
             hosted_search: None,
             session_message: None,
         }
@@ -4541,6 +4560,8 @@ mod tests {
             parent_tool_call_id: None,
             agent_name: None,
             image_generation: None,
+            response_diagnostics: None,
+            assistant_replay: None,
             hosted_search: None,
             session_message: None,
         };
@@ -4980,6 +5001,8 @@ mod tests {
             parent_tool_call_id: None,
             agent_name: None,
             image_generation: None,
+            response_diagnostics: None,
+            assistant_replay: None,
             hosted_search: None,
             session_message: None,
         };
@@ -5025,6 +5048,25 @@ mod tests {
     }
 
     #[test]
+    fn assistant_partial_response_metadata_roundtrips_without_a_schema_change() {
+        let mut message = user_msg("partial", "Retained answer", "2026-09-29T00:00:00Z");
+        message.role = "assistant".into();
+        message.status = Some("error".into());
+        message.error = Some(json!({ "code": "MODEL_OUTPUT_TRUNCATED" }));
+        message.response_diagnostics =
+            Some(json!({ "end": "truncated", "rawStopReason": "max_tokens" }));
+        message.assistant_replay = Some(
+            json!({ "api": "anthropic-messages", "provider": "qa", "model": "claude-qa", "blocks": [{ "type": "thinking", "thinking": "Retained thinking", "thinkingSignature": "fixture-signature" }, { "type": "text", "text": "Retained answer" }] }),
+        );
+        let (record, _) = ui_to_record(&message);
+        let restored = record_to_ui(record);
+        assert_eq!(restored.response_diagnostics, message.response_diagnostics);
+        assert_eq!(restored.assistant_replay, message.assistant_replay);
+        assert_eq!(restored.content, message.content);
+        assert_eq!(restored.status, message.status);
+    }
+
+    #[test]
     fn assistant_hosted_search_roundtrips_as_canonical_blocks() {
         let db = test_db();
         let session = create_session(&db, None, None, None, None, None).unwrap();
@@ -5059,6 +5101,8 @@ mod tests {
             parent_tool_call_id: None,
             agent_name: None,
             image_generation: None,
+            response_diagnostics: None,
+            assistant_replay: None,
             hosted_search: Some(json!({
                 "status": "completed",
                 "rounds": [

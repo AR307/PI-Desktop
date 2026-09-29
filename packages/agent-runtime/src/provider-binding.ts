@@ -51,6 +51,8 @@ export type RuntimeProviderConfig = {
   modelId: string;
   apiKey: string;
   authKind?: string;
+  /** Non-secret selected MC group for final-wire diagnostics. */
+  mirrorCodingGroupId?: string;
   /** Plugin-owned trusted agent key when this is not a host provider row. */
   extensionAgentKey?: string;
   /** Wire protocol for the endpoint (provider config apiStyle). */

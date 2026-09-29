@@ -1,3 +1,5 @@
+import { responseOutcome, responseOutcomeError, responseDiagnostics } from "./response-outcome.js";
+import { upstreamRequestDiagnostics, type RequestDiagnostics } from "./request-diagnostics.js";
 /**
  * Host-owned one-shot completion used by prompt enhancement and plugin
  * `agent.complete`. No session history is implied: the caller supplies the
@@ -88,10 +90,14 @@ export async function completeOneShot(
     ((requestModel, requestContext, streamOptions) =>
       models.streamSimple(requestModel, requestContext, streamOptions));
   let providerStatus: number | undefined;
+  let providerRequestId: string | undefined;
   let providerHeaders: Record<string, string> | undefined;
   let providerFailure: ProviderFetchFailure | undefined;
   let transientRetryAttempt = 0;
   let rateLimitRetryAttempt = 0;
+  let request: RequestDiagnostics | undefined;
+  let requestAttempts = 0;
+  const startedAt = Date.now();
 
   const requestOptions: SimpleStreamOptions = withProviderHeaders(
     withOpenCodeSessionHeaders(
@@ -102,11 +108,20 @@ export async function completeOneShot(
         ...(thinkingLevel !== "off" ? { reasoning: thinkingLevel } : {}),
         fetch: providerRequestFetch(
           model.api,
-          captureProviderResponse(undefined, (response, _requestBytes, failure) => {
-            providerStatus = response?.status;
-            providerHeaders = response?.headers;
-            providerFailure = failure;
-          }),
+          captureProviderResponse(
+            undefined,
+            (response, _requestBytes, failure) => {
+              providerStatus = response?.status;
+              providerRequestId =
+                response?.headers["x-request-id"] ?? response?.headers["request-id"];
+              providerHeaders = response?.headers;
+              providerFailure = failure;
+            },
+            (value) => {
+              request = upstreamRequestDiagnostics(value, provider);
+              requestAttempts++;
+            },
+          ),
         ),
       },
       {
@@ -114,63 +129,76 @@ export async function completeOneShot(
         sessionId: options.sessionId,
       },
     ),
-    mergeProviderHeaders(
-      copilotRequestHeaders(provider, context),
-      provider.headers,
-    ),
+    mergeProviderHeaders(copilotRequestHeaders(provider, context), provider.headers),
     model.api,
   );
-  const stream = createProviderRetryStream(
-    model,
-    context,
-    requestOptions,
-    (retryOptions) => streamSimple(model, context, retryOptions),
-    {
-      claim: (error, phase) => {
-        if (phase !== "request" || !error.retriable) return undefined;
-        if (error.code === "PROVIDER_RATE_LIMITED") {
-          if (rateLimitRetryAttempt >= PROVIDER_RATE_LIMIT_MAX_RETRIES) {
+  for (let emptyAttempt = 0; ; emptyAttempt++) {
+    const stream = createProviderRetryStream(
+      model,
+      context,
+      requestOptions,
+      (retryOptions) => streamSimple(model, context, retryOptions),
+      {
+        claim: (error, phase) => {
+          if (phase !== "request" || !error.retriable) return undefined;
+          if (error.code === "PROVIDER_RATE_LIMITED") {
+            if (rateLimitRetryAttempt >= PROVIDER_RATE_LIMIT_MAX_RETRIES) {
+              return undefined;
+            }
+            rateLimitRetryAttempt += 1;
+            return rateLimitRetryAttempt;
+          }
+          if (!isTransientProviderRetryCode(error.code)) return undefined;
+          if (transientRetryAttempt >= PROVIDER_TRANSIENT_MAX_RETRIES) {
             return undefined;
           }
-          rateLimitRetryAttempt += 1;
-          return rateLimitRetryAttempt;
-        }
-        if (!isTransientProviderRetryCode(error.code)) return undefined;
-        if (transientRetryAttempt >= PROVIDER_TRANSIENT_MAX_RETRIES) {
-          return undefined;
-        }
-        transientRetryAttempt += 1;
-        return transientRetryAttempt;
+          transientRetryAttempt += 1;
+          return transientRetryAttempt;
+        },
+        headers: () => providerHeaders,
+        status: () => providerStatus,
+        failure: () => providerFailure,
       },
-      headers: () => providerHeaders,
-      status: () => providerStatus,
-      failure: () => providerFailure,
-    },
-  );
-  const result = await stream.result();
+    );
+    const result = await stream.result();
+    const diagnostic = {
+      ...responseDiagnostics(result, Math.max(emptyAttempt + 1, requestAttempts)),
+      ...request,
+      ...(providerStatus !== undefined ? { httpStatus: providerStatus } : {}),
+      ...(providerRequestId ? { requestId: providerRequestId } : {}),
+      ...(provider.mirrorCodingGroupId ? { group: provider.mirrorCodingGroupId } : {}),
+      durationMs: Date.now() - startedAt,
+    };
 
-  if (result.stopReason === "aborted") {
-    throw completeError("TURN_ABORTED", "The completion was aborted.");
-  }
-  if (result.stopReason === "error") {
-    const classified = withProviderFetchFailure(
-      classifyAgentError(result.errorMessage || "Completion failed."),
-      providerFailure,
-    );
-    throw completeError(
-      classified.code,
-      classified.message,
-      classified.details,
-      classified.retriable,
-    );
-  }
+    if (result.stopReason === "aborted") {
+      throw completeError("TURN_ABORTED", "The completion was aborted.");
+    }
+    if (result.stopReason === "error") {
+      const classified = withProviderFetchFailure(
+        classifyAgentError(result.errorMessage || "Completion failed."),
+        providerFailure,
+      );
+      throw completeError(
+        classified.code,
+        classified.message,
+        { ...classified.details, response: diagnostic },
+        classified.retriable,
+      );
+    }
 
-  const text = assistantContent(result.content).text.trim();
-  if (!text) {
-    throw completeError(
-      options.emptyErrorCode ?? "EMPTY_COMPLETION",
-      options.emptyErrorMessage ?? "The model returned no text.",
-    );
+    const outcome = responseOutcome(result);
+    if (outcome === "empty" && emptyAttempt === 0 && !options.signal?.aborted) continue;
+    const outcomeError = responseOutcomeError(outcome);
+    if (outcomeError)
+      throw completeError(outcomeError.code, outcomeError.message, { response: diagnostic }, false);
+    const text = assistantContent(result.content).text.trim();
+    if (!text) {
+      throw completeError(
+        options.emptyErrorCode ?? "EMPTY_COMPLETION",
+        options.emptyErrorMessage ?? "The model returned no text.",
+        { response: diagnostic },
+      );
+    }
+    return { text, usage: usageFromPi(result.usage) };
   }
-  return { text, usage: usageFromPi(result.usage) };
 }

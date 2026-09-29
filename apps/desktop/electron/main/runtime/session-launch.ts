@@ -688,6 +688,7 @@ export function createSessionLaunchRuntime({
           modelId,
           apiKey: mirrorCodingBinding?.apiKey || secret.value || "",
           authKind: provider.authKind,
+          ...(mirrorCodingBinding?.mirrorCodingGroupId !== undefined ? { mirrorCodingGroupId: mirrorCodingBinding.mirrorCodingGroupId } : {}),
           extensionAgentKey: provider.extensionAgentKey,
           apiStyle,
           ...(mirrorCodingBinding?.temperature !== undefined ? { temperature: mirrorCodingBinding.temperature } : {}),

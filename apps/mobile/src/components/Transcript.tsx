@@ -2,6 +2,8 @@ import { memo, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Bot, Download, ImagePlus, FileText, ChevronDown, LoaderCircle, Scissors, UnfoldVertical } from "lucide-react";
 import type { ImageGenerationResult, MessageAttachment, UiMessage } from "@pi-desktop/shared";
+import { canContinueResponse } from "@pi-desktop/shared";
+import { useMobileStore } from "../state/store";
 import type { MobileController } from "../state/controller";
 import {
   buildDiffLines,
@@ -101,6 +103,11 @@ function ThinkingCard({ text }: { text: string }) {
 
 export const Message = memo(function Message({ message, controller, reference }: { message: UiMessage; controller: MobileController; reference(file: PickedAttachment): void }) {
   const { t } = useTranslation("translation", { keyPrefix: "mobile" });
+  const { t: translate } = useTranslation();
+  const continuationDisabled = useMobileStore(controller, view => view.busy || view.connection !== "connected" || Boolean(view.snapshot?.activeTurn) ||
+    Boolean(view.uncertainMessageId) || view.snapshot?.session.capabilities.canPrompt !== true ||
+    Boolean(view.snapshot?.pendingApprovals.length) || Boolean(view.snapshot?.pendingInputs.length));
+  const latestId = useMobileStore(controller, view => view.messages.filter(item => !item.parentToolCallId && item.role !== "tool").at(-1)?.id);
   const generated = message.imageGeneration ?? imageResult(message.toolResult);
   const truncatedBody = isDisplayTruncated(message.content) || isDisplayTruncated(message.thinking);
   return <article className={`message message-${message.role}`} data-message-id={message.id}>
@@ -112,7 +119,8 @@ export const Message = memo(function Message({ message, controller, reference }:
     </>}
     {message.attachments?.map((attachment) => <AttachmentCard key={attachment.ref} controller={controller} messageId={message.id} id={attachment.ref} attachment={attachment} reference={reference}/>)}
     {generated && <section className="image-result"><p className="muted">{t("generatedWith")} {generated.model.displayName} · {generated.model.groupName}</p>{generated.images.map((image) => image.attachment ? <AttachmentCard key={image.id} controller={controller} messageId={message.id} id={image.id} attachment={image.attachment} reference={reference}/> : <div key={image.id} className="image-pending"><p>{image.error}</p><button onClick={() => void controller.retryImage(message.id, image.id)}>{t("retryDownload")}</button></div>)}</section>}
-    {(message.error || generated?.error) && <p className="error-text">{message.error?.message ?? generated?.error}</p>}
+    {(message.error || generated?.error) && <p className="error-text">{message.error ? translate(`errors.${message.error.code}`, { defaultValue: message.error.message }) : generated?.error}</p>}
+    {latestId === message.id && canContinueResponse(message) && <button disabled={continuationDisabled} onClick={() => void controller.continueResponse(message.id, translate("chat.continueCurrentTaskPrompt"))}>{translate("errors.action.continue")}</button>}
   </article>;
 });
 

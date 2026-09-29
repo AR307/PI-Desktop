@@ -563,10 +563,31 @@ needed by an actual request rather than starting a repository-wide rewrite.
   PiMobileQA / emulator-5554 instance. The APK is unsigned because no release
   keystore is configured in this workspace.
 
-## 2026-09-29 ? MC Claude routing
+## 2026-09-29 - MC Claude routing
 
 - Centralized original-ID Claude chat selection for MC catalog, bindings and
   relay validation; new bindings override stale persisted OpenAI routes.
 - Retained model/group authorization and image routing, without fallback.
 - Added controlled relay HTTP coverage for path, unchanged payload, encoded
   Chinese group, denied alternate path and permission removal.
+
+## 2026-09-29 - Non-destructive response completion and continuation
+
+- Added a shared runtime outcome classifier for empty, thinking-only, explicit
+  truncation, interruption and cancellation, across main/delegate/one-shot calls.
+- Limited genuine-empty retries to one; blocked automatic replay after text,
+  thinking or tool output, even with infinite retry. Preserved pre-output retry
+  budgets, Retry-After, completed tool context and internal completion notices.
+- Stored minimal native replay blocks and safe final-wire diagnostics in existing
+  Rust message meta, without a new table. Unsigned partial thinking remains
+  display-only and incomplete tool parameters do not execute.
+- Reused desktop Continue and added mobile Continue with localized explanations,
+  append-only history, restart recovery, and preservation of unsent drafts.
+- Added native adapter tests and controlled Electron/mobile recovery acceptance.
+  Updated runtime/error specs, recovery ADRs and acceptance scenarios. Production
+  MC/Kiro calls, pushing and release publication remain outside this task.
+- Reused the established native catalog capability resolver for published Claude
+  aliases, so dotted aliases retain adaptive effort options, including max.
+- Verified real isolated Electron, Rust and mobile-browser flows against local
+  MC authorization/relay and native SSE, including restart and explicit Continue.
+  Generic provider acceptance preserves pre-output retry and completed tools.

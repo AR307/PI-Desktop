@@ -1,5 +1,6 @@
 import type { MobileGrant, MobileModelCatalog, MobileSession, MobileSessionConfigureInput, MobileSessionSnapshot, MobileSessionState, RacpApprovalDecision, RacpEventEnvelope, UiMessage } from "@pi-desktop/shared";
 import type { RacpClientState } from "@pi-desktop/racp/client";
+import { canContinueResponse } from "@pi-desktop/shared";
 import type { MobileAccount, MobileAuthChallenge, MobileDevice } from "../services/account";
 import { AccountError } from "../services/account";
 import { MobileRelay } from "../services/relay";
@@ -35,7 +36,7 @@ export class MobileController {
   readonly cache: TranscriptCache = createTranscriptCache();
   readonly drafts = new Map<string, string>();
   readonly files = new Map<string, PickedAttachment[]>();
-  private readonly uncertain = new Map<string, string>();
+  private readonly uncertain = new Map<string, { messageId: string; keepDraft: boolean }>();
   constructor(readonly account: MobileAccount) {}
   getSnapshot = () => this.value;
   subscribe = (listener: () => void) => { this.listeners.add(listener); return () => { this.listeners.delete(listener); }; };
@@ -103,7 +104,7 @@ export class MobileController {
     // renders the persisted cache first, then replays only the gap. The route
     // flip patches synchronously so a view transition can capture it.
     const live = this.value.selectedId === sessionId && this.value.messages.length > 0;
-    this.patch({ selectedId: sessionId, ...(live ? {} : { snapshot: undefined, catalog: undefined, messages: [] }), loading: true, uncertainMessageId: this.uncertain.get(sessionId) });
+    this.patch({ selectedId: sessionId, ...(live ? {} : { snapshot: undefined, catalog: undefined, messages: [] }), loading: true, uncertainMessageId: this.uncertain.get(sessionId)?.messageId });
     const cached = live ? undefined : await this.cache.get(grant.desktopDeviceId, sessionId).catch(() => undefined);
     if (selection !== this.selection || relay !== this.relay) return;
     const resume = live
@@ -175,7 +176,10 @@ export class MobileController {
   private reconcile(snapshot: MobileSessionSnapshot, messages: UiMessage[]) {
     const pendingId = this.value.uncertainMessageId;
     const confirmed = pendingId && (messages.some((message) => message.id === pendingId) || snapshot.activeTurn?.idempotencyKey === pendingId || snapshot.queuedTurns.some((turn) => turn.idempotencyKey === pendingId));
-    if (confirmed) { this.uncertain.delete(snapshot.session.id); this.drafts.delete(snapshot.session.id); this.files.delete(snapshot.session.id); }
+    if (confirmed) {
+      if (!this.uncertain.get(snapshot.session.id)?.keepDraft) { this.drafts.delete(snapshot.session.id); this.files.delete(snapshot.session.id); }
+      this.uncertain.delete(snapshot.session.id);
+    }
     this.patch({ snapshot, messages, ...(confirmed ? { uncertainMessageId: undefined, notice: "deliveryConfirmed" } : {}) });
   }
   private handleEvent(event: RacpEventEnvelope) {
@@ -281,7 +285,16 @@ export class MobileController {
   private flushCache() {
     if (this.cacheTimer) { clearTimeout(this.cacheTimer); this.cacheTimer = undefined; this.persistCacheNow(); }
   }
-  async send(text: string, files: PickedAttachment[]): Promise<boolean> {
+  async continueResponse(messageId: string, text: string): Promise<boolean> {
+    const view = this.value;
+    const message = view.messages.find(item => item.id === messageId);
+    const latest = view.messages.filter(item => !item.parentToolCallId && item.role !== "tool").at(-1);
+    if (!message || latest?.id !== messageId || !canContinueResponse(message) || view.connection !== "connected" ||
+        view.snapshot?.activeTurn || view.snapshot?.pendingApprovals.length || view.snapshot?.pendingInputs.length ||
+        view.snapshot?.session.capabilities.canPrompt !== true || view.snapshot.session.taskMode === "image") return false;
+    return this.send(text, [], true);
+  }
+  async send(text: string, files: PickedAttachment[], keepDraft = false): Promise<boolean> {
     const relay = this.relay; const snapshot = this.value.snapshot; if (!relay || !snapshot || this.value.busy || this.value.uncertainMessageId) return false;
     const sessionId = snapshot.session.id; const messageId = crypto.randomUUID();
     this.patch({ busy: true, error: undefined, notice: undefined });
@@ -294,8 +307,9 @@ export class MobileController {
       if (relay !== this.relay || sessionId !== this.value.selectedId) throw new Error("Conversation changed before sending");
       started = true;
       await relay.request("turn/start", { sessionId, input: { text, messageId, attachments }, admission: "queue", context: { requestId: messageId, idempotencyKey: messageId } });
-      this.drafts.delete(sessionId); this.files.delete(sessionId); void this.background(() => this.refreshState()); return true;
-    } catch (error) { const code = error && typeof error === "object" && "code" in error ? error.code : undefined; if (started && (relay.client.state !== "connected" || code === "TIMEOUT" || code === "HOST_DISCONNECTED")) { this.uncertain.set(sessionId, messageId); this.patch({ uncertainMessageId: messageId }); } this.report(error); return false; }
+      if (!keepDraft) { this.drafts.delete(sessionId); this.files.delete(sessionId); }
+      void this.background(() => this.refreshState()); return true;
+    } catch (error) { const code = error && typeof error === "object" && "code" in error ? error.code : undefined; if (started && (relay.client.state !== "connected" || code === "TIMEOUT" || code === "HOST_DISCONNECTED")) { this.uncertain.set(sessionId, { messageId, keepDraft }); this.patch({ uncertainMessageId: messageId }); } this.report(error); return false; }
     finally { this.patch({ busy: false }); }
   }
   async stop() { await this.mutate("turn/interrupt", {}); }
@@ -315,8 +329,9 @@ export class MobileController {
     if (!messageId || !sessionId || !relay) return;
     const result = await relay.request<{ status: "persisted" | "queued" | "running" | "unknown" }>("message/status", { sessionId, messageId });
     if (relay !== this.relay || sessionId !== this.value.selectedId) return;
+    const keepDraft = this.uncertain.get(sessionId)?.keepDraft;
     this.uncertain.delete(sessionId);
-    if (result.status !== "unknown") { this.drafts.delete(sessionId); this.files.delete(sessionId); this.patch({ notice: "deliveryConfirmed" }); }
+    if (result.status !== "unknown") { if (!keepDraft) { this.drafts.delete(sessionId); this.files.delete(sessionId); } this.patch({ notice: "deliveryConfirmed" }); }
     this.patch({ uncertainMessageId: undefined }); await this.refreshState();
   }); }
   back() { this.flushCache(); if (this.value.selectedId && this.value.grant?.scope.kind !== "session") { ++this.selection; this.clearFrameEvents(); this.patch({ selectedId: undefined, snapshot: undefined, messages: [] }); } else void this.disconnect(); }

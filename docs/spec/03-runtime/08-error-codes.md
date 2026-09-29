@@ -103,7 +103,9 @@ does not turn temporary thread pressure into a host process exit.
 | `CONTEXT_TOO_LARGE` | no | prompt/context still exceeds the safe model budget after recovery, the second provider overflow occurred, or automatic recovery is disabled |
 | `CONTEXT_COMPACTION_FAILED` | no | automatic retained-tail recovery could not prepare, persist, or fit a checkpoint, or manual checkpoint summary generation / durable append failed; the guarded next provider request does not start |
 | `STREAM_FAILED` | yes | provider stream was terminated, closed prematurely, or otherwise ended before a complete response; up to ten same-turn retries may precede the terminal event |
-| `EMPTY_MODEL_RESPONSE` | yes | the model ended its turn with no tool call and no visible text twice: once as streamed, once after the automatic re-run; the first reply to a Host-ledger completion notice is exempt (spec 02-agent-runtime §5e, D446) |
+| `EMPTY_MODEL_RESPONSE` | yes | normal completion with no substantive text, thinking or tool activity after the single automatic empty-response retry; the first reply to a Host-ledger completion notice is exempt (spec 02-agent-runtime §5e, D446) |
+| `MODEL_THINKING_ONLY` | no | normal completion with thinking but no answer or legal tool round; retain thinking and offer explicit Continue, never automatic replay |
+| `MODEL_OUTPUT_TRUNCATED` | no | provider explicitly reports output-length termination; retain partial content and offer explicit Continue, never automatic replay |
 | `PROMPT_ENHANCEMENT_EMPTY` | no | the one-shot enhancement model returned no text |
 | `SPEECH_NOT_CONFIGURED` | no | host speech ASR or TTS is not bound in settings |
 | `SPEECH_PROTOCOL_UNSUPPORTED` | no | the speech protocol is unknown or does not support this role |
@@ -497,3 +499,18 @@ summary. It asks the user to check the certificate, clock, and trusted roots
 used by security software/proxies, then restart after changing trust. It does
 not claim that interception is the only possible cause or offer a TLS bypass.
 Manual Continue remains available after the cause is corrected.
+
+### Non-destructive completion outcomes (2026-09-29)
+
+- EMPTY_MODEL_RESPONSE: normally ended with no substantive content, after at most
+  one automatic empty retry per submission. Continue is an explicit new turn.
+- MODEL_THINKING_ONLY: normal stop with thinking but no answer or legal tool
+  round; no automatic replay. Preserve thinking and offer Continue.
+- MODEL_OUTPUT_TRUNCATED: explicit provider output-length termination; no
+  automatic replay. Preserve partial output and offer Continue.
+- STREAM_FAILED and other original transport errors keep their cause and any
+  partial content. User cancellation remains aborted and never recovers itself.
+
+These rules supersede any older description permitting partial/thinking replay.
+The response diagnostics and replay blocks are optional message meta fields;
+unknown usage and provider reasons remain absent.
