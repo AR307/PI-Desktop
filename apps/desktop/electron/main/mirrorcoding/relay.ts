@@ -13,6 +13,7 @@ import { validateImageOptions } from "@pi-desktop/shared";
 import type { MirrorCodingAccount } from "./account";
 import { ENDPOINTS, IMAGE_ENDPOINTS } from "./catalog";
 import { relayBindingKey } from "./relay-key";
+import { mirrorCodingChatRoute } from "./chat-route";
 
 type Binding = {
   providerId: string;
@@ -96,7 +97,7 @@ export class MirrorCodingRelay {
 
   async bind(providerId: string, metadata: MirrorCodingProvider, modelId: string, sessionId?: string, groupId?: string) {
     const group = selectedGroup(metadata, groupId);
-    const endpoint = group.routes[modelId];
+    const endpoint = mirrorCodingChatRoute(modelId, group.routes[modelId]);
     if (!endpoint) throw new Error("model_or_group_unavailable");
     return this.bindInternal(providerId, group, modelId, sessionId, "chat", endpoint, group.groupId);
   }
@@ -178,12 +179,12 @@ export class MirrorCodingRelay {
       const modelId = gemini ? decodeURIComponent(gemini[1]) : payload.model;
       if (typeof modelId !== "string") throw new Error("invalid_model_request");
       const imageRoutes = binding.metadata.imageRoutes?.[modelId];
-      const endpoint = binding.kind === "chat" ? binding.metadata.routes[modelId] :
+      const endpoint = binding.kind === "chat" ? mirrorCodingChatRoute(modelId, binding.metadata.routes[modelId]) :
         (Array.isArray(payload.images) && payload.images.length > 0 ? imageRoutes?.reference : imageRoutes?.generation);
       const expectedPath = binding.kind === "chat"
-        ? (binding.metadata.routes[modelId] ? ENDPOINTS[binding.metadata.routes[modelId]!].path : "")
+        ? (endpoint ? ENDPOINTS[endpoint as MirrorCodingEndpoint].path : "")
         : (endpoint ? IMAGE_ENDPOINTS[endpoint as MirrorCodingImageEndpoint].path : "");
-      if (!endpoint || (binding.kind === "chat" && (endpoint === "gemini" ? !gemini : path !== expectedPath)) ||
+      if (!endpoint || (binding.kind === "chat" && (endpoint !== binding.endpoint || (endpoint === "gemini" ? !gemini : path !== expectedPath))) ||
           (binding.kind === "image" && path !== expectedPath)) {
         response.writeHead(403).end(JSON.stringify({ error: { message: "Model or group unavailable", code: "model_or_group_unavailable" } }));
         return;
@@ -196,7 +197,9 @@ export class MirrorCodingRelay {
       const currentCapability = currentModel?.image;
       const currentPath = hasReferences ? currentCapability?.referencePath : currentCapability?.generationPath;
       const routeAvailable = binding.kind === "chat"
-        ? Boolean(currentModel?.supportedEndpointTypes.includes(endpoint as MirrorCodingEndpoint))
+        ? Boolean(currentModel && currentModel.image?.supportsChat !== false &&
+            currentModel.supportedEndpointTypes.some((kind) =>
+              kind in ENDPOINTS && mirrorCodingChatRoute(modelId, kind as MirrorCodingEndpoint) === endpoint))
         : Boolean(currentCapability && endpoint && currentPath === IMAGE_ENDPOINTS[endpoint as MirrorCodingImageEndpoint].path &&
             currentModel?.supportedEndpointTypes.includes(endpoint));
       if (!currentModel || !routeAvailable) {

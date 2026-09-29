@@ -54,3 +54,13 @@ Rust provider tests cover account projection, model-setting propagation and
 refresh retention. Desktop typecheck and model-settings user-path tests cover
 the model-first renderer surface. Live MirrorCoding acceptance remains
 dependent on the controlled local MC service.
+
+## Amendment: native MC Claude routing (2026-09-29)
+
+The original MC chat model ID containing claude, irrespective of case or
+suffix, now selects Anthropic Messages. Central policy is applied when
+compiling catalog routes, binding new work and validating relay requests.
+The alternative of trusting stale OpenAI endpoint annotations was rejected
+because it introduces an avoidable translation layer for native reasoning
+and tools. Membership and credential checks remain authoritative; there is
+no fallback if MC rejects the selected endpoint. Non-MC routes do not change.

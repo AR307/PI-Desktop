@@ -562,3 +562,11 @@ needed by an actual request rather than starting a repository-wide rewrite.
 - Release validation used Node 24.19.0, Rust 1.90.0, Java 21 and the single
   PiMobileQA / emulator-5554 instance. The APK is unsigned because no release
   keystore is configured in this workspace.
+
+## 2026-09-29 ? MC Claude routing
+
+- Centralized original-ID Claude chat selection for MC catalog, bindings and
+  relay validation; new bindings override stale persisted OpenAI routes.
+- Retained model/group authorization and image routing, without fallback.
+- Added controlled relay HTTP coverage for path, unchanged payload, encoded
+  Chinese group, denied alternate path and permission removal.

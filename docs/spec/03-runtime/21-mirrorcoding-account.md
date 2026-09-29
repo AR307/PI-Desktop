@@ -41,3 +41,14 @@ An empty successful catalog disables the managed rows. A failed refresh keeps
 the last usable catalog. Historical sessions retain their provider identity;
 logout disables managed rows and clears the account credential through the
 existing revocation flow.
+
+## Claude chat protocol (2026-09-29)
+
+For MC-authorized chat models only, the original catalog model ID containing
+claude (case-insensitive) selects Anthropic Messages /v1/messages. This
+policy is shared by catalog compilation, new runtime bindings, and relay
+validation; stale OpenAI annotations cannot override it. Original IDs, group
+authorization and model settings remain unchanged. Images and other provider
+sources retain their existing routes. A rejected Messages request surfaces
+without protocol, model or group fallback. Already active requests keep their
+selected protocol.

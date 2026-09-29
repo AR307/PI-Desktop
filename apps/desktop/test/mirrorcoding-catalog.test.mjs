@@ -5,6 +5,9 @@ import test from "node:test";
 const moduleUrl = new URL("../electron/main/mirrorcoding/catalog.ts", import.meta.url);
 const hooks = registerHooks({
   resolve(specifier, context, nextResolve) {
+    if (context.parentURL === moduleUrl.href && specifier === "./chat-route") {
+      return nextResolve("./chat-route.ts", context);
+    }
     if (context.parentURL === moduleUrl.href && specifier === "../models-dev-catalog") {
       return nextResolve("../models-dev-catalog.ts", context);
     }
@@ -14,6 +17,19 @@ const hooks = registerHooks({
 const { compileCatalog, parseCatalog } = await import(moduleUrl.href).finally(() => hooks.deregister());
 
 const emptyModelsDev = { findModel: () => undefined };
+
+test("MC Claude IDs use Messages despite legacy OpenAI catalog annotations", () => {
+  const ids = ["claude-opus-5.5", "vendor/CLAUDE-Sonnet-thinking", "claude-future", "other-chat"];
+  const catalog = {
+    user: { id: 42, displayName: "QA" },
+    supportedEndpoints: { openai: { method: "POST", path: "/v1/chat/completions" } },
+    groups: [{ id: "中文分组", name: "QA", description: "", ratio: 0.06, dynamicBilling: false,
+      models: ids.map(id => ({ id, supportedEndpointTypes: ["openai"] })) }],
+  };
+  const group = compileCatalog(catalog, emptyModelsDev).groups[0];
+  assert.deepEqual(group.models.map(model => model.id), ids);
+  assert.deepEqual(group.metadata.routes, Object.fromEntries(ids.map(id => [id, id === "other-chat" ? "openai" : "anthropic"])));
+});
 
 test("parses MirrorCoding catalog fields and preserves group routing data", () => {
   const catalog = parseCatalog({

@@ -4,6 +4,7 @@ import type {
 } from "@pi-desktop/shared";
 import { genericModelConfig, type ModelConfig } from "@pi-desktop/agent-runtime";
 import { modelConfigFromModelsDev, type ModelsDevCatalog } from "../models-dev-catalog";
+import { mirrorCodingChatRoute } from "./chat-route";
 
 export const ENDPOINTS = {
   "openai-response": { api: "openai-responses", style: "responses", path: "/v1/responses", prefix: "/v1" },
@@ -143,10 +144,10 @@ export function compileCatalog(catalog: MirrorCodingCatalog, modelsDev: ModelsDe
         const config = modelMetadata(modelsDev, model.id);
         const native = preferredEndpoint(config);
         const candidates = [...new Set([...(native ? [native] : []), ...Object.keys(ENDPOINTS) as MirrorCodingEndpoint[]])];
-        const endpoint = candidates.find((kind) => {
+        const endpoint = mirrorCodingChatRoute(model.id, candidates.find((kind) => {
           const advertised = catalog.supportedEndpoints[kind];
           return model.image?.supportsChat !== false && model.supportedEndpointTypes.includes(kind) && advertised?.method === "POST" && advertised.path === ENDPOINTS[kind].path;
-        });
+        }));
         // Image routes are only usable when the server supplied the image
         // capability object. Endpoint type names alone are not sufficient:
         // the capability carries the generation/reference path contract.
