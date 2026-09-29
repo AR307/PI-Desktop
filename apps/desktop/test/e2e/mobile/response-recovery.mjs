@@ -64,6 +64,7 @@ async function openDesktop() {
 }
 async function closeDesktop() { if (desktop) { await desktop.evaluate(() => { process.env.PI_DESKTOP_BOOT_PROBE = "1"; }); await desktop.close(); desktop = undefined; } }
 async function shot(name) {
+  await page.getByTestId("startup-splash").waitFor({ state: "hidden" });
   await page.screenshot({ path: join(output, name + "-desktop.png") });
   await phone.screenshot({ path: join(output, name + "-mobile.png"), fullPage: true });
   check(name + " fits phone width", await phone.evaluate(() => document.documentElement.scrollWidth <= innerWidth));
@@ -166,6 +167,9 @@ try {
   const localizedError = "模型只返回了思考，没有生成回答。已保留现有内容，可点击“继续”请求回答。";
   await page.getByText(localizedError, { exact: true }).last().waitFor();
   await phone.getByText(localizedError, { exact: true }).last().waitFor();
+  await page.getByTestId("startup-splash").waitFor({ state: "hidden" });
+  await page.getByRole("button", { name: "继续", exact: true }).last().click({ trial: true });
+  await phone.getByRole("button", { name: "继续", exact: true }).last().click({ trial: true });
   await shot("thinking-light-zh");
   check("Chinese Continue is available in light theme on both clients", await phone.locator("html").getAttribute("data-theme") === "light");
 } catch (error) {
