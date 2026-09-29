@@ -591,3 +591,5 @@ needed by an actual request rather than starting a repository-wide rewrite.
 - Verified real isolated Electron, Rust and mobile-browser flows against local
   MC authorization/relay and native SSE, including restart and explicit Continue.
   Generic provider acceptance preserves pre-output retry and completed tools.
+- Bound mobile acceptance waits to the newly submitted terminal message, not a
+  potentially earlier idle relay snapshot; cancellation waits for its abort row.

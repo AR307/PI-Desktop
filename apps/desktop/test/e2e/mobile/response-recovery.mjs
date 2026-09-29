@@ -100,10 +100,18 @@ try {
   await page.locator('[data-action="close-mobile-pairing"]').click();
   async function send(step) {
     steps = step === "empty" ? ["empty", "empty"] : [step]; const before = requests.length;
+    const previousMessages = new Set((await view()).messages.map(message => message.id));
     await phone.locator(".composer textarea").fill("Controlled " + step + " response");
     await phone.getByRole("button", { name: "Send", exact: true }).click();
-    await until(async () => requests.length > before && !(await view()).busy && !(await view()).snapshot?.activeTurn, "response " + step);
-    return { before, message: (await view()).messages.filter(m => m.role === "assistant").at(-1) };
+    const message = await until(async () => {
+      const current = await view();
+      const reply = current.messages.filter(message => message.role === "assistant").at(-1);
+      // An idle snapshot can precede the relay event for this submission.
+      // Wait for its new terminal row, not the previous response.
+      return requests.length > before && !current.busy && !current.snapshot?.activeTurn &&
+        reply && !previousMessages.has(reply.id) && ["error", "complete", "aborted"].includes(reply.status) && reply;
+    }, "terminal response " + step);
+    return { before, message };
   }
   const first = await send("thinking");
   check("MC Claude uses native Messages with exact model, Bearer, encoded group and no SDK key", requests[0].path.startsWith("/v1/messages") && requests[0].body.model === modelId && requests[0].bearer && !requests[0].sdkKey && decodeURIComponent(requests[0].group) === "中文 分组");
@@ -139,7 +147,10 @@ try {
   await phone.locator(".composer textarea").fill("Controlled stop"); await phone.getByRole("button", { name: "Send", exact: true }).click();
   await until(() => Boolean(held), "partial live response");
   await phone.getByRole("button", { name: "Stop", exact: true }).click();
-  await until(async () => !(await view()).snapshot?.activeTurn, "stopped");
+  await until(async () => {
+    const current = await view();
+    return !current.snapshot?.activeTurn && current.messages.filter(message => message.role === "assistant").at(-1)?.status === "aborted";
+  }, "stopped");
   check("user Stop retains cancellation without replay", requests.length === beforeStop + 1 && (await view()).messages.filter(m => m.role === "assistant").at(-1).status === "aborted");
   await shot("stopped");
   await send("thinking");
