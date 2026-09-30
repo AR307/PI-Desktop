@@ -237,7 +237,8 @@ try {
   await until(async () => (await view()).snapshot?.session.configuration.next.fast === false, "desktop Fast off synchronizes to phone");
   check("desktop Fast toggle updates mobile");
   await mobileSend("mobile-fast-child: delegate through the authorized model");
-  await until(async () => (await invoke("session/get", { id: shared.id })).session.messages.some(message => message.toolName === "Task" && message.toolResult?.details?.fast === true && message.toolResult.details.status === "completed"), "Fast child completes");
+  await until(async () => (await view()).messages.some(message => message.toolName === "Task" && message.toolResult?.details?.fast === true && message.toolResult.details.status === "completed"), "Fast child completes");
+  check("child Fast survives durable history reads", (await invoke("session/get", { id: shared.id })).session.messages.some(message => message.toolName === "Task" && message.toolResult?.details?.fast === true));
   const childRequests = fixture.chats.filter(body => body.model === "gpt-5.1");
   check("A creates B with independent Fast including tool continuation", childRequests.length >= 2 && childRequests.every(body => body.service_tier === "fast"));
   await until(async () => (await view()).messages.some(message => message.toolName === "Task" && message.toolResult?.details?.fast === true), "child metadata reaches mobile");

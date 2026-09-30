@@ -100,7 +100,7 @@ try {
   await until(async () => !(await view()).loading, "initial account load");
   await phone.getByRole("button", { name: /^(Account and appearance|账号与外观)$/ }).click();
   await phone.getByLabel(/^(Language|语言)$/).selectOption("en");
-  await phone.getByLabel("Theme", { exact: true }).selectOption("light");
+  await phone.getByRole("group", { name: "Theme", exact: true }).getByRole("button", { name: "Light", exact: true }).click();
   await phone.getByRole("dialog").getByRole("button", { name: "Close", exact: true }).click();
   if ((await view()).signedIn) await phone.evaluate(() => window.__PI_MOBILE_CONTROLLER__.logout());
   await phone.locator('[name="username"]').fill("mobileqa");
@@ -194,7 +194,7 @@ try {
   await phone.getByText("Continuation sent from the actual Android APK", { exact: true }).waitFor();
   check("Android restart reloads durable desktop history");
   await phone.getByRole("button", { name: "Account and appearance", exact: true }).click();
-  await phone.getByLabel("Theme", { exact: true }).selectOption("dark");
+  await phone.getByRole("group", { name: "Theme", exact: true }).getByRole("button", { name: "Dark", exact: true }).click();
   await phone.getByLabel("Language", { exact: true }).selectOption("zh-CN");
   await phone.getByRole("dialog").getByRole("button", { name: "关闭", exact: true }).click();
   await screenshot("android-conversation-dark-zh");
