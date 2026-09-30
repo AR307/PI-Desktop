@@ -775,3 +775,5 @@ This completion record supersedes the earlier pending acceptance notes.
   the native ESM runtime upgrade (window, launcher and backend resource paths).
   Set it once in the Main bundle output; preload remains sandboxed CJS. The
   failed isolated startup is recorded under .artifacts/upstream-mobile-candidate.
+- Resolve the ESM directory through the existing Main define transform, not a
+  chunk banner: electron-vite already emits its own shim in dependency chunks.

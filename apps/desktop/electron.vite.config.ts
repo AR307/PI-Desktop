@@ -51,16 +51,13 @@ export default defineConfig({
     // kills the whole Main bundle before the app starts, so state the documented
     // "no native accelerator" input to that branch at build time instead.
     define: {
+      // Resolve extracted Main resource paths at the emitted ESM module.
+      __dirname: "import.meta.dirname",
       "process.env.WS_NO_BUFFER_UTIL": "\"1\"",
       "process.env.WS_NO_UTF_8_VALIDATE": "\"1\"",
     },
     build: {
       rollupOptions: {
-        output: {
-          // Main resource paths are relative to the emitted bundle, including
-          // code extracted into bootstrap modules. Main now emits native ESM.
-          banner: "const __dirname = import.meta.dirname;",
-        },
         // Bundle JS workspace packages into Main. Native voice modules must
         // resolve from packaged node_modules because their loaders locate
         // platform libraries relative to their own package directories.
