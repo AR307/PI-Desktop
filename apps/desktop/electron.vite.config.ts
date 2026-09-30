@@ -56,6 +56,11 @@ export default defineConfig({
     },
     build: {
       rollupOptions: {
+        output: {
+          // Main resource paths are relative to the emitted bundle, including
+          // code extracted into bootstrap modules. Main now emits native ESM.
+          banner: "const __dirname = import.meta.dirname;",
+        },
         // Bundle JS workspace packages into Main. Native voice modules must
         // resolve from packaged node_modules because their loaders locate
         // platform libraries relative to their own package directories.

@@ -770,3 +770,8 @@ This completion record supersedes the earlier pending acceptance notes.
 - A final remote refresh found upstream d96382d74e0a9ae9497eecad54b7583f788b4159
   (Live Voice real-error display and failure logging). Integrated that follow-up
   before candidate acceptance; the latest stable version remains 0.15.10.
+
+- Controlled Electron startup exposed missing bundle-relative __dirname after
+  the native ESM runtime upgrade (window, launcher and backend resource paths).
+  Set it once in the Main bundle output; preload remains sandboxed CJS. The
+  failed isolated startup is recorded under .artifacts/upstream-mobile-candidate.
