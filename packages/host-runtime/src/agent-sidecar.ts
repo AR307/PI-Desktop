@@ -145,7 +145,6 @@ export class AgentSidecar {
   // work panel's WebContentsView) — host-core never sees these.
   private localToolControllers = new Map<string, AbortController>();
   private localTools = new Map<string, LocalToolHandler>();
-  private localToolTimers = new Set<ReturnType<typeof setTimeout>>();
   private projectInstructionResolver: ProjectInstructionResolver | null = null;
   // The sidecar may request a path, but it never chooses the project root.
   // The embedding host registers this binding from the host-owned session
@@ -210,8 +209,6 @@ export class AgentSidecar {
       p.reject(error);
     }
     this.pending.clear();
-    for (const timer of this.localToolTimers) clearTimeout(timer);
-    this.localToolTimers.clear();
     for (const controller of this.localToolControllers.values()) controller.abort();
     this.localToolControllers.clear();
     this.handlers.clear();
@@ -270,31 +267,20 @@ export class AgentSidecar {
     const controller = new AbortController();
     this.localToolControllers.set(key, controller);
     const imageGeneration = params.toolName === "GenerateImages";
-    let timer: ReturnType<typeof setTimeout> | undefined;
     try {
-      return await Promise.race([
-        (async () => {
-          if (imageGeneration) {
-            imageGenerationPrompts(input.args);
-            if (!this.host) throw new Error("host unavailable");
-            const gate = await this.host.call<LocalToolResult>("tools.execute", params);
-            if (!gate.ok) return gate;
-            controller.signal.throwIfAborted();
-          }
-          return handler({ ...input, signal: controller.signal });
-        })(),
-        new Promise<LocalToolResult>((_, reject) => {
-          timer = setTimeout(() => {
-            controller.abort();
-            reject(new Error("host-local tool timeout"));
-          }, rpcTimeoutMs("tools.execute", params));
-          this.localToolTimers.add(timer);
-        }),
-      ]);
+      if (imageGeneration) {
+        imageGenerationPrompts(input.args);
+        if (!this.host) throw new Error("host unavailable");
+        const gate = await this.host.call<LocalToolResult>("tools.execute", params);
+        if (!gate.ok) return gate;
+        controller.signal.throwIfAborted();
+      }
+      // Local tools share tools.execute lifetime: explicit cancellation, not
+      // a transport deadline. Their services retain execution-specific budgets.
+      return await handler({ ...input, signal: controller.signal });
     } finally {
       controller.abort();
       this.localToolControllers.delete(key);
-      if (timer) { clearTimeout(timer); this.localToolTimers.delete(timer); }
     }
   }
 

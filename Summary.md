@@ -786,3 +786,9 @@ This completion record supersedes the earlier pending acceptance notes.
   isolates Electron renderer storage as well as host data. Recovery acceptance
   declares Messages in the MC catalog and uses a known native reasoning model;
   it no longer depends on the removed model-name routing override.
+- Actual image-tool acceptance found a merge defect in host-local reverse RPC:
+  upstream tools.execute now has no deadline, but the local bridge scheduled
+  setTimeout(undefined), aborting asynchronous image tools immediately. Removed
+  the obsolete transport timer, preserving explicit abort/disposal and each
+  service execution budget. A controlled real-child regression test reproduced
+  the failure before the fix; image acceptance will be rerun after rebuilding.

@@ -1100,6 +1100,9 @@ Local permission behavior (**D636 / ADR 0310**): an unresolved request remains
 pending until an explicit decision, cancellation, or host/process shutdown.
 The transport does not apply a deadline to `tools.execute`; tool-specific
 execution budgets still apply after approval.
+The same lifetime applies to embedding-host local tools, including image catalog
+and generation handlers. Stop and transport disposal abort their active signal;
+an absent RPC deadline must not become a zero-delay timer.
 
 `permissions.pending` returns the open requests as Host state (D374/D375):
 `{ requests: PendingPermission[] }`, oldest first, optionally scoped by
