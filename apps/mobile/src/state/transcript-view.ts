@@ -8,7 +8,7 @@ import { TRANSCRIPT_DISPLAY_TRUNCATION_MARKER, type MobileCompactionMark, type U
  */
 export type TranscriptEntry =
   | { kind: "message"; message: UiMessage }
-  | { kind: "delegation"; id: string; agentName?: string; running: boolean; messages: UiMessage[] }
+  | { kind: "delegation"; id: string; agentName?: string; running: boolean; fast: boolean; messages: UiMessage[] }
   | { kind: "compaction"; id: string };
 
 export function buildTranscriptEntries(
@@ -22,13 +22,14 @@ export function buildTranscriptEntries(
     marks.set(mark.throughMessageId, list);
   }
   const entries: TranscriptEntry[] = [];
+  const tasks = new Map(messages.filter(message => message.toolName === "Task").map(message => [message.toolCallId, message]));
   const groups = new Map<string, Extract<TranscriptEntry, { kind: "delegation" }>>();
   for (const message of messages) {
     const parent = message.parentToolCallId;
     if (parent) {
       let group = groups.get(parent);
       if (!group) {
-        group = { kind: "delegation", id: parent, running: false, messages: [] };
+        group = { kind: "delegation", id: parent, running: false, fast: delegationFastRequested(tasks.get(parent)), messages: [] };
         groups.set(parent, group);
         entries.push(group);
       }
@@ -43,6 +44,14 @@ export function buildTranscriptEntries(
     }
   }
   return entries;
+}
+
+/** Only accepted Task metadata describes the requested child tier. */
+export function delegationFastRequested(message: UiMessage | undefined): boolean {
+  if (message?.toolName !== "Task" || !message.toolResult || typeof message.toolResult !== "object") return false;
+  const result = message.toolResult as { details?: unknown; fast?: unknown };
+  const details = result.details ?? result;
+  return !!details && typeof details === "object" && (details as { fast?: unknown }).fast === true;
 }
 
 /** True when host-core capped this text for display (`content_limit`). */

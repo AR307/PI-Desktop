@@ -547,7 +547,6 @@ export function createSessionLaunchRuntime({
       for (const binding of row.models ?? []) {
         const mirrorCodingChat =
           isMirrorCodingRow &&
-          !isImageGenerationModel(imageCandidates, row.id, binding.id) &&
           mirrorCodingChatAvailable(row.mirrorCoding, binding.id, binding.mirrorCodingGroupId);
         if (!binding.availableForSubagents || (isMirrorCodingRow && !mirrorCodingChat)) continue;
         let key = `${row.vendorKey ?? row.name}/${binding.id}`;

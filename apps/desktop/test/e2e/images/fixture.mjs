@@ -22,6 +22,7 @@ export async function imageFixture() {
     { id: "seedream-fixture", modes: ["image"], supported_endpoint_types: ["image-generation"], image: { generation_path: image.generation_path, reference_path: image.generation_path, sizes: ["2K", "4K"], max_count: 2, supports_chat: false } },
     { id: "text-only-image-fixture", modes: ["image"], supported_endpoint_types: ["image-generation"], image: { generation_path: image.generation_path, max_count: 1, supports_chat: false } },
     { id: "video-fixture", modes: ["video"], supported_endpoint_types: ["video"] },
+    { id: "gpt-5.1", modes: ["text"], supported_endpoint_types: ["openai"], fast: { enabled: true, supported_endpoint_types: ["openai"] } },
   ];
   const catalog = { user: { id: 901, display_name: "Image QA" }, supported_endpoints: {
     openai: { path: "/v1/chat/completions", method: "POST" },

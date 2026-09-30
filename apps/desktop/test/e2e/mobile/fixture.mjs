@@ -72,6 +72,12 @@ export async function mobileFixture({ port = 0, messageHandler } = {}) {
           heldChats.add(held); res.once("close", () => { if (heldChats.delete(held)) control.abortedChats++; }); return;
         }
         let tool, args;
+        if (!toolResults.length && /mobile-(fast|ordinary)-child/.test(prompt) && body.tools?.some(item => item.function.name === "Task")) {
+          tool = "Task"; args = { agent: "explorer", task: "Controlled child Fast tool continuation", model: control.subagentModel, ...(prompt.includes("mobile-fast-child") ? { fast: true } : {}) };
+        }
+        if (!toolResults.length && prompt.includes("Controlled child Fast tool continuation") && body.tools?.some(item => item.function.name === "Glob")) {
+          tool = "Glob"; args = { pattern: "*.md" };
+        }
         if (!toolResults.length && prompt.includes("mobile-question")) {
           tool = body.tools?.find((item) => /asktool/i.test(item.function.name))?.function.name;
           args = { questions: [{ question: "Choose the mobile acceptance color", options: ["Blue", "Green"] }] };

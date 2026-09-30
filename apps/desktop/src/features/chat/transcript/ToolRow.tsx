@@ -78,6 +78,7 @@ import {
 } from "./shared";
 import {
   delegateAgentName,
+  delegateFastRequested,
   delegateModelId,
   delegateThinkingLevel,
 } from "./model";
@@ -414,6 +415,7 @@ export const ToolRow = memo(function ToolRow({
                 </span>
               ) : null}
               <span className="subagent-topology-node-status">
+                {delegateFastRequested(message) ? `${t("mirrorCoding.fastRequested")} · ` : ""}
                 {statusLabel}
                 {duration ? ` · ${duration}` : ""}
               </span>

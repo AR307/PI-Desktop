@@ -3,6 +3,7 @@ import { TRANSCRIPT_DISPLAY_TRUNCATION_MARKER, type UiMessage } from "@pi-deskto
 import {
   buildDiffLines,
   buildTranscriptEntries,
+  delegationFastRequested,
   extractToolDiff,
   isDisplayTruncated,
   messageHasTruncatedContent,
@@ -15,6 +16,17 @@ function message(id: string, overrides: Partial<UiMessage> = {}): UiMessage {
 }
 
 describe("transcript view projection", () => {
+  it("shows accepted child Fast metadata without assuming parent or requested arguments", () => {
+    const task = message("01", { role: "tool", toolName: "Task", toolCallId: "task-1", toolArgs: { fast: true } });
+    const reply = message("02", { parentToolCallId: "task-1", agentName: "explorer" });
+    expect(delegationFastRequested(task)).toBe(false);
+    task.toolResult = { details: { fast: true } };
+    const group = buildTranscriptEntries([task, reply]).find(entry => entry.kind === "delegation");
+    expect(group?.fast).toBe(true);
+    task.toolResult = { details: { fast: false } };
+    expect(delegationFastRequested(task)).toBe(false);
+  });
+
   it("groups delegate messages under their Task call and marks running groups", () => {
     const rows = [
       message("01"),

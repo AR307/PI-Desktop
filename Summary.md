@@ -653,3 +653,12 @@ resolve their provider before creating a durable turn. Fast is now explicitly
 requested at those launch sites; the immutable current configuration is captured
 after the turn exists. Auxiliary launches remain off. Desktop typecheck and
 build pass; the previously failing cross-device acceptance is being rerun.
+
+### Child Fast visibility and acceptance coverage
+
+Desktop delegation cards and mobile Task/group details now identify requested Fast
+from accepted child metadata, never from parent preferences. The delegation
+selector permits opted-in dual-mode models when the selected group declares text.
+Controlled acceptance now exercises child tool continuation and parent/child Fast
+isolation. Async toggle checks wait for the persisted result rather than assuming
+a synchronous checkbox update.

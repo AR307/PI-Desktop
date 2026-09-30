@@ -112,7 +112,7 @@ export const Conversation = memo(function Conversation({ controller }: { control
       {entries.map((entry) => entry.kind === "message"
         ? <Message key={entry.message.id} message={entry.message} controller={controller} reference={reference}/>
         : entry.kind === "delegation"
-          ? <DelegationCard key={`delegation:${entry.id}`} id={entry.id} agentName={entry.agentName} running={entry.running} messages={entry.messages} controller={controller} reference={reference}/>
+          ? <DelegationCard key={`delegation:${entry.id}`} id={entry.id} agentName={entry.agentName} running={entry.running} fast={entry.fast} messages={entry.messages} controller={controller} reference={reference}/>
           : <CompactionDivider key={`compaction:${entry.id}`}/>)}
       {imageRunning && <div className="action-card">{t("imageGeneration")} · {t("working")}</div>}
       {snapshot?.pendingApprovals.map((request) => <Approval key={request.id} request={request} controller={controller} markdown={snapshot?.plans?.find((plan) => plan.id === request.id)?.markdown}/>)}

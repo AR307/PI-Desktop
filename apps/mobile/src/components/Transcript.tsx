@@ -7,6 +7,7 @@ import { useMobileStore } from "../state/store";
 import type { MobileController } from "../state/controller";
 import {
   buildDiffLines,
+  delegationFastRequested,
   extractToolDiff,
   isDisplayTruncated,
   messageHasTruncatedContent,
@@ -83,7 +84,7 @@ function ToolCard({ message, controller }: { message: UiMessage; controller: Mob
   useEffect(() => { if (running) setOpen(true); }, [running]);
   const diff = extractToolDiff(message.toolName, message.toolArgs);
   return <details className="tool-card" open={open} onToggle={(event) => setOpen((event.target as HTMLDetailsElement).open)}>
-    <summary><span>{running ? <LoaderCircle size={15} className="spin"/> : <ChevronDown size={15}/>} {message.toolName ?? t("tool")}</span><small>{message.toolStatus}</small></summary>
+    <summary><span>{running ? <LoaderCircle size={15} className="spin"/> : <ChevronDown size={15}/>} {message.toolName ?? t("tool")}</span><small>{delegationFastRequested(message) ? `${t("fastRequested")} · ` : ""}{message.toolStatus}</small></summary>
     {open && <>
       {diff ? <DiffBlock before={diff.before} after={diff.after} path={diff.path}/> : message.toolArgs !== undefined && <ToolPayload label={t("input")} value={message.toolArgs}/>}
       {message.toolResult !== undefined && <ToolPayload label={t("result")} value={message.toolResult}/>}
@@ -125,15 +126,15 @@ export const Message = memo(function Message({ message, controller, reference }:
 });
 
 /** Collapsible run of messages one delegate produced (`parentToolCallId`). */
-export const DelegationCard = memo(function DelegationCard({ id, agentName, running, messages, controller, reference }: {
-  id: string; agentName?: string; running: boolean; messages: UiMessage[]; controller: MobileController; reference(file: PickedAttachment): void;
+export const DelegationCard = memo(function DelegationCard({ id, agentName, running, fast, messages, controller, reference }: {
+  id: string; agentName?: string; running: boolean; fast: boolean; messages: UiMessage[]; controller: MobileController; reference(file: PickedAttachment): void;
 }) {
   const { t } = useTranslation("translation", { keyPrefix: "mobile" });
   const [open, setOpen] = useState(false);
   return <details className="delegation-card" data-delegation-id={id} open={open} onToggle={(event) => setOpen((event.target as HTMLDetailsElement).open)}>
     <summary>
       <span className="delegation-title">{running ? <LoaderCircle size={15} className="spin"/> : <Bot size={15}/>} {agentName ?? t("subagent")}</span>
-      <small>{t(running ? "working" : "ready")} · {messages.length}</small>
+      <small>{fast ? `${t("fastRequested")} · ` : ""}{t(running ? "working" : "ready")} · {messages.length}</small>
     </summary>
     {open && <div className="delegation-body">{messages.map((message) => <Message key={message.id} message={message} controller={controller} reference={reference}/>)}</div>}
   </details>;

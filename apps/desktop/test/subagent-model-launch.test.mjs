@@ -80,7 +80,7 @@ test("launch resolves definition-only pins without granting Task.model selection
   assert.deepEqual(collision.subagentModelKeys, ["other-account/private"]);
 });
 
-test("MirrorCoding chat models enter the delegation catalog without an opt-in flag", async (t) => {
+test("MirrorCoding delegates require opt-in and selected-group chat capability, including dual-mode models", async (t) => {
   const root = mkdtempSync(join(tmpdir(), "pi-mc-model-launch-"));
   t.after(() => rmSync(root, { recursive: true, force: true }));
   const account = {
@@ -90,15 +90,16 @@ test("MirrorCoding chat models enter the delegation catalog without an opt-in fl
     enabled: true,
     authKind: "mirrorcoding",
     models: [
-      { id: "chat-a", thinkingLevels: ["off"] },
-      { id: "chat-b", thinkingLevels: ["off"] },
-      { id: "image-1", thinkingLevels: ["off"] },
+      { id: "chat-a", thinkingLevels: ["off"], mirrorCodingGroupId: "group" },
+      { id: "chat-b", thinkingLevels: ["off"], mirrorCodingGroupId: "group", availableForSubagents: true },
+      { id: "image-1", thinkingLevels: ["off"], mirrorCodingGroupId: "group", availableForSubagents: true },
     ],
     mirrorCoding: {
       scope: "account",
       accountId: 1,
+      groups: [{ id: "group", routes: { "chat-a": "openai", "chat-b": "openai" }, modelCapabilities: { "chat-a": { modes: ["text"] }, "chat-b": { modes: ["text", "image"] }, "image-1": { modes: ["image"] } } }],
       routes: { "chat-a": "openai", "chat-b": "openai" },
-      imageModels: { "image-1": { generation_path: "/v1/images/generations" } },
+      imageModels: { "image-1": { generation_path: "/v1/images/generations" }, "chat-b": { generation_path: "/v1/images/generations" } },
       imageRoutes: { "image-1": { generation: "image-generation" } },
     },
   };
@@ -156,7 +157,7 @@ test("MirrorCoding chat models enter the delegation catalog without an opt-in fl
     },
   });
   const launched = (await runtime.resolveAgentRuntimeLaunch("session", {
-    providerId: account.id, modelId: "chat-a", projectPath: root,
+    providerId: account.id, modelId: "chat-a", projectPath: root, fast: true,
   }, {})).sidecarParams;
   assert.deepEqual(
     [...new Map(bound.map((row) => [`${row.providerId}:${row.modelId}`, row])).values()],
@@ -166,8 +167,12 @@ test("MirrorCoding chat models enter the delegation catalog without an opt-in fl
     ],
   );
   assert.deepEqual(launched.subagentModelKeys, [
-    "mirrorcoding/chat-a",
     "mirrorcoding/chat-b",
   ]);
   assert.equal(launched.subagentProviders["mirrorcoding/chat-b"].id, "mc-account");
+  assert.equal(launched.provider.fast, false, "auxiliary resolution never inherits saved Fast");
+  const fastLaunch = (await runtime.resolveAgentRuntimeLaunch("session", {
+    providerId: account.id, modelId: "chat-a", projectPath: root, fast: true,
+  }, {}, { fast: true })).sidecarParams;
+  assert.equal(fastLaunch.provider.fast, true, "user launch explicitly carries Fast");
 });
