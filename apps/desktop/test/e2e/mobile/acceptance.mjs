@@ -244,10 +244,15 @@ try {
   check("A creates B with independent Fast including tool continuation", childRequests.length >= 2 && childRequests.every(body => body.service_tier === "fast"));
   await until(async () => (await view()).messages.some(message => message.toolName === "Task" && message.toolResult?.details?.fast === true), "child metadata reaches mobile");
   await phone.locator(".delegation-card").filter({ hasText: "Fast requested" }).first().waitFor();
-  await page.locator(".subagent-topology-node-status").filter({ hasText: "Fast requested" }).first().waitFor();
   await screenshot("mobile-fast-child");
+  const childProcess = page.locator(".turn-process").filter({
+    has: page.locator(".subagent-topology-node-status").filter({ hasText: "Fast requested" }),
+  }).first();
+  const processHeader = childProcess.locator(":scope > .tool-activity-header");
+  if (await processHeader.getAttribute("aria-expanded") !== "true") await processHeader.click();
   const childGroup = page.locator(".tool-activity-group.has-subagents .tool-activity-header").first();
   if (await childGroup.getAttribute("aria-expanded") !== "true") await childGroup.click();
+  await page.locator(".subagent-topology-node-status").filter({ hasText: "Fast requested" }).first().waitFor();
   await page.locator(".subagent-topology-node-status").filter({ hasText: "Fast requested" }).first().scrollIntoViewIfNeeded();
   await screenshot("desktop-fast-child", page);
   await until(async () => !(await view()).busy && !(await view()).snapshot?.activeTurn, "Fast parent settles");

@@ -777,3 +777,7 @@ This completion record supersedes the earlier pending acceptance notes.
   failed isolated startup is recorded under .artifacts/upstream-mobile-candidate.
 - Resolve the ESM directory through the existing Main define transform, not a
   chunk banner: electron-vite already emits its own shim in dependency chunks.
+- Follow the native transcript disclosure in mobile acceptance: expand the
+  completed turn process and child group before asserting visible child Fast.
+  The controlled flow already verifies pairing, queueing, next-turn settings
+  and independent child Fast; the full candidate run continues below.
