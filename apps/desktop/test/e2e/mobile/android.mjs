@@ -123,6 +123,7 @@ try {
   await screenshot("android-paired-light-en");
   await phone.locator(".conversation-controls .model-chip").click();
   await phone.getByRole("switch", { name: "Fast", exact: true }).check();
+  await phone.locator(".fast-config").scrollIntoViewIfNeeded();
   await screenshot("android-fast-panel");
   await phone.getByRole("button", { name: "Apply", exact: true }).click();
   await phone.locator(".surface").waitFor({ state: "hidden" });

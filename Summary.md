@@ -662,3 +662,12 @@ selector permits opted-in dual-mode models when the selected group declares text
 Controlled acceptance now exercises child tool continuation and parent/child Fast
 isolation. Async toggle checks wait for the persisted result rather than assuming
 a synchronous checkbox update.
+
+### Controlled acceptance progress
+
+Electron plus mobile-browser acceptance passed the complete shared-session flow,
+including Fast next-turn requests, A-to-B child tool continuation and independent
+parent/child settings. The native Android run reached the real Capacitor runtime;
+its remaining setup blocker was the emulator keyboard handwriting tutorial, not
+a model request. The Fast row now keeps its label, input and status compact.
+Final native and restart coverage is recorded below once completed.

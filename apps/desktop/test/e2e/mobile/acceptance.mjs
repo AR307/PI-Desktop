@@ -211,6 +211,7 @@ try {
   await phone.locator(".model-variant").filter({ hasText: "auto" }).click();
   await phone.getByLabel("Thinking level", { exact: true }).selectOption("high");
   await phone.getByRole("switch", { name: "Fast", exact: true }).check();
+  await phone.locator(".fast-config").scrollIntoViewIfNeeded();
   await screenshot("mobile-fast-next-turn");
   await phone.getByRole("button", { name: "Apply", exact: true }).click();
   await phone.locator(".surface").waitFor({ state: "hidden" });
@@ -245,6 +246,9 @@ try {
   await phone.locator(".delegation-card").filter({ hasText: "Fast requested" }).first().waitFor();
   await page.locator(".subagent-topology-node-status").filter({ hasText: "Fast requested" }).first().waitFor();
   await screenshot("mobile-fast-child");
+  const childGroup = page.locator(".tool-activity-group.has-subagents .tool-activity-header").first();
+  if (await childGroup.getAttribute("aria-expanded") !== "true") await childGroup.click();
+  await page.locator(".subagent-topology-node-status").filter({ hasText: "Fast requested" }).first().scrollIntoViewIfNeeded();
   await screenshot("desktop-fast-child", page);
   await until(async () => !(await view()).busy && !(await view()).snapshot?.activeTurn, "Fast parent settles");
   await invoke("session/configure", shared.id, { mode: "agent", fast: true });
@@ -368,6 +372,7 @@ try {
   await screenshot("mobile-images-dark-en");
   await phone.reload(); await phone.locator(".grant-open").waitFor();
   check("phone reload restores login and pairing");
+  await invoke("session/configure", shared.id, { mode: "agent", fast: true });
   await closeDesktop();
   await phone.getByRole("button", { name: "Refresh", exact: true }).click();
   await phone.getByText("Desktop offline", { exact: false }).first().waitFor();
@@ -377,6 +382,7 @@ try {
   await phone.locator(".image-result .attachment-preview").first().click();
   await phone.locator(".image-result img").first().waitFor();
   check("desktop restart retains shared image history");
+  check("desktop restart restores next-turn Fast to the phone", (await view()).snapshot.session.configuration.next.fast === true);
   await page.locator('[data-nav="settings"]').click();
   await page.getByRole("button", { name: "Account", exact: true }).click();
   await page.locator('[data-testid="mobile-sync-settings"]').waitFor();

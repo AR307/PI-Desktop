@@ -19,5 +19,6 @@
 @media (max-width: 360px) { .work-list { padding: 18px 14px; } .transcript { padding-left: 14px; padding-right: 14px; } .login-page { padding: 24px 20px; } .dialog { padding: 18px; } .grant-remove { width: 36px; } }
 
 .fast-config { padding: 12px 0; }
+.fast-config .config-field { display: flex; align-items: center; justify-content: space-between; min-height: 40px; margin: 0 0 6px; }
 .fast-config > small { display: block; color: var(--ds-text-muted); line-height: 1.5; }
 .fast-config input[type=checkbox] { width: 20px; height: 20px; accent-color: var(--ds-text-primary); }
