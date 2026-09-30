@@ -792,3 +792,8 @@ This completion record supersedes the earlier pending acceptance notes.
   the obsolete transport timer, preserving explicit abort/disposal and each
   service execution budget. A controlled real-child regression test reproduced
   the failure before the fix; image acceptance will be rerun after rebuilding.
+- Image recovery acceptance also exposed the new cached transcript projection
+  classifying text-free image results as hidden process content. Align it with
+  the existing image-card projection so stopped-download retry remains visible.
+  Added the actual cancelled-URL result to the projection regression fixtures;
+  the test failed before the one-line fix. Updated the image spec to Pi 0.99.1.

@@ -20,8 +20,8 @@ omitted. No chat reasoning parameter is sent to image endpoints. The shared
 capability contract and server handoff are in
 [`mirrorcoding-image-generation-requirements.md`](../../mirrorcoding-image-generation-requirements.md).
 
-Node sidecar uses pi's `createImagesProvider` and `generateImages`, independently
-of `agent.prompt`. Main issues temporary loopback bindings, injects MirrorCoding
+Node sidecar uses pi's `createModels` / `createProvider` image adapter and
+`generateImages`, independently of `agent.prompt`. Main issues temporary loopback bindings, injects MirrorCoding
 Bearer credentials and the encoded group, persists attachments, and coordinates
 the durable turn. JSON edits use the server's JSON-to-multipart bridge. There is
 no automatic endpoint, model or group substitution. Image generation is not
@@ -36,6 +36,8 @@ cancellation and preserves the prompt. History records text metadata and
 attachment references, not base64. Generated pixels enter a later request only
 when explicitly attached. Failed/cancelled direct tasks retain draft input and
 an assistant error card. Restart restores persisted cards and explicit selections.
+Image cards remain outside the collapsed turn process even without accompanying
+text, so stopped-download recovery stays directly accessible.
 
 The agent has `ListImageModels` in all execution modes and `GenerateImage` only
 in Agent/execution mode. It chooses an explicit model and provider from the live

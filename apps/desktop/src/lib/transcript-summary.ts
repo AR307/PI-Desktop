@@ -68,7 +68,7 @@ export function getAssistantTurnSummary(entry: AssistantTurnEntry): AssistantTur
     }
     const message = part.message;
     result.messages.push(message);
-    if (part === answer || message.error) result.responses.push(part);
+    if (part === answer || message.error || message.imageGeneration) result.responses.push(part);
     else result.process.push(part);
     if (messageContentFacts(message).hasContent) {
       result.actionMessage = message;

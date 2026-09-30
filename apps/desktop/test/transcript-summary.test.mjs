@@ -40,6 +40,11 @@ test("cached turn aggregates and process topology match legacy helpers", () => {
     [],
     [message("blank", " \n ")],
     [message("partial", " Part ", { status: "aborted" })],
+    [message("stopped-image", "", { status: "aborted", imageGeneration: {
+      kind: "image-generation", prompt: "Stopped URL download", options: { count: 1 },
+      images: [{ id: "image", downloadUrl: "http://127.0.0.1/image.png", error: "image_download_failed" }],
+      error: "image_aborted",
+    } })],
     [message("a", " A ", { modelId: "model-a", usage: { inputTokens: 4, outputTokens: 3, totalTokens: 7, cacheReadTokens: 0 }, responseDurationMs: 1200 }),
       message("b", " B ", { responseOutputTokens: 8, responseDurationMs: 400 }),
       message("c", " C ", { usage: { inputTokens: 8, outputTokens: 0, totalTokens: 8, cacheWriteTokens: 2, reasoningTokens: 6 }, responseOutputTokens: 9, responseDurationMs: -1 })],
