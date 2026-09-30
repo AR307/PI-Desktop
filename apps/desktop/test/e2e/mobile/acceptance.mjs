@@ -178,7 +178,10 @@ try {
   check("conversation header identifies the shared session and online desktop", await phone.locator(".app-heading strong").textContent() === "Mobile shared session" && (await phone.locator(".app-heading small").textContent()).includes("Online"));
   check("phone initially bounds a long conversation", (await view()).snapshot.hasMoreHistory === true && !(await view()).messages.some((message) => message.content === "Historical message 00"));
   await editor.fill("Desktop event during mobile history paging"); await editor.press("Enter");
-  await phone.getByRole("button", { name: "Load earlier messages", exact: true }).click();
+  // Scrolling to the sentinel loads the page before its optional button can be clicked.
+  await phone.locator(".transcript").hover();
+  await phone.mouse.wheel(0, -20000);
+  await until(async () => (await view()).messages.some((message) => message.content === "Historical message 00"), "scroll-driven history pagination");
   await phone.getByText("Historical message 00", { exact: true }).waitFor();
   await phone.getByText("Desktop event during mobile history paging", { exact: true }).waitFor();
   check("older history and live desktop output merge without duplicates", new Set((await view()).messages.map((message) => message.id)).size === (await view()).messages.length);

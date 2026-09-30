@@ -644,3 +644,4 @@ needed by an actual request rather than starting a repository-wide rewrite.
   tests, two Rust Fast persistence/configuration tests, workspace package builds
   and desktop/mobile typechecks pass. Candidate visual E2E is still pending.
 - Full Rust suite: 647 passed, four failures in unchanged Windows path-normalization/fork assertions; this is not a fully green suite. Fixed a missing native reasoning-panel translation key found by i18n checks.
+- Replaced obsolete renderer-staging tests with main configuration/launch snapshot tests; 29 composer/configuration checks and all 36 i18n checks pass. Updated the controlled mobile history scenario to use the current scroll-triggered pagination interaction.
