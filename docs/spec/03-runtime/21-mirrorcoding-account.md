@@ -68,8 +68,15 @@ Mobile reconnects read this launch snapshot rather than sampling saved settings.
 
 Fast is enabled only for the selected model/group/Chat-or-Responses endpoint
 when declared by the directory. The native model panel shows requested Fast,
-not a guarantee of acceleration or a client-computed surcharge. Switching to an
-unsupported combination clears the next-turn preference with a visible notice.
+not a guarantee of acceleration or a client-computed surcharge. Selecting a
+different model or group clears the next-turn preference, even if the new
+selection supports Fast. The user must opt in again. Reselecting the same
+combination or changing reasoning alone preserves the preference. Mobile stages
+this reset until Apply; Cancel does not change the saved preference. A single
+mobile save may include an explicit Fast opt-in after the new selection.
+Unsupported combinations remain unavailable. The desktop composer represents
+requested Fast with a small solid lightning icon; its tooltip and accessible
+label preserve the requested-state wording, not a claim of actual acceleration.
 
 The final pi payload hook composes existing extension hooks, preserving reasoning
 and limits, then writes service_tier: fast. Off omits the field. Images, titles,

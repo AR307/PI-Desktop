@@ -79,15 +79,19 @@ mod tests {
     use serde_json::json;
 
     fn catalog(db: &Database, enabled: bool) {
-        let groups = ["fast-group", "slow-group"].into_iter().map(|id| json!({
+        let groups = ["fast-group", "other-fast-group", "slow-group"].into_iter().map(|id| json!({
             "metadata": { "scope":"group", "accountId":901, "groupId":id,
                 "groupName":id, "description":"Controlled fixture", "ratio":1.0,
-                "dynamicBilling":false, "routes":{"gpt-test":"openai"},
+                "dynamicBilling":false, "routes":{"gpt-test":"openai", "gpt-next":"openai"},
                 "modelCapabilities":{"gpt-test":{"modes":["text"], "supportedEndpointTypes":["openai"],
-                    "fast":{"enabled":enabled && id == "fast-group", "supportedEndpointTypes":["openai"]}}},
+                    "fast":{"enabled":enabled && id != "slow-group", "supportedEndpointTypes":["openai"]}},
+                    "gpt-next":{"modes":["text"], "supportedEndpointTypes":["openai"],
+                    "fast":{"enabled":enabled && id != "slow-group", "supportedEndpointTypes":["openai"]}}},
                 "supportedEndpoints":{"openai":{"path":"/v1/chat/completions","method":"POST"}}
             },
             "models":[{"id":"gpt-test", "contextWindow":128000, "maxTokens":8192,
+                "thinkingLevels":["off","high"], "defaultThinkingLevel":"off", "mirrorCodingGroupId":id},
+                {"id":"gpt-next", "contextWindow":128000, "maxTokens":8192,
                 "thinkingLevels":["off","high"], "defaultThinkingLevel":"off", "mirrorCodingGroupId":id}]
         })).collect::<Vec<_>>();
         providers::sync_mirrorcoding(
@@ -160,6 +164,58 @@ mod tests {
             )
             .unwrap();
         assert_eq!(count, 0);
+    }
+
+    #[test]
+    fn switching_model_or_group_requires_explicit_fast_opt_in() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = Database::open(&dir.path().join("pi.sqlite")).unwrap();
+        catalog(&db, true);
+        let first = group_provider(&db, "fast-group");
+        let second = group_provider(&db, "other-fast-group");
+        let session = create_session(
+            &db,
+            None,
+            Some("agent".into()),
+            Some(first.clone()),
+            Some("gpt-test".into()),
+            None,
+        )
+        .unwrap();
+        let configure = |provider: Option<&str>, model: Option<&str>, fast: Option<bool>| {
+            configure_session_with_thinking(
+                &db,
+                &session.id,
+                "agent",
+                provider,
+                model,
+                Some("high"),
+                None,
+                fast,
+            )
+            .unwrap()
+            .unwrap()
+        };
+
+        assert!(configure(None, None, Some(true)).fast);
+        assert!(
+            !configure(None, Some("gpt-next"), None).fast,
+            "a different Fast-capable model must start with Fast off"
+        );
+        assert!(configure(None, None, Some(true)).fast);
+        assert!(
+            configure(Some(&first), Some("gpt-next"), None).fast,
+            "reasoning changes and reselecting the same model preserve Fast"
+        );
+        assert!(
+            !configure(Some(&second), None, None).fast,
+            "a different group must not inherit the previous selection's Fast"
+        );
+        assert!(
+            configure(Some(&first), Some("gpt-test"), Some(true)).fast,
+            "mobile can explicitly opt in after selecting a model in one save"
+        );
+        assert!(!configure(Some(&second), Some("gpt-next"), None).fast);
     }
 
     #[test]

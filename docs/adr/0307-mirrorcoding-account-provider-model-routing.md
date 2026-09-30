@@ -61,7 +61,11 @@ and endpoint paths. The prior Claude-name override is removed: model identity
 is not permission to use an undeclared endpoint. Native protocol preference
 still applies when exact model metadata and the directory agree.
 
-Fast follows each persisted session selection, rather than a global default.
+Fast belongs to the current persisted session selection, not a global or
+per-model remembered default. Changing model/group resets it to off; an explicit
+opt-in after selection can be saved atomically with that selection. This avoids
+silently applying a possibly billable option to another model. Reasoning-only
+edits and already running requests preserve their Fast settings.
 Rust remains the only persistence owner. One main-process configuration service
 serves IPC and mobile, replacing the renderer's private pending-selection queue.
 A transient launch snapshot distinguishes running requests from next-turn edits,

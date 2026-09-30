@@ -1622,6 +1622,7 @@ sklm: {
     fastHint: "Request a faster service tier. Provider availability and pricing apply; acceleration is not guaranteed.",
     fastUnavailable: "Fast is not declared for this model, group and protocol.",
     fastDisabled: "Fast was turned off for the next turn because this model/group does not support it.",
+    fastReset: "Fast was turned off after changing the model or group. Turn it on manually if needed.",
     pi_fast_unavailable: "Fast is unavailable. Refresh the catalog and select a supported model/group. This request was not replayed at normal speed.",
     invalid_service_tier: "The requested service tier is invalid.",
     catalog_unavailable: "The catalog is temporarily unavailable. Your last synchronized models and draft are retained.",

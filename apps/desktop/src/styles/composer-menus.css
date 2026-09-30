@@ -173,6 +173,11 @@
   color: var(--ds-text-muted);
 }
 
+.composer-model-fast-icon {
+  flex: 0 0 auto;
+  color: var(--ds-accent);
+}
+
 .composer-model-thinking-menu .composer-menu-root {
   display: flex;
   flex-direction: column;

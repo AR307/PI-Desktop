@@ -706,3 +706,23 @@ This completion record supersedes the earlier pending acceptance notes.
   from the task. No user files, emulator instances or worktrees were removed.
 - No MC server changes, production/paid Fast calls, push or release. The tested
   APK is an isolated acceptance build, not a distribution artifact.
+
+## 2026-09-30 - Fast selection reset and compact composer indicator
+
+- Read-only diagnostics from the manual test profile recorded service_tier fast
+  in two completed Responses requests. The main relay forwards the original
+  request bytes and the account layer only injects authorization. No production
+  or paid requests were initiated during this investigation; absence of an MC
+  log badge is not proof that the client omitted the request field.
+- Selecting a different model/group now defaults Fast to off on desktop and
+  mobile, including Rust configuration calls that omit Fast. An explicit opt-in
+  after selection can be saved atomically; unchanged selection/reasoning edits
+  and active turns retain their request state. Canceling the mobile panel keeps
+  the saved state. No per-model preference map or new persistence schema.
+- Replaced the composer requested-Fast text with the existing icon library's
+  solid lightning glyph, keeping localized tooltip/accessibility wording.
+- Regression test failed on the original implementation and passes with the
+  fix. All three Rust Fast tests, desktop/mobile typechecks, 36 i18n tests,
+  i18n build, desktop build, fresh sidecar bundle, final host rebuild and Rust
+  formatting check passed. Controlled Electron/mobile acceptance is pending
+  at this commit.

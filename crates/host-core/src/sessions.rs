@@ -1790,12 +1790,16 @@ pub fn configure_session_with_thinking(
     let Some(current) = get_session_summary(db, id)? else {
         return Ok(None);
     };
+    let next_provider_id = provider_id.or(current.provider_id.as_deref());
+    let next_model_id = model_id.or(current.model_id.as_deref());
+    let same_selection = next_provider_id == current.provider_id.as_deref()
+        && next_model_id == current.model_id.as_deref();
     let selected_fast = fast::resolve(
         db,
-        provider_id.or(current.provider_id.as_deref()),
-        model_id.or(current.model_id.as_deref()),
+        next_provider_id,
+        next_model_id,
         fast,
-        current.fast,
+        current.fast && same_selection,
     )?;
     let tx = db.conn().unchecked_transaction()?;
     let changed = tx

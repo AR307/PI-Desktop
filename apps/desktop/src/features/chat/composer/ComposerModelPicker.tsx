@@ -10,6 +10,7 @@ import {
   IconChevronRight,
   IconImage,
   IconSparkles,
+  IconZap,
 } from "../../../components/icons";
 import { SettingsToggle, TooltipButton } from "../../../components/ui";
 import type { useComposerModelMenu } from "./hooks/useComposerModelMenu";
@@ -71,6 +72,7 @@ export function ComposerModelPicker({
     onMenuKeyDown,
   } = controller;
   const imageMode = task === "image";
+  const fastHint = !imageMode && controller.fast ? ` · ${t("mirrorCoding.fastRequested")}` : "";
 
   return (
     <AnchoredMenu
@@ -89,8 +91,8 @@ export function ComposerModelPicker({
           ref={ref}
           type="button"
           className={`icon-btn composer-model-thinking-chip ${open ? "active" : ""}`}
-          tooltip={imageMode ? `${t("images.mode")}: ${modelLabel}` : `${modelLabel} · ${t("chat.reasoningLevel")}: ${thinkingLabel}`}
-          ariaLabel={imageMode ? `${t("images.mode")}: ${modelLabel}` : `${t("chat.model")}: ${modelLabel}. ${t("chat.reasoningLevel")}: ${thinkingLabel}`}
+          tooltip={imageMode ? `${t("images.mode")}: ${modelLabel}` : `${modelLabel} · ${t("chat.reasoningLevel")}: ${thinkingLabel}${fastHint}`}
+          ariaLabel={imageMode ? `${t("images.mode")}: ${modelLabel}` : `${t("chat.model")}: ${modelLabel}. ${t("chat.reasoningLevel")}: ${thinkingLabel}${fastHint}`}
           aria-haspopup="menu"
           aria-expanded={open}
           disabled={controlsBlocked}
@@ -114,7 +116,7 @@ export function ComposerModelPicker({
               <span className="composer-model-thinking-level">{thinkingLabel}</span>
             </>
           ) : null}
-          {!imageMode && controller.fast && <span className="composer-model-thinking-level">{t("mirrorCoding.fastRequested")}</span>}
+          {!imageMode && controller.fast && <IconZap size={12} fill="currentColor" strokeWidth={0} className="composer-model-fast-icon" aria-hidden="true" />}
           <IconChevronDown size={12} aria-hidden="true" className="composer-model-thinking-chevron" />
         </TooltipButton>
       )}

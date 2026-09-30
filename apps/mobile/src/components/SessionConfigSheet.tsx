@@ -29,7 +29,7 @@ export function SessionConfigSheet({ open, panel, close, controller, view }: {
   const [thinkingLevel, setThinkingLevel] = useState<SessionThinkingLevel>(session?.configuration?.next.thinkingLevel ?? session?.thinkingLevel ?? "off");
   const [options, setOptions] = useState<{ size?: string; quality?: string; aspectRatio?: string; count?: number }>({ count: 1 });
   const [fast, setFast] = useState(false);
-  const [fastAdjusted, setFastAdjusted] = useState(false);
+  const [fastAdjusted, setFastAdjusted] = useState<"selection" | "unavailable">();
   const [parametersAdjusted, setParametersAdjusted] = useState(false);
   const [search, setSearch] = useState("");
   const [expandedModel, setExpandedModel] = useState<string>();
@@ -47,7 +47,7 @@ export function SessionConfigSheet({ open, panel, close, controller, view }: {
     setModelId(session?.taskMode === "image" ? image?.modelId : next?.modelId ?? session?.modelId);
     setThinkingLevel(next?.thinkingLevel ?? session?.thinkingLevel ?? "off");
     setOptions({ count: 1, ...(image?.options ?? {}) });
-    setFast(session?.configuration?.chat?.fast ?? next?.fast ?? false); setFastAdjusted(false);
+    setFast(session?.configuration?.chat?.fast ?? next?.fast ?? false); setFastAdjusted(undefined);
     setSearch(""); setExpandedModel(undefined); setParametersAdjusted(false);
   }, [open, panel]);
 
@@ -90,16 +90,19 @@ export function SessionConfigSheet({ open, panel, close, controller, view }: {
       const chat = session?.configuration?.chat;
       const requestedFast = mode === "image" ? chat?.fast === true : fast;
       setFast(requestedFast && nextChoice?.fastAvailable === true);
-      setFastAdjusted(requestedFast && !nextChoice?.fastAvailable);
+      setFastAdjusted(requestedFast && !nextChoice?.fastAvailable ? "unavailable" : undefined);
       if (mode === "image") setThinkingLevel(chat?.thinkingLevel ?? "off");
     }
     return Boolean(nextChoice);
   };
 
   const selectChoice = (choice: MobileModelChoice, groupKey = choice.modelId) => {
+    const selectionChanged = choice.providerId !== providerId || choice.modelId !== modelId;
     setProviderId(choice.providerId); setModelId(choice.modelId);
     setExpandedModel(groupKey);
-    if (mode !== "image" && fast && !choice.fastAvailable) { setFast(false); setFastAdjusted(true); }
+    if (mode !== "image" && fast && (selectionChanged || !choice.fastAvailable)) {
+      setFast(false); setFastAdjusted(selectionChanged ? "selection" : "unavailable");
+    }
     if (mode === "image") {
       const next = compatibleImageOptions(options, choice.image);
       setParametersAdjusted(!sameImageOptions(options, next));
@@ -131,7 +134,7 @@ export function SessionConfigSheet({ open, panel, close, controller, view }: {
       <div className="model-groups">{groups.map(([id, rows]) => <div className="model-group" key={id}><button className="model-row" onClick={() => rows.length === 1 ? selectChoice(rows[0]!, id) : setExpandedModel(expandedModel === id ? undefined : id)}><span className="model-row-icon">{mode === "image" ? <ImageIcon size={17}/> : <MessageSquare size={17}/>}</span><span><strong>{rows[0]?.displayName ?? id}</strong><small>{rows[0]?.source === "mirrorcoding" ? rows[0]?.groupName ?? rows[0]?.providerName : rows[0]?.providerName}</small></span><span className="model-row-end">{rows.some((row) => row.providerId === providerId && row.modelId === modelId) && <Check size={16}/>}<ChevronRight size={17} className={expandedModel === id ? "rotate-90" : ""}/></span></button>{expandedModel === id && <div className="model-variants">{rows.map((choice) => <button key={`${choice.providerId}:${choice.groupId ?? choice.groupName ?? "default"}`} className={`model-variant ${choice.providerId === providerId && choice.modelId === modelId ? "selected" : ""}`} onClick={() => selectChoice(choice, id)}><span><strong>{choice.groupName ?? choice.providerName}</strong><small>{choice.groupDescription ?? choice.providerName}</small></span><span className="variant-meta">{choice.dynamicBilling ? t("dynamicBilling") : choice.ratio != null ? `${choice.ratio}×` : ""}</span></button>)}</div>}</div>)}</div>
       {groups.length === 0 && <p className="empty-state">{view.catalog ? t("noModelMatches") : t("working")}</p>}
       {mode !== "image" && selected && selected.supportedThinkingLevels.length > 1 && <label className="config-field">{t("thinkingLevel")}<select aria-label={t("thinkingLevel")} value={thinkingLevel} onChange={(event) => setThinkingLevel(event.target.value as SessionThinkingLevel)}>{selected.supportedThinkingLevels.map((level) => <option key={level} value={level}>{level}</option>)}</select></label>}
-      {mode !== "image" && <div className="fast-config"><label className="config-field">{t("fast")}<input type="checkbox" role="switch" aria-label={t("fast")} checked={fast} disabled={!selected?.fastAvailable && !fast} onChange={(event) => setFast(event.target.checked)}/></label><small role="status">{t(!selected?.fastAvailable ? "fastUnavailable" : fast ? "fastRequested" : "fastHint")}</small>{fastAdjusted && <small role="status">{t("fastDisabled")}</small>}</div>}
+      {mode !== "image" && <div className="fast-config"><label className="config-field">{t("fast")}<input type="checkbox" role="switch" aria-label={t("fast")} checked={fast} disabled={!selected?.fastAvailable && !fast} onChange={(event) => { setFast(event.target.checked); setFastAdjusted(undefined); }}/></label><small role="status">{t(!selected?.fastAvailable ? "fastUnavailable" : fast ? "fastRequested" : "fastHint")}</small>{fastAdjusted && <small role="status">{t(fastAdjusted === "selection" ? "fastReset" : "fastDisabled")}</small>}</div>}
       {mode === "image" && selected?.image && <ImageParameters choice={selected} options={options} setOptions={setOptions} t={t}/>}
       {mode === "image" && parametersAdjusted && <small className="muted config-change-note" role="status">{t("parametersAdjusted")}</small>}
     </>}

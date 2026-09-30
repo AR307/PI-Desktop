@@ -335,14 +335,16 @@ export function useComposerModelMenu({
             nextBinding,
             nextModelProvider?.supportedThinkingLevels,
           );
+      const selectionChanged = candidate.id !== provider?.id || nextModelId !== modelId;
+      const nextFastAvailable = mirrorCodingFastAvailable(candidate.mirrorCoding, nextModelId, nextBinding?.mirrorCodingGroupId);
       await configureActiveSession({
         mode,
         providerId: candidate.id,
         modelId: nextModelId,
         thinkingLevel: nextThinkingLevel,
-        fast: fast && mirrorCodingFastAvailable(candidate.mirrorCoding, nextModelId, nextBinding?.mirrorCodingGroupId),
+        fast: fast && !selectionChanged && nextFastAvailable,
       });
-      if (fast && !mirrorCodingFastAvailable(candidate.mirrorCoding, nextModelId, nextBinding?.mirrorCodingGroupId)) showToast(t("mirrorCoding.fastDisabled"));
+      if (fast && (selectionChanged || !nextFastAvailable)) showToast(t(selectionChanged ? "mirrorCoding.fastReset" : "mirrorCoding.fastDisabled"));
       setQuery("");
       setView("root");
       setModelHighlight(-1);

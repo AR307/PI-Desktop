@@ -15459,6 +15459,14 @@ Chat/Responses payload at the local MC boundary; Fast-on sends service_tier fast
 Fast-off, image and auxiliary requests omit it. Inspect both model panels in
 actual Electron and Android WebView screenshots.
 
+Switch from Fast-on model A to a different Fast-capable model B in desktop and
+mobile. B starts off, the next request omits service_tier, and manually enabling
+Fast again sends the field. Changing groups also resets it; reasoning-only edits
+do not. Canceling mobile selection leaves the saved setting untouched. Check
+that desktop shows a solid lightning icon instead of visible requested-Fast
+text, keeps the tooltip and accessible request wording, and removes the icon
+when Fast is off or image mode is active. Retain light/dark and narrow screenshots.
+
 Complement these user paths with catalog/group/endpoint fixtures, Rust persisted
 configuration checks and real controlled HTTP child/tool-continuation checks.
 Verify denied Fast never falls back; no Claude-name route survives. Record the

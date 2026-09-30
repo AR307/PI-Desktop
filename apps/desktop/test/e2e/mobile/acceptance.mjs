@@ -260,6 +260,56 @@ try {
   await invoke("session/configure", shared.id, { mode: "agent", fast: false });
   await invoke("session/configure", shared.id, { providerId: provider.id, modelId: "gpt-5", thinkingLevel: "medium", permissionMode: "ask", mode: "agent" });
   await phone.evaluate(() => window.__PI_MOBILE_CONTROLLER__.refreshSession());
+  await page.locator(".composer-model-thinking-chip").click();
+  await page.getByRole("switch", { name: "Fast", exact: true }).click();
+  await page.locator(".composer-model-fast-icon").waitFor();
+  await page.keyboard.press("Escape");
+  const fastChip = page.locator(".composer-model-thinking-chip");
+  check("Fast is a solid lightning icon, not visible status text",
+    await fastChip.locator('svg.composer-model-fast-icon[fill="currentColor"][stroke-width="0"]').count() === 1 &&
+    !(await fastChip.textContent()).includes("Fast requested") &&
+    (await fastChip.getAttribute("aria-label")).includes("Fast requested"));
+  await screenshot("desktop-fast-lightning-dark", page);
+  await page.locator(".composer-model-thinking-chip").click();
+  await page.locator(".composer-menu-entry").filter({ has: page.getByText("Model", { exact: true }) }).click();
+  await page.locator('.composer-model-option[title="gpt-5.1"]').click();
+  await page.locator(".mirrorcoding-group-option").filter({ hasText: provider.mirrorCoding.groupName }).click();
+  await until(async () => await page.getByRole("switch", { name: "Fast", exact: true }).getAttribute("aria-checked") === "false", "desktop model switch resets Fast");
+  await page.keyboard.press("Escape");
+  await until(async () => (await view()).snapshot?.session.configuration.next.modelId === "gpt-5.1" && (await view()).snapshot.session.configuration.next.fast === false, "desktop reset synchronizes to phone");
+  check("switching Fast-capable desktop models clears Fast and its icon", await page.locator(".composer-model-fast-icon").count() === 0);
+  await mobileSend("Model B after switching uses ordinary processing");
+  await until(async () => {
+    const state = await view();
+    return fixture.chats.some(body => body.model === "gpt-5.1" && JSON.stringify(body.messages.at(-1)).includes("Model B after switching")) && !state.busy && !state.snapshot?.activeTurn;
+  }, "ordinary model B completes");
+  check("switched model request reaches MC without service_tier", fixture.chats.some(body => body.model === "gpt-5.1" && body.service_tier === undefined && JSON.stringify(body.messages.at(-1)).includes("Model B after switching")));
+  await phone.locator(".conversation-controls .model-chip").click();
+  await phone.getByRole("switch", { name: "Fast", exact: true }).check();
+  await phone.getByRole("button", { name: "Apply", exact: true }).click();
+  await phone.locator(".surface").waitFor({ state: "hidden" });
+  await page.locator(".composer-model-fast-icon").waitFor();
+  await mobileSend("Model B manually requests Fast");
+  await until(async () => {
+    const state = await view();
+    return fixture.chats.some(body => body.model === "gpt-5.1" && JSON.stringify(body.messages.at(-1)).includes("Model B manually requests Fast")) && !state.busy && !state.snapshot?.activeTurn;
+  }, "explicit model B Fast completes");
+  check("explicitly reenabled Fast reaches the final MC HTTP boundary", fixture.chats.some(body => body.model === "gpt-5.1" && body.service_tier === "fast" && JSON.stringify(body.messages.at(-1)).includes("Model B manually requests Fast")));
+  await phone.locator(".conversation-controls .model-chip").click();
+  await phone.locator(".model-row").filter({ hasText: "gpt-5" }).first().click();
+  await phone.locator(".model-variant").filter({ hasText: provider.mirrorCoding.groupName }).click();
+  check("mobile selecting a different Fast-capable model defaults to off", !(await phone.getByRole("switch", { name: "Fast", exact: true }).isChecked()));
+  await screenshot("mobile-fast-reset");
+  await phone.getByRole("button", { name: "Cancel", exact: true }).click();
+  await phone.locator(".surface").waitFor({ state: "hidden" });
+  check("canceling the selection retains saved Fast", (await invoke("session/get", { id: shared.id })).session.fast === true);
+  await phone.locator(".conversation-controls .model-chip").click();
+  await phone.locator(".model-row").filter({ hasText: "gpt-5" }).first().click();
+  await phone.locator(".model-variant").filter({ hasText: provider.mirrorCoding.groupName }).click();
+  await phone.getByRole("button", { name: "Apply", exact: true }).click();
+  await phone.locator(".surface").waitFor({ state: "hidden" });
+  await page.locator(".composer-model-fast-icon").waitFor({ state: "hidden" });
+  check("mobile model switch saves Fast off to desktop", (await invoke("session/get", { id: shared.id })).session.fast === false);
   await mobileSend("mobile-slow stopped task"); await phone.getByRole("button", { name: "Stop", exact: true }).waitFor();
   await phone.getByRole("button", { name: "Stop", exact: true }).click();
   await until(async () => !(await view()).busy && !(await view()).snapshot?.activeTurn, "phone stop");
