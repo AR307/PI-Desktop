@@ -125,4 +125,18 @@ test("Live Voice separates idle entry and compact call presentation", async (t) 
     assert.equal(liveVoiceIssue({ ...snapshot, call: { ...call, playbackBlocked: false, notice: { code: "LIVE_PLAYBACK_BLOCKED", retriable: true } } }), null);
     assert.equal(liveVoiceIssue({ ...snapshot, call: { ...call, notice: { code: "LIVE_EXECUTION_NOT_CONNECTED", retriable: false } } }).message, "liveVoice.workNotConnected");
   });
+  await t.test("a stopped call names its real cause and shows the verbatim error code", () => {
+    const failed = { ...snapshot, call: { ...call, phase: "failed", error: { code: "LIVE_NETWORK_ERROR", retriable: true } } };
+    assert.equal(liveVoiceIssue(failed).message, "errors.NETWORK_ERROR");
+    const html = renderBar(failed);
+    assert.match(html, /errors\.NETWORK_ERROR/);
+    assert.match(html, /<code class="live-voice-error-code">LIVE_NETWORK_ERROR<\/code>/);
+    // account failures read as account failures, not as generic configuration advice
+    const auth = liveVoiceIssue({ ...snapshot, call: { ...call, phase: "failed", error: { code: "LIVE_AUTH_REQUIRED", retriable: false } } });
+    assert.equal(auth.message, "liveVoice.authRequired");
+    // genuinely new codes still fall back, with the code visible for a report
+    const unknown = liveVoiceIssue({ ...snapshot, call: { ...call, phase: "failed", error: { code: "LIVE_SOMETHING_NEW", retriable: false } } });
+    assert.equal(unknown.message, "liveVoice.errorGeneric");
+    assert.equal(unknown.code, "LIVE_SOMETHING_NEW");
+  });
 });

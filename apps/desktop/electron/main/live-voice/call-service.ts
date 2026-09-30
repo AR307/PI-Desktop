@@ -663,6 +663,13 @@ export class LiveCallService {
       slot.releaseMicrophone = null;
       slot.mediaRelease = "unconfirmed";
       slot.error = { code: "LIVE_MEDIA_RELEASE_UNCONFIRMED", stage: "cleanup", retriable: false };
+      this.deps.log?.("error", "live voice microphone release unconfirmed", {
+        callId: slot.callId,
+        adapterId: slot.binding?.adapterId ?? "unknown",
+        code: slot.error.code,
+        stage: slot.error.stage ?? "cleanup",
+        retriable: slot.error.retriable,
+      });
     }
     transition(slot, slot.error ? "failed" : "ended");
     this.publish(slot);
@@ -672,7 +679,23 @@ export class LiveCallService {
 
   private async failAndCleanup(slot: Slot, error: unknown, stage: string): Promise<void> {
     if (this.current !== slot) return;
-    if (!slot.error) slot.error = { ...errorCode(error), stage };
+    // Only the first failure is the cause; later failures are consequences of
+    // the same teardown and would bury it.
+    if (!slot.error) {
+      slot.error = { ...errorCode(error), stage };
+      this.deps.log?.("warn", "live voice call failed", {
+        callId: slot.callId,
+        adapterId: slot.binding?.adapterId ?? "unknown",
+        phase: slot.phase,
+        stage,
+        code: slot.error.code,
+        retriable: slot.error.retriable,
+        // The raw reason is log-only: the Logger redacts bearer tokens and key
+        // material, while a call view may show only the code and its localized
+        // message (live-voice spec: no provider response content in views).
+        ...(error instanceof Error && error.message && error.message !== slot.error.code ? { reason: error.message } : {}),
+      });
+    }
     await this.endSlot(slot, slot.error.code === "LIVE_TIMEOUT" ? "timeout" : slot.error.code === "LIVE_AUDIO_BACKPRESSURE" ? "audio-backpressure" : "network-error");
   }
 

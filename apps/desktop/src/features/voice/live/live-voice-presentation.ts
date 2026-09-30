@@ -1,5 +1,6 @@
 import type { LiveStatus } from "@pi-desktop/shared";
 import type { LiveVoiceSnapshot } from "./live-call-controller";
+import { liveVoiceErrorKey } from "./live-voice-error";
 
 export type LiveVoiceMode = "idle" | "connecting" | "reconnecting" | "connected" | "stopping";
 
@@ -57,12 +58,21 @@ export function liveVoiceIssue(snapshot: LiveVoiceSnapshot) {
     : call?.error?.code ?? snapshot.errorCode ?? notice
     ?? (!terminal && call?.playbackBlocked ? "LIVE_PLAYBACK_BLOCKED" : undefined);
   if (!code) return null;
+  // The bar must name the actual cause: the call-specific table wins,
+  // `liveVoiceErrorKey` covers the account/transport codes, and only genuinely
+  // unmapped codes fall back — a network failure no longer reads as a generic
+  // "check your service configuration" problem. Only this key and the verbatim
+  // code reach the bar; a raw provider or credential message never does.
+  const mapped = ERROR_MESSAGES[code] ?? liveVoiceErrorKey(code);
+  const message = mapped !== "liveVoice.errorGeneric"
+    ? mapped
+    : code.startsWith("LIVE_WORK_") ? "liveVoice.workActionFailed"
+    : call?.phase === "connected" ? "liveVoice.callActionFailed"
+    : "liveVoice.errorGeneric";
   return {
     code,
     key: `${call?.callId ?? "start"}:${code}`,
-    message: ERROR_MESSAGES[code] ?? (code.startsWith("LIVE_WORK_")
-      ? "liveVoice.workActionFailed"
-      : call?.phase === "connected" ? "liveVoice.callActionFailed" : "liveVoice.errorGeneric"),
+    message,
     warning: code === "LIVE_PLAYBACK_BLOCKED",
   };
 }

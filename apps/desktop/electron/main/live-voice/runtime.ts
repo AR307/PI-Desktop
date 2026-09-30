@@ -34,6 +34,8 @@ export function createLiveCallService(input: {
     providerId: string;
     sidecarParams: { provider: import("@pi-desktop/agent-runtime").RuntimeProviderConfig };
   }>;
+  /** Terminal call failures land in the `provider` log channel (see spec 09). */
+  log?: (level: "warn" | "error", message: string, data: Record<string, unknown>) => void;
 }): LiveCallService {
   const backgroundLeases = new Map<number, BackgroundLease>();
   const authorizedWorkspaces = new WeakMap<object, string | null>();
@@ -82,6 +84,7 @@ export function createLiveCallService(input: {
       return host.call<AppSettings>("settings.get");
     },
     authResolver,
+    log: input.log,
     resolveWorkBinding: async (target) => {
       if (target.workSessionId.startsWith("native-pi:")) {
         throw Object.assign(new Error("Live work integration does not support native Pi sessions"), {

@@ -333,6 +333,18 @@
   font-size: var(--text-sm);
 }
 
+/* The error code stays verbatim: it is what a log line or bug report needs,
+   and translating it would break the lookup the spec documents. */
+.live-voice-error-code {
+  display: block;
+  margin-top: 2px;
+  color: var(--ds-text-secondary);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  -webkit-user-select: text;
+  user-select: text;
+}
+
 .live-voice-transcripts {
   display: grid;
   gap: 6px;

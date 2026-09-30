@@ -69,7 +69,11 @@ persisted settings:
    the visibility-gated chat and Composer subtree, so in-app navigation cannot
    hide the call controls.
    Playback blocking and errors, including playback-resume failure, are visible
-   directly in the bar instead of requiring Details. Non-terminal action or
+   directly in the bar instead of requiring Details. The bar pairs the
+   localized message with the verbatim `LIVE_*` error code, so a failure whose
+   code has no localized message is still attributable from a screenshot or
+   bug report; the raw reason behind that code never reaches a view and stays
+   in the redacted `provider` log instead. Non-terminal action or
    missing-work-binding warnings do not falsely say the call has stopped.
 4. **Details open:** an explicitly opened secondary surface contains the
    transient transcript, provider identity, and any scoped work actions and

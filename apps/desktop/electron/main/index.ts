@@ -870,6 +870,7 @@ const liveCallService = createLiveCallService({
       mode: "agent",
     });
   },
+  log: (level, message, data) => logger.app("provider", level, message, { data }),
 });
 
 function registerIpc() {

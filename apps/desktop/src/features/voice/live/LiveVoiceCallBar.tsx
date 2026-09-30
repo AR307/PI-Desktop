@@ -99,6 +99,11 @@ export function LiveVoiceCallBar({
       {issue ? (
         <p className={issue.warning ? "live-voice-feedback live-voice-hint" : "live-voice-feedback live-voice-error"} role={issue.warning ? "status" : "alert"}>
           {t(issue.message)}
+          {/* The localized sentence alone cannot say whether authentication,
+              entitlement or the transport failed; the allow-listed code can,
+              and it is what a log line or bug report needs. Raw provider text
+              never reaches this bar (live-voice spec). */}
+          <code className="live-voice-error-code">{issue.code}</code>
         </p>
       ) : null}
     </div>

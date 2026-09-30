@@ -59,6 +59,13 @@ export type LiveCallServiceDeps = {
     deliverReceipt: (receipt: LiveProviderReceipt) => Promise<LiveReceiptDelivery>,
   ) => Promise<void>;
   onWorkOperation?: (callId: string, operation: LiveWorkOperationView, delegationId?: string) => void;
+  /**
+   * Optional Main-side sink for terminal call failures. Nothing under
+   * live-voice/ used to log, and IPC errors were only returned to the
+   * renderer, so a collapsed generic toast could never be traced back to
+   * the error code that produced it.
+   */
+  log?: (level: "warn" | "error", message: string, data: Record<string, unknown>) => void;
 };
 
 export type Slot = {

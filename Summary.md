@@ -766,3 +766,7 @@ This completion record supersedes the earlier pending acceptance notes.
   mobile user-path acceptance is pending below. No production model requests.
 - No push, release, test-profile replacement or user-file cleanup. Update and
   feedback ownership remain AR307/PI-Desktop.
+
+- A final remote refresh found upstream d96382d74e0a9ae9497eecad54b7583f788b4159
+  (Live Voice real-error display and failure logging). Integrated that follow-up
+  before candidate acceptance; the latest stable version remains 0.15.10.
