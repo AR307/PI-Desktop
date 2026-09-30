@@ -11,7 +11,7 @@ const { _electron, chromium } = require(process.env.PI_TEST_PLAYWRIGHT ?? "playw
 const root = resolve(import.meta.dirname, "../../../../..");
 const output = join(root, ".artifacts", "response-recovery-" + Date.now());
 await mkdir(join(output, "workspace"), { recursive: true });
-const modelId = "claude-opus-5.5-thinking";
+const modelId = "claude-opus-4-6";
 const requests = [], passed = [], errors = [];
 let steps = [], desktop, browser, page, phone, credentials, held;
 const fixture = await mobileFixture({ messageHandler: async (req, res) => {
@@ -38,7 +38,8 @@ const fixture = await mobileFixture({ messageHandler: async (req, res) => {
   emit("message_delta", { delta: { stop_reason: step === "length" ? "max_tokens" : "end_turn", stop_sequence: null }, usage: { output_tokens: step === "empty" ? 0 : 8 } });
   emit("message_stop"); res.end();
 } });
-fixture.upstream.catalog.groups[0].models.push({ id: modelId, supported_endpoint_types: ["openai"] });
+fixture.upstream.catalog.supported_endpoints.anthropic = { path: "/v1/messages", method: "POST" };
+fixture.upstream.catalog.groups[0].models.push({ id: modelId, modes: ["text"], supported_endpoint_types: ["anthropic"] });
 const mobileRequire = createRequire(join(root, "apps/mobile/package.json"));
 const { createServer } = await import(pathToFileURL(mobileRequire.resolve("vite")).href);
 process.env.VITE_MC_ORIGIN = fixture.origin;

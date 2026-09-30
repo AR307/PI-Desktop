@@ -28,7 +28,7 @@ async function open() {
   closing = false;
   const env = { ...process.env, PI_DESKTOP_DATA_DIR: join(output, "profile"), PI_DESKTOP_HOST_BIN: join(root, "target/debug/pi-desktop-host-core.exe"), PI_DESKTOP_MIRRORCODING_TEST_ORIGIN: fixture.origin };
   delete env.ELECTRON_RUN_AS_NODE;
-  desktop = await _electron.launch({ executablePath: require("electron"), args: [join(root, "apps/desktop")], env, timeout: 60_000 });
+  desktop = await _electron.launch({ executablePath: require("electron"), args: [join(root, "apps/desktop"), "--user-data-dir=" + join(output, "electron-profile")], env, timeout: 60_000 });
   page = await until(async () => { for (const p of desktop.windows()) if (await p.locator(".app-shell").count()) return p; }, "desktop window", 60_000);
   page.setDefaultTimeout(20_000);
   page.on("pageerror", (error) => (closing ? shutdownErrors : errors).push({ message: error.message, after: passed.at(-1) }));
@@ -43,7 +43,7 @@ async function mode(name) {
 }
 async function choose(model, group = "中文 分组") {
   await page.locator(".composer-model-thinking-chip").click();
-  await page.locator(".composer-menu-entry").first().click();
+  await page.locator("button.composer-menu-entry").click();
   await page.getByRole("menuitem", { name: new RegExp(`^${model}`) }).click();
   await page.getByRole("menuitemradio", { name: new RegExp(`^${group}`) }).click();
   await until(() => page.locator(".composer-model-thinking-chip").textContent().then((text) => text.includes(model) && text.includes(group)), "image selection");
@@ -90,7 +90,7 @@ try {
   }
   check("main mode button cycles through planning, goal and image");
   await page.locator(".composer-model-thinking-chip").click();
-  await page.locator(".composer-menu-entry").first().click();
+  await page.locator("button.composer-menu-entry").click();
   check("image menu excludes chat-only and video models", await page.getByRole("menuitem", { name: /^gpt-5/ }).count() === 0 && await page.getByRole("menuitem", { name: /^video-fixture/ }).count() === 0);
   check("same image ID is deduplicated across groups", await page.getByRole("menuitem", { name: /^gpt-image-1/ }).count() === 1);
   await page.getByRole("menuitem", { name: /^gpt-image-1/ }).click();
@@ -139,7 +139,7 @@ try {
   await choose("gpt-image-1");
   await mode("智能体");
   await page.locator(".composer-model-thinking-chip").click();
-  await page.locator(".composer-menu-entry").first().click();
+  await page.locator("button.composer-menu-entry").click();
   check("chat menu excludes pure image models and retains dual-capability models", await page.getByRole("menuitem", { name: /^gpt-image-1/ }).count() === 0 && await page.getByRole("menuitem", { name: /^gemini-image-fixture/ }).count() === 1);
   await page.keyboard.press("Escape");
   check("chat selection remains gpt-5", (await page.locator(".composer-model-thinking-chip").textContent()).includes("gpt-5"));

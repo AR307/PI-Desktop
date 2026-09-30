@@ -781,3 +781,8 @@ This completion record supersedes the earlier pending acceptance notes.
   completed turn process and child group before asserting visible child Fast.
   The controlled flow already verifies pairing, queueing, next-turn settings
   and independent child Fast; the full candidate run continues below.
+- The full controlled desktop/mobile flow passed 79 checks. Image acceptance
+  follows the model button rather than the newly preceding Fast row, and now
+  isolates Electron renderer storage as well as host data. Recovery acceptance
+  declares Messages in the MC catalog and uses a known native reasoning model;
+  it no longer depends on the removed model-name routing override.
