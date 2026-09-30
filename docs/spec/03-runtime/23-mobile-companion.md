@@ -121,3 +121,13 @@ the selected model's declared sizes, ratios, qualities and count.
 See [MC API handoff](../../mirrorcoding-mobile-sync-requirements.md) and
 [architecture decision](../../adr/mobile-companion-relay.md). Local fixture
 acceptance is distinct from MC-team service acceptance and production deployment.
+
+## Session Fast (2026-09-30)
+
+The existing model sheet stages Fast with model/group/reasoning and applies one
+session/configure write. Catalog choices expose fastAvailable and an unavailable
+reason. Session configuration includes Fast in current, next and remembered chat
+selections; current is captured at desktop launch, not from next-turn settings.
+Image mode sends no Fast, and returning to chat restores its saved choice.
+Running chat edits affect the next turn only; image and auxiliary requests do not
+inherit it. MC transports these existing RACP payloads without new server state.

@@ -1,4 +1,5 @@
 import { join } from "node:path";
+import { captureTurnConfiguration } from "../services/session-configuration";
 import {
   ErrorCodes as SharedErrorCodes,
   isActiveInProject,
@@ -40,7 +41,7 @@ import type { HostProcess } from "../host-process";
 import type { Logger } from "../logger";
 import type { PluginRuntime } from "../plugin-runtime";
 import type { UserMcpRuntime } from "../user-mcp";
-import { isMirrorCodingImageOnlyModel } from "../mirrorcoding/catalog";
+import { mirrorCodingChatAvailable } from "@pi-desktop/shared";
 import type { RuntimeState } from "./context";
 import type { RuntimeProvider } from "./provider-catalog";
 
@@ -276,9 +277,12 @@ export function createSessionLaunchRuntime({
     const commandShell = (await resolveEffectiveCommandShell()).effective!;
     const providers = await runtimeState.host!.call<{ providers: RuntimeProvider[] }>(
       "providers.list",
-      { includeDisabled: false },
+      { includeDisabled: true },
     );
     const requestedProviderId = overrides.providerId ?? session.providerId;
+    const savedProvider = providers.providers.find((item) => item.id === requestedProviderId);
+    if (savedProvider?.authKind === "mirrorcoding" && !savedProvider.enabled) throw new Error("model_or_group_unavailable");
+    providers.providers = providers.providers.filter((item) => item.enabled !== false);
     const extensionAgentKey = requestedProviderId
       ? trustedExtensionAgentKeyFromProviderId(requestedProviderId)
       : undefined;
@@ -331,7 +335,7 @@ export function createSessionLaunchRuntime({
         errorCode: ErrorCodes.MODEL_NOT_CONFIGURED,
       });
     }
-    if (isImageGenerationModel(
+    if (!isMirrorCodingAccount && isImageGenerationModel(
       imageGenerationBindings(settings.imageGenerationModels, settings.imageGeneration),
       provider.id,
       modelId,
@@ -545,8 +549,8 @@ export function createSessionLaunchRuntime({
         const mirrorCodingChat =
           isMirrorCodingRow &&
           !isImageGenerationModel(imageCandidates, row.id, binding.id) &&
-          !isMirrorCodingImageOnlyModel(row.mirrorCoding, binding.id);
-        if (!binding.availableForSubagents && !mirrorCodingChat) continue;
+          mirrorCodingChatAvailable(row.mirrorCoding, binding.id, binding.mirrorCodingGroupId);
+        if (!binding.availableForSubagents || (isMirrorCodingRow && !mirrorCodingChat)) continue;
         let key = `${row.vendorKey ?? row.name}/${binding.id}`;
         // Two provider rows can share a vendor alias. Opting in one row must
         // not authorize the credential-bearing pin resolved from another row.
@@ -661,15 +665,18 @@ export function createSessionLaunchRuntime({
             : [],
         ),
     );
+    const mode = normalizeMode(overrides.mode ?? session.mode ?? settings.defaultMode ?? "agent");
+    const fast = Boolean(overrides.turnId && isMirrorCodingAccount && session.fast === true);
+    if (overrides.turnId) captureTurnConfiguration(runtimeState.host, sessionId, overrides.turnId, {
+      mode, providerId: provider.id, modelId, thinkingLevel, fast,
+    });
     return {
       providerId: provider.id,
       modelId,
       projectPath,
       sidecarParams: {
         sessionId,
-        mode: normalizeMode(
-          overrides.mode ?? session.mode ?? settings.defaultMode ?? "agent",
-        ),
+        mode,
         ...(overrides.turnId ? { turnId: overrides.turnId } : {}),
         thinkingLevel,
         infiniteProviderRetry: settings.infiniteProviderRetry === true,
@@ -688,6 +695,7 @@ export function createSessionLaunchRuntime({
           modelId,
           apiKey: mirrorCodingBinding?.apiKey || secret.value || "",
           authKind: provider.authKind,
+          ...(isMirrorCodingAccount ? { fastAvailable: mirrorCodingBinding?.fastAvailable === true, fast } : {}),
           ...(mirrorCodingBinding?.mirrorCodingGroupId !== undefined ? { mirrorCodingGroupId: mirrorCodingBinding.mirrorCodingGroupId } : {}),
           extensionAgentKey: provider.extensionAgentKey,
           apiStyle,

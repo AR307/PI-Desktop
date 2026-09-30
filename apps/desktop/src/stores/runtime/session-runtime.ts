@@ -39,7 +39,7 @@ export type SessionConfiguration = Pick<
   SessionSummary,
   "mode" | "providerId" | "modelId" | "thinkingLevel"
 > &
-  Partial<Pick<SessionSummary, "permissionMode">>;
+  Partial<Pick<SessionSummary, "permissionMode" | "fast">>;
 
 export type SessionSelection = { id: string; intent: number };
 
@@ -49,8 +49,6 @@ export type SessionRuntime = {
   readonly liveSessionTranscripts: Set<string>;
   readonly sessionHistoryCache: Map<string, SessionHistoryWindow>;
   readonly submittedComposerDrafts: Map<string, SubmittedComposerDraft>;
-  readonly pendingSessionConfigurations: Map<string, SessionConfiguration>;
-  readonly sessionConfigurationFlushes: Map<string, Promise<void>>;
   beginNavigationIntent: () => number;
   navigationIntentIsCurrent: (intent: number) => boolean;
   newSessionScopeKey: (projectPath?: string | null) => string;
@@ -125,8 +123,6 @@ export function createSessionRuntime({ get, set }: StoreAccess): SessionRuntime 
   const liveSessionTranscripts = new Set<string>();
   const sessionHistoryCache = new Map<string, SessionHistoryWindow>();
   const submittedComposerDrafts = new Map<string, SubmittedComposerDraft>();
-  const pendingSessionConfigurations = new Map<string, SessionConfiguration>();
-  const sessionConfigurationFlushes = new Map<string, Promise<void>>();
   const sessionDetailLoads = new Map<string, ReturnType<typeof api.getSession>>();
   const toolStartsByCallId = new Map<string, ToolStart>();
   const planSyncGenerations = new Map<string, number>();
@@ -392,8 +388,6 @@ export function createSessionRuntime({ get, set }: StoreAccess): SessionRuntime 
     sessionHistoryCache,
     syncTranscriptProjection,
     submittedComposerDrafts,
-    pendingSessionConfigurations,
-    sessionConfigurationFlushes,
     beginNavigationIntent: () => navigationIntents.begin(),
     navigationIntentIsCurrent: (intent) => navigationIntents.isCurrent(intent),
     newSessionScopeKey: (projectPath) =>

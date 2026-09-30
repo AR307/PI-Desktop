@@ -740,3 +740,5 @@
   flex: 0 0 auto;
   margin-left: auto;
 }
+
+.composer-fast-setting > small { display: block; padding: 0 12px 10px; max-width: 320px; color: var(--ds-text-secondary); font-size: 11px; line-height: 1.5; }

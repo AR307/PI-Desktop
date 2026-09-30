@@ -24,7 +24,7 @@ import type { PluginRuntime } from "../plugin-runtime";
 import type { UserMcpRuntime } from "../user-mcp";
 import type { RuntimeState } from "./context";
 import type { FinishTurn } from "./plans";
-import { isMirrorCodingImageOnlyModel } from "../mirrorcoding/catalog";
+import { mirrorCodingChatAvailable } from "@pi-desktop/shared";
 import type { MirrorCodingRuntime } from "../mirrorcoding/runtime";
 
 export type SidecarRuntimeDependencies = {
@@ -404,7 +404,7 @@ export function createSidecarRuntime({
   s.setVendorAuthResolver(async ({ providerId }) =>
     vendorOAuth.resolveAuth(providerId),
   );
-  s.setSubagentModelResolver(async (key: string) => {
+  s.setSubagentModelResolver(async (key: string, sessionId: string) => {
     const slash = key.indexOf("/");
     if (slash < 1) throw new Error("invalid model key");
     const providerPart = key.slice(0, slash);
@@ -426,15 +426,13 @@ export function createSidecarRuntime({
       (model: { id: string; availableForSubagents?: boolean }) =>
         model.id === modelId || model.id.toLowerCase() === modelId.toLowerCase(),
     );
-    const isMirrorCodingAccount =
-      provider.authKind === "mirrorcoding" && provider.mirrorCoding?.scope === "account";
-    const imageOnly = isMirrorCodingImageOnlyModel(provider.mirrorCoding, modelId);
-    // MirrorCoding chat models are the account catalog; they have no API
-    // secret, so the generic opt-in flag is not required for Task.model.
+    const unavailable = provider.authKind === "mirrorcoding" && !mirrorCodingChatAvailable(provider.mirrorCoding, modelId, binding?.mirrorCodingGroupId);
+    // MC uses a relay instead of an API key, but delegation still requires
+    // the same explicit opt-in as every other source.
     if (
       !binding ||
-      imageOnly ||
-      (!binding.availableForSubagents && !isMirrorCodingAccount)
+      unavailable ||
+      !binding.availableForSubagents
     ) {
       throw new Error(
         `model "${modelId}" on provider "${provider.name}" is not enabled for delegation`,
@@ -458,7 +456,7 @@ export function createSidecarRuntime({
     let managedBinding: RuntimeProviderConfig | undefined;
     if (isMirrorCoding) {
       if (!mirrorCoding) throw new Error("MirrorCoding runtime unavailable");
-      managedBinding = await mirrorCoding.bindingFor(provider.id, modelId, "subagent");
+      managedBinding = await mirrorCoding.bindingFor(provider.id, modelId, sessionId);
       apiKey = managedBinding.apiKey;
       catalogModelConfig = managedBinding.modelConfig ??
         catalogModelConfigFor(modelsDevCatalog, {
@@ -502,6 +500,7 @@ export function createSidecarRuntime({
       modelId,
       apiKey,
       ...(provider.authKind ? { authKind: provider.authKind } : {}),
+      ...(managedBinding ? { fastAvailable: managedBinding.fastAvailable === true } : {}),
       ...(managedBinding?.mirrorCodingGroupId !== undefined ? { mirrorCodingGroupId: managedBinding.mirrorCodingGroupId } : {}),
       ...(managedBinding?.baseUrl ?? provider.baseUrl ? { baseUrl: managedBinding?.baseUrl ?? provider.baseUrl } : {}),
       ...(managedBinding?.apiStyle ?? provider.apiStyle ? { apiStyle: managedBinding?.apiStyle ?? provider.apiStyle } : {}),

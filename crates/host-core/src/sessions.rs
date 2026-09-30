@@ -97,6 +97,8 @@ fn validate_thinking_level(level: &str) -> Result<()> {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SessionSummary {
+    #[serde(default)]
+    pub fast: bool,
     pub id: String,
     pub title: String,
     /// Number of messages in the current canonical transcript. This is the
@@ -1173,12 +1175,14 @@ fn session_created_at(db: &Database, session_id: &str) -> Result<String> {
 
 const SUMMARY_SELECT: &str =
     "SELECT s.id, s.title, s.last_seq, p.path, s.model_id, s.provider_id, s.mode,
-            s.thinking_level, s.permission_mode, s.updated_at, s.created_at
+            s.thinking_level, s.permission_mode, s.updated_at, s.created_at,
+            COALESCE((SELECT value_json = 'true' FROM kv WHERE ns = 'app' AND key = 'session-fast:' || s.id), 0) AS fast
      FROM sessions s LEFT JOIN projects p ON p.id = s.project_id
      WHERE s.deleted_at IS NULL";
 
 pub(crate) fn summary_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<SessionSummary> {
     Ok(SessionSummary {
+        fast: row.get("fast")?,
         id: row.get(0)?,
         title: row.get(1)?,
         message_count: row.get(2)?,
@@ -1191,6 +1195,14 @@ pub(crate) fn summary_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Sess
         updated_at: ms_to_ts(row.get(9)?),
         created_at: ms_to_ts(row.get(10)?),
     })
+}
+
+pub fn get_session_summary(db: &Database, id: &str) -> Result<Option<SessionSummary>> {
+    Ok(db
+        .conn()
+        .prepare_cached(&format!("{SUMMARY_SELECT} AND s.id = ?1"))?
+        .query_row(params![id], summary_from_row)
+        .optional()?)
 }
 
 // ---- sessions ---------------------------------------------------------------
@@ -1344,6 +1356,7 @@ pub fn create_session_with_options(
             now
         ])?;
     Ok(SessionSummary {
+        fast: false,
         id,
         title,
         message_count: 0,
@@ -1704,6 +1717,7 @@ pub fn fork_session_through(
     files.commit();
 
     let summary = SessionSummary {
+        fast: false,
         id,
         title,
         message_count: records.len() as i64,
@@ -1740,7 +1754,7 @@ pub fn configure_session(
     provider_id: Option<&str>,
     model_id: Option<&str>,
 ) -> Result<Option<SessionSummary>> {
-    configure_session_with_thinking(db, id, mode, provider_id, model_id, None, None)
+    configure_session_with_thinking(db, id, mode, provider_id, model_id, None, None, None)
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -1752,6 +1766,7 @@ pub fn configure_session_with_thinking(
     model_id: Option<&str>,
     thinking_level: Option<&str>,
     permission_mode: Option<&str>,
+    fast: Option<bool>,
 ) -> Result<Option<SessionSummary>> {
     if !(is_valid_mode(mode) || mode == "chat") {
         return Err(anyhow!("mode must be plan or agent"));
@@ -1772,8 +1787,18 @@ pub fn configure_session_with_thinking(
         thinking_level,
         permission_mode,
     )?;
-    let changed = db
-        .conn()
+    let Some(current) = get_session_summary(db, id)? else {
+        return Ok(None);
+    };
+    let selected_fast = fast::resolve(
+        db,
+        provider_id.or(current.provider_id.as_deref()),
+        model_id.or(current.model_id.as_deref()),
+        fast,
+        current.fast,
+    )?;
+    let tx = db.conn().unchecked_transaction()?;
+    let changed = tx
         .prepare_cached(
             "UPDATE sessions
              SET mode = ?2, provider_id = COALESCE(?3, provider_id),
@@ -1794,14 +1819,25 @@ pub fn configure_session_with_thinking(
     if changed == 0 {
         return Ok(None);
     }
+    db.set_setting(
+        &format!("session-fast:{id}"),
+        &serde_json::json!(selected_fast),
+    )?;
+    tx.commit()?;
     Ok(get_session(db, id)?.map(|detail| detail.summary))
 }
 
 pub fn delete_session(db: &Database, id: &str) -> Result<bool> {
+    let tx = db.conn().unchecked_transaction()?;
+    tx.execute(
+        "DELETE FROM kv WHERE ns = 'app' AND key = ?1",
+        [format!("session-fast:{id}")],
+    )?;
     let n = db
         .conn()
         .prepare_cached("DELETE FROM sessions WHERE id = ?1")?
         .execute(params![id])?;
+    tx.commit()?;
     if n > 0 {
         // Here rather than in the RPC handler so every deletion path (UI,
         // failed scheduled-run cleanup) also drops the transcript files.
@@ -4252,6 +4288,7 @@ mod tests {
             Some("model-1"),
             Some("high"),
             None,
+            None,
         )
         .unwrap()
         .unwrap();
@@ -4275,6 +4312,7 @@ mod tests {
             None,
             Some("turbo"),
             None,
+            None,
         )
         .is_err());
         let omitted = configure_session_with_thinking(
@@ -4284,6 +4322,7 @@ mod tests {
             None,
             None,
             Some("omit"),
+            None,
             None,
         )
         .unwrap()
@@ -4393,6 +4432,7 @@ mod tests {
     fn import_session_is_idempotent_and_preserves_timestamps() {
         let db = test_db();
         let summary = SessionSummary {
+            fast: false,
             id: "import-claude-code-abc".into(),
             title: "Imported".into(),
             message_count: 1,
@@ -4443,6 +4483,7 @@ mod tests {
     fn import_materializes_unique_projects_but_keeps_pathless_sessions_temporary() {
         let db = test_db();
         let base = SessionSummary {
+            fast: false,
             id: "import-codex-one".into(),
             title: "Imported".into(),
             message_count: 0,
@@ -5216,6 +5257,7 @@ mod tests {
     fn import_and_replace_preserve_thinking() {
         let db = test_db();
         let summary = SessionSummary {
+            fast: false,
             id: "thinking-import".into(),
             title: "Thinking".into(),
             message_count: 0,
@@ -5588,6 +5630,7 @@ mod tests {
             Some("model-1"),
             Some("high"),
             Some("auto"),
+            None,
         )
         .unwrap();
 
@@ -5663,6 +5706,7 @@ mod tests {
             Some("model-2"),
             Some("off"),
             Some("ask"),
+            None,
         )
         .unwrap();
         let source_final = get_session(&db, &source.id).unwrap().unwrap();
@@ -7268,3 +7312,4 @@ mod tests {
         );
     }
 }
+mod fast;

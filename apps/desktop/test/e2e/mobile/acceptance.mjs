@@ -204,13 +204,17 @@ try {
   await phone.locator(".model-row").filter({ hasText: "gpt-5" }).first().click();
   await phone.locator(".model-variant").filter({ hasText: "auto" }).click();
   await phone.getByLabel("Thinking level", { exact: true }).selectOption("high");
+  await phone.getByRole("switch", { name: "Fast", exact: true }).check();
+  await screenshot("mobile-fast-next-turn");
   await phone.getByRole("button", { name: "Apply", exact: true }).click();
   await phone.locator(".surface").waitFor({ state: "hidden" });
   await until(async () => {
     const configuration = (await view()).snapshot?.session.configuration;
-    return configuration?.current?.providerId === provider.id && configuration.current.thinkingLevel === "medium" && configuration.next.providerId === autoProvider.id && configuration.next.thinkingLevel === "high";
+    return configuration?.current?.providerId === provider.id && configuration.current.thinkingLevel === "medium" && configuration.next.providerId === autoProvider.id && configuration.next.thinkingLevel === "high" && configuration.current.fast === false && configuration.next.fast === true;
   }, "running task keeps current configuration while mobile saves the next selection");
-  check("running task keeps its model while mobile preselects the next model and reasoning level");
+  check("running task freezes model, reasoning and Fast while mobile saves the next turn");
+  await phone.evaluate(() => window.__PI_MOBILE_CONTROLLER__.refreshSession());
+  check("state refresh retains actual current Fast", (await view()).snapshot.session.configuration.current.fast === false);
   await mobileSend("Queued from the phone while running");
   await until(async () => (await view()).snapshot?.queuedTurns.length === 1, "shared queue");
   check("phone sees live output and queues messages on desktop");
@@ -218,6 +222,13 @@ try {
   await until(async () => (await invoke("session/get", { id: shared.id })).session.messages.some((message) => message.content === "Queued from the phone while running"), "queued user message executed");
   await until(async () => !(await view()).busy && !(await view()).snapshot?.activeTurn && !(await view()).snapshot?.queuedTurns.length, "queue drained");
   check("queued turn uses the newly saved group and reasoning level", fixture.chatRequests.some((request) => request.prompt.includes("Queued from the phone while running") && request.group === "auto") && fixture.chats.some((body) => body.reasoning_effort === "high" && JSON.stringify(body.messages.at(-1)).includes("Queued from the phone while running")));
+  check("queued request carries Fast and previous request does not", fixture.chats.some((body) => body.service_tier === "fast" && JSON.stringify(body.messages.at(-1)).includes("Queued from the phone while running")) && fixture.chats.some((body) => body.service_tier === undefined && JSON.stringify(body.messages.at(-1)).includes("mobile-slow streaming task")));
+  await page.locator(".composer-model-thinking-chip").click();
+  await page.getByRole("switch", { name: "Fast", exact: true }).uncheck();
+  await screenshot("desktop-fast-control", page);
+  await page.keyboard.press("Escape");
+  await until(async () => (await view()).snapshot?.session.configuration.next.fast === false, "desktop Fast off synchronizes to phone");
+  check("desktop Fast toggle updates mobile");
   await invoke("session/configure", shared.id, { providerId: provider.id, modelId: "gpt-5", thinkingLevel: "medium", permissionMode: "ask", mode: "agent" });
   await phone.evaluate(() => window.__PI_MOBILE_CONTROLLER__.refreshSession());
   await mobileSend("mobile-slow stopped task"); await phone.getByRole("button", { name: "Stop", exact: true }).waitFor();

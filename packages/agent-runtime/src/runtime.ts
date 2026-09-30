@@ -1,3 +1,4 @@
+import { assertMirrorCodingFast, withMirrorCodingFast } from "./mirrorcoding-fast.js";
 import { assistantReplay, canRestorePartialResponse, responseContentFacts, responseDiagnostics, responseOutcome, responseOutcomeError, restoredAssistantBlocks } from "./response-outcome.js";
 import { upstreamRequestDiagnostics, type RequestDiagnostics } from "./request-diagnostics.js";
 import { restoreHostedSearchReplay } from "./hosted-search-replay.js";
@@ -466,6 +467,7 @@ export type DelegationRecord = {
   agentName: string;
   modelId: string;
   thinkingLevel: SubagentThinkingLevel;
+  fast?: boolean;
   status: DelegationStatus;
   startedAt: number;
   completedAt?: number;
@@ -504,6 +506,7 @@ function delegationSummary(record: DelegationRecord): Record<string, unknown> {
     agent: record.agentName,
     modelId: record.modelId,
     thinkingLevel: record.thinkingLevel,
+    fast: record.fast === true,
     status: record.status,
     startedAt: record.startedAt,
     turns: record.result?.turns ?? record.turns,
@@ -1963,7 +1966,7 @@ You may end your turn while delegates run: they keep working in the background a
           ),
           m.api,
         );
-        const hookedOptions = this.withExtensionProviderHooks(requestOptions, m);
+        const hookedOptions = withMirrorCodingFast(this.withExtensionProviderHooks(requestOptions, m), this.provider);
         // The watchdog must be able to *stop* what it abandons. It wraps the
         // retry adapter, so draining alone would let the adapter wake from its
         // backoff and open a second request for this turn while the runtime is
@@ -2405,6 +2408,8 @@ You may end your turn while delegates run: they keep working in the background a
       (this.provider.baseUrl ?? "") === (config.provider.baseUrl ?? "") &&
       this.provider.apiKey === config.provider.apiKey &&
       this.provider.authKind === config.provider.authKind &&
+      this.provider.fast === config.provider.fast &&
+      this.provider.fastAvailable === config.provider.fastAvailable &&
       (this.provider.apiStyle ?? "") === (config.provider.apiStyle ?? "") &&
       providerHeadersEqual(this.provider.headers, config.provider.headers) &&
       this.provider.supportsReasoning === config.provider.supportsReasoning &&
@@ -3830,7 +3835,7 @@ You may end your turn while delegates run: they keep working in the background a
     try {
       const result = await (this.host as any).call(
         "provider.resolveSubagentModel",
-        { key },
+        { key, sessionId: this.sessionId },
       );
       // A late response cannot authorize work in a newer turn or after disposal.
       if (this.disposed || grants !== this.subagentOverrideProviders) return undefined;
@@ -3901,7 +3906,7 @@ You may end your turn while delegates run: they keep working in the background a
         ? provider.supportedThinkingLevels.join("/")
         : "none";
       lines.push(
-        `- \`${key}\` — ${provider.name}, ${reasoning}, thinking: ${levels}`,
+        `- \`${key}\` — ${provider.name}, ${reasoning}, thinking: ${levels}, Fast: ${provider.fastAvailable ? "available (request fast:true)" : "unavailable"}`,
       );
     }
     lines.push(
@@ -4175,6 +4180,9 @@ You may end your turn while delegates run: they keep working in the background a
               "Override the delegate's model for this run, e.g. 'anthropic/claude-sonnet-4-20250514'. Omit to use the subagent's default. Repeating the definition's own Default model key is the same as omitting this parameter. Only choose a different override from the available delegation model catalog. Forbidden when `resume` is set.",
           }),
         ),
+        fast: Type.Optional(Type.Boolean({
+          description: "Request MC Fast for this delegation. New runs default to false and never inherit parent Fast. Resume omission retains this delegate’s previous value. Only use true when the resolved model/group advertises Fast.",
+        })),
         resume: Type.Optional(
           Type.String({
             description:
@@ -4290,9 +4298,8 @@ You may end your turn while delegates run: they keep working in the background a
         const resumedChain = resumeLookup?.ok ? resumeLookup.chain : undefined;
         // A resume keeps the chain's own binding (ADR 0279 §4): changing the
         // parent's session model must not strand a chain, and a delegate must
-        // never swap models by accident. When the recorded binding is gone the
-        // run continues on the definition's current one and says so in its
-        // lifecycle details, because refusing would strand the chain forever.
+        // never swap models by accident. Missing authorization requires restoring
+        // the recorded binding or starting a new delegation explicitly.
         const resumeEpoch = this.turnEpoch;
         const resumedProvider = resumedChain
           ? await this.resumedChainProvider(resumedChain, definition)
@@ -4312,6 +4319,14 @@ You may end your turn while delegates run: they keep working in the background a
           );
         }
         if (resumedProvider) provider = resumedProvider;
+        const fast = isRecord(params) && typeof params.fast === "boolean" ? params.fast : resumedChain?.latestFast ?? false;
+        if (resumedChain?.latestModelId && !resumedProvider) {
+          return this.subagentToolError(toolCallId, "The delegation model is no longer available. Restore its model/group authorization; resume cannot switch models.");
+        }
+        if (provider.authKind === "mirrorcoding" || fast) provider = { ...provider, fast };
+        try { assertMirrorCodingFast(provider, fast); } catch (error) {
+          return this.subagentToolError(toolCallId, error instanceof Error ? error.message : "PI_FAST_UNAVAILABLE");
+        }
         const modelChangedFrom =
           resumedChain?.latestModelId && !resumedProvider
             ? resumedChain.latestModelId
@@ -4363,6 +4378,7 @@ You may end your turn while delegates run: they keep working in the background a
           originalTask: resumedChain?.originalTask ?? task,
           objective,
           latestModelId: provider.modelId,
+          latestFast: fast,
           ...(providerKey ? { latestModelKey: providerKey } : {}),
           resumedFrom: resumedChain,
         });
@@ -4373,6 +4389,7 @@ You may end your turn while delegates run: they keep working in the background a
           modelId: provider.modelId,
           thinkingLevel,
           status: "running",
+          fast,
           startedAt,
           completion,
           resolveCompletion,
@@ -4498,6 +4515,7 @@ You may end your turn while delegates run: they keep working in the background a
             startedAt,
             modelId: provider.modelId,
             thinkingLevel,
+            fast,
             ...(resumedChain ? { resumedFrom: resume } : {}),
           },
         };
@@ -5054,6 +5072,7 @@ You may end your turn while delegates run: they keep working in the background a
           status: record.status,
           modelId: record.modelId,
           thinkingLevel: record.thinkingLevel,
+    fast: record.fast === true,
           startedAt: record.startedAt,
           ...(record.completedAt ? { completedAt: record.completedAt } : {}),
           ...(record.result?.error ? { error: record.result.error } : {}),

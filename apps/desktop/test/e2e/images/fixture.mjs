@@ -16,19 +16,19 @@ export async function imageFixture() {
   const control = { hold: false, imageStatus: 200, downloadsFail: false, downloadsHold: false, rejectOnce: false, empty: false, removeAuto: false, offline: false, refreshes: 0, aborted: 0, revocations: 0 };
   const image = { generation_path: "/v1/images/generations", reference_path: "/v1/images/edits", sizes: ["1024x1024", "1536x1024"], qualities: ["high", "low"], max_count: 3, supports_chat: false };
   const models = [
-    { id: "gpt-5", supported_endpoint_types: ["openai"] },
-    { id: "gpt-image-1", supported_endpoint_types: ["image-generation", "image-edit"], image },
-    { id: "gemini-image-fixture", supported_endpoint_types: ["image-generation", "openai"], image: { generation_path: image.generation_path, reference_path: image.generation_path, aspect_ratios: ["1:1", "16:9"], max_count: 1, supports_chat: true } },
-    { id: "seedream-fixture", supported_endpoint_types: ["image-generation"], image: { generation_path: image.generation_path, reference_path: image.generation_path, sizes: ["2K", "4K"], max_count: 2, supports_chat: false } },
-    { id: "text-only-image-fixture", supported_endpoint_types: ["image-generation"], image: { generation_path: image.generation_path, max_count: 1, supports_chat: false } },
-    { id: "video-fixture", supported_endpoint_types: ["video"] },
+    { id: "gpt-5", modes: ["text"], supported_endpoint_types: ["openai"], fast: { enabled: true, supported_endpoint_types: ["openai"] } },
+    { id: "gpt-image-1", modes: ["image"], supported_endpoint_types: ["image-generation", "image-edit"], image },
+    { id: "gemini-image-fixture", modes: ["image","text"], supported_endpoint_types: ["image-generation", "openai"], image: { generation_path: image.generation_path, reference_path: image.generation_path, aspect_ratios: ["1:1", "16:9"], max_count: 1, supports_chat: true } },
+    { id: "seedream-fixture", modes: ["image"], supported_endpoint_types: ["image-generation"], image: { generation_path: image.generation_path, reference_path: image.generation_path, sizes: ["2K", "4K"], max_count: 2, supports_chat: false } },
+    { id: "text-only-image-fixture", modes: ["image"], supported_endpoint_types: ["image-generation"], image: { generation_path: image.generation_path, max_count: 1, supports_chat: false } },
+    { id: "video-fixture", modes: ["video"], supported_endpoint_types: ["video"] },
   ];
   const catalog = { user: { id: 901, display_name: "Image QA" }, supported_endpoints: {
     openai: { path: "/v1/chat/completions", method: "POST" },
     "image-generation": { path: image.generation_path, method: "POST" }, "image-edit": { path: image.reference_path, method: "POST" },
   }, groups: [
     { id: "中文 分组", name: "中文 分组", description: "Reference images and full quality controls", ratio: 0.06, dynamic_billing: false, models },
-    { id: "auto", name: "auto", description: "Dynamic route with conservative capabilities", ratio: null, dynamic_billing: true, models: [{ id: "gpt-image-1", supported_endpoint_types: ["image-generation"], image: { generation_path: image.generation_path, max_count: 1, supports_chat: false } }, models[0]] },
+    { id: "auto", name: "auto", description: "Dynamic route with conservative capabilities", ratio: null, dynamic_billing: true, models: [{ id: "gpt-image-1", modes: ["image"], supported_endpoint_types: ["image-generation"], image: { generation_path: image.generation_path, max_count: 1, supports_chat: false } }, models[0]] },
   ] };
   let origin;
   const server = createServer(async (req, res) => {

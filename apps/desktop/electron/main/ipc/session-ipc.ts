@@ -27,6 +27,7 @@ import type { Logger } from "../logger";
 import type { PersistenceOutbox } from "../persistence-outbox";
 import type { PluginRuntime } from "../plugin-runtime";
 import { readSessionCollaboration } from "../services/session-collaboration";
+import { configureSession } from "../services/session-configuration";
 import { searchSessionsAcrossSources } from "../services/session-search";
 import type { IpcRegistrar } from "./types";
 
@@ -530,6 +531,7 @@ export function registerSessionIpc({
       id: string,
       config: {
         mode: Mode;
+        fast?: boolean;
         providerId?: string;
         modelId?: string;
         thinkingLevel?: SessionThinkingLevel;
@@ -538,10 +540,7 @@ export function registerSessionIpc({
     ) => {
       rejectNativeMutation(id, "configuration");
       if (!host) throw new Error("host unavailable");
-      const result = await host.call<{ session?: RuntimeSession | null }>(
-        "session.configure",
-        { id, ...config },
-      );
+      const result = await configureSession(host, id, config);
       if (!result.session) return result;
       const { providers, defaults } = await sessionCapabilityContext();
       const session = enrichSession(result.session, providers, defaults);

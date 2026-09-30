@@ -1,4 +1,12 @@
 export const mobileEn = {
+  fast: "Fast",
+  fastRequested: "Fast requested",
+  fastHint: "Request a faster service tier. Provider availability and pricing apply; acceleration is not guaranteed.",
+  fastUnavailable: "Fast is not declared for this model, group and protocol.",
+  fastDisabled: "Fast was turned off for the next turn because this model/group does not support it.",
+  pi_fast_unavailable: "Fast is unavailable. Refresh the catalog and select a supported model/group. This request was not replayed at normal speed.",
+  invalid_service_tier: "The requested service tier is invalid.",
+  catalog_unavailable: "The catalog is temporarily unavailable. Your last synchronized models and draft are retained.",
   title: "PI Mobile", subtitle: "Your desktop agent, wherever you are.",
   loginTitle: "Sign in to MirrorCoding", username: "Username", password: "Password", login: "Sign in",
   challenge: "Verify your account", verificationCode: "Verification code", verify: "Verify", openVerification: "Open verification",
@@ -35,6 +43,14 @@ export const mobileEn = {
 };
 
 export const mobileZhCN: typeof mobileEn = {
+  fast: "Fast 模式",
+  fastRequested: "已请求 Fast",
+  fastHint: "请求快速服务档位，实际可用性与计费由服务端决定，不保证已加速。",
+  fastUnavailable: "当前模型、分组和协议未声明支持 Fast。",
+  fastDisabled: "所选模型或分组不支持 Fast，下一轮已关闭。",
+  pi_fast_unavailable: "Fast 暂不可用，请刷新目录并重新选择。未按普通速度重放请求。",
+  invalid_service_tier: "请求的服务档位参数无效。",
+  catalog_unavailable: "目录暂不可用，已保留上次同步的模型与草稿。",
   title: "PI 移动端", subtitle: "随时查看电脑上的智能体。",
   loginTitle: "登录 MirrorCoding", username: "账号", password: "密码", login: "登录",
   challenge: "验证账号", verificationCode: "验证码", verify: "验证", openVerification: "打开验证页面",

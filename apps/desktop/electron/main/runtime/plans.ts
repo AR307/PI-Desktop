@@ -1,3 +1,4 @@
+import { releaseTurnConfiguration } from "../services/session-configuration";
 import { ErrorCodes, IPC, type AgentEventEnvelope, type AppNotification, type PlanExecution, type PlanExecutionFinishStatus, type UiMessage } from "@pi-desktop/shared";
 import { executionFromResponse, executionListFromResponse, planExecutionFromUnknown } from "@pi-desktop/host-runtime";
 import type { RuntimeState } from "./context";
@@ -156,6 +157,7 @@ function finishTurn(
   // turn it does not own. Callers still persist the event as history.
   const turnId = String(options?.turnId ?? "").trim();
   if (!id || !turnId) return Promise.resolve();
+  if (runtimeState.host) releaseTurnConfiguration(runtimeState.host, id, turnId);
 
   const finalizationKey = planSubmissionTurnKey(id, turnId);
   // A second call joins the first claim. That is what stops a late abort from

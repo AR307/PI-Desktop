@@ -99,6 +99,7 @@ export type SubagentRunResult = {
   modelId: string;
   /** Thinking selection passed to the delegate after inheritance/clamping. */
   thinkingLevel: SubagentThinkingLevel;
+  fast?: boolean;
   status: SubagentRunStatus;
   /** Text handed back to the parent model. */
   report: string;
@@ -644,6 +645,7 @@ export class SubagentRun {
       agentName: name,
       modelId: this.provider.modelId,
       thinkingLevel: this.thinkingLevel,
+      fast: this.provider.fast === true,
       status,
       report: boundedReport([
         ...this.modelFailures.map((failure) => `Model ${failure.model} failed (${failure.code}): ${failure.message}`),

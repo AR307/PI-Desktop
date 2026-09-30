@@ -419,11 +419,11 @@ export class AgentSidecar {
    * `availableForSubagents` gate on each model binding.
    */
   private subagentModelResolver:
-    | ((key: string) => Promise<unknown>)
+    | ((key: string, sessionId: string) => Promise<unknown>)
     | null = null;
 
   setSubagentModelResolver(
-    resolver: (key: string) => Promise<unknown>,
+    resolver: (key: string, sessionId: string) => Promise<unknown>,
   ): void {
     this.subagentModelResolver = resolver;
   }
@@ -441,7 +441,9 @@ export class AgentSidecar {
         { code: -32602 },
       );
     }
-    return this.subagentModelResolver(key);
+    const sessionId = typeof params.sessionId === "string" ? params.sessionId.trim() : "";
+    if (!sessionId) throw new Error("subagent sessionId required");
+    return this.subagentModelResolver(key, sessionId);
   }
 
   private async onLine(line: string) {

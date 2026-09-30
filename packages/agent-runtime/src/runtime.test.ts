@@ -6623,6 +6623,32 @@ describe("DesktopAgentRuntime subagents", () => {
     );
   }
 
+  it("isolates explicitly requested Fast from parent and parallel siblings", async () => {
+    const parent = { ...provider, authKind: "mirrorcoding", fast: true, fastAvailable: true };
+    const child = { ...parent, id: "mc-child", modelId: "child", fast: false };
+    const runtime = createRuntime({ provider: parent, subagents: [explorer], subagentProviders: { "mc-child/child": child }, subagentModelKeys: ["mc-child/child"] });
+    subagentRuns.calls.length = 0; subagentRuns.deferred = true;
+    try {
+      await Promise.all([
+        taskTool(runtime).execute("normal-child", { agent: "explorer", task: "Read the workspace." }),
+        taskTool(runtime).execute("fast-child", { agent: "explorer", task: "Read another module.", model: "mc-child/child", fast: true }),
+      ]);
+      expect(subagentRuns.calls.map(call => call.provider.fast)).toEqual([false, true]);
+      expect(subagentRuns.calls[1].provider.modelId).toBe("child");
+      expect(parent.fast).toBe(true); expect(child.fast).toBe(false);
+    } finally { subagentRuns.deferred = false; await runtime.dispose(); }
+  });
+
+  it("rejects unsupported Task.fast before starting a delegate", async () => {
+    const runtime = createRuntime({ subagents: [explorer] });
+    subagentRuns.calls.length = 0;
+    try {
+      const result = await taskTool(runtime).execute("fast-rejected", { agent: "explorer", task: "Read the workspace.", fast: true });
+      expect(JSON.stringify(result)).toContain("PI_FAST_UNAVAILABLE");
+      expect(subagentRuns.calls).toHaveLength(0);
+    } finally { await runtime.dispose(); }
+  });
+
   it("offers Task as a core Agent-mode tool that advertises every definition", async () => {
     const runtime = createRuntime({ subagents: [explorer, pinned] });
     const tool = taskTool(runtime);
@@ -6716,7 +6742,7 @@ describe("DesktopAgentRuntime subagents", () => {
     });
     expect(echoed.details.error).toBeUndefined();
     expect(subagentRuns.calls[1].provider).toBe(remote);
-    expect(host.call).toHaveBeenCalledTimes(1);
+    expect(host.call.mock.calls.filter(([method]) => method === "provider.resolveSubagentModel")).toHaveLength(1);
   });
 
   it("allows an opted-in model to override a definition pin without changing D278", async () => {
@@ -6804,7 +6830,7 @@ describe("DesktopAgentRuntime subagents", () => {
       const denied = await taskTool(runtime).execute("revoked", { agent: "explorer", task: "Search.", model: "new/new-model" });
       expect(denied.details.error).toContain("not available for delegation");
       expect(subagentRuns.calls).toHaveLength(1);
-      expect(host.call).toHaveBeenLastCalledWith("provider.resolveSubagentModel", { key: "new/new-model" });
+      expect(host.call).toHaveBeenLastCalledWith("provider.resolveSubagentModel", { sessionId: "session-1", key: "new/new-model" });
     } finally { await runtime.dispose(); }
   });
 
@@ -8236,6 +8262,19 @@ describe("DesktopAgentRuntime subagents", () => {
       return taskTool(runtime).execute(toolCallId, args);
     }
 
+    it.each([undefined, false, true])("restores delegate Fast after restart; resume override %s", async (requested) => {
+      const mc = { ...provider, authKind: "mirrorcoding", fast: false, fastAvailable: true };
+      const history: UiMessage[] = [{ id: "task-1", role: "tool", content: "", createdAt: "2026-09-30T00:00:00.000Z", toolName: "Task", toolCallId: "task-1", toolArgs: { agent: "explorer", task: "Read the workspace.", fast: true }, toolStatus: "success", toolResult: { details: { delegationId: "del-1", agent: "explorer", modelId: mc.modelId, status: "completed", fast: true } } }, delegateRow("child-1", "task-1")];
+      const runtime = createRuntime({ provider: mc, subagents: [explorer], history });
+      subagentRuns.calls.length = 0; subagentRuns.deferred = true;
+      try {
+        const result = await startTask(runtime, "task-2", { agent: "explorer", task: "Continue.", resume: "del-1", ...(requested === undefined ? {} : { fast: requested }) });
+        expect(result.details.fast).toBe(requested ?? true);
+        expect(subagentRuns.calls[0].provider.fast).toBe(requested ?? true);
+        expect(mc.fast).toBe(false);
+      } finally { subagentRuns.deferred = false; await runtime.dispose(); }
+    });
+
     it("seeds a resumed run with the chain's prior messages and keeps its model", async () => {
       const history: UiMessage[] = [
         delegateRow("child-1", "task-1"),
@@ -8696,10 +8735,13 @@ describe("DesktopAgentRuntime subagents", () => {
       subagentRuns.deferred = false;
       try {
         const result = await startTask(runtime, "task-2", { agent: "explorer", task: "Continue.", resume: "del-1" });
-        expect(result.details.error).toBeUndefined();
-        expect(subagentRuns.calls[0].provider).toBe(source === "missing" ? provider : authorized);
-        const records = (runtime as unknown as { delegations: Map<string, { modelChangedFrom?: string }> }).delegations;
-        expect(records.get(result.details.delegationId)?.modelChangedFrom).toBe(source === "missing" ? "recorded-model" : undefined);
+        if (source === "missing") {
+          expect(result.details.error).toContain("no longer available");
+          expect(subagentRuns.calls).toHaveLength(0);
+        } else {
+          expect(result.details.error).toBeUndefined();
+          expect(subagentRuns.calls[0].provider).toBe(authorized);
+        }
       } finally { await runtime.dispose(); }
     });
 
@@ -8718,8 +8760,9 @@ describe("DesktopAgentRuntime subagents", () => {
       subagentRuns.deferred = false;
       try {
         await startTask(runtime, "task-2", { agent: "explorer", task: "Continue.", resume: "del-1" });
-        expect(host.call).toHaveBeenCalledWith("provider.resolveSubagentModel", { key: "dynamic/dynamic-model" });
-        expect(subagentRuns.calls[0].provider).toBe(allowed ? selected : provider);
+        expect(host.call).toHaveBeenCalledWith("provider.resolveSubagentModel", { sessionId: "session-1", key: "dynamic/dynamic-model" });
+        if (allowed) expect(subagentRuns.calls[0].provider).toBe(selected);
+        else expect(subagentRuns.calls).toHaveLength(0);
       } finally { await runtime.dispose(); }
     });
 
@@ -8799,80 +8842,15 @@ describe("DesktopAgentRuntime subagents", () => {
       await runtime.dispose();
     });
 
-    it("continues a chain whose recorded binding is gone and reports the change", async () => {
-      const onEvent = vi.fn();
-      const history: UiMessage[] = [
-        restartedTaskRow("task-1", "del-1", {
-          status: "completed",
-          modelId: "gone-model",
-        }),
+    it("refuses resume when the recorded binding is gone", async () => {
+      const runtime = createRuntime({ subagents: [explorer], history: [
+        restartedTaskRow("task-1", "del-1", { status: "completed", modelId: "gone-model" }),
         delegateRow("child-1", "task-1"),
-      ];
-      const runtime = createRuntime({ subagents: [explorer], history, onEvent });
-      const internals = runtime as any;
+      ] });
       subagentRuns.calls.length = 0;
-      subagentRuns.instances.length = 0;
-      subagentRuns.deferred = true;
-
-      const args = { agent: "explorer", task: "Continue.", resume: "del-1" };
-      const result = await startTask(runtime, "task-2", args);
-      const delegationId = (result.details as any).delegationId as string;
-
-      // Refusing would strand the chain forever, so it continues on the
-      // definition's current binding and records what it left behind.
-      expect((result.details as any).error).toBeUndefined();
-      expect((result.details as any).resumedFrom).toBe("del-1");
-      expect(subagentRuns.calls[0].provider).toBe(provider);
-      expect(internals.delegations.get(delegationId).modelChangedFrom).toBe(
-        "gone-model",
-      );
-
-      // …and the parent sees it on the settled Task row.
-      const handle = internals.handleAgentEvent.bind(runtime);
-      await handle({
-        type: "tool_execution_start",
-        toolName: "Task",
-        toolCallId: "task-2",
-        args,
-      });
-      await handle({
-        type: "tool_execution_end",
-        toolName: "Task",
-        toolCallId: "task-2",
-        result,
-        isError: false,
-      });
-      subagentRuns.resolveRun?.({
-        agentName: "explorer",
-        status: "completed",
-        report: "done",
-        turns: 1,
-        toolCalls: 0,
-      });
-      await vi.waitFor(() => {
-        const snapshots = onEvent.mock.calls
-          .map(([envelope]) => envelope as any)
-          .filter(
-            (envelope) =>
-              envelope.event.type === "message_end" &&
-              envelope.event.message.role === "tool",
-          );
-        expect(snapshots).toHaveLength(1);
-      });
-      const snapshot = onEvent.mock.calls
-        .map(([envelope]) => envelope as any)
-        .find(
-          (envelope) =>
-            envelope.event.type === "message_end" &&
-            envelope.event.message.role === "tool",
-        );
-      expect(snapshot.event.message.toolResult.details).toMatchObject({
-        delegationId,
-        status: "completed",
-        modelChangedFrom: "gone-model",
-      });
-
-      subagentRuns.deferred = false;
+      const result = await startTask(runtime, "task-2", { agent: "explorer", task: "Continue.", resume: "del-1" });
+      expect(result.details.error).toContain("no longer available");
+      expect(subagentRuns.calls).toHaveLength(0);
       await runtime.dispose();
     });
 

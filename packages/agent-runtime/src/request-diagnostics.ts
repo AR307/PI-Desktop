@@ -2,7 +2,7 @@ import type { ResponseDiagnostics } from "@pi-desktop/shared";
 
 export type RequestDiagnostics = Pick<
   ResponseDiagnostics,
-  "path" | "model" | "reasoning" | "outputLimit"
+  "path" | "model" | "reasoning" | "outputLimit" | "requestedServiceTier"
 >;
 
 /** MC strips the provider-scoped loopback prefix before forwarding upstream. */
@@ -37,6 +37,7 @@ export function requestDiagnostics(
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) return result;
   const payload = raw as Record<string, unknown>;
   if (typeof payload.model === "string") result.model = payload.model;
+  if (typeof payload.service_tier === "string") result.requestedServiceTier = payload.service_tier;
   for (const key of ["max_tokens", "max_completion_tokens", "max_output_tokens"]) {
     const value = payload[key];
     if (typeof value === "number" && Number.isFinite(value)) result.outputLimit = value;

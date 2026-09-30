@@ -17,6 +17,15 @@ import type { PlanningState } from "./plans.js";
  */
 export type SessionSource = "desktop" | "pi-native" | "remote";
 
+export type SessionConfigurationInput = {
+  mode: Mode;
+  providerId?: string;
+  modelId?: string;
+  thinkingLevel?: SessionThinkingLevel;
+  permissionMode?: PermissionMode;
+  fast?: boolean;
+};
+
 export type SessionCapabilities = {
   canPrompt: boolean;
   canStop: boolean;
@@ -24,6 +33,8 @@ export type SessionCapabilities = {
 };
 
 export type SessionSummary = {
+  /** Saved next-turn MC Fast preference; new sessions start disabled. */
+  fast?: boolean;
   id: string;
   /** Transcript authority. Omitted by older hosts and normalized to `desktop`. */
   source?: SessionSource;

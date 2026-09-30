@@ -58,7 +58,7 @@ const catalog = {
     models: [
       {
         id: "gpt-image-1",
-        supportedEndpointTypes: ["image-generation", "image-edit"],
+        modes: ["image"], supportedEndpointTypes: ["image-generation", "image-edit"],
         image: {
           generationPath: "/v1/images/generations",
           referencePath: "/v1/images/edits",
@@ -70,7 +70,7 @@ const catalog = {
       },
       {
         id: "text-image",
-        supportedEndpointTypes: ["image-generation"],
+        modes: ["image"], supportedEndpointTypes: ["image-generation"],
         image: { generationPath: "/v1/images/generations", maxCount: 1, supportsChat: false },
       },
     ],

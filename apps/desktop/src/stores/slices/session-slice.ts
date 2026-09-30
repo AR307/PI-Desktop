@@ -608,6 +608,7 @@ export function createSessionSlice({
         set((state) => ({
           draftConfiguration: {
             mode: config.mode,
+            fast: config.fast ?? state.draftConfiguration?.fast ?? false,
             thinkingLevel: config.thinkingLevel,
             providerId:
               config.providerId ?? state.draftConfiguration?.providerId,
@@ -619,32 +620,7 @@ export function createSessionSlice({
         return;
       }
       if (get().pendingPlans[sessionId]?.status === "pending") return;
-      if (
-        get().runningSessions[sessionId] ||
-        runtime.sessionConfigurationFlushes.has(sessionId)
-      ) {
-        runtime.pendingSessionConfigurations.set(
-          sessionId,
-          runtime.mergeSessionConfiguration(
-            runtime.pendingSessionConfigurations.get(sessionId),
-            config,
-          ),
-        );
-        set((state) => ({
-          sessions: state.sessions.map((session) =>
-            session.id === sessionId
-              ? applyOptimisticSessionConfiguration(session, config)
-              : session,
-          ),
-        }));
-        return;
-      }
-      const payload = runtime.mergeSessionConfiguration(
-        runtime.pendingSessionConfigurations.get(sessionId),
-        config,
-      );
-      runtime.pendingSessionConfigurations.delete(sessionId);
-      const result = await api.configureSession(sessionId, payload);
+      const result = await api.configureSession(sessionId, config);
       set((state) => ({
         sessions: state.sessions.map((session) =>
           session.id === sessionId

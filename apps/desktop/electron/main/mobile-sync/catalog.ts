@@ -7,6 +7,7 @@ import type {
   ProviderPublic, ModelModality,
 } from "@pi-desktop/shared";
 import type { HostRpc } from "@pi-desktop/host-runtime";
+import { mirrorCodingFastAvailable } from "@pi-desktop/shared";
 import type { ImageService } from "../images/service";
 
 type CatalogDependencies = {
@@ -43,6 +44,8 @@ export async function buildMobileModelCatalog({ host, images, isMirrorCodingRead
         modelId: binding.id,
         displayName: binding.alias || binding.id,
         source: provider.mirrorCoding ? "mirrorcoding" : "provider",
+        fastAvailable: mirrorCodingFastAvailable(provider.mirrorCoding, binding.id, binding.mirrorCodingGroupId),
+        ...(!mirrorCodingFastAvailable(provider.mirrorCoding, binding.id, binding.mirrorCodingGroupId) ? { fastUnavailableReason: "pi_fast_unavailable" } : {}),
         ...(provider.mirrorCoding ? {
           groupId: provider.mirrorCoding.groupId,
           groupName: provider.mirrorCoding.groupName,

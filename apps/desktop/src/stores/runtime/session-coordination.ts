@@ -39,7 +39,6 @@ export type PersistSessionOptions = {
 };
 
 export type SessionCoordination = {
-  flushPendingSessionConfiguration: (sessionId: string) => Promise<void>;
   rememberSessionCompactions: (
     sessionId: string,
     session:
@@ -78,69 +77,6 @@ export function createSessionCoordination({
   withoutRecordKey,
   untitledTaskTitle,
 }: SessionCoordinationDependencies): SessionCoordination {
-  function flushPendingSessionConfiguration(sessionId: string): Promise<void> {
-    const active = runtime.sessionConfigurationFlushes.get(sessionId);
-    if (active) return active;
-    if (get().runningSessions[sessionId]) return Promise.resolve();
-
-    const flush = (async () => {
-      let failed = false;
-      while (!get().runningSessions[sessionId]) {
-        const config = runtime.pendingSessionConfigurations.get(sessionId);
-        if (!config) break;
-        try {
-          const result = await api.configureSession(sessionId, config);
-          if (runtime.pendingSessionConfigurations.get(sessionId) === config) {
-            runtime.pendingSessionConfigurations.delete(sessionId);
-          }
-          set((state) => ({
-            sessions: state.sessions.map((session) =>
-              session.id === sessionId
-                ? {
-                    ...result.session,
-                    pinned: sessionIsPinned(sessionId, state.sessionMeta),
-                    archived: sessionIsArchived(sessionId, state.sessionMeta),
-                  }
-                : session,
-            ),
-            planningStates: {
-              ...state.planningStates,
-              [sessionId]:
-                result.session.mode === "plan" ? "planning" : "inactive",
-            },
-          }));
-        } catch (error) {
-          get().showToast(
-            error instanceof Error ? error.message : String(error),
-            { variant: "error" },
-          );
-          void get().refreshSessions();
-          if (runtime.pendingSessionConfigurations.get(sessionId) !== config) {
-            continue;
-          }
-          failed = true;
-          break;
-        }
-      }
-      return failed;
-    })();
-    const settled = flush.then(() => undefined);
-    runtime.sessionConfigurationFlushes.set(sessionId, settled);
-    void flush.then((failed) => {
-      if (runtime.sessionConfigurationFlushes.get(sessionId) === settled) {
-        runtime.sessionConfigurationFlushes.delete(sessionId);
-      }
-      if (
-        !failed &&
-        runtime.pendingSessionConfigurations.has(sessionId) &&
-        !get().runningSessions[sessionId]
-      ) {
-        void flushPendingSessionConfiguration(sessionId);
-      }
-    });
-    return settled;
-  }
-
   function rememberSessionCompactions(
     sessionId: string,
     session:
@@ -322,6 +258,10 @@ export function createSessionCoordination({
       throw error;
     }
     const sessionId = created.session.id;
+    if (draftConfig?.fast === true) {
+      const configured = await api.configureSession(sessionId, { mode: created.session.mode, fast: true });
+      if (configured.session) created.session = { ...created.session, ...configured.session };
+    }
     if (!runtime.navigationIntentIsCurrent(active)) {
       commitCreatedEmptySession(created.session, { activate: false });
       return null;
@@ -345,7 +285,6 @@ export function createSessionCoordination({
   }
 
   return {
-    flushPendingSessionConfiguration,
     rememberSessionCompactions,
     commitForkedSession,
     persistSessionAndSelect,

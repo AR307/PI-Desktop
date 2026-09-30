@@ -627,3 +627,20 @@ needed by an actual request rather than starting a repository-wide rewrite.
   recovery checks and four MC routing/key checks passed. Actual Electron
   clipboard interaction also passed with developer mode disabled. The sidebar
   fix is locally committed; no push or release was performed.
+
+## 2026-09-30 — MC client-management and Fast (implementation candidate)
+
+- Replaced Claude-name routing with published per-group modes/endpoints and
+  exact native-model preference. Preserve unavailable saved group selections.
+- Added Rust-owned session Fast settings and a shared main configuration entry;
+  desktop/mobile native model panels synchronize next-turn preferences while
+  active launches keep their actual settings. Removed renderer-only pending state.
+- Added independent Task.fast and durable resume preference, shared final pi
+  payload handling and relay revalidation. Missing resume bindings now require
+  explicit user/model reselection, never silent replacement.
+- Kept credentials in main and ordinary-provider routing unchanged. MC server
+  changes, production calls, push and release are outside this task.
+- Targeted checks: 35 desktop routing/mobile boundary tests, 318 agent-runtime
+  tests, two Rust Fast persistence/configuration tests, workspace package builds
+  and desktop/mobile typechecks pass. Candidate visual E2E is still pending.
+- Full Rust suite: 647 passed, four failures in unchanged Windows path-normalization/fork assertions; this is not a fully green suite. Fixed a missing native reasoning-panel translation key found by i18n checks.

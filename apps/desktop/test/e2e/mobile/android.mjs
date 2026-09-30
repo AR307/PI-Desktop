@@ -121,10 +121,16 @@ try {
   await phone.locator(".grant-open").filter({ hasText: "Android acceptance" }).click();
   await phone.locator(".composer textarea").waitFor();
   await screenshot("android-paired-light-en");
+  await phone.locator(".conversation-controls .model-chip").click();
+  await phone.getByRole("switch", { name: "Fast", exact: true }).check();
+  await screenshot("android-fast-panel");
+  await phone.getByRole("button", { name: "Apply", exact: true }).click();
+  await phone.locator(".surface").waitFor({ state: "hidden" });
   await send("Continuation sent from the actual Android APK");
   await until(async () => (await invoke("session/get", { id: session.id })).session.messages.some((message) => message.role === "assistant"), "native continuation");
   await until(async () => !(await view()).busy && !(await view()).snapshot?.activeTurn, "native turn complete");
   check("Android sends through MC relay to desktop and receives reply");
+  check("Android Fast setting persists and reaches actual request", (await invoke("session/get", { id: session.id })).session.fast === true && fixture.chats.some((body) => body.service_tier === "fast"));
   // A trusted pointer click focuses the actual WebView input and opens the IME.
   await phone.locator(".composer textarea").click();
   await until(async () => /mInputShown=true|isInputViewShown=true/.test((await adb("shell", "dumpsys", "input_method")).stdout), "Android soft keyboard");

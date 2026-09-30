@@ -48,7 +48,6 @@ export type EventsSliceDependencies = StoreAccess & {
     payload?: { question?: string; toolName?: string },
   ) => void;
   triggerAutoTitleSummarization: (sessionId: string) => Promise<void>;
-  flushPendingSessionConfiguration: (sessionId: string) => Promise<void>;
   assistantErrorMessage: (error: {
     code: string;
     message: string;
@@ -69,7 +68,6 @@ export function createEventsSlice({
   openPlanArtifact,
   notifyInteractivePrompt,
   triggerAutoTitleSummarization,
-  flushPendingSessionConfiguration,
   assistantErrorMessage,
   withCompactionMark,
 }: EventsSliceDependencies): Pick<
@@ -276,7 +274,6 @@ export function createEventsSlice({
             [envelope.sessionId]: false,
           },
         }));
-        void flushPendingSessionConfiguration(envelope.sessionId);
         void get().refreshQueuedPrompts(envelope.sessionId);
       } else if (event.type === "agent_end" || event.type === "error") {
         set((state) => ({
@@ -315,7 +312,6 @@ export function createEventsSlice({
                     },
                   },
         }));
-        void flushPendingSessionConfiguration(envelope.sessionId);
         if (event.type === "agent_end") {
           void get().refreshQueuedPrompts(envelope.sessionId);
         }
@@ -404,7 +400,6 @@ export function createEventsSlice({
             ),
           },
         }));
-        void flushPendingSessionConfiguration(envelope.sessionId);
       }
 
       if (envelope.sessionId !== get().activeSessionId) {

@@ -74,6 +74,8 @@ pub struct MirrorCodingImageRoute {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct MirrorCodingProvider {
+    #[serde(flatten)]
+    pub client: MirrorCodingClientMetadata,
     /// `group` rows are retained for historical sessions; `account` is the
     /// model-first provider projected from the complete authorized catalog.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -98,6 +100,8 @@ pub struct MirrorCodingProvider {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct MirrorCodingGroupRoute {
+    #[serde(flatten)]
+    pub client: MirrorCodingClientMetadata,
     pub id: String,
     pub name: String,
     pub description: String,
@@ -110,6 +114,17 @@ pub struct MirrorCodingGroupRoute {
     pub image_capabilities: Option<BTreeMap<String, serde_json::Value>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub image_models: Option<BTreeMap<String, serde_json::Value>>,
+}
+
+#[derive(Debug, Default, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct MirrorCodingClientMetadata {
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub model_capabilities: BTreeMap<String, serde_json::Value>,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub supported_endpoints: BTreeMap<String, serde_json::Value>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub candidate_groups: Vec<String>,
 }
 
 #[derive(Debug, Deserialize)]

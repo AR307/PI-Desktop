@@ -13,7 +13,7 @@ import { validateImageOptions } from "@pi-desktop/shared";
 import type { MirrorCodingAccount } from "./account";
 import { ENDPOINTS, IMAGE_ENDPOINTS } from "./catalog";
 import { relayBindingKey } from "./relay-key";
-import { mirrorCodingChatRoute } from "./chat-route";
+import { isMirrorCodingEndpointPath, mirrorCodingChatRoute } from "./chat-route";
 
 type Binding = {
   providerId: string;
@@ -35,7 +35,7 @@ function selectedGroup(metadata: MirrorCodingProvider, groupId?: string): Mirror
     if (groupId && groupId !== metadata.groupId) throw new Error("model_or_group_unavailable");
     return metadata;
   }
-  const selected = groupId ?? metadata.groups?.[0]?.id;
+  const selected = groupId;
   const route = metadata.groups?.find((group) => group.id === selected);
   if (!route) throw new Error("model_or_group_unavailable");
   return {
@@ -47,6 +47,8 @@ function selectedGroup(metadata: MirrorCodingProvider, groupId?: string): Mirror
     ratio: route.ratio,
     dynamicBilling: route.dynamicBilling,
     routes: route.routes,
+    modelCapabilities: route.modelCapabilities, supportedEndpoints: route.supportedEndpoints,
+    candidateGroups: route.candidateGroups,
     ...(route.imageRoutes ? { imageRoutes: route.imageRoutes } : {}),
     ...(route.imageCapabilities ? { imageCapabilities: route.imageCapabilities } : {}),
     ...(route.imageModels ? { imageModels: route.imageModels } : {}),
@@ -97,9 +99,13 @@ export class MirrorCodingRelay {
 
   async bind(providerId: string, metadata: MirrorCodingProvider, modelId: string, sessionId?: string, groupId?: string) {
     const group = selectedGroup(metadata, groupId);
-    const endpoint = mirrorCodingChatRoute(modelId, group.routes[modelId]);
+    const catalog = this.account.snapshot().catalog;
+    const model = catalog?.groups.find(entry => entry.id === group.groupId)?.models.find(entry => entry.id === modelId);
+    const endpoint = model && catalog ? mirrorCodingChatRoute(model, catalog.supportedEndpoints, group.routes[modelId]) : undefined;
     if (!endpoint) throw new Error("model_or_group_unavailable");
-    return this.bindInternal(providerId, group, modelId, sessionId, "chat", endpoint, group.groupId);
+    const fastAvailable = (endpoint === "openai" || endpoint === "openai-response") &&
+      model?.fast?.enabled === true && model.fast.supportedEndpointTypes.includes(endpoint);
+    return { ...await this.bindInternal(providerId, group, modelId, sessionId, "chat", endpoint, group.groupId), fastAvailable };
   }
 
   async bindImage(providerId: string, metadata: MirrorCodingProvider, modelId: string, sessionId: string | undefined, edit = false, groupId?: string) {
@@ -168,9 +174,9 @@ export class MirrorCodingRelay {
       const rawBody = Buffer.concat(chunks);
       const body = rawBody.toString("utf8");
       const contentType = String(request.headers["content-type"] ?? "");
-      let payload: { model?: unknown; images?: unknown; n?: unknown; size?: unknown; quality?: unknown; aspect_ratio?: unknown } = {};
+      let payload: Record<string, unknown> = {};
       if (contentType.toLowerCase().includes("application/json")) {
-        payload = JSON.parse(body) as { model?: unknown; images?: unknown; n?: unknown; size?: unknown; quality?: unknown; aspect_ratio?: unknown };
+        payload = JSON.parse(body) as Record<string, unknown>;
       } else if (contentType.toLowerCase().includes("multipart/form-data")) {
         const model = /name="model"\r?\n\r?\n([^\r\n]+)/.exec(body)?.[1];
         payload = { model };
@@ -179,7 +185,7 @@ export class MirrorCodingRelay {
       const modelId = gemini ? decodeURIComponent(gemini[1]) : payload.model;
       if (typeof modelId !== "string") throw new Error("invalid_model_request");
       const imageRoutes = binding.metadata.imageRoutes?.[modelId];
-      const endpoint = binding.kind === "chat" ? mirrorCodingChatRoute(modelId, binding.metadata.routes[modelId]) :
+      const endpoint = binding.kind === "chat" ? binding.endpoint :
         (Array.isArray(payload.images) && payload.images.length > 0 ? imageRoutes?.reference : imageRoutes?.generation);
       const expectedPath = binding.kind === "chat"
         ? (endpoint ? ENDPOINTS[endpoint as MirrorCodingEndpoint].path : "")
@@ -197,13 +203,24 @@ export class MirrorCodingRelay {
       const currentCapability = currentModel?.image;
       const currentPath = hasReferences ? currentCapability?.referencePath : currentCapability?.generationPath;
       const routeAvailable = binding.kind === "chat"
-        ? Boolean(currentModel && currentModel.image?.supportsChat !== false &&
-            currentModel.supportedEndpointTypes.some((kind) =>
-              kind in ENDPOINTS && mirrorCodingChatRoute(modelId, kind as MirrorCodingEndpoint) === endpoint))
-        : Boolean(currentCapability && endpoint && currentPath === IMAGE_ENDPOINTS[endpoint as MirrorCodingImageEndpoint].path &&
+        ? Boolean(currentModel?.modes.includes("text") && endpoint && currentModel.supportedEndpointTypes.includes(endpoint))
+        : Boolean(currentModel?.modes.includes("image") && currentCapability && endpoint && currentPath === IMAGE_ENDPOINTS[endpoint as MirrorCodingImageEndpoint].path &&
             currentModel?.supportedEndpointTypes.includes(endpoint));
       if (!currentModel || !routeAvailable) {
         throw new Error("model_or_group_unavailable");
+      }
+      const advertised = endpoint && state.catalog?.supportedEndpoints[endpoint];
+      if (!advertised || advertised.method !== "POST" || !isMirrorCodingEndpointPath(advertised.path)) {
+        throw new Error("model_or_group_unavailable");
+      }
+      if (payload.service_tier !== undefined) {
+        if (binding.kind !== "chat") throw new Error("invalid_image_parameter");
+        if (payload.service_tier !== "fast" && payload.service_tier !== "default") throw new Error("invalid_service_tier");
+        if (payload.service_tier === "fast" && !((endpoint === "openai" || endpoint === "openai-response") &&
+            currentModel.fast?.enabled && currentModel.fast.supportedEndpointTypes.includes(endpoint))) {
+          void this.account.groupUnavailable();
+          throw new Error("pi_fast_unavailable");
+        }
       }
       if (binding.kind === "image" && contentType.toLowerCase().includes("application/json")) {
         const capability = imageCapability(binding.metadata, modelId);
@@ -223,10 +240,13 @@ export class MirrorCodingRelay {
         if (typeof value === "string") headers.set(name, value);
       }
       const query = gemini?.[2] === "streamGenerateContent" ? "?alt=sse" : "";
-      const upstream = await this.account.request(`${path}${query}`, { method: "POST", headers, body: rawBody, signal: controller.signal });
-      if (upstream.status === 403) {
-        const denied = await upstream.clone().json().catch(() => null) as { error?: { code?: string; message?: string } } | null;
-        if (denied?.error?.code?.includes("group") || denied?.error?.message === "The selected group is not available to this account") {
+      let upstreamPath = advertised.path.replace("{model}", encodeURIComponent(modelId));
+      if (gemini?.[2] === "streamGenerateContent") upstreamPath = upstreamPath.replace(/:generateContent$/, ":streamGenerateContent");
+      const upstream = await this.account.request(`${upstreamPath}${query}`, { method: "POST", headers, body: rawBody, signal: controller.signal });
+      if (upstream.status === 400 || upstream.status === 403) {
+        const denied = await upstream.clone().json().catch(() => null) as { code?: string; error?: { code?: string; message?: string } } | null;
+        const code = denied?.error?.code ?? denied?.code;
+        if (code === "pi_fast_unavailable" || code?.includes("group") || denied?.error?.message === "The selected group is not available to this account") {
           void this.account.groupUnavailable();
         }
       }
@@ -244,7 +264,8 @@ export class MirrorCodingRelay {
       if (response.headersSent) response.destroy();
       else if (!response.destroyed) {
         const code = error instanceof Error && /^[a-z_]+$/.test(error.message) ? error.message : "mirrorcoding_request_failed";
-        response.writeHead(code === "reauthorization_required" ? 401 : code === "model_or_group_unavailable" ? 403 : 502, { "Content-Type": "application/json" });
+        response.writeHead(code === "reauthorization_required" ? 401 : code === "model_or_group_unavailable" ? 403 :
+          ["pi_fast_unavailable", "invalid_service_tier", "invalid_image_parameter"].includes(code) ? 400 : 502, { "Content-Type": "application/json" });
         response.end(JSON.stringify({ error: { message: code, code } }));
       }
     } finally {

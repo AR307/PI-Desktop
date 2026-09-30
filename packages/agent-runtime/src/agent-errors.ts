@@ -431,6 +431,9 @@ export function classifyAgentError(err: unknown): ClassifiedAgentError {
   ) {
     return result("TURN_ABORTED", false);
   }
+  if (envelope?.errorCode === "PI_FAST_UNAVAILABLE" || /\bpi_fast_unavailable\b/i.test(rawMessage)) return result("PI_FAST_UNAVAILABLE", false);
+  if (/\b(?:invalid_service_tier|model_or_group_unavailable)\b/i.test(rawMessage)) return result("PROVIDER_ERROR", false);
+  if (status === 402) return result("PROVIDER_ERROR", false);
   if (/CONTEXT_COMPACTION_FAILED/i.test(rawMessage)) {
     return result("CONTEXT_COMPACTION_FAILED", false);
   }

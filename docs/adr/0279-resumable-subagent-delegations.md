@@ -105,11 +105,9 @@ the session binding, and currently authorized overrides. A remembered key whose
 turn grant expired is reauthorized before use; a denied key cannot select another
 account by model id. Other definitions' private pins are never candidates (#841). Changing the
 parent's own session model therefore does not strand a chain, and a delegate never
-swaps models by accident. If nothing resolves the recorded binding any more, the
-run continues on the binding the definition resolves to now and records the
-previous model id in the delegation's lifecycle details as `modelChangedFrom`:
-refusing instead would strand the chain forever, and swapping silently would hand
-the same conversation to a different model with no trace.
+swaps models by accident. If the recorded binding is no longer authorized,
+resume fails before starting a request. Restore that binding or start a new
+delegation explicitly; resume never changes the model.
 
 ### 5. Only `completed` and `failed` are resumable
 

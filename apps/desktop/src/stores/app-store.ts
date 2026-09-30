@@ -433,7 +433,6 @@ const sessionCoordination: SessionCoordination = createSessionCoordination({
   untitledTaskTitle,
 });
 const {
-  flushPendingSessionConfiguration,
   rememberSessionCompactions,
   commitForkedSession,
   persistSessionAndSelect,
@@ -492,7 +491,6 @@ export const useAppStore = create<AppState>((set, get) => {
     runtime: sessionRuntime,
     promptAttachmentsFromMessage,
     viewingSessionIdForPrompt,
-    flushPendingSessionConfiguration,
   }),
 
   ...createProjectSlice({
@@ -526,7 +524,6 @@ export const useAppStore = create<AppState>((set, get) => {
     openPlanArtifact,
     notifyInteractivePrompt,
     triggerAutoTitleSummarization,
-    flushPendingSessionConfiguration,
     assistantErrorMessage,
     withCompactionMark,
   }),

@@ -33,10 +33,10 @@ test("MirrorCoding chat models enter the delegation catalog through the local re
   assert.match(sessionLaunchSource, /mirrorCodingBindingFor\(/);
   assert.match(sessionLaunchSource, /scope !== "account"/);
   assert.match(sessionLaunchSource, /mirrorCodingChat/);
-  assert.match(sessionLaunchSource, /isMirrorCodingImageOnlyModel/);
+  assert.match(sessionLaunchSource, /mirrorCodingChatAvailable/);
   assert.match(desktopSidecarSource, /scope === "account"/);
-  assert.match(desktopSidecarSource, /isMirrorCodingAccount/);
-  assert.match(desktopSidecarSource, /isMirrorCodingImageOnlyModel/);
+  assert.match(desktopSidecarSource, /availableForSubagents/);
+  assert.match(desktopSidecarSource, /mirrorCodingChatAvailable/);
 });
 
 test("every launch resolves the subagent catalog and its pinned models", () => {

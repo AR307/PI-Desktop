@@ -39,9 +39,8 @@ vendor-account Providers keep their existing storage and request paths.
 
 - Model settings are edited once per account model and apply to every selected
   group route.
-- Group changes remain explicit and survive catalog refresh while the group
-  remains authorized; unavailable groups are replaced only by catalog sync
-  selection rules, never by a request-time fallback.
+- Group changes remain explicit and survive catalog refresh. An unavailable
+  saved group is not replaced; the user must select a valid group.
 - Historical sessions retain their group Provider identity and do not silently
   switch to the account default.
 - The provider list contains an internal account projection in addition to
@@ -55,12 +54,21 @@ refresh retention. Desktop typecheck and model-settings user-path tests cover
 the model-first renderer surface. Live MirrorCoding acceptance remains
 dependent on the controlled local MC service.
 
-## Amendment: native MC Claude routing (2026-09-29)
+## Amendment: published capabilities and independent Fast (2026-09-30)
 
-The original MC chat model ID containing claude, irrespective of case or
-suffix, now selects Anthropic Messages. Central policy is applied when
-compiling catalog routes, binding new work and validating relay requests.
-The alternative of trusting stale OpenAI endpoint annotations was rejected
-because it introduces an avoidable translation layer for native reasoning
-and tools. Membership and credential checks remain authoritative; there is
-no fallback if MC rejects the selected endpoint. Non-MC routes do not change.
+The client-management contract now publishes modes, per-endpoint Fast support,
+and endpoint paths. The prior Claude-name override is removed: model identity
+is not permission to use an undeclared endpoint. Native protocol preference
+still applies when exact model metadata and the directory agree.
+
+Fast follows each persisted session selection, rather than a global default.
+Rust remains the only persistence owner. One main-process configuration service
+serves IPC and mobile, replacing the renderer's private pending-selection queue.
+A transient launch snapshot distinguishes running requests from next-turn edits,
+including reconnecting phones; it is released by the existing turn finalizer.
+
+A final payload hook composes pi's existing hooks instead of adding an adapter.
+Subagents validate their own resolved binding, never inherit parent Fast, and
+retain their own preference on resume. Explicit subagent authorization remains.
+A missing resumed binding is an actionable error rather than an alternate-model
+continuation. Costs and actual upstream acceleration are not inferred locally.

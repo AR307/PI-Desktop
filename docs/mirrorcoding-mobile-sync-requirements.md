@@ -340,3 +340,17 @@ expose unshared history. PI separately verifies the visible agent/image flows.
 
 Passing the PI-controlled fixture proves client behavior only. Production
 deployment and MC implementation acceptance are recorded separately.
+
+## PI client-management alignment: Fast (2026-09-30)
+
+No new MC mobile endpoint or configuration database is requested. Continue
+forwarding the existing RACP frames unchanged: session/modelCatalog now includes
+fastAvailable and fastUnavailableReason, session/configure accepts fast, and
+session configuration snapshots expose current.fast, next.fast and chat.fast.
+Task lifecycle details may contain fast to mean requested Fast, not measured
+acceleration. PI owns validation, persistence and next-turn application.
+
+Joint acceptance: change Fast from either device, observe the other device,
+change it during a running task, then verify only the next request changes.
+Reconnect mid-turn and verify current and next remain distinct. Revoke Fast in
+the MC directory and verify pi_fast_unavailable with no normal-speed replay.

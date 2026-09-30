@@ -20,6 +20,7 @@ fn account_provider_id(account_id: i64) -> String {
 
 fn route_metadata(metadata: &MirrorCodingProvider) -> MirrorCodingGroupRoute {
     MirrorCodingGroupRoute {
+        client: metadata.client.clone(),
         id: metadata.group_id.clone(),
         name: metadata.group_name.clone(),
         description: metadata.description.clone(),
@@ -70,6 +71,7 @@ fn account_metadata(account_id: i64, groups: &[MirrorCodingGroupSync]) -> Mirror
         }
     }
     MirrorCodingProvider {
+        client: Default::default(),
         scope: Some("account".into()),
         account_id,
         group_id: "account".into(),
@@ -92,30 +94,16 @@ fn merge_account_models(
     let mut merged = Vec::new();
     for group in groups {
         for model in &group.models {
-            if merged
-                .iter()
-                .any(|item: &ModelBinding| item.id.eq_ignore_ascii_case(&model.id))
-            {
+            if merged.iter().any(|item: &ModelBinding| item.id == model.id) {
                 continue;
             }
             let mut selected = existing
                 .iter()
-                .find(|item| item.id.eq_ignore_ascii_case(&model.id))
+                .find(|item| item.id == model.id)
                 .cloned()
                 .unwrap_or_else(|| model.clone());
-            let existing_group_is_available = selected
-                .mirror_coding_group_id
-                .as_deref()
-                .map(|group_id| {
-                    groups.iter().any(|candidate| {
-                        candidate.metadata.group_id == group_id
-                            && candidate.models.iter().any(|candidate_model| {
-                                candidate_model.id.eq_ignore_ascii_case(&model.id)
-                            })
-                    })
-                })
-                .unwrap_or(false);
-            if !existing_group_is_available {
+            // An unavailable saved group stays invalid until the user reselects.
+            if selected.mirror_coding_group_id.is_none() {
                 selected.mirror_coding_group_id = Some(
                     model
                         .mirror_coding_group_id
@@ -162,7 +150,7 @@ pub(crate) fn project_account_model_settings(
             .map(|model| {
                 let mut next = account_models
                     .iter()
-                    .find(|candidate| candidate.id.eq_ignore_ascii_case(&model.id))
+                    .find(|candidate| candidate.id == model.id)
                     .cloned()
                     .unwrap_or_else(|| model.clone());
                 next.mirror_coding_group_id = Some(metadata.group_id.clone());
@@ -231,7 +219,7 @@ pub fn sync_mirrorcoding(db: &Database, input: MirrorCodingProviderSync) -> Resu
             .map(|model| {
                 let mut selected = models
                     .iter()
-                    .find(|item| item.id.eq_ignore_ascii_case(&model.id))
+                    .find(|item| item.id == model.id)
                     .cloned()
                     .unwrap_or_else(|| model.clone());
                 selected.mirror_coding_group_id = Some(metadata.group_id.clone());

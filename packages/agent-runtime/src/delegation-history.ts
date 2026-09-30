@@ -65,6 +65,7 @@ export type DelegationChain = {
   latestObjective?: string;
   /** Provider/model used by the latest run; resume must keep it. */
   latestModelId?: string;
+  latestFast?: boolean;
   /** `providerId/modelId` key the latest run resolved (ADR 0279 §4). */
   latestModelKey?: string;
   /** Settled status of the latest run; `running` while it works. Owns the
@@ -510,6 +511,7 @@ export type RebuiltTaskCall = {
   objective: string;
   task?: string;
   modelId?: string;
+  fast?: boolean;
   createdAt: number;
   /** Settled status this call's `Task` row recorded, when it recorded one. */
   status?: string;
@@ -585,6 +587,7 @@ export function rebuildChainsFromTranscript(
       objective: taskObjectiveFromArgs(args),
       ...(task ? { task } : {}),
       ...(modelId ? { modelId } : {}),
+      fast: details?.fast === true,
       status: chainStatusFromDetail(details, row),
       createdAt: timestampMs(row.createdAt) || Date.now(),
     };
@@ -647,6 +650,7 @@ export function rebuildChainsFromTranscript(
       latestDelegationId: latest?.delegationId,
       latestObjective: latest?.objective ?? root.objective,
       latestModelId: latest?.modelId,
+      latestFast: latest?.fast === true,
       latestStatus: latest?.status,
       lastActivityAt: latest?.createdAt ?? root.createdAt,
     });

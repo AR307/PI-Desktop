@@ -16,6 +16,7 @@ export type ResponseDiagnostics = {
   group?: string;
   reasoning?: Record<string, string | number | boolean>;
   outputLimit?: number;
+  requestedServiceTier?: string;
   httpStatus?: number;
   requestId?: string;
   textLength: number;

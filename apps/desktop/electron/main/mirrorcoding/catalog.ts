@@ -4,7 +4,7 @@ import type {
 } from "@pi-desktop/shared";
 import { genericModelConfig, type ModelConfig } from "@pi-desktop/agent-runtime";
 import { catalogModelConfigFor, modelConfigFromModelsDev, type ModelsDevCatalog } from "../models-dev-catalog";
-import { isMirrorCodingClaudeModel, mirrorCodingChatRoute } from "./chat-route";
+import { isMirrorCodingEndpointPath, mirrorCodingChatRoute } from "./chat-route";
 
 export const ENDPOINTS = {
   "openai-response": { api: "openai-responses", style: "responses", path: "/v1/responses", prefix: "/v1" },
@@ -73,7 +73,9 @@ export function parseCatalog(value: unknown): MirrorCodingCatalog {
   const supportedEndpoints: MirrorCodingCatalog["supportedEndpoints"] = {};
   for (const [key, raw] of Object.entries(supported)) {
     const endpoint = record(raw);
-    supportedEndpoints[key] = { path: string(endpoint.path), method: string(endpoint.method) };
+    const path = string(endpoint.path);
+    if (!isMirrorCodingEndpointPath(path)) throw new Error("invalid_catalog");
+    supportedEndpoints[key] = { path, method: string(endpoint.method) };
   }
   const groupIds = new Set<string>();
   const groups = data.groups.map((raw) => {
@@ -93,11 +95,20 @@ export function parseCatalog(value: unknown): MirrorCodingCatalog {
       const endpointTypes = model.supported_endpoint_types ?? model.supportedEndpointTypes;
       if (!modelId || seen.has(modelId) || !Array.isArray(endpointTypes)) throw new Error("invalid_catalog");
       seen.add(modelId);
-      return { id: modelId, supportedEndpointTypes: endpointTypes.map(string), image: parseImageCapability(model.image) };
+      const modes = optionalStringArray(model.modes);
+      if (!modes) throw new Error("invalid_catalog");
+      const fast = model.fast === undefined ? undefined : record(model.fast);
+      if (fast && typeof fast.enabled !== "boolean") throw new Error("invalid_catalog");
+      const fastEndpoints = fast ? optionalStringArray(fast.supported_endpoint_types) : undefined;
+      if (fast && !fastEndpoints) throw new Error("invalid_catalog");
+      return { id: modelId, modes, supportedEndpointTypes: endpointTypes.map(string),
+        ...(fast ? { fast: { enabled: fast.enabled as boolean, supportedEndpointTypes: fastEndpoints! } } : {}),
+        image: parseImageCapability(model.image) };
     });
     return {
       id, name: string(group.name), description: string(group.description ?? ""),
       ratio: group.ratio as number | null, dynamicBilling, models,
+      candidateGroups: optionalStringArray(group.candidate_groups),
     };
   });
   return { user: { id: user.id as number, displayName: string(user.display_name ?? user.displayName) }, groups, supportedEndpoints };
@@ -116,7 +127,7 @@ export function modelMetadata(catalog: ModelsDevCatalog, modelId: string): Model
   }
   // Use the established Messages capability resolver for catalog aliases as
   // well as exact native records. Never guess an effort ladder from a name.
-  if (isMirrorCodingClaudeModel(modelId)) {
+  if (catalog.anthropicThinkingFor?.(modelId)) {
     return catalogModelConfigFor(catalog, { vendorKey: "anthropic", apiStyle: "anthropic_messages", modelId });
   }
   const known = catalog.findModel({ modelId });
@@ -141,6 +152,7 @@ export function compileCatalog(catalog: MirrorCodingCatalog, modelsDev: ModelsDe
     accountId: catalog.user.id,
     groups: catalog.groups.map((group) => {
       const routes: Record<string, MirrorCodingEndpoint> = {};
+      const modelCapabilities: NonNullable<MirrorCodingProvider["modelCapabilities"]> = {};
       const imageRoutes: Record<string, MirrorCodingImageRoutes> = {};
       const imageCapabilities: NonNullable<MirrorCodingProviderSync["groups"][number]["metadata"]["imageCapabilities"]> = {};
       const imageModels: Record<string, ImageGenerationCapability> = {};
@@ -148,15 +160,11 @@ export function compileCatalog(catalog: MirrorCodingCatalog, modelsDev: ModelsDe
       for (const model of group.models) {
         const config = modelMetadata(modelsDev, model.id);
         const native = preferredEndpoint(config);
-        const candidates = [...new Set([...(native ? [native] : []), ...Object.keys(ENDPOINTS) as MirrorCodingEndpoint[]])];
-        const endpoint = mirrorCodingChatRoute(model.id, candidates.find((kind) => {
-          const advertised = catalog.supportedEndpoints[kind];
-          return model.image?.supportsChat !== false && model.supportedEndpointTypes.includes(kind) && advertised?.method === "POST" && advertised.path === ENDPOINTS[kind].path;
-        }), model.image?.supportsChat !== false && model.supportedEndpointTypes.some(kind => kind in ENDPOINTS));
+        const endpoint = mirrorCodingChatRoute(model, catalog.supportedEndpoints, native);
         // Image routes are only usable when the server supplied the image
         // capability object. Endpoint type names alone are not sufficient:
         // the capability carries the generation/reference path contract.
-        const imageGeneration = model.image?.generationPath === IMAGE_ENDPOINTS["image-generation"].path &&
+        const imageGeneration = model.modes.includes("image") && model.image?.generationPath === IMAGE_ENDPOINTS["image-generation"].path &&
           model.supportedEndpointTypes.includes("image-generation") &&
           catalog.supportedEndpoints["image-generation"]?.method === "POST" &&
           catalog.supportedEndpoints["image-generation"]?.path === IMAGE_ENDPOINTS["image-generation"].path;
@@ -170,6 +178,7 @@ export function compileCatalog(catalog: MirrorCodingCatalog, modelsDev: ModelsDe
           catalog.supportedEndpoints[imageReferenceKind]?.method === "POST" &&
           catalog.supportedEndpoints[imageReferenceKind]?.path === IMAGE_ENDPOINTS[imageReferenceKind].path;
         if (!endpoint && !imageGeneration) continue;
+        modelCapabilities[model.id] = { modes: model.modes, ...(model.fast ? { fast: model.fast } : {}) };
         if (endpoint) routes[model.id] = endpoint;
         if (imageGeneration && model.image) {
           imageRoutes[model.id] = {
@@ -202,7 +211,8 @@ export function compileCatalog(catalog: MirrorCodingCatalog, modelsDev: ModelsDe
           scope: "group",
           accountId: catalog.user.id, groupId: group.id, groupName: group.name,
           description: group.description, ratio: group.dynamicBilling ? null : group.ratio,
-          dynamicBilling: group.dynamicBilling, routes,
+          dynamicBilling: group.dynamicBilling, routes, modelCapabilities,
+          supportedEndpoints: catalog.supportedEndpoints, candidateGroups: group.candidateGroups,
           ...(Object.keys(imageRoutes).length ? { imageRoutes, imageCapabilities, imageModels } : {}),
         }, models,
       };
@@ -210,21 +220,3 @@ export function compileCatalog(catalog: MirrorCodingCatalog, modelsDev: ModelsDe
   };
 }
 
-/** True when the model is image-only: no chat route on the account or its groups. */
-export function isMirrorCodingImageOnlyModel(
-  meta: MirrorCodingProvider | undefined,
-  modelId: string,
-): boolean {
-  if (!meta || !modelId) return false;
-  const hasChat =
-    Boolean(meta.routes?.[modelId]) ||
-    (meta.groups ?? []).some((group) => Boolean(group.routes?.[modelId]));
-  if (hasChat) return false;
-  return Boolean(
-    meta.imageModels?.[modelId] ||
-      meta.imageRoutes?.[modelId] ||
-      (meta.groups ?? []).some(
-        (group) => group.imageModels?.[modelId] || group.imageRoutes?.[modelId],
-      ),
-  );
-}

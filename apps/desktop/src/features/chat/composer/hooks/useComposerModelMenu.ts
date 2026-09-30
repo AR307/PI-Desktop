@@ -1,3 +1,4 @@
+import { useTranslation } from "react-i18next";
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
 import type {
   Mode,
@@ -5,6 +6,7 @@ import type {
   SessionThinkingLevel,
 } from "@pi-desktop/shared";
 import {
+  mirrorCodingFastAvailable,
   initialThinkingLevelForBinding,
   imageGenerationBindings,
   isImageGenerationModel,
@@ -41,7 +43,7 @@ type UseComposerModelMenuOptions = {
   thinkingLevel: SessionThinkingLevel;
   controlsBlocked: boolean;
   configureActiveSession: (configuration: {
-    mode: Mode; providerId?: string; modelId?: string; thinkingLevel: SessionThinkingLevel;
+    mode: Mode; providerId?: string; modelId?: string; thinkingLevel: SessionThinkingLevel; fast?: boolean;
   }) => Promise<void>;
   imageSelection?: { providerId?: string; modelId?: string };
   onSelectImage?: (selection: { providerId: string; modelId: string }) => Promise<void>;
@@ -60,6 +62,10 @@ export function useComposerModelMenu({
   imageSelection,
   onSelectImage,
 }: UseComposerModelMenuOptions) {
+  const { t } = useTranslation();
+  const fast = useAppStore((s) => (activeSessionId ? s.sessions.find((session) => session.id === activeSessionId)?.fast : s.draftConfiguration?.fast) === true);
+  const fastAvailable = task !== "image" && !!provider?.enabled && !!modelId && mirrorCodingFastAvailable(provider.mirrorCoding, modelId, provider.models.find((entry) => entry.id === modelId)?.mirrorCodingGroupId);
+  const [fastBusy, setFastBusy] = useState(false);
   const providers = useAppStore((s) => s.providers);
   const imageGeneration = useAppStore((s) => s.settings?.imageGeneration);
   const imageGenerationModels = useAppStore((s) => s.settings?.imageGenerationModels);
@@ -334,7 +340,9 @@ export function useComposerModelMenu({
         providerId: candidate.id,
         modelId: nextModelId,
         thinkingLevel: nextThinkingLevel,
+        fast: fast && mirrorCodingFastAvailable(candidate.mirrorCoding, nextModelId, nextBinding?.mirrorCodingGroupId),
       });
+      if (fast && !mirrorCodingFastAvailable(candidate.mirrorCoding, nextModelId, nextBinding?.mirrorCodingGroupId)) showToast(t("mirrorCoding.fastDisabled"));
       setQuery("");
       setView("root");
       setModelHighlight(-1);
@@ -413,7 +421,16 @@ export function useComposerModelMenu({
     });
   };
 
+  const toggleFast = async () => {
+    if (fastBusy || (!fastAvailable && !fast)) return;
+    setFastBusy(true);
+    try { await configureActiveSession({ mode, providerId: provider?.id, modelId, thinkingLevel, fast: !fast }); }
+    catch (error) { showToast(error instanceof Error ? error.message : String(error), { variant: "error" }); }
+    finally { setFastBusy(false); }
+  };
+
   return {
+    fast, fastAvailable, fastBusy, toggleFast,
     task,
     selectedImage: imageSelection,
     pendingMirrorModel,

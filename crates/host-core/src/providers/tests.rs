@@ -19,6 +19,7 @@ fn mirrorcoding_sync_persists_group_and_model_bindings() {
             account_id: Some(901),
             groups: vec![MirrorCodingGroupSync {
                 metadata: MirrorCodingProvider {
+                    client: Default::default(),
                     scope: Some("group".into()),
                     account_id: 901,
                     group_id: "group-1".into(),

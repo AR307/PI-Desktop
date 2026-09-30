@@ -11,7 +11,7 @@ import {
   IconImage,
   IconSparkles,
 } from "../../../components/icons";
-import { TooltipButton } from "../../../components/ui";
+import { SettingsToggle, TooltipButton } from "../../../components/ui";
 import type { useComposerModelMenu } from "./hooks/useComposerModelMenu";
 import { ThinkingLevelSlider } from "./ThinkingLevelSlider";
 
@@ -114,6 +114,7 @@ export function ComposerModelPicker({
               <span className="composer-model-thinking-level">{thinkingLabel}</span>
             </>
           ) : null}
+          {!imageMode && controller.fast && <span className="composer-model-thinking-level">{t("mirrorCoding.fastRequested")}</span>}
           <IconChevronDown size={12} aria-hidden="true" className="composer-model-thinking-chevron" />
         </TooltipButton>
       )}
@@ -121,6 +122,12 @@ export function ComposerModelPicker({
       {view === "root" ? (
         <div className="composer-menu-root" ref={rootMenuRef}>
           {rootActions}
+          {!imageMode && <div className="composer-fast-setting">
+            <div className="composer-menu-entry"><span className="composer-menu-entry-label">{t("mirrorCoding.fast")}</span>
+              <SettingsToggle checked={controller.fast} label={t("mirrorCoding.fast")} disabled={!controller.fastAvailable && !controller.fast} busy={controller.fastBusy} onChange={() => void controller.toggleFast()} />
+            </div>
+            <small role="status">{t(controller.fastAvailable ? (controller.fast ? "mirrorCoding.fastRequested" : "mirrorCoding.fastHint") : "mirrorCoding.fastUnavailable")}</small>
+          </div>}
           <button
             type="button"
             className="composer-menu-entry"

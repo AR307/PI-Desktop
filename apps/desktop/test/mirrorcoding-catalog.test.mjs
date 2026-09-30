@@ -17,11 +17,11 @@ const hooks = registerHooks({
 });
 const { compileCatalog, parseCatalog, modelMetadata } = await import(moduleUrl.href).finally(() => hooks.deregister());
 
-test("uses published Messages reasoning options for the existing dotted Claude alias", async () => {
+test("uses published Messages reasoning options for an exact native model", async () => {
   const { ModelsDevCatalog } = await import("../electron/main/models-dev-catalog.ts");
   const catalog = new ModelsDevCatalog({ catalogPath: fileURLToPath(new URL("../resources/models.dev/api.json", import.meta.url)) });
   assert.equal(await catalog.ensureLoaded(), true);
-  const metadata = modelMetadata(catalog, "claude-opus-5.5-thinking");
+  const metadata = modelMetadata(catalog, "claude-opus-4-7");
   assert(metadata.reasoningOptions.some(option => option.type === "effort"));
   assert(!metadata.reasoningOptions.some(option => option.type === "budget_tokens"));
   assert.equal(metadata.thinkingLevelMap.max, "max");
@@ -29,17 +29,17 @@ test("uses published Messages reasoning options for the existing dotted Claude a
 
 const emptyModelsDev = { findModel: () => undefined, anthropicThinkingFor: () => undefined };
 
-test("MC Claude IDs use Messages despite legacy OpenAI catalog annotations", () => {
+test("MC Claude IDs require a published Messages route", () => {
   const ids = ["claude-opus-5.5", "vendor/CLAUDE-Sonnet-thinking", "claude-future", "other-chat"];
   const catalog = {
     user: { id: 42, displayName: "QA" },
     supportedEndpoints: { openai: { method: "POST", path: "/v1/chat/completions" } },
     groups: [{ id: "中文分组", name: "QA", description: "", ratio: 0.06, dynamicBilling: false,
-      models: ids.map(id => ({ id, supportedEndpointTypes: ["openai"] })) }],
+      models: ids.map(id => ({ id, modes: ["text"], supportedEndpointTypes: ["openai"] })) }],
   };
   const group = compileCatalog(catalog, emptyModelsDev).groups[0];
   assert.deepEqual(group.models.map(model => model.id), ids);
-  assert.deepEqual(group.metadata.routes, Object.fromEntries(ids.map(id => [id, id === "other-chat" ? "openai" : "anthropic"])));
+  assert.deepEqual(group.metadata.routes, Object.fromEntries(ids.map(id => [id, "openai"])));
 });
 
 test("parses MirrorCoding catalog fields and preserves group routing data", () => {
@@ -56,7 +56,7 @@ test("parses MirrorCoding catalog fields and preserves group routing data", () =
         description: "Primary group",
         ratio: 0.06,
         dynamicBilling: false,
-        models: [{ id: "model-a", supportedEndpointTypes: ["openai"] }],
+        models: [{ id: "model-a", modes: ["text"], supportedEndpointTypes: ["openai"] }],
       }],
     },
   });
@@ -65,14 +65,14 @@ test("parses MirrorCoding catalog fields and preserves group routing data", () =
   assert.deepEqual(catalog.groups[0].models[0].supportedEndpointTypes, ["openai"]);
 });
 
-test("MC Claude chat eligibility does not depend on a stale global endpoint annotation", () => {
+test("MC Claude chat eligibility requires the global endpoint declaration", () => {
   const catalog = { user: { id: 42, displayName: "QA" }, supportedEndpoints: {},
     groups: [{ id: "qa", name: "QA", description: "", ratio: 1, dynamicBilling: false,
-      models: [{ id: "Claude-fixture", supportedEndpointTypes: ["openai"] },
-        { id: "other-chat", supportedEndpointTypes: ["openai"] },
-        { id: "claude-video", supportedEndpointTypes: ["video"] }] }] };
+      models: [{ id: "Claude-fixture", modes: ["text"], supportedEndpointTypes: ["openai"] },
+        { id: "other-chat", modes: ["text"], supportedEndpointTypes: ["openai"] },
+        { id: "claude-video", modes: ["video"], supportedEndpointTypes: ["video"] }] }] };
   const group = compileCatalog(catalog, emptyModelsDev).groups[0];
-  assert.deepEqual(group.metadata.routes, { "Claude-fixture": "anthropic" });
+  assert.deepEqual(group.metadata.routes, {});
 });
 
 test("parses documented image capability fields without inventing defaults", () => {
@@ -92,7 +92,7 @@ test("parses documented image capability fields without inventing defaults", () 
         dynamic_billing: true,
         models: [{
           id: "gpt-image-1",
-          supported_endpoint_types: ["image-generation", "image-edit"],
+          modes: ["image"], supported_endpoint_types: ["image-generation", "image-edit"],
           image: {
             generation_path: "/v1/images/generations",
             reference_path: "/v1/images/edits",
@@ -143,13 +143,13 @@ test("only compiles declared image capabilities and keeps generation/reference r
       groups: [{
         id: "g-images", name: "Images", description: "", ratio: null, dynamicBilling: true,
         models: [
-          { id: "declared", supportedEndpointTypes: ["image-generation", "image-edit"], image: {
+          { id: "declared", modes: ["image"], supportedEndpointTypes: ["image-generation", "image-edit"], image: {
             generationPath: "/v1/images/generations", referencePath: "/v1/images/edits", max_count: 1, supports_chat: false,
           } },
-          { id: "json-reference", supportedEndpointTypes: ["image-generation"], image: {
+          { id: "json-reference", modes: ["image"], supportedEndpointTypes: ["image-generation"], image: {
             generationPath: "/v1/images/generations", referencePath: "/v1/images/generations", max_count: 1, supports_chat: false,
           } },
-          { id: "undeclared", supportedEndpointTypes: ["image-generation"] },
+          { id: "undeclared", modes: ["image"], supportedEndpointTypes: ["image-generation"] },
         ],
       }],
     },

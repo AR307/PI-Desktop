@@ -15448,3 +15448,18 @@ The provider recovery Electron suite checks real pre-output network backoff,
 post-output interruption followed by explicit Continue, and tool-round budgets.
 Record actual passed assertions and screenshots separately from production
 MC/Kiro testing; do not claim the latter from controlled fixtures.
+
+## MC client-management and Fast acceptance (2026-09-30)
+
+Use the task worktree with rebuilt packages, Rust host, desktop and sidecar bundle.
+The controlled mobile browser and PiMobileQA Android suites exercise login,
+pairing, streaming, next-turn model/group/Fast selection, queued execution,
+desktop-to-phone updates, image requests and restart. Capture the real outgoing
+Chat/Responses payload at the local MC boundary; Fast-on sends service_tier fast,
+Fast-off, image and auxiliary requests omit it. Inspect both model panels in
+actual Electron and Android WebView screenshots.
+
+Complement these user paths with catalog/group/endpoint fixtures, Rust persisted
+configuration checks and real controlled HTTP child/tool-continuation checks.
+Verify denied Fast never falls back; no Claude-name route survives. Record the
+commit, remote base, suites and local-versus-production boundary in Summary.md.

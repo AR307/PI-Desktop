@@ -53,6 +53,7 @@ export type MobileSession = RacpSession & {
   providerId?: string;
   modelId?: string;
   thinkingLevel?: SessionThinkingLevel;
+    fast?: boolean;
   groupName?: string;
   taskMode: MobileTaskMode;
   imageConfig?: MobileImageSessionConfig;
@@ -88,6 +89,8 @@ export type MobileSessionState = Omit<RacpSessionState, "session"> & {
   compactions?: MobileCompactionMark[];
 };
 export type MobileModelChoice = {
+  fastAvailable?: boolean;
+  fastUnavailableReason?: string;
   providerId: string;
   providerName: string;
   modelId: string;
@@ -116,6 +119,7 @@ export type MobileSessionConfiguration = {
     providerId?: string;
     modelId?: string;
     thinkingLevel?: SessionThinkingLevel;
+    fast?: boolean;
     imageConfig?: MobileImageSessionConfig;
   };
   /** Persisted configuration read by the next turn. */
@@ -124,6 +128,7 @@ export type MobileSessionConfiguration = {
     providerId?: string;
     modelId?: string;
     thinkingLevel?: SessionThinkingLevel;
+    fast?: boolean;
     imageConfig?: MobileImageSessionConfig;
   };
   chat?: {
@@ -132,6 +137,7 @@ export type MobileSessionConfiguration = {
     providerId?: string;
     modelId?: string;
     thinkingLevel?: SessionThinkingLevel;
+    fast?: boolean;
   };
   /** The saved image selection remains available while chat mode is active. */
   image?: {
@@ -149,6 +155,7 @@ export type MobileSessionConfigureInput = {
   providerId?: string;
   modelId?: string;
   thinkingLevel?: SessionThinkingLevel;
+    fast?: boolean;
   imageConfig?: MobileImageSessionConfig;
 };
 

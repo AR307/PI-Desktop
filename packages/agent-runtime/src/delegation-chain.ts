@@ -103,6 +103,7 @@ export class DelegationChainRegistry {
     originalTask: string;
     objective: string;
     latestModelId?: string;
+    latestFast?: boolean;
     /** `providerId/modelId` key that resolved, so a resume can re-resolve it. */
     latestModelKey?: string;
     resumedFrom?: DelegationChain;
@@ -118,6 +119,7 @@ export class DelegationChainRegistry {
           latestDelegationId: options.delegationId,
           latestObjective: options.objective || existing.latestObjective,
           latestModelId: options.latestModelId ?? existing.latestModelId,
+          latestFast: options.latestFast ?? existing.latestFast ?? false,
           latestModelKey: options.latestModelKey ?? existing.latestModelKey,
           latestStatus: "running",
           lastActivityAt: Date.now(),
@@ -133,6 +135,7 @@ export class DelegationChainRegistry {
           latestDelegationId: options.delegationId,
           latestObjective: options.objective,
           latestModelId: options.latestModelId,
+          latestFast: options.latestFast ?? false,
           latestModelKey: options.latestModelKey,
           latestStatus: "running",
           lastActivityAt: Date.now(),

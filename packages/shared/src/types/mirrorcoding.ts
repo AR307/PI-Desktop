@@ -6,6 +6,13 @@ export const MIRRORCODING_ORIGIN = "https://console.mirrorcoding.xyz" as const;
 
 export type MirrorCodingEndpoint = "openai" | "openai-response" | "anthropic" | "gemini";
 export type MirrorCodingImageEndpoint = "image-generation" | "image-edit";
+export type MirrorCodingFastCapability = { enabled: boolean; supportedEndpointTypes: string[] };
+export type MirrorCodingModelCapability = { modes: string[]; fast?: MirrorCodingFastCapability };
+export type MirrorCodingPublishedRoutes = {
+  modelCapabilities?: Record<string, MirrorCodingModelCapability>;
+  supportedEndpoints?: Record<string, { path: string; method: string }>;
+  candidateGroups?: string[];
+};
 
 export type MirrorCodingImageRoutes = {
   generation: MirrorCodingImageEndpoint;
@@ -23,7 +30,7 @@ export type MirrorCodingImageCapability = {
 };
 
 /** Route and billing information for one authorized account group. */
-export type MirrorCodingGroupRoute = {
+export type MirrorCodingGroupRoute = MirrorCodingPublishedRoutes & {
   id: string;
   name: string;
   description: string;
@@ -35,7 +42,7 @@ export type MirrorCodingGroupRoute = {
   imageModels?: Record<string, ImageGenerationCapability>;
 };
 
-export type MirrorCodingModel = {
+export type MirrorCodingModel = MirrorCodingModelCapability & {
   id: string;
   supportedEndpointTypes: string[];
   image?: MirrorCodingImageCapability;
@@ -47,6 +54,7 @@ export type MirrorCodingGroup = {
   description: string;
   ratio: number | null;
   dynamicBilling: boolean;
+  candidateGroups?: string[];
   models: MirrorCodingModel[];
 };
 
@@ -56,7 +64,7 @@ export type MirrorCodingCatalog = {
   supportedEndpoints: Record<string, { path: string; method: string }>;
 };
 
-export type MirrorCodingProvider = {
+export type MirrorCodingProvider = MirrorCodingPublishedRoutes & {
   /** Group rows are retained for historical sessions; account rows are the
    * model-first provider used for new selections. */
   scope?: "group" | "account";

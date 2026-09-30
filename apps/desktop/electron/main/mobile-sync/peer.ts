@@ -16,6 +16,7 @@ import { MobileAttachments } from "./attachments";
 import { buildMobileModelCatalog } from "./catalog";
 import type { MobileScopeAccess } from "./scope";
 import { integer, object, string } from "./validation";
+import { configureSession, currentTurnConfiguration } from "../services/session-configuration";
 
 export type MobilePeerDependencies = {
   peerId: string; deviceId: string; desktopDeviceId: string; dataDir: string;
@@ -30,8 +31,6 @@ export class MobilePeer {
   private subscriptions = new Map<string, string>();
   private delivery: Promise<void> = Promise.resolve();
   private pendingEvents = 0;
-  private activeConfigurations = new Map<string, MobileSessionConfiguration["next"]>();
-  private queuedConfigurations = new Map<string, MobileSessionConfiguration["next"]>();
   private attachments: MobileAttachments;
   private stopImages: () => void;
   private stopConfiguration: () => void;
@@ -41,7 +40,6 @@ export class MobilePeer {
     this.attachments = new MobileAttachments(deps.dataDir, deps.host);
     this.stopImages = deps.images.subscribe((imageState) => {
       if (![...this.subscriptions.values()].includes(imageState.sessionId)) return;
-      if (imageState.status !== "running") this.activeConfigurations.delete(imageState.sessionId);
       void this.deliverActivity(imageState.sessionId, { imageState });
     });
     this.stopConfiguration = deps.images.subscribeConfiguration((sessionId) => {
@@ -52,7 +50,7 @@ export class MobilePeer {
     if (this.closed) return;
     this.closed = true;
     for (const [id, sessionId] of this.subscriptions) this.deps.agent().unsubscribe(id, sessionId);
-    this.subscriptions.clear(); this.attachments.dispose(); this.stopImages(); this.stopConfiguration(); this.activeConfigurations.clear(); this.queuedConfigurations.clear();
+    this.subscriptions.clear(); this.attachments.dispose(); this.stopImages(); this.stopConfiguration();
   }
   desktopChanged() { for (const sessionId of new Set(this.subscriptions.values())) void this.deliverActivity(sessionId, { configurationChanged: true }); }
   async frame(frame: string) {
@@ -192,6 +190,7 @@ export class MobilePeer {
   private async configure(record: SessionSummary, params: Record<string, unknown>): Promise<MobileSession> {
     if (!canPrompt(record)) throw new RacpError("FORBIDDEN", "session_read_only");
     const settings = await this.deps.host().call<AppSettings>("settings.get");
+    const previousRecord = record;
     const current = await this.describe(record, settings);
     const input = parseConfiguration(params);
     const requestedMode = input.mode ?? current.taskMode;
@@ -224,7 +223,7 @@ export class MobilePeer {
       } catch (error) {
         throw new RacpError("INVALID_ARGUMENT", error instanceof Error ? error.message : "invalid_image_options");
       }
-      await this.deps.host().call("session.configure", { id: record.id, mode: "agent" });
+      await configureSession(this.deps.host(), record.id, { mode: "agent" });
       try {
         await this.deps.images.configure(record.id, {
           active: true,
@@ -233,21 +232,22 @@ export class MobilePeer {
           options,
         });
       } catch (error) {
-        await rethrowAfterRollback(error, this.deps.host, record);
+        await rethrowAfterRollback(error, this.deps.host, previousRecord);
       }
     } else {
-      await this.deps.host().call("session.configure", {
-        id: record.id,
+      const result = await configureSession(this.deps.host(), record.id, {
         mode: requestedMode,
+        ...(input.fast === undefined ? {} : { fast: input.fast }),
         ...(providerId !== undefined ? { providerId } : {}),
         ...(modelId !== undefined ? { modelId } : {}),
         ...(effectiveThinking !== undefined ? { thinkingLevel: effectiveThinking } : {}),
       });
+      if (result.session) record = { ...record, ...result.session };
       if (currentMode === "image") {
         try {
           await this.deps.images.configure(record.id, { active: false, providerId: current.imageConfig?.providerId, modelId: current.imageConfig?.modelId, options: current.imageConfig?.options ?? { count: 1 } });
         } catch (error) {
-          await rethrowAfterRollback(error, this.deps.host, record);
+          await rethrowAfterRollback(error, this.deps.host, previousRecord);
         }
       }
     }
@@ -281,18 +281,20 @@ export class MobilePeer {
       mode: taskMode,
       ...(providerId ? { providerId } : {}),
       ...(modelId ? { modelId } : {}),
-      ...(image ? {} : { thinkingLevel: record.thinkingLevel }),
+      ...(image ? { fast: false } : { thinkingLevel: record.thinkingLevel, fast: record.fast === true }),
       ...(config ? { imageConfig: config } : {}),
     } satisfies MobileSessionConfiguration["next"];
     const chat = {
       mode: record.mode,
+      fast: record.fast === true,
       ...(record.providerId ? { providerId: record.providerId } : {}),
       ...(record.modelId ? { modelId: record.modelId } : {}),
       ...(record.thinkingLevel ? { thinkingLevel: record.thinkingLevel } : {}),
     } satisfies NonNullable<MobileSessionConfiguration["chat"]>;
     const configuration: MobileSessionConfiguration = {
       mode: taskMode,
-      ...(this.activeConfigurations.has(record.id) ? { current: this.activeConfigurations.get(record.id) } : {}),
+      ...(described.activeTurnId ? { current: currentTurnConfiguration(this.deps.host(), record.id) }
+        : image && busy ? { current: next } : {}),
       next,
       chat,
       ...(config ? { image: { mode: "image", ...(config.providerId ? { providerId: config.providerId } : {}), ...(config.modelId ? { modelId: config.modelId } : {}), imageConfig: config } } : {}),
@@ -300,7 +302,7 @@ export class MobilePeer {
       pendingTurn: busy,
       ...(!canPrompt(record) ? { blockedReason: "read_only" as const } : busy ? { blockedReason: "running" as const } : approvalPending ? { blockedReason: "approval_pending" as const } : {}),
     };
-    return { ...described, providerId, modelId, thinkingLevel: record.thinkingLevel,
+    return { ...described, providerId, modelId, thinkingLevel: record.thinkingLevel, fast: !image && record.fast === true,
       groupName, taskMode, ...(config ? { imageConfig: config } : {}), configuration,
       capabilities: { canPrompt: canPrompt(record), canStop: record.capabilities?.canStop ?? record.source !== "pi-native" } };
   }
@@ -376,19 +378,10 @@ export class MobilePeer {
       if (!config.providerId || !config.modelId) throw new RacpError("INVALID_ARGUMENT", "image_model_not_selected");
       if (this.deps.images.states().some((job) => job.sessionId === session.id)) throw new RacpError("CONFLICT", "session_busy");
       const jobId = messageId;
-      this.activeConfigurations.set(session.id, configurationValues(description));
-      try {
-        return await this.deps.images.start({ sessionId: session.id, jobId, messageId, providerId: config.providerId, modelId: config.modelId, prompt: text, references: attachments, options: config.options });
-      } catch (error) {
-        this.activeConfigurations.delete(session.id);
-        throw error;
-      }
+      return this.deps.images.start({ sessionId: session.id, jobId, messageId, providerId: config.providerId, modelId: config.modelId, prompt: text, references: attachments, options: config.options });
     }
-    const configuration = configurationValues(description);
     const result = await this.deps.agent().startTurn(this.principal, { sessionId: session.id, admission: "queue", idempotencyKey: messageId,
       input: { text, userMessageId: messageId, attachments }, context: { requestId: messageId } });
-    if (result.turn.status === "queued") this.queuedConfigurations.set(result.turn.id, configuration);
-    else this.activeConfigurations.set(session.id, configuration);
     return result;
   }
   private deliver(event: RacpEventEnvelope) {
@@ -397,19 +390,10 @@ export class MobilePeer {
     this.delivery = this.delivery.then(async () => {
       if (!event.sessionId || this.closed) return;
       try {
-        const record = await this.require(event.sessionId);
-        if (event.kind === "turn.started") {
-          const queued = event.turnId ? this.queuedConfigurations.get(event.turnId) : undefined;
-          this.activeConfigurations.set(event.sessionId, queued ?? configurationValues(await this.describe(record)));
-          if (event.turnId) this.queuedConfigurations.delete(event.turnId);
-        }
+        await this.require(event.sessionId);
       }
       catch { this.deps.close("share_revoked"); return; }
       if (!this.closed) {
-        if (["turn.completed", "turn.interrupted", "turn.failed", "turn.canceled"].includes(event.kind)) {
-          this.activeConfigurations.delete(event.sessionId);
-          if (event.turnId) this.queuedConfigurations.delete(event.turnId);
-        }
         this.deps.send(encodeFrame({ jsonrpc: "2.0", method: RACP_EVENT_NOTIFICATION, params: event }));
       }
     }).catch(() => this.deps.close("delivery_failed")).finally(() => { this.pendingEvents -= 1; });
@@ -422,16 +406,6 @@ export class MobilePeer {
         revision: state.revision, kind: "turn.activity", occurredAt: new Date().toISOString(), payload });
     } catch { this.deps.close("share_revoked"); }
   }
-}
-
-function configurationValues(session: MobileSession): MobileSessionConfiguration["next"] {
-  return {
-    mode: session.taskMode,
-    ...(session.providerId ? { providerId: session.providerId } : {}),
-    ...(session.modelId ? { modelId: session.modelId } : {}),
-    ...(session.thinkingLevel ? { thinkingLevel: session.thinkingLevel } : {}),
-    ...(session.imageConfig ? { imageConfig: session.imageConfig } : {}),
-  };
 }
 
 function canPrompt(record: SessionSummary): boolean {
@@ -452,8 +426,8 @@ async function rethrowAfterRollback(error: unknown, host: () => HostRpc, record:
 }
 
 async function restoreHostConfiguration(host: () => HostRpc, record: SessionSummary): Promise<void> {
-  await host().call("session.configure", {
-    id: record.id,
+  await configureSession(host(), record.id, {
+    fast: record.fast === true,
     mode: record.mode,
     ...(record.providerId !== undefined ? { providerId: record.providerId } : {}),
     ...(record.modelId !== undefined ? { modelId: record.modelId } : {}),
@@ -462,6 +436,7 @@ async function restoreHostConfiguration(host: () => HostRpc, record: SessionSumm
 }
 
 function parseConfiguration(params: Record<string, unknown>): MobileSessionConfigureInput {
+  if (params.fast !== undefined && typeof params.fast !== "boolean") throw new RacpError("INVALID_ARGUMENT", "invalid_fast");
   const modeValue = params.mode;
   if (modeValue !== undefined && modeValue !== "agent" && modeValue !== "plan" && modeValue !== "goal" && modeValue !== "image") {
     throw new RacpError("INVALID_ARGUMENT", "invalid_task_mode");
@@ -490,6 +465,7 @@ function parseConfiguration(params: Record<string, unknown>): MobileSessionConfi
   }
   return {
     ...(modeValue !== undefined ? { mode: modeValue } : {}),
+    ...(typeof params.fast === "boolean" ? { fast: params.fast } : {}),
     ...(providerId !== undefined ? { providerId } : {}),
     ...(modelId !== undefined ? { modelId } : {}),
     ...(thinkingLevel !== undefined ? { thinkingLevel } : {}),

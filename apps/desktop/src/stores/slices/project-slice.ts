@@ -137,7 +137,6 @@ function clearLocalSessionState(
   id: string,
 ): void {
   manualSessionTitles.delete(id);
-  runtime.pendingSessionConfigurations.delete(id);
   runtime.sessionTranscriptCache.delete(id);
   runtime.sessionHistoryCache.delete(id);
   runtime.liveSessionTranscripts.delete(id);

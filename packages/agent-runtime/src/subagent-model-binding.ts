@@ -1,3 +1,4 @@
+import { withMirrorCodingFast } from "./mirrorcoding-fast.js";
 import {
   buildProviderModel,
   copilotRequestHeaders,
@@ -115,7 +116,7 @@ export function subagentModelBinding(opts: {
       return createProviderRetryStream(
         m,
         context,
-        requestOptions,
+        withMirrorCodingFast(requestOptions, opts.provider),
         (retryOptions) =>
           omitThinking
             ? models.stream(omitThinkingModel, context, retryOptions)
