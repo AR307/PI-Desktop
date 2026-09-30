@@ -102,6 +102,8 @@ try {
   await phone.getByLabel(/^(Language|语言)$/).selectOption("en");
   await phone.getByRole("group", { name: "Theme", exact: true }).getByRole("button", { name: "Light", exact: true }).click();
   await phone.getByRole("dialog").getByRole("button", { name: "Close", exact: true }).click();
+  // The closing native dialog keeps the login fields inert until its animation ends.
+  await phone.locator(".surface").waitFor({ state: "hidden" });
   if ((await view()).signedIn) await phone.evaluate(() => window.__PI_MOBILE_CONTROLLER__.logout());
   await phone.locator('[name="username"]').fill("mobileqa");
   await phone.locator('[name="password"]').fill("mobile-pass");
