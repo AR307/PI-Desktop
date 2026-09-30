@@ -17,6 +17,7 @@ needed for the harness.
 ```powershell
 pnpm install --frozen-lockfile
 pnpm -r --filter ./packages/* build
+pnpm --filter @pi-desktop/desktop run bundle:runtime
 pnpm --filter @pi-desktop/desktop build
 cargo build -p host-core --locked
 $env:PI_TEST_PLAYWRIGHT = 'C:/path/to/node_modules/playwright'
@@ -150,3 +151,22 @@ desktop restart, draft preservation, cancellation and bilingual light/dark
 screenshots on desktop and phone-sized Chromium. Artifacts and the candidate
 revision are recorded under `.artifacts/response-recovery-*`. This is not
 native Android or production MC/Kiro acceptance.
+
+## MC Fast acceptance coverage (2026-09-30)
+
+The browser flow changes Fast from both devices, preserves the active launch
+while applying the next queued selection, checks actual Chat request tiers,
+creates an explicitly authorized second-model child with Fast and tool
+continuation, verifies parent/child independence, and restores Fast after a
+desktop restart. Requested-tier labels are checked on desktop and mobile.
+
+The native Android flow checks the model-sheet Fast control, persistence and
+the actual outgoing tier before continuing the native attachment/image and
+restart scenarios. Await closing dialogs before typing: their underlying
+fields remain inert during the exit animation. Tap inputs when testing the
+Android keyboard; programmatic focus alone does not guarantee the IME opens.
+
+Use the existing PiMobileQA device with a normal keyboard, not the keyboard
+handwriting tutorial. The acceptance run may use local dependency junctions;
+keep generated Capacitor dependency paths out of source commits. These checks
+prove controlled client behavior, not production MC deployment or speed.

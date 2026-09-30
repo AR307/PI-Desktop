@@ -671,3 +671,38 @@ parent/child settings. The native Android run reached the real Capacitor runtime
 its remaining setup blocker was the emulator keyboard handwriting tutorial, not
 a model request. The Fast row now keeps its label, input and status compact.
 Final native and restart coverage is recorded below once completed.
+
+## 2026-09-30 — MC Fast completion and validation
+
+This completion record supersedes the earlier pending acceptance notes.
+
+- Browser/Electron candidate: fa89ddc3f66aa7edcfe90f7311e0e0a9a454f66f.
+- Android candidate: daa92f6d3dfe57db49081381f6387569c4cea929. Later changes
+  between these candidates only correct native acceptance interaction steps.
+- Both candidates contain origin/main 920b12b8e053165d343a421b3cb8ee93c50a436a;
+  a final fetch confirmed that base remains current.
+- Actual Electron + mobile browser: 70 checks passed, no renderer/cleanup
+  errors. Report: .artifacts/fast-mobile-final/report.json. Includes current/next
+  Fast separation, queued requests, cross-model child tool continuation, parent
+  independence, durable Fast, restart, approvals, images and narrow layouts.
+- Actual PiMobileQA Android (emulator-5554): 21 checks passed, no WebView
+  errors. Report: .artifacts/fast-android-5/report.json. Includes encrypted login,
+  pairing, a real Fast HTTP request, native keyboard/Back, file picker, image
+  generation/save/reference and process restart. Screenshots were reviewed.
+- Final focused checks: 65 desktop contract/behavior checks, 318 runtime checks,
+  six mobile transcript checks, two Rust Fast configuration/persistence checks
+  and Rust formatting passed. Workspace package builds, desktop build, desktop/
+  mobile typechecks, host build, runtime bundle and 36 i18n checks also passed.
+- The full Rust run is NOT green: 647 passed and four failed in Windows path
+  assertions for mcp_servers, sessions/fork_files, session fork pasted files and
+  user_skills. Those failure paths were not changed here; a separate clean-base
+  reproduction was not performed.
+- During child acceptance the live Task event reached completed, while a raw
+  Rust history read still held its initial running snapshot. Fast was correctly
+  persisted in both. This general lifecycle discrepancy is recorded for a
+  separate investigation, not claimed fixed by the Fast work.
+- Capacitor sync temporarily rewrote dependency paths because local dependencies
+  are junction-backed; that generated-only change was restored and is excluded
+  from the task. No user files, emulator instances or worktrees were removed.
+- No MC server changes, production/paid Fast calls, push or release. The tested
+  APK is an isolated acceptance build, not a distribution artifact.
