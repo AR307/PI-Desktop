@@ -797,3 +797,41 @@ This completion record supersedes the earlier pending acceptance notes.
   the existing image-card projection so stopped-download retry remains visible.
   Added the actual cancelled-URL result to the projection regression fixtures;
   the test failed before the one-line fix. Updated the image spec to Pi 0.99.1.
+
+### Final upstream candidate validation
+
+- Executable candidate: 2d48371da87ad6790e3904352f447782071b3fca. Final
+  documentation-only commit does not change the tested executable tree.
+- Fork base: 920b12b8e053165d343a421b3cb8ee93c50a436a; retained MC/Fast
+  baseline: dd1f205628e088c3ca6730cf02c8847a28a6caba. Upstream main:
+  d96382d74e0a9ae9497eecad54b7583f788b4159. Final fetch confirmed both
+  remote main refs unchanged. No fork tags were overwritten.
+- Workspace/Desktop/Rust/Android version: 0.15.10; Android versionCode: 2.
+  The stable upstream release is v0.15.10; the integrated main includes
+  subsequent changes. CHANGELOG.md records the user-visible update summary.
+- Actual isolated Electron plus mobile Chromium: 79 checks, no renderer or
+  cleanup errors. Evidence: .artifacts/upstream-mobile-delivery/report.json.
+- Actual Electron image flow: 46 checks, no renderer or shutdown errors.
+  Covers direct generation, all reference adapters, autonomous agent image
+  selection, download-only retry, cancellation, account changes and restart.
+  Evidence: .artifacts/upstream-images-verified/report.json.
+- Actual Electron/mobile response recovery: 20 checks, no errors. Native
+  Messages follows the declared catalog; max, partial output, bounded empty
+  retries, explicit continuation, restart and Stop are preserved. Evidence:
+  .artifacts/response-recovery-1790784508496/report.json.
+- Reviewed desktop Fast, mobile narrow Chinese model selection and narrow
+  light-theme image screenshots. All acceptance used local MC/HTTP fixtures;
+  no production or paid requests, real voice-provider claims, or native Android
+  device/APK validation are implied. The running user preview was not replaced.
+- Final follow-up checks: host-runtime 107 passed / 3 skipped, transcript
+  projection 40 passed, host-runtime/Desktop typechecks, rebuilt host-runtime,
+  fresh sidecar bundle, Desktop build, release-doc alignment, agent-policy
+  synchronization and git diff whitespace checks passed. Earlier full Rust
+  (703), agent-runtime (1195), shared (1164), i18n (37), agent-host (60),
+  mobile (16), selected Desktop (138) and Live Voice (14) checks also passed.
+- The broad Desktop suite is not fully green: Windows-incompatible macOS/SSH
+  fixtures, path assertions, plugin fixture resolution and other source checks
+  were reported. No clean-base reproduction was performed for every remaining
+  failure; do not describe the whole cross-platform suite as passing.
+- All changes are committed locally on codex/upstream-01510. No push, release,
+  primary-checkout modification, or user data cleanup was performed.

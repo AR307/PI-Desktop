@@ -1,3 +1,27 @@
+## v0.15.10 - Upstream synchronization
+
+This candidate integrates upstream main through `d96382d74`, including changes
+after the stable v0.15.10 release. Workspace, desktop, Rust and Android versions
+are aligned; this is a local integration, not a published fork release.
+
+- Upgrade to Pi 0.99.1 with its unified model/account registry, native reasoning
+  and output capabilities, image adapter API, and operation usage accounting.
+- Add upstream Live Voice conversation and work handoff, including actual
+  failure reasons, plus per-session Todo checklists and TodoWrite recovery.
+- Improve long-conversation rendering and streaming, browser tab ownership and
+  previews, input history, and the native inline reasoning slider.
+- Integrate plugin composer/work-panel slots, MCP OAuth and configuration
+  fixes, Windows/Portable update handling, and resumable truncated subagent
+  reports. Include upstream marketplace ordering and macOS packaging cleanup.
+- Preserve MirrorCoding account authorization, catalog-selected protocols,
+  model/group selection, main-owned credentials, independent subagent Fast,
+  model-change Fast reset, and the solid lightning indicator.
+- Keep desktop/Android sharing, four task modes, direct and agent image
+  generation, partial-response retention, and explicit continuation. Updates
+  and issue feedback continue to target AR307/PI-Desktop.
+- Fix integration-specific ESM resource paths, host-local tool lifetime,
+  cancelled image download cards, and durable mobile queue message identity.
+
 ## v0.15.6-mirrorcoding.1
 
 ## Subagents run detached and wake the session
