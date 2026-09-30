@@ -609,3 +609,21 @@ needed by an actual request rather than starting a repository-wide rewrite.
 - Updated the regression test and UX/E2E specifications. Confirmed the exact
   session ID reaches the native clipboard from the actual Electron menu with
   developer mode disabled; no credentials or session content are copied.
+
+## 2026-09-30 - Claude upstream investigation closure
+
+- The authorized fresh-session comparison reproduced thinking-only completion
+  with max effort and a successful file-writing task with medium effort. Both
+  used Messages; routing and accurate outcome classification alone did not
+  resolve the generation failure.
+- The subsequent raw-stream comparison was interrupted before the max response
+  ended. It is not proof of which upstream component caused the failure. Later
+  probes returned HTTP 404 and did not establish the original root cause.
+- The user confirmed an upstream problem and that Opus 5.5 is no longer usable.
+  Stopped further live probes and removed temporary instrumentation from the
+  generated desktop bundle. No downgrade, replay, model replacement or server
+  change was introduced. Existing conversations remain untouched.
+- Validation: desktop typecheck, four session-menu checks, ten native-response
+  recovery checks and four MC routing/key checks passed. Actual Electron
+  clipboard interaction also passed with developer mode disabled. The sidebar
+  fix is locally committed; no push or release was performed.
