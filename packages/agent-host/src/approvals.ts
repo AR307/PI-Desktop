@@ -35,7 +35,7 @@ export interface ApprovalPort {
 
 export type PendingToolRequest = ToolPermissionRequest & {
   createdAt: string;
-  expiresAt: string;
+  expiresAt?: string;
 };
 
 type PendingApproval = {
@@ -81,6 +81,7 @@ export class ApprovalBroker {
       risk: request.risk,
       ...(request.agentName ? { agentName: request.agentName } : {}),
       ...(request.parentToolCallId ? { parentToolCallId: request.parentToolCallId } : {}),
+      ...(request.nestedParentToolCallId ? { nestedParentToolCallId: request.nestedParentToolCallId } : {}),
       allowedDecisions: context.allowSession
         ? [...RACP_TOOL_APPROVAL_DECISIONS]
         : RACP_TOOL_APPROVAL_DECISIONS.filter((decision) => decision !== "allow-session"),
@@ -126,7 +127,10 @@ export class ApprovalBroker {
   ): Promise<RacpApprovalRequest[]> {
     const open = await this.port.listPendingTools(sessionId);
     return open.map((request) =>
-      this.fromToolPermission(request, { ...context, expiresAt: request.expiresAt }),
+      this.fromToolPermission(
+        request,
+        request.expiresAt ? { ...context, expiresAt: request.expiresAt } : context,
+      ),
     );
   }
 

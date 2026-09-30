@@ -26,6 +26,7 @@ test("a stored binding drives the draft thinking menu without a live catalog", (
   // its other, reasoning-capable models (fresh-profile draft regression).
   const provider = {
     id: "mc-group",
+    authKind: "mirrorcoding",
     supportsReasoning: false,
     supportedThinkingLevels: ["off"],
     models: [
@@ -46,7 +47,7 @@ test("a stored binding drives the draft thinking menu without a live catalog", (
   const catalogued = thinkingProviderForModel(
     { ...provider, models: [] },
     "gpt-5.4",
-    [{ modelId: "gpt-5.4", reasoning: true, capabilities: ["reasoning"], supportedThinkingLevels: ["low", "high"] }],
+    [{ modelId: "gpt-5.4", catalogSource: "pi", reasoning: true, capabilities: ["reasoning"], supportedThinkingLevels: ["low", "high"] }],
   );
   assert.equal(catalogued?.supportsReasoning, true);
   assert.deepEqual(providerThinkingLevels(catalogued), ["low", "high"]);

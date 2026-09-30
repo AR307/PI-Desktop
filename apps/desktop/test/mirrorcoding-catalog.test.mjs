@@ -22,12 +22,12 @@ test("uses published Messages reasoning options for an exact native model", asyn
   const catalog = new ModelsDevCatalog({ catalogPath: fileURLToPath(new URL("../resources/models.dev/api.json", import.meta.url)) });
   assert.equal(await catalog.ensureLoaded(), true);
   const metadata = modelMetadata(catalog, "claude-opus-4-7");
-  assert(metadata.reasoningOptions.some(option => option.type === "effort"));
-  assert(!metadata.reasoningOptions.some(option => option.type === "budget_tokens"));
+  assert.equal(metadata.compat.forceAdaptiveThinking, true);
+  assert(metadata.supportedThinkingLevels.includes("max"));
   assert.equal(metadata.thinkingLevelMap.max, "max");
 });
 
-const emptyModelsDev = { findModel: () => undefined, anthropicThinkingFor: () => undefined };
+const emptyModelsDev = { findModel: () => undefined };
 
 test("MC Claude IDs require a published Messages route", () => {
   const ids = ["claude-opus-5.5", "vendor/CLAUDE-Sonnet-thinking", "claude-future", "other-chat"];

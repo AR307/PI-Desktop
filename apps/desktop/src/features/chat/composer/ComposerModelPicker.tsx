@@ -4,12 +4,10 @@ import { ComposerModelList } from "./ComposerModelList";
 import { AnchoredMenu } from "../../../components/settings/AnchoredMenu";
 import {
   IconBot,
-  IconCheck,
   IconChevronDown,
   IconChevronLeft,
   IconChevronRight,
   IconImage,
-  IconSparkles,
   IconZap,
 } from "../../../components/icons";
 import { SettingsToggle, TooltipButton } from "../../../components/ui";
@@ -53,12 +51,9 @@ export function ComposerModelPicker({
     setQuery,
     modelHighlight,
     setModelHighlight,
-    thinkingHighlight,
-    setThinkingHighlight,
     rootMenuRef,
     modelSearchRef,
     modelListRef,
-    thinkingListRef,
     groupListRef,
     pendingMirrorModel,
     mirrorGroups,
@@ -68,7 +63,6 @@ export function ComposerModelPicker({
     showView,
     selectModel,
     commitThinkingLevel,
-    selectThinkingLevel,
     onMenuKeyDown,
   } = controller;
   const imageMode = task === "image";
@@ -142,21 +136,7 @@ export function ComposerModelPicker({
             <span className="composer-menu-entry-value" title={modelLabel}>{modelLabel}</span>
             <IconChevronRight size={14} aria-hidden="true" />
           </button>
-          {!imageMode ? <button
-            type="button"
-            className="composer-menu-entry"
-            role="menuitem"
-            aria-haspopup="menu"
-            onClick={() => showView("thinking")}
-          >
-            <IconSparkles size={14} aria-hidden="true" />
-            <span className="composer-menu-entry-label">{t("chat.reasoningLevel")}</span>
-            <span className="composer-menu-entry-value">{thinkingLabel}</span>
-            <IconChevronRight size={14} aria-hidden="true" />
-          </button> : null}
-          {/* The slider sits directly under the Reasoning level entry
-              (issue #417): one drag adjusts the level without entering the
-              submenu, while the entry itself opens the classic radio list. */}
+          {/* Reasoning stays on the native inline slider. */}
           {!imageMode && thinkingMenuLevels.length > 1 ? (
             <ThinkingLevelSlider
               key={`${selectedProviderId}:${selectedModelId}:${thinkingMenuLevels.join("|")}`}
@@ -176,7 +156,7 @@ export function ComposerModelPicker({
             onClick={() => showView(view === "group" ? "model" : "root")}
           >
             <IconChevronLeft size={14} aria-hidden="true" />
-            <span>{view === "group" ? pendingMirrorModel : view === "model" ? (imageMode ? t("images.model") : t("chat.model")) : t("chat.reasoningLevel")}</span>
+            <span>{view === "group" ? pendingMirrorModel : view === "model" ? (imageMode ? t("images.model") : t("chat.model")) : t("chat.model")}</span>
           </button>
           <div className="composer-menu-separator" />
           {view === "model" ? (
@@ -190,7 +170,7 @@ export function ComposerModelPicker({
                 accountSelected={mirrorCodingSelected}
               />
             </>
-          ) : view === "group" ? (
+          ) : (
             <div className="composer-model-list" ref={groupListRef} aria-label={t("images.chooseModel")}>
               {mirrorGroups.map(({ provider }) => {
                 const group = provider.mirrorCoding!;
@@ -221,29 +201,6 @@ export function ComposerModelPicker({
               })}
               {mirrorGroups.length === 0 ? <p role="status">{t("mirrorCoding.model_or_group_unavailable")}</p> : null}
             </div>
-          ) : (
-            <>
-              <div className="composer-thinking-heading">
-                {t("chat.reasoningSupportedBy", { model: modelLabel })}
-              </div>
-              <div className="composer-thinking-list" ref={thinkingListRef}>
-                {thinkingMenuLevels.map((level, index) => (
-                  <button
-                    key={level}
-                    type="button"
-                    data-thinking-index={index}
-                    className={`composer-plus-item ${thinkingLevel === level ? "active" : ""} ${thinkingHighlight === index ? "kb-active" : ""}`}
-                    role="menuitemradio"
-                    aria-checked={thinkingLevel === level}
-                    onMouseMove={() => setThinkingHighlight(index)}
-                    onClick={() => void selectThinkingLevel(level)}
-                  >
-                    <span className="flex-1">{level}</span>
-                    {thinkingLevel === level ? <IconCheck size={14} className="composer-model-check" aria-hidden="true" /> : null}
-                  </button>
-                ))}
-              </div>
-            </>
           )}
         </>
       )}

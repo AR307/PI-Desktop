@@ -47,18 +47,25 @@ test("advanced settings choose the default thinking level among omit and the ena
   assert.match(pickerSource, /bindingDefaultThinkingMenuLevels\(enabledLevels\)\.length > 1 \?/);
 });
 
+test("advanced settings expose the model thinking protocol", () => {
+  assert.match(pickerSource, /settings\.thinkingProtocol/);
+  assert.match(pickerSource, /settings\.thinkingProtocolLegacy/);
+  assert.match(pickerSource, /settings\.thinkingProtocolAdaptive/);
+  assert.match(
+    pickerSource,
+    /binding\.thinkingProtocol\s*\?\?\s*info\?\.thinkingProtocol\s*\?\?\s*"legacy"/,
+  );
+  assert.match(pickerSource, /thinkingProtocol: id as ThinkingProtocol/);
+});
+
 test("the capability checkboxes show and follow the published value", () => {
   assert.match(pickerSource, /settings\.imageInput/);
   assert.match(pickerSource, /settings\.documentInput/);
   assert.match(pickerSource, /supportsImages: next/);
   assert.match(pickerSource, /supportsDocuments: next/);
-  // Agreeing with models.dev stores "follow the catalog" instead of an
-  // equal-valued override, so a later catalog correction still lands and no
-  // separate reset control is needed.
-  assert.match(
-    pickerSource,
-    /onChange\(event\.target\.checked === published \? null : event\.target\.checked\)/,
-  );
+  // A deliberate checkbox change pins the selected value even when it equals
+  // today's catalog value; later catalog corrections must not undo that choice.
+  assert.match(pickerSource, /onChange\(event\.target\.checked\)/);
   assert.match(
     pickerSource,
     /const effective = typeof value === "boolean" \? value : published/,
@@ -174,7 +181,7 @@ test("the published record is not shaped by the stored override", () => {
   // the binding to it would make an override its own justification.
   assert.match(
     mainSource,
-    /modalities: catalogModelConfig\.modalities \?\? \{ input: \["text"\], output: \["text"\] \}/,
+    /modalities: operationMetadata\?\.modalities \?\? catalogModelConfig\.modalities \?\? \{ input: \["text"\], output: \["text"\] \}/,
   );
   const decorate = mainSource.slice(
     mainSource.indexOf("const decorate ="),
@@ -216,9 +223,9 @@ test("a model the catalog does not describe still reports its binding overrides"
     ),
   );
   for (const block of [providerBlock, sessionBlock]) {
-    assert.match(block, /modelConfigWithBinding\(/);
+    assert.doesNotMatch(block, /modelConfigWithBinding\(/);
     assert.match(block, /catalogModelConfigFor\(modelsDevCatalog/);
-    assert.match(block, /bindingForModel\(provider, modelId\)/);
+    assert.match(block, /providerId: provider.id/);
   }
   assert.doesNotMatch(
     providerCatalogSource,

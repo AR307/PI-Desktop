@@ -123,7 +123,7 @@ test("developer mode gates every devtools entry point in the main process", () =
     menuSource,
     /\.\.\.\(developerMode[\s\S]*role: "toggleDevTools"/,
   );
-  assert.match(mainSource, /let developerMode = false/);
+  assert.match(mainSource, /(?:let\s+)?developerMode\s*=\s*false/);
   assert.match(mainSource, /function applyDeveloperMode/);
   assert.match(
     mainSource,
@@ -142,6 +142,35 @@ test("developer mode gates every devtools entry point in the main process", () =
   assert.ok(
     handler.indexOf("!developerMode") < handler.indexOf("openDevTools"),
     "the IPC gate must run before opening devtools",
+  );
+});
+
+test("the main app shell consumes unmodified Ctrl+R before Chromium reloads", () => {
+  const handlerStart = mainSource.indexOf(
+    'window.webContents.on("before-input-event"',
+  );
+  const handlerEnd = mainSource.indexOf("\n  });", handlerStart);
+  const handler = mainSource.slice(handlerStart, handlerEnd);
+  const reloadGuard = handler.slice(
+    handler.indexOf("if (isReloadChord)"),
+    handler.indexOf("const isPluginLauncherChord"),
+  );
+  assert.match(
+    handler,
+    /const isReloadChord =\s*input\.type === "keyDown" &&\s*input\.code === "KeyR" &&\s*input\.control &&\s*!input\.meta &&\s*!input\.alt &&\s*!input\.shift;/,
+  );
+  assert.match(reloadGuard, /event\.preventDefault\(\);\s*return;/);
+  assert.ok(
+    handler.indexOf("if (isReloadChord)") <
+      handler.indexOf("const isPluginLauncherChord"),
+    "reload prevention must run before other focused-window shortcuts",
+  );
+  assert.ok(
+    handler.indexOf("if (isReloadChord)") <
+      handler.indexOf(
+        'if (input.type !== "keyDown" || !windowState.developerMode) return;',
+      ),
+    "reload prevention must not depend on developer mode",
   );
 });
 

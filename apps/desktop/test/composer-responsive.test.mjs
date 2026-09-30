@@ -44,7 +44,7 @@ test("narrow composer containers progressively simplify the model controls", () 
 
 test("responsive rules preserve the semantic model trigger and action controls", () => {
   assert.match(composerSource, /className=\{`icon-btn composer-model-thinking-chip/);
-  assert.match(composerSource, /ariaLabel=\{`\$\{t\("chat\.model"\)\}: \$\{modelLabel\}\./);
+  assert.match(composerSource, /ariaLabel=\{imageMode \? [^\n]* : `\$\{t\("chat\.model"\)\}: \$\{modelLabel\}\./);
   assert.match(composerSource, /className=\"composer-model-thinking-chevron\"/);
   assert.match(composerSource, /ContextUsageInspector/);
   assert.match(composerSource, /className=\{`icon-btn icon-btn-square composer-enhance-btn/);

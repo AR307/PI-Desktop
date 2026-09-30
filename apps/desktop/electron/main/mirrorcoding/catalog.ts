@@ -3,7 +3,7 @@ import type {
   MirrorCodingImageRoutes, MirrorCodingProvider, MirrorCodingProviderSync, ModelBinding,
 } from "@pi-desktop/shared";
 import { genericModelConfig, type ModelConfig } from "@pi-desktop/agent-runtime";
-import { catalogModelConfigFor, modelConfigFromModelsDev, type ModelsDevCatalog } from "../models-dev-catalog";
+import { modelConfigFromModelsDev, type ModelsDevCatalog } from "../models-dev-catalog";
 import { isMirrorCodingEndpointPath, mirrorCodingChatRoute } from "./chat-route";
 
 export const ENDPOINTS = {
@@ -123,12 +123,7 @@ export function modelMetadata(catalog: ModelsDevCatalog, modelId: string): Model
     ["google", "google-generative-ai"],
   ] as const) {
     const native = catalog.findModel({ vendorKey, modelId });
-    if (native?.providerKey === vendorKey) return { ...modelConfigFromModelsDev(native), api };
-  }
-  // Use the established Messages capability resolver for catalog aliases as
-  // well as exact native records. Never guess an effort ladder from a name.
-  if (catalog.anthropicThinkingFor?.(modelId)) {
-    return catalogModelConfigFor(catalog, { vendorKey: "anthropic", apiStyle: "anthropic_messages", modelId });
+    if (native?.provider === vendorKey) return { ...modelConfigFromModelsDev(native), api };
   }
   const known = catalog.findModel({ modelId });
   return known ? modelConfigFromModelsDev(known) : genericModelConfig(modelId, "");

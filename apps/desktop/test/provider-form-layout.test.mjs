@@ -270,6 +270,7 @@ test("the panes stack again before the dialog gets too narrow to read", () => {
   const at = styles.indexOf("@media (max-width: 940px)");
   assert.notEqual(at, -1, "missing the two-pane fallback breakpoint");
   const query = styles.slice(at, styles.indexOf("@media", at + 10));
+  assert.match(query, /\(max-height:\s*800px\)/, "must also stack when vertical height is constrained (#1223)");
   assert.match(query, /\.provider-setup-field-row[\s\S]*?\{\s*grid-template-columns: minmax\(0, 1fr\)/);
   // The explicit custom rows must also collapse or Name | URL and Key | Format
   // stay side-by-side on a stacked dialog.

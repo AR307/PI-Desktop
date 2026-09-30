@@ -430,6 +430,9 @@
       "parentToolCallId": {
         "type": "string"
       },
+      "nestedParentToolCallId": {
+        "type": "string"
+      },
       "agentName": {
         "type": "string"
       },
@@ -491,6 +494,9 @@
         "type": "string"
       },
       "parentToolCallId": {
+        "type": "string"
+      },
+      "nestedParentToolCallId": {
         "type": "string"
       },
       "agentName": {
@@ -941,6 +947,9 @@
             "parentToolCallId": {
               "type": "string"
             },
+            "nestedParentToolCallId": {
+              "type": "string"
+            },
             "agentName": {
               "type": "string"
             },
@@ -1005,6 +1014,9 @@
               "type": "string"
             },
             "parentToolCallId": {
+              "type": "string"
+            },
+            "nestedParentToolCallId": {
               "type": "string"
             },
             "agentName": {
@@ -1090,6 +1102,9 @@
               "type": "string"
             },
             "parentToolCallId": {
+              "type": "string"
+            },
+            "nestedParentToolCallId": {
               "type": "string"
             },
             "title": {
@@ -1199,6 +1214,9 @@
               "type": "string"
             },
             "parentToolCallId": {
+              "type": "string"
+            },
+            "nestedParentToolCallId": {
               "type": "string"
             },
             "questions": {
@@ -1704,6 +1722,9 @@
             "parentToolCallId": {
               "type": "string"
             },
+            "nestedParentToolCallId": {
+              "type": "string"
+            },
             "agentName": {
               "type": "string"
             },
@@ -1787,6 +1808,9 @@
               "type": "string"
             },
             "parentToolCallId": {
+              "type": "string"
+            },
+            "nestedParentToolCallId": {
               "type": "string"
             },
             "title": {
@@ -1896,6 +1920,9 @@
               "type": "string"
             },
             "parentToolCallId": {
+              "type": "string"
+            },
+            "nestedParentToolCallId": {
               "type": "string"
             },
             "questions": {
@@ -2032,6 +2059,9 @@
         "type": "string"
       },
       "parentToolCallId": {
+        "type": "string"
+      },
+      "nestedParentToolCallId": {
         "type": "string"
       },
       "title": {
@@ -2293,6 +2323,9 @@
         "type": "string"
       },
       "parentToolCallId": {
+        "type": "string"
+      },
+      "nestedParentToolCallId": {
         "type": "string"
       },
       "questions": {

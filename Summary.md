@@ -740,3 +740,29 @@ This completion record supersedes the earlier pending acceptance notes.
   user approval; verified the responsive PI-Desktop window and rebuilt host.
   No production requests, push or release. Native Android/APK validation was
   not repeated for this follow-up; mobile acceptance used the browser surface.
+
+## 2026-09-30 - Upstream 0.15.10 integration
+
+- Merge upstream main at dc91f141831d3ce8a7cc35bee762660d0cfc9156 into the
+  completed MC/Fast baseline dd1f205628e088c3ca6730cf02c8847a28a6caba, with
+  origin/main 920b12b8e053165d343a421b3cb8ee93c50a436a retained as fork base.
+- Synchronize desktop, workspace, Rust and Android versions to 0.15.10.
+  Main also includes post-release Pi 0.99.1, Live Voice, session Todos,
+  browser tab ownership, input history, plugin slots and usage accounting.
+- Preserve MC authorization, catalog-selected routing, group relay, independent
+  child Fast, model-change Fast reset, solid indicator, mobile synchronization,
+  image tasks and partial-response retention. Update image generation to the
+  Pi unified Models API; keep MC reference images on the JSON relay path.
+- Reconcile the native inline reasoning slider and Pi metadata with MC bindings.
+  Fold queued mobile message IDs into the upstream v20 queue schema upgrade;
+  both pre-upgrade and fresh/restarted queue behavior are covered.
+- Validation so far: JavaScript/docs/mobile build, desktop typecheck, fresh
+  sidecar bundle and host build pass. Runtime: 1195 tests; Rust: 703; selected
+  desktop contracts: 138; shared: 1164 (source and compiled suites); i18n: 37;
+  agent-host: 60; host-runtime: 106 with 3 skips; mobile: 16, all passing.
+- Broad desktop suite was also attempted: platform-specific shell/signing,
+  filesystem and fixture assertions remain under investigation; this is not
+  a claim that the full cross-platform suite is green. Controlled Electron/
+  mobile user-path acceptance is pending below. No production model requests.
+- No push, release, test-profile replacement or user-file cleanup. Update and
+  feedback ownership remain AR307/PI-Desktop.

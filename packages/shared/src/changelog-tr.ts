@@ -2,6 +2,22 @@ import type { ChangelogEntry } from "./changelog.js";
 
 export const trEntries: ChangelogEntry[] = [
   {
+    "version": "0.15.10",
+    "date": "2026-09-28",
+    "highlights": [
+      "Eklenti pazarı artık eklentileri alfabetik sıra yerine rastgele sırada gösteriyor.",
+    ],
+  },
+
+  {
+    "version": "0.15.9",
+    "date": "2026-09-27",
+    "highlights": [
+      "macOS DMG ve ZIP paketlerindeki eski ilk açılış yardım dosyalarını kaldırır.",
+    ],
+  },
+
+  {
     "version": "0.15.6",
     "date": "2026-09-23",
     "highlights": [

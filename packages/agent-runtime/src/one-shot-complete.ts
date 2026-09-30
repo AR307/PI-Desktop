@@ -13,7 +13,9 @@ import type {
   Model,
   SimpleStreamOptions,
 } from "@earendil-works/pi-ai";
-import type { MessageUsage, ThinkingLevel } from "@pi-desktop/shared";
+import { addUsage, type MessageUsage, type ThinkingLevel } from "@pi-desktop/shared";
+import { accountModelStream } from "./request-usage.js";
+import { requestThinkingLevel } from "./thinking-level.js";
 import { classifyAgentError } from "./agent-errors.js";
 import { clampOutputToContext } from "./output-cap.js";
 import { assistantContent, usageFromPi } from "./agent-messages.js";
@@ -50,6 +52,8 @@ export type OneShotCompleteStream = (
 export type OneShotCompleteOptions = {
   signal?: AbortSignal;
   stream?: OneShotCompleteStream;
+  /** Optional hard cap for callers whose response schema has a small bound. */
+  maxOutputTokens?: number;
   emptyErrorCode?: string;
   emptyErrorMessage?: string;
   /** Conversation id forwarded to OpenCode as `x-opencode-session`. */
@@ -89,6 +93,7 @@ export async function completeOneShot(
     options.stream ??
     ((requestModel, requestContext, streamOptions) =>
       models.streamSimple(requestModel, requestContext, streamOptions));
+  let usage: MessageUsage | undefined;
   let providerStatus: number | undefined;
   let providerRequestId: string | undefined;
   let providerHeaders: Record<string, string> | undefined;
@@ -102,10 +107,16 @@ export async function completeOneShot(
   const requestOptions: SimpleStreamOptions = withProviderHeaders(
     withOpenCodeSessionHeaders(
       {
-        maxTokens: clampOutputToContext(model, context, undefined),
+        maxTokens: clampOutputToContext(
+          model,
+          context,
+          options.maxOutputTokens === undefined
+            ? undefined
+            : Math.min(model.maxTokens, Math.max(1, Math.floor(options.maxOutputTokens))),
+        ),
         ...(options.signal ? { signal: options.signal } : {}),
         maxRetries: 0,
-        ...(thinkingLevel !== "off" ? { reasoning: thinkingLevel } : {}),
+        reasoning: requestThinkingLevel(model, thinkingLevel),
         fetch: providerRequestFetch(
           model.api,
           captureProviderResponse(
@@ -137,7 +148,10 @@ export async function completeOneShot(
       model,
       context,
       requestOptions,
-      (retryOptions) => streamSimple(model, context, retryOptions),
+      (retryOptions) => accountModelStream(model, () => streamSimple(model, context, retryOptions), {
+        providerId: provider.id, nativeCost: provider.modelConfig?.nativeCost,
+        onUsage: attemptUsage => { usage = addUsage(usage, attemptUsage); },
+      }),
       {
         claim: (error, phase) => {
           if (phase !== "request" || !error.retriable) return undefined;
@@ -199,6 +213,6 @@ export async function completeOneShot(
         { response: diagnostic },
       );
     }
-    return { text, usage: usageFromPi(result.usage) };
+    return { text, usage: usage ?? usageFromPi(result.usage) };
   }
 }

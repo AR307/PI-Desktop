@@ -162,7 +162,7 @@
 
 /*
   The chosen service is a settled fact, not an open menu: its letter tile,
-  name and host on the field tone, with Change leading back to the chooser.
+  name and endpoint on the field tone, with Change leading back to the chooser.
 */
 .provider-service-chip {
   display: flex;
@@ -185,11 +185,10 @@
 .provider-service-chip-copy {
   display: flex;
   flex: 1;
+  flex-wrap: wrap;
   align-items: baseline;
-  gap: 8px;
+  gap: 2px 8px;
   min-width: 0;
-  overflow: hidden;
-  white-space: nowrap;
 }
 
 .provider-service-chip-name {
@@ -202,12 +201,11 @@
 
 .provider-service-chip-host {
   min-width: 0;
-  overflow: hidden;
+  overflow-wrap: anywhere;
   color: var(--ds-text-muted);
   font-family: var(--font-mono);
   font-size: var(--text-2xs);
   line-height: var(--leading-tight);
-  text-overflow: ellipsis;
 }
 
 .provider-service-chip-change,
@@ -1189,10 +1187,14 @@
 }
 
 .provider-chosen-thinking-head {
-  display: flex;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
-  flex-wrap: wrap;
-  gap: 4px 8px;
+  gap: 4px 12px;
+  min-width: 0;
+}
+
+.provider-chosen-thinking-head > .provider-chosen-thinking-label {
   min-width: 0;
 }
 
@@ -1216,11 +1218,18 @@
   line-height: var(--leading-normal);
 }
 
-.provider-chosen-thinking-default {
+.provider-chosen-thinking-controls {
+  display: flex;
+  align-items: center;
+  justify-self: end;
+  gap: 12px;
+}
+
+.provider-chosen-thinking-default,
+.provider-chosen-thinking-protocol {
   display: flex;
   align-items: center;
   gap: 6px;
-  margin-left: auto;
 }
 
 /* The row body keeps its own compact field metric (28px inputs and selects), so
@@ -1840,8 +1849,10 @@
 
 /* ------------------------------------------------------------ responsive */
 
-@media (max-width: 940px) {
-  /* Two panes stop being readable before the dialog itself gets narrow. */
+@media (max-width: 940px), (max-height: 800px) {
+  /* Two panes stop being readable before the dialog itself gets narrow,
+     and when vertical space is constrained (such as Windows high-DPI scaling)
+     the stacked layout prevents the panes from being crushed. */
   .provider-setup-field-row,
   .provider-setup-custom-identity-row,
   .provider-setup-custom-auth-row {
@@ -1900,6 +1911,19 @@
 
   .provider-chosen-thinking-chips {
     grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+
+  .provider-chosen-thinking-head {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+
+  .provider-chosen-thinking-head > .provider-chosen-thinking-label {
+    grid-column: 1 / -1;
+  }
+
+  .provider-chosen-thinking-controls {
+    grid-column: 1 / -1;
+    justify-self: end;
   }
 
 }

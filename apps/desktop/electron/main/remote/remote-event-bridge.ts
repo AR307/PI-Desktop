@@ -110,6 +110,7 @@ function toToolPermissionRequest(
     reason: approval.summary,
     ...(approval.agentName ? { agentName: approval.agentName } : {}),
     ...(approval.parentToolCallId ? { parentToolCallId: approval.parentToolCallId } : {}),
+    ...(approval.nestedParentToolCallId ? { nestedParentToolCallId: approval.nestedParentToolCallId } : {}),
   };
 }
 
@@ -133,7 +134,6 @@ function toAskToolRequest(
 }
 
 function toPlanningStateAgentEvent(
-  remoteSessionId: string,
   planning: PlanningStateEvent,
 ): AgentEvent {
   const { sessionId: _hostSessionId, ...rest } = planning;
@@ -155,6 +155,7 @@ export function createRemoteEventBridge(options: RemoteEventBridgeOptions): Remo
       ts: Date.parse(envelope.occurredAt) || Date.now(),
       event,
       ...(envelope.parentToolCallId ? { parentToolCallId: envelope.parentToolCallId } : {}),
+      ...(envelope.nestedParentToolCallId ? { nestedParentToolCallId: envelope.nestedParentToolCallId } : {}),
       ...(envelope.agentName ? { agentName: envelope.agentName } : {}),
     };
     emit(IPC.event.agentMessage, local);
@@ -219,7 +220,7 @@ export function createRemoteEventBridge(options: RemoteEventBridgeOptions): Remo
           emitAgentEvent(
             envelope,
             remoteSessionId,
-            toPlanningStateAgentEvent(remoteSessionId, planning),
+            toPlanningStateAgentEvent(planning),
           );
         }
         return;

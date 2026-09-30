@@ -136,7 +136,7 @@ record.
 - host/agent spawn, handshake, and unexpected exit;
 - session create/delete;
 - prompt accepted/aborted;
-- tool completion/failure/interruption and permission request/decision/timeout;
+- tool completion/failure/interruption and permission request/decision/cancellation;
 - Plan artifact creation, approval, expiry, rejection, execution transition,
   and startup interruption;
 - shell identity, timeout, abort, and process-tree shutdown;

@@ -16,6 +16,7 @@ import { useTranslation } from "react-i18next";
 import { installRendererApi } from "../../capture/renderer-api";
 import { StartupSplash } from "../../components/StartupSplash";
 import { api } from "../../lib/api";
+import { playNotificationChime } from "../../lib/notification-sound";
 import {
   clampSidebarWidth,
   loadSidebarWidth,
@@ -32,6 +33,7 @@ import { useAppStore } from "../../stores/app-store";
 import { useSidebarTransition } from "./useSidebarTransition";
 import { useStartupWatchdog } from "./useStartupWatchdog";
 import { useTraySessions } from "./useTraySessions";
+import { runLiveVoiceShortcut } from "../voice/live/live-voice-shortcuts";
 
 const MODIFIER_ONLY_KEYS = new Set([
   "Alt",
@@ -573,8 +575,12 @@ export function useAppShellRuntime() {
       useAppStore.getState().applyQueueChanged(event),
     );
     const offPlansChanged = api.onPlansChanged(handlePlansChanged);
+    const offTodosChanged = api.onTodosChanged((snapshot) =>
+      useAppStore.getState().applyTodosChanged(snapshot),
+    );
     // Host-pushed toasts (plugin runtime etc.) are informational.
     const offToast = api.onToast((message) => showToast(message));
+    const offNotificationSound = api.onNotificationSound(playNotificationChime);
     // The first plaintext hop to an endpoint the user typed. The shell owns the
     // wording, and recording `insecureNoticeAcknowledged` keeps it to once; a
     // failed write only means the notice shows again.
@@ -598,6 +604,7 @@ export function useAppShellRuntime() {
     });
     // Agent-driven HTML preview: surface the browser tab when the agent
     // opens a workspace file in the embedded browser (BrowserPreview tool).
+    const offBrowserState = api.onBrowserState((event) => useAppStore.getState().updateBrowserWorkPanelTab(event));
     const offBrowserPreview = api.onBrowserPreview((event) => {
       useAppStore
         .getState()
@@ -630,6 +637,7 @@ export function useAppShellRuntime() {
       // to a row that is already present/acknowledged. Do not surface a native
       // banner for an event the store intentionally rejected.
       if (!accepted) return;
+      playNotificationChime();
       const failed = notification.kind === "task.failed";
       const title = t(
         failed ? "notifications.failedTitle" : "notifications.completedTitle",
@@ -734,8 +742,15 @@ export function useAppShellRuntime() {
       }
       if (
         e.repeat &&
-        (shortcut.id === "navigateBack" || shortcut.id === "navigateForward")
+        (shortcut.id === "navigateBack" ||
+          shortcut.id === "navigateForward" ||
+          shortcut.id === "voiceToggle" ||
+          shortcut.id === "voiceCancel")
       ) {
+        return;
+      }
+      if (shortcut.id === "voiceToggle" || shortcut.id === "voiceCancel") {
+        if (runLiveVoiceShortcut(shortcut.id)) e.preventDefault();
         return;
       }
       e.preventDefault();
@@ -796,9 +811,12 @@ export function useAppShellRuntime() {
       offEvent();
       offQueueChanged();
       offPlansChanged();
+      offTodosChanged();
       offToast();
+      offNotificationSound();
       offInsecureEndpoint();
       offBrowserPreview();
+      offBrowserState();
       offHostStatus();
       offNotificationChanged();
       offSessionsChanged();

@@ -3,7 +3,6 @@ import {
   SESSION_THINKING_LEVELS,
   defaultCommandShellForPlatform,
   isCommandShellId,
-  resolveBindingLimits,
   validateNetworkProxy,
   validateSpeechSettings,
   type CommandShellId,
@@ -13,7 +12,7 @@ import {
 } from "@pi-desktop/shared";
 import {
   capabilitiesFromModelConfig,
-  modelConfigWithBinding,
+  type ModelConfig,
   visionFromModelConfig,
   type ThinkingCapabilities,
 } from "@pi-desktop/agent-runtime";
@@ -80,6 +79,7 @@ export function createProviderCatalogRuntime({
 
   const modelsDevModelFor = (provider: RuntimeProvider, modelId: string) =>
     modelsDevCatalog.findModel({
+      providerId: provider.id,
       vendorKey: provider.vendorKey,
       baseUrl: provider.baseUrl,
       modelId,
@@ -91,22 +91,15 @@ export function createProviderCatalogRuntime({
    * the effective thinking capability for the endpoint.
    */
   const effectiveSubagentModelConfig = (
-    provider: Pick<RuntimeProvider, "models">,
+    provider: RuntimeProvider,
     modelId: string,
-    catalogModelConfig: Parameters<typeof modelConfigWithBinding>[0],
+    catalogModelConfig?: ModelConfig,
   ) => {
-    const resolved = resolveBindingLimits(
-      catalogModelConfig,
-      bindingForModel(provider, modelId),
-    );
-    const modelConfig = modelConfigWithBinding(
-      resolved.catalogConfig,
-      resolved.binding,
-    );
-    return {
-      modelConfig,
-      capabilities: capabilitiesFromModelConfig(modelConfig),
-    };
+    modelsDevCatalog.configureAccount(provider);
+    const modelConfig = modelsDevCatalog.modelConfigFor({
+      providerId: provider.id, vendorKey: provider.vendorKey, baseUrl: provider.baseUrl, modelId,
+    }, catalogModelConfig);
+    return { modelConfig, capabilities: capabilitiesFromModelConfig(modelConfig) };
   };
 
   const enrichProvider = <T extends RuntimeProvider>(
@@ -119,52 +112,20 @@ export function createProviderCatalogRuntime({
       provider.models?.[0]?.id ||
       provider.defaultModelId ||
       "";
-    const storedModel = bindingForModel(provider, modelId);
-    const catalogModelConfig = catalogModelConfigFor(modelsDevCatalog, {
-      vendorKey: provider.vendorKey,
-      baseUrl: provider.baseUrl,
-      apiStyle: provider.apiStyle,
-      modelId,
+    modelsDevCatalog.configureAccount(provider);
+    const modelConfig = catalogModelConfigFor(modelsDevCatalog, {
+      providerId: provider.id, vendorKey: provider.vendorKey, baseUrl: provider.baseUrl, modelId,
     });
-    const resolved = resolveBindingLimits(
-      catalogModelConfig,
-      storedModel,
-    );
-    const modelConfig = modelConfigWithBinding(
-      resolved.catalogConfig,
-      resolved.binding,
-    );
     const models = provider.models?.map((binding) => {
-      const catalogModelConfig = catalogModelConfigFor(modelsDevCatalog, {
-        vendorKey: provider.vendorKey,
-        baseUrl: provider.baseUrl,
-        apiStyle: provider.apiStyle,
-        modelId: binding.id,
+      const effective = catalogModelConfigFor(modelsDevCatalog, {
+        providerId: provider.id, vendorKey: provider.vendorKey, baseUrl: provider.baseUrl, modelId: binding.id,
       });
-      const bindingResolved = resolveBindingLimits(
-        catalogModelConfig,
-        binding,
-      );
-      const effective = modelConfigWithBinding(
-        bindingResolved.catalogConfig,
-        bindingResolved.binding,
-      );
-      return {
-        ...binding,
-        contextWindow: effective.contextWindow,
-        maxTokens: effective.maxTokens,
-        // An inherited window keeps its catalog provenance on the exposed row,
-        // so saving this form cannot freeze a models.dev value into a snapshot
-        // of its own.
-        ...(bindingResolved.binding.contextWindowSource
-          ? { contextWindowSource: bindingResolved.binding.contextWindowSource }
-          : {}),
-      };
+      return { ...binding, contextWindow: effective.contextWindow, maxTokens: effective.maxTokens, maxTokensSource: binding.maxTokensSource ?? "user" as const };
     });
     return {
       ...provider,
       ...(models ? { models } : {}),
-      ...(catalogModelConfig.source !== "generic"
+      ...(modelConfig.source !== "generic"
         ? {
             contextWindow: modelConfig.contextWindow,
             maxOutputTokens: modelConfig.maxTokens,
@@ -207,6 +168,8 @@ export function createProviderCatalogRuntime({
       defaultCommandShell?: unknown;
       infiniteProviderRetry?: unknown;
       keepAwakeWhileRunning?: unknown;
+      updatePreference?: unknown;
+      lastNotifiedUpdateVersion?: unknown;
       networkProxy?: unknown;
     };
     if (
@@ -230,6 +193,25 @@ export function createProviderCatalogRuntime({
       typeof value.keepAwakeWhileRunning !== "boolean"
     ) {
       throw Object.assign(new Error("keepAwakeWhileRunning is invalid"), {
+        errorCode: ErrorCodes.INVALID_PARAMS,
+      });
+    }
+    if (
+      Object.prototype.hasOwnProperty.call(value, "updatePreference") &&
+      value.updatePreference !== "automatic" &&
+      value.updatePreference !== "manual"
+    ) {
+      throw Object.assign(new Error("updatePreference is invalid"), {
+        errorCode: ErrorCodes.INVALID_PARAMS,
+      });
+    }
+    if (
+      Object.prototype.hasOwnProperty.call(value, "lastNotifiedUpdateVersion") &&
+      (typeof value.lastNotifiedUpdateVersion !== "string" ||
+        value.lastNotifiedUpdateVersion.trim().length === 0 ||
+        value.lastNotifiedUpdateVersion.length > 128)
+    ) {
+      throw Object.assign(new Error("lastNotifiedUpdateVersion is invalid"), {
         errorCode: ErrorCodes.INVALID_PARAMS,
       });
     }
@@ -258,6 +240,7 @@ export function createProviderCatalogRuntime({
       { includeDisabled },
     );
     await modelsDevCatalog.ensureLoaded();
+    for (const provider of result.providers) modelsDevCatalog.configureAccount(provider);
     return result.providers;
   };
 
@@ -302,6 +285,7 @@ export function createProviderCatalogRuntime({
     const pinnedProvider = session.providerId
       ? providers.find((item) => item.id === session.providerId)
       : undefined;
+    if (session.providerId && (!pinnedProvider || pinnedProvider.enabled === false)) return null;
     const provider =
       pinnedProvider ||
       (defaults?.defaultProviderId
@@ -338,19 +322,10 @@ export function createProviderCatalogRuntime({
       };
     }
     const { provider, modelId } = target;
-    const resolved = resolveBindingLimits(
-      catalogModelConfigFor(modelsDevCatalog, {
-        vendorKey: provider.vendorKey,
-        baseUrl: provider.baseUrl,
-        apiStyle: provider.apiStyle,
-        modelId,
-      }),
-      bindingForModel(provider, modelId),
-    );
-    const modelConfig = modelConfigWithBinding(
-      resolved.catalogConfig,
-      resolved.binding,
-    );
+    modelsDevCatalog.configureAccount(provider);
+    const modelConfig = catalogModelConfigFor(modelsDevCatalog, {
+      providerId: provider.id, vendorKey: provider.vendorKey, baseUrl: provider.baseUrl, modelId,
+    });
     return {
       ...session,
       ...capabilitiesFromModelConfig(modelConfig),

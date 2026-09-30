@@ -221,6 +221,7 @@ function forkHarness({ host, sidecar, activeTurns = new Map() }) {
     "@pi-desktop/shared": sharedForIpc,
     "../importers": { convertSession() {}, scanAllSources() {}, scanModelConfigs() {} },
     "../services/session-collaboration": { readSessionCollaboration() {} },
+    "../services/session-configuration": { configureSession() { assert.fail("read/fork must not configure a session"); } },
     "../services/session-search": { searchSessionsAcrossSources },
   });
   registerSessionIpc({

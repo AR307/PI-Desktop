@@ -1,5 +1,16 @@
 # Unreleased changes
 
+- `/compact` and automatic context compaction work again on a gateway that
+  fronts a Codex backend. The summary request of a checkpoint now carries the
+  conversation identity every other turn of the session sends
+  (`prompt_cache_key`), instead of being the one request the gateway answers
+  with `400 invalid codex request`.
+
+- Claude models on a GitHub Copilot account no longer fail with "missing
+  required Authorization header". Their Anthropic Messages requests now
+  authenticate with `Authorization: Bearer` instead of sending the Copilot
+  token as `X-Api-Key`.
+
 - Google Gemini rows send requests again. A provider row on the native
   generative-AI endpoint no longer hands pi-ai's Google adapter the internal
   response-capture `fetch` it refuses before the request leaves, custom provider

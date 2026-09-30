@@ -34,7 +34,8 @@ const { registerSessionIpc } = load("../electron/main/ipc/session-ipc.ts", {
   "@pi-desktop/shared": shared,
   "../importers": {},
   "../services/session-collaboration": collaboration,
-  "../services/session-search": { searchSessionsAcrossSources: async () => ({ hits: [], nextOffset: null }) },
+  "../services/session-configuration": { configureSession() { assert.fail("read/fork must not configure a session"); } },
+    "../services/session-search": { searchSessionsAcrossSources: async () => ({ hits: [], nextOffset: null }) },
 });
 const summary = {
   sessionId: "worker-session-id",

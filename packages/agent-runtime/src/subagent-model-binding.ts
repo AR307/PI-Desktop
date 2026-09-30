@@ -1,4 +1,5 @@
 import { withMirrorCodingFast } from "./mirrorcoding-fast.js";
+import { accountModelStream, type UsageObserver } from "./request-usage.js";
 import {
   buildProviderModel,
   copilotRequestHeaders,
@@ -42,6 +43,7 @@ export function subagentModelBinding(opts: {
   thinkingLevel: SubagentThinkingLevel;
   sessionId: string;
   maxTokens?: number;
+  onUsage?: UsageObserver;
 }, retry: SubagentProviderRetryState) {
   // A definition may cap the delegate's own output (issue #171). The
   // catalog's published limit keeps applying otherwise, so this is an
@@ -117,10 +119,14 @@ export function subagentModelBinding(opts: {
         m,
         context,
         withMirrorCodingFast(requestOptions, opts.provider),
-        (retryOptions) =>
+        (retryOptions) => accountModelStream(m, () =>
           omitThinking
             ? models.stream(omitThinkingModel, context, retryOptions)
-            : models.streamSimple(m, context, retryOptions),
+            : models.streamSimple(m, context, retryOptions), {
+              providerId: opts.provider.id,
+              nativeCost: opts.provider.modelConfig?.nativeCost,
+              onUsage: opts.onUsage,
+            }),
         {
           claim: (error, phase) => retry.claim(error, phase),
           headers: () => retry.headers,

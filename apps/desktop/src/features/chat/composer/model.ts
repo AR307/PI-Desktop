@@ -12,8 +12,9 @@ import {
   PERMISSION_MODES,
   sessionThinkingMenuLevels,
 } from "@pi-desktop/shared";
-import { sameComposerModelId } from "../../../lib/composer-models";
-import { providerThinkingLevels } from "../../../lib/session-thinking";
+import { sameComposerModelId } from "../../../lib/composer-models.ts";
+import type { ComposerPluginPart } from "../../../lib/composer-smart-stop";
+import { providerThinkingLevels } from "../../../lib/session-thinking.ts";
 
 export const COMPOSER_MIN_HEIGHT_PX = 28;
 export const COMPOSER_MAX_VISIBLE_ROWS = 7;
@@ -41,7 +42,7 @@ export const MODE_LABEL_KEYS: Record<Mode, string> = {
   goal: "settings.modeGoal",
 };
 
-export { PERMISSION_MODE_I18N_KEYS } from "../../../lib/permission-mode-labels";
+export { PERMISSION_MODE_I18N_KEYS } from "../../../lib/permission-mode-labels.ts";
 
 export const THINKING_LEVELS: readonly ThinkingLevel[] = [
   "off",
@@ -66,9 +67,10 @@ export type ComposerFileReference = {
   kind: "image" | "file";
   mimeType?: string;
   token?: string;
+  plugin?: ComposerPluginPart;
 };
 
-export type ComposerMenuView = "root" | "model" | "group" | "thinking";
+export type ComposerMenuView = "root" | "model" | "group";
 
 export type PromptEnhancementError = {
   message: string;
@@ -130,17 +132,37 @@ export function thinkingProviderForModel(
 ): ProviderPublic | null | undefined {
   if (!provider || !modelId) return provider;
   const model = modelCatalog?.find((candidate) => sameComposerModelId(candidate.modelId, modelId));
-  // The stored binding decides even without a live discovery entry. Rows that
-  // never publish a /models endpoint (MirrorCoding) have no catalog, and the
-  // provider-level flag reflects the row's default model — falling back to it
-  // locked the draft thinking menu for every other model in the group.
+
   const binding = provider.models.find((candidate) =>
-    sameComposerModelId(candidate.id, model?.modelId ?? modelId),
+    sameComposerModelId(candidate.id, modelId),
   );
-  if (!model && !binding) return provider;
   const configuredLevels = binding
     ? THINKING_LEVELS.filter((level) => binding.thinkingLevels.includes(level))
     : undefined;
+
+  if (provider.authKind === "mirrorcoding" && (!model || binding)) {
+    if (!binding) return provider;
+    const levels = configuredLevels ?? [];
+    return { ...provider, supportsReasoning: levels.some((level) => level !== "off"), supportedThinkingLevels: levels };
+  }
+
+  if (model?.catalogSource !== "pi" && model?.catalogSource !== "models.dev") {
+    // Discovery/user rows are not trusted capability matches.
+    // A binding override still takes precedence when present.
+    // An empty binding is the generic seed for an unknown model, not an
+    // explicit disable; `off` is the persisted opt-out for that case.
+    const unmatchedLevels = configuredLevels?.length ? configuredLevels : undefined;
+    const supportsReasoning = unmatchedLevels
+      ? unmatchedLevels.some((level) => level !== "off")
+      : true;
+    return {
+      ...provider,
+      supportsReasoning,
+      supportedThinkingLevels:
+        unmatchedLevels ?? [...THINKING_LEVELS],
+    };
+  }
+
   const supportsReasoning = configuredLevels
     ? configuredLevels.some((level) => level !== "off")
     : model

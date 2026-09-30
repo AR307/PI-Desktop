@@ -1,4 +1,4 @@
-//! The Host-owned turn queue (D375 / ADR 0213 / ADR 0260, schema v18).
+//! The Host-owned turn queue (D375 / ADR 0213 / ADR 0260, schema v20).
 //!
 //! Queued prompts used to live in renderer memory, so only the window that
 //! typed them knew they existed and a reload dropped them. The table lets the
@@ -13,6 +13,13 @@ use serde_json::Value;
 use uuid::Uuid;
 
 use crate::db::{ms_to_ts, now_ms, Database};
+
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct VoiceOrigin {
+    pub call_id: String,
+    pub operation_id: String,
+}
 
 /// Initial target from the RACP limits table (spec §12).
 pub const MAX_QUEUED_TURNS_PER_SESSION: i64 = 8;
@@ -29,6 +36,7 @@ pub struct QueuedTurnInput {
     pub content: String,
     pub session_message_id: Option<String>,
     pub user_message_id: Option<String>,
+    pub voice_origin: Option<VoiceOrigin>,
     pub attachments: Option<Value>,
     pub permission_mode: String,
 }
@@ -48,6 +56,8 @@ pub struct QueuedTurn {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub user_message_id: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub voice_origin: Option<VoiceOrigin>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub attachments: Option<Value>,
     pub permission_mode: String,
     pub position: i64,
@@ -61,6 +71,18 @@ pub struct QueuedTurn {
 
 fn row_to_entry(row: &rusqlite::Row<'_>) -> rusqlite::Result<QueuedTurn> {
     let attachments: Option<String> = row.get(6)?;
+    let voice_origin_json: Option<String> = row.get(13)?;
+    let voice_origin = voice_origin_json
+        .map(|value| {
+            serde_json::from_str(&value).map_err(|error| {
+                rusqlite::Error::FromSqlConversionFailure(
+                    13,
+                    rusqlite::types::Type::Text,
+                    Box::new(error),
+                )
+            })
+        })
+        .transpose()?;
     Ok(QueuedTurn {
         id: row.get(0)?,
         session_id: row.get(1)?,
@@ -69,19 +91,19 @@ fn row_to_entry(row: &rusqlite::Row<'_>) -> rusqlite::Result<QueuedTurn> {
         input_hash: row.get(4)?,
         content: row.get(5)?,
         session_message_id: row.get(10)?,
-        user_message_id: row.get(12)?,
         attachments: attachments.and_then(|text| serde_json::from_str(&text).ok()),
         permission_mode: row.get(7)?,
         position: row.get(8)?,
         priority: row.get(11)?,
+        user_message_id: row.get(12)?,
+        voice_origin,
         created_at: ms_to_ts(row.get::<_, i64>(9)?),
     })
 }
 
 const SELECT: &str = "SELECT id, session_id, principal, idempotency_key, input_hash, content,
         attachments_json, permission_mode, position, created_at, session_message_id, priority,
-        (SELECT json_extract(value_json, '$.userMessageId') FROM kv
-         WHERE ns = 'turnQueueMetadata' AND key = turn_queue.id)
+        user_message_id, voice_origin_json
  FROM turn_queue";
 
 /// Delivery order: promoted entries first in click order (ascending
@@ -92,6 +114,21 @@ const ORDER_BY: &str = "ORDER BY (priority IS NULL) ASC, priority ASC, position 
 /// the existing entry when the input hash matches and fails with
 /// `IDEMPOTENCY_CONFLICT` otherwise; a full queue fails with `QUEUE_FULL`.
 pub fn push(db: &Database, input: QueuedTurnInput) -> Result<QueuedTurn> {
+    if let Some(origin) = &input.voice_origin {
+        if origin.call_id.trim().is_empty()
+            || origin.call_id.len() > 128
+            || origin.operation_id.trim().is_empty()
+            || origin.operation_id.len() > 128
+            || input
+                .user_message_id
+                .as_deref()
+                .is_none_or(|message_id| message_id.trim().is_empty())
+        {
+            return Err(anyhow!(
+                "INVALID_ARGUMENT: invalid voice-origin queue metadata"
+            ));
+        }
+    }
     let conn = db.conn();
     let session_exists: bool = conn.query_row(
         "SELECT EXISTS(SELECT 1 FROM sessions WHERE id = ?1)",
@@ -136,12 +173,18 @@ pub fn push(db: &Database, input: QueuedTurnInput) -> Result<QueuedTurn> {
         .as_ref()
         .map(serde_json::to_string)
         .transpose()?;
+    let voice_origin_json = input
+        .voice_origin
+        .as_ref()
+        .map(serde_json::to_string)
+        .transpose()?;
     let created_at = now_ms();
     tx.execute(
         "INSERT INTO turn_queue (
             id, session_id, principal, idempotency_key, input_hash, content,
-            attachments_json, permission_mode, position, created_at, session_message_id
-         ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
+            attachments_json, permission_mode, position, created_at, session_message_id,
+            user_message_id, voice_origin_json
+         ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)",
         params![
             id,
             input.session_id,
@@ -153,20 +196,11 @@ pub fn push(db: &Database, input: QueuedTurnInput) -> Result<QueuedTurn> {
             input.permission_mode,
             max_position + 1,
             created_at,
-            input.session_message_id
+            input.session_message_id,
+            input.user_message_id,
+            voice_origin_json
         ],
     )?;
-    if let Some(message_id) = &input.user_message_id {
-        tx.execute(
-            "INSERT INTO kv (ns, key, value_json, updated_at)
-             VALUES ('turnQueueMetadata', ?1, ?2, ?3)",
-            params![
-                id,
-                serde_json::json!({ "userMessageId": message_id }).to_string(),
-                created_at
-            ],
-        )?;
-    }
     tx.commit()?;
     Ok(QueuedTurn {
         id,
@@ -177,6 +211,7 @@ pub fn push(db: &Database, input: QueuedTurnInput) -> Result<QueuedTurn> {
         content: input.content,
         session_message_id: input.session_message_id,
         user_message_id: input.user_message_id,
+        voice_origin: input.voice_origin,
         attachments: input.attachments,
         permission_mode: input.permission_mode,
         position: max_position + 1,
@@ -209,10 +244,6 @@ pub fn remove(db: &Database, id: &str) -> Result<bool> {
     let removed = tx
         .prepare_cached("DELETE FROM turn_queue WHERE id = ?1")?
         .execute(params![id])?;
-    tx.execute(
-        "DELETE FROM kv WHERE ns = 'turnQueueMetadata' AND key = ?1",
-        params![id],
-    )?;
     tx.commit()?;
     Ok(removed > 0)
 }
@@ -354,6 +385,7 @@ mod tests {
             content: content.to_string(),
             session_message_id: None,
             user_message_id: None,
+            voice_origin: None,
             attachments: None,
             permission_mode: "ask".into(),
         }
@@ -413,6 +445,133 @@ mod tests {
         }
         let full = push(&db, input(&session_id, "overflow", None)).unwrap_err();
         assert_eq!(full.to_string(), "QUEUE_FULL");
+    }
+
+    #[test]
+    fn voice_origin_and_user_message_identity_roundtrip_through_queue() {
+        let (_dir, db, session_id) = open_with_session();
+        let origin = VoiceOrigin {
+            call_id: "call-1".into(),
+            operation_id: "operation-1".into(),
+        };
+        let mut request = input(&session_id, "voice request", None);
+        request.user_message_id = Some("message-1".into());
+        request.voice_origin = Some(origin.clone());
+
+        let inserted = push(&db, request).unwrap();
+        assert_eq!(inserted.user_message_id.as_deref(), Some("message-1"));
+        assert_eq!(inserted.voice_origin, Some(origin.clone()));
+
+        let restored = list(&db, Some(&session_id)).unwrap();
+        assert_eq!(restored[0].user_message_id.as_deref(), Some("message-1"));
+        assert_eq!(restored[0].voice_origin, Some(origin));
+    }
+
+    #[test]
+    fn voice_origin_survives_database_reopen_without_replaying_or_reordering_entries() {
+        let (dir, db, session_id) = open_with_session();
+        let legacy = push(&db, input(&session_id, "legacy text request", None)).unwrap();
+        let origin = VoiceOrigin {
+            call_id: "closed-live-call".into(),
+            operation_id: "accepted-operation".into(),
+        };
+        let mut request = input(&session_id, "accepted voice request", Some("voice-request"));
+        request.id = Some("voice-queue-entry".into());
+        request.user_message_id = Some("voice-user-message".into());
+        request.session_message_id = Some("session-message".into());
+        request.voice_origin = Some(origin.clone());
+        let voice = push(&db, request.clone()).unwrap();
+        let voice = prioritize(&db, &voice.id).unwrap().unwrap();
+        drop(db);
+
+        let reopened = Database::open_in_dir(dir.path()).unwrap();
+        let restored = list(&reopened, Some(&session_id)).unwrap();
+        assert_eq!(restored, vec![voice.clone(), legacy]);
+        assert_eq!(restored[0].voice_origin, Some(origin));
+        assert_eq!(
+            restored[0].user_message_id.as_deref(),
+            Some("voice-user-message")
+        );
+        assert_eq!(
+            restored[0].session_message_id.as_deref(),
+            Some("session-message")
+        );
+        assert_eq!(restored[0].permission_mode, "ask");
+        assert!(restored[1].voice_origin.is_none());
+        assert!(restored[1].user_message_id.is_none());
+        assert_eq!(push(&reopened, request).unwrap(), voice);
+        assert_eq!(list(&reopened, None).unwrap(), restored);
+        drop(reopened);
+
+        let reopened_again = Database::open_in_dir(dir.path()).unwrap();
+        assert_eq!(list(&reopened_again, Some(&session_id)).unwrap(), restored);
+    }
+
+    #[test]
+    fn malformed_voice_origin_is_reported_instead_of_dropped() {
+        let (_dir, db, session_id) = open_with_session();
+        let origin = VoiceOrigin {
+            call_id: "call-1".into(),
+            operation_id: "operation-1".into(),
+        };
+        let mut request = input(&session_id, "voice request", None);
+        request.user_message_id = Some("message-1".into());
+        request.voice_origin = Some(origin);
+        let queued = push(&db, request).unwrap();
+        db.conn()
+            .execute(
+                "UPDATE turn_queue SET voice_origin_json = '{invalid' WHERE id = ?1",
+                [&queued.id],
+            )
+            .unwrap();
+
+        assert!(list(&db, Some(&session_id)).is_err());
+    }
+
+    #[test]
+    fn v19_queue_upgrade_preserves_existing_entries() {
+        for mobile_message_id in [None, Some("mobile-message-before-upgrade")] {
+            let dir = tempfile::tempdir().unwrap();
+            let path = dir.path().join("pi.sqlite");
+            let session_id;
+            let entry_id;
+            {
+                let db = Database::open(&path).unwrap();
+                let session = sessions::create_session(
+                    &db,
+                    Some("Queue".into()),
+                    Some("agent".into()),
+                    None,
+                    None,
+                    None,
+                )
+                .unwrap();
+                session_id = session.id;
+                entry_id = push(&db, input(&session_id, "existing", None)).unwrap().id;
+                if let Some(message_id) = mobile_message_id {
+                    db.conn().execute(
+                    "INSERT INTO kv (ns, key, value_json, updated_at) VALUES ('turnQueueMetadata', ?1, ?2, '2026-09-30')",
+                    params![entry_id, serde_json::json!({ "userMessageId": message_id }).to_string()],
+                ).unwrap();
+                }
+                db.conn()
+                    .execute_batch(
+                        "ALTER TABLE turn_queue DROP COLUMN voice_origin_json;
+                     ALTER TABLE turn_queue DROP COLUMN user_message_id;
+                     PRAGMA user_version = 19;",
+                    )
+                    .unwrap();
+            }
+
+            let db = Database::open(&path).unwrap();
+            let entries = list(&db, Some(&session_id)).unwrap();
+            assert_eq!(entries.len(), 1);
+            assert_eq!(entries[0].id, entry_id);
+            assert_eq!(entries[0].content, "existing");
+            assert_eq!(entries[0].user_message_id.as_deref(), mobile_message_id);
+            assert!(entries[0].voice_origin.is_none());
+            assert_eq!(crate::db::SCHEMA_VERSION, 21);
+        }
     }
 
     #[test]

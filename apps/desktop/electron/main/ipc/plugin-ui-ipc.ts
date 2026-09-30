@@ -180,16 +180,13 @@ export function registerPluginUiIpc({
       viewId?: string;
       sessionId?: string;
       location?: string;
+      tabId?: string;
     }) => {
       const pluginId = String(payload?.pluginId ?? "");
       const viewId = String(payload?.viewId ?? "");
       const sessionId = String(payload?.sessionId ?? "").trim();
       const location = String(payload?.location ?? "").trim();
       const isBrowserView = pluginId === BROWSER_PLUGIN_ID && viewId === BROWSER_VIEW_ID;
-      if (isBrowserView && sessionId) browserHost.setChromeSession(sessionId);
-      if (isBrowserView && sessionId && location) {
-        browserHost.rememberLocation(sessionId, location);
-      }
       const loaded = plugins.getLoaded(pluginId);
       if (!loaded) throw new Error("plugin not loaded");
       if (!loaded.permissions.has("ui.view")) {
@@ -204,6 +201,9 @@ export function registerPluginUiIpc({
       if (!view) throw new Error("plugin has no such view");
       const htmlPath = join(loaded.path, view.entry);
       if (!existsSync(htmlPath)) throw new Error("view entry missing");
+      if (isBrowserView && sessionId) {
+        browserHost.setChromeSession(sessionId, typeof payload.tabId === "string" ? payload.tabId : undefined, location);
+      }
       pluginViews.open({
         pluginId,
         viewId,
@@ -211,24 +211,24 @@ export function registerPluginUiIpc({
         theme: getPluginPanelTheme(),
         htmlPath,
         netDomains: loaded.manifest.net?.domains?.map((domain) => String(domain)),
+        netAnyHost: loaded.permissions.has("net.anyHost"),
         // The browser view owns an address bar and its own history, so its
         // location keeps going through `browserHost`; every other contributed
         // view receives the opener's subject untouched (D320 follow-up).
         ...(isBrowserView || !location ? {} : { location }),
       });
-      if (isBrowserView && location) {
-        void browserHost.navigate(
-          { path: location, url: location },
-          sessionId || undefined,
-        );
-      }
       return { ok: true };
     },
   );
 
   handle(
     IPC.invoke.pluginViewClose,
-    async (payload: { pluginId?: string; viewId?: string }) => {
+    async (payload: { pluginId?: string; viewId?: string; sessionId?: string; tabId?: string }) => {
+      if (payload.pluginId === BROWSER_PLUGIN_ID && payload.viewId === BROWSER_VIEW_ID && typeof payload.sessionId === "string") {
+        if (typeof payload.tabId === "string") browserHost.closeTab(payload.sessionId, payload.tabId);
+        else browserHost.closeSession(payload.sessionId);
+        return { ok: true };
+      }
       pluginViews.close(String(payload?.pluginId ?? ""), String(payload?.viewId ?? ""));
       return { ok: true };
     },

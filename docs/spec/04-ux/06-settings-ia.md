@@ -70,6 +70,11 @@ Settings is a **full-window page** that replaces the app sidebar + main chrome (
   lines are rendered. These are visual landmarks only, not a second navigation
   level.
   When search filters the directory, empty clusters and their headings disappear.
+- **Voice** is an Experimental Preferences destination between AI and
+  Shortcuts, present only in development builds while developer mode is on.
+  Its existing build/developer gate applies to the rail, page, search hits,
+  and idle Composer entry; this interaction redesign does not widen access.
+  It is the only place to enable Live Voice. See the Voice section below.
 - **Cloud sync / 云同步** is a developer-only, Experimental destination: its
   rail row, page, and settings-search hits exist only while
   `AppSettings.developerMode` is `true`. With developer mode off the row is
@@ -293,6 +298,32 @@ history stays host-owned (`session.endTurn.usage`, `stats.getTokenUsageHistory`)
 The user-facing dashboard is marketplace plugin `pi.token-insights`, opened from
 the command palette (`usage`, `tokens`, `用量`). Settings search does not index
 a usage tab.
+
+### Voice (experimental)
+
+- This development-build and developer-mode gated destination owns Live Voice
+  enablement and provider bindings. Disabled Live Voice has no Composer voice
+  or work icon; enabling it reveals one preparation entry, never auto-starts a
+  call, and never grants work access.
+- Bind an existing compatible provider account, choose the exact next-call
+  binding, and configure its model, voice, and explicit Realtime profile where
+  applicable. Readiness describes that selected binding, not whether any other
+  configured provider is ready. Credentials remain in the existing Host/Main
+  systems and are not shown or copied into the renderer.
+- Provider-binding edits remain locked while that binding is active. Turning
+  Live Voice off ends the call, but the global compact call bar remains visible
+  through Main termination and renderer media cleanup, including while Settings
+  replaces the chat shell. An unconfirmed release keeps its error visible and
+  suppresses another Start until the app is restarted.
+- Work authorization belongs to an explicit opt-in and target in next-call
+  preparation, not to the Settings enable switch. Context sharing is a separate
+  unchecked, transient next-call choice. Settings copy distinguishes the
+  default voice-only call from explicitly authorized work requests.
+- Legacy Dictation and Host Speech settings remain hidden and their stored
+  values retain their meaning. No new persisted preference, IPC, provider
+  fallback, or permission rule is introduced. See
+  [Live Voice](../03-runtime/live-voice.md) and
+  [Live Work](../03-runtime/live-work-session.md).
 
 ### Shortcuts (`shortcuts` tab)
 - **Keyboard shortcuts** card:
@@ -779,7 +810,9 @@ system while preserving their different data ownership:
    Shortcuts / 快捷键, Instructions / 指令, Models / 模型, Skills / 技能, MCP,
    Subagents / 子智能体, Import / 导入, Projects / 项目, Cloud sync / 云同步,
    Remote Hosts / 远程主机, and Info / 信息 in that order. Cloud sync / 云同步
-   and Remote Hosts / 远程主机 appear only while developer mode is on. The rows are grouped under Preferences / 偏好,
+   and Remote Hosts / 远程主机 appear only while developer mode is on. Voice
+   appears between AI and Shortcuts only in development builds with developer
+   mode on. The rows are grouped under Preferences / 偏好,
    Agent / 智能体, Workspace / 工作区, and System / 系统. There is no
    Usage / 用量 destination.
 3. Appearance is part of General and has no standalone rail destination

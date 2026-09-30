@@ -26,6 +26,7 @@ import {
   type ModelInfo,
   type SessionThinkingLevel,
   type ThinkingLevel,
+  type ThinkingProtocol,
 } from "@pi-desktop/shared";
 import {
   CONTEXT_WINDOW_PRESETS,
@@ -786,6 +787,7 @@ export function ModelSelectionPanes({
                                 onClick={() =>
                                   updateBinding(binding.id, {
                                     maxTokens: preset.tokens,
+                                    maxTokensSource: "user",
                                   })
                                 }
                               >
@@ -802,6 +804,7 @@ export function ModelSelectionPanes({
                           onChange={(event) =>
                             updateBinding(binding.id, {
                               maxTokens: Number(event.target.value) || 0,
+                              maxTokensSource: "user",
                             })
                           }
                         />
@@ -817,34 +820,63 @@ export function ModelSelectionPanes({
                             <HelpIcon label={t("settings.thinkingManualOverrideHint")} />
                           ) : null}
                         </span>
-                        {bindingDefaultThinkingMenuLevels(enabledLevels).length > 1 ? (
-                          <div className="provider-chosen-thinking-default">
+                        <div className="provider-chosen-thinking-controls">
+                          <div className="provider-chosen-thinking-protocol">
                             <span className="provider-chosen-thinking-label">
-                              {t("settings.defaultThinkingLevel")}
+                              {t("settings.thinkingProtocol")}
                             </span>
                             <SettingsMenuSelect
                               className="provider-chosen-thinking-select"
-                              label={t("settings.defaultThinkingLevel")}
+                              label={t("settings.thinkingProtocol")}
                               value={
-                                resolveBindingDefaultThinkingLevel(
-                                  binding.defaultThinkingLevel,
-                                  enabledLevels,
-                                ) ?? ""
+                                binding.thinkingProtocol ?? info?.thinkingProtocol ?? "legacy"
                               }
                               onChange={(id) =>
                                 updateBinding(binding.id, {
-                                  defaultThinkingLevel: id as SessionThinkingLevel,
+                                  thinkingProtocol: id as ThinkingProtocol,
                                 })
                               }
-                              options={bindingDefaultThinkingMenuLevels(enabledLevels).map(
-                                (level) => ({
-                                  id: level,
-                                  label: level,
-                                }),
-                              )}
+                              options={[
+                                {
+                                  id: "legacy",
+                                  label: t("settings.thinkingProtocolLegacy"),
+                                },
+                                {
+                                  id: "adaptive",
+                                  label: t("settings.thinkingProtocolAdaptive"),
+                                },
+                              ]}
                             />
                           </div>
-                        ) : null}
+                          {bindingDefaultThinkingMenuLevels(enabledLevels).length > 1 ? (
+                            <div className="provider-chosen-thinking-default">
+                              <span className="provider-chosen-thinking-label">
+                                {t("settings.defaultThinkingLevel")}
+                              </span>
+                              <SettingsMenuSelect
+                                className="provider-chosen-thinking-select"
+                                label={t("settings.defaultThinkingLevel")}
+                                value={
+                                  resolveBindingDefaultThinkingLevel(
+                                    binding.defaultThinkingLevel,
+                                    enabledLevels,
+                                  ) ?? ""
+                                }
+                                onChange={(id) =>
+                                  updateBinding(binding.id, {
+                                    defaultThinkingLevel: id as SessionThinkingLevel,
+                                  })
+                                }
+                                options={bindingDefaultThinkingMenuLevels(enabledLevels).map(
+                                  (level) => ({
+                                    id: level,
+                                    label: level,
+                                  }),
+                                )}
+                              />
+                            </div>
+                          ) : null}
+                        </div>
                       </div>
                       <div
                         className="provider-chosen-thinking-chips"
@@ -1028,17 +1060,15 @@ type CapabilityToggleProps = {
   published: boolean;
   /** Stored override: `true`/`false` explicit, `null`/undefined follows. */
   value: boolean | null | undefined;
-  onChange: (next: boolean | null) => void;
+  onChange: (next: boolean) => void;
 };
 
 /**
  * One attachment capability as a plain checkbox showing the effective answer.
  *
- * The three stored states stay, but they need no third control: ticking the box
- * back to what models.dev publishes stores "follow the catalog" rather than an
- * equal-valued override, so agreeing with the catalog is the reset. That keeps a
- * later catalog correction flowing through without asking the user to
- * understand the distinction.
+ * An untouched checkbox follows the catalog. Once the user changes it, the
+ * selected boolean is explicit and stays pinned even if it currently agrees
+ * with models.dev; catalog refreshes must not undo a deliberate choice.
  */
 function CapabilityToggle({ label, published, value, onChange }: CapabilityToggleProps) {
   const effective = typeof value === "boolean" ? value : published;
@@ -1047,9 +1077,7 @@ function CapabilityToggle({ label, published, value, onChange }: CapabilityToggl
       <input
         type="checkbox"
         checked={effective}
-        onChange={(event) =>
-          onChange(event.target.checked === published ? null : event.target.checked)
-        }
+        onChange={(event) => onChange(event.target.checked)}
       />
       <span>{label}</span>
     </label>

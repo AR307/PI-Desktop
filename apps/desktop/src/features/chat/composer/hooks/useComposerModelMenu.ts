@@ -1,5 +1,4 @@
 import { useTranslation } from "react-i18next";
-import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
 import type {
   Mode,
   ProviderPublic,
@@ -7,11 +6,12 @@ import type {
 } from "@pi-desktop/shared";
 import {
   mirrorCodingFastAvailable,
-  initialThinkingLevelForBinding,
   imageGenerationBindings,
+  initialThinkingLevelForBinding,
+  initialThinkingLevelForUnmatchedModel,
   isImageGenerationModel,
 } from "@pi-desktop/shared";
-import { useAppStore } from "../../../../stores/app-store";
+import { type KeyboardEvent, useEffect, useMemo, useRef, useState } from "react";
 import {
   composerModelBinding,
   composerModelMatchesQuery,
@@ -23,11 +23,12 @@ import {
   providerSearchText,
 } from "../../../../lib/provider-display";
 import { providerThinkingLevels } from "../../../../lib/session-thinking";
+import { useAppStore } from "../../../../stores/app-store";
 import {
+  type ComposerMenuView,
   sessionThinkingMenuLevels,
   thinkingLevelForProvider,
   thinkingProviderForModel,
-  type ComposerMenuView,
   type ComposerTask,
 } from "../model";
 import { createLatestCommitQueue } from "../thinking-commit-queue";
@@ -80,10 +81,8 @@ export function useComposerModelMenu({
   const [view, setView] = useState<ComposerMenuView>("root");
   const [query, setQuery] = useState("");
   const [modelHighlight, setModelHighlight] = useState(-1);
-  const [thinkingHighlight, setThinkingHighlight] = useState(-1);
   const [pendingMirrorModel, setPendingMirrorModel] = useState<string>();
   const groupListRef = useRef<HTMLDivElement>(null);
-  const thinkingListRef = useRef<HTMLDivElement>(null);
   const rootMenuRef = useRef<HTMLDivElement>(null);
   const modelSearchRef = useRef<HTMLInputElement>(null);
   const modelListRef = useRef<HTMLDivElement>(null);
@@ -271,7 +270,6 @@ export function useComposerModelMenu({
     requestAnimationFrame(() => {
       if (view === "root") rootMenuRef.current?.querySelector<HTMLButtonElement>(".composer-menu-entry")?.focus();
       if (view === "model") modelSearchRef.current?.focus();
-      if (view === "thinking") thinkingListRef.current?.querySelector<HTMLButtonElement>("button")?.focus();
       if (view === "group") groupListRef.current?.querySelector<HTMLButtonElement>("button")?.focus();
       if (view === "model" && modelHighlight >= 0) {
         modelListRef.current
@@ -291,7 +289,6 @@ export function useComposerModelMenu({
   const showView = (nextView: ComposerMenuView) => {
     setView(nextView);
     setModelHighlight(-1);
-    setThinkingHighlight(-1);
     if (nextView !== "group") setPendingMirrorModel(undefined);
     if (nextView !== "model") setQuery("");
   };
@@ -318,7 +315,6 @@ export function useComposerModelMenu({
         setQuery("");
         setView("root");
         setModelHighlight(-1);
-        setThinkingHighlight(-1);
         return;
       }
       const nextModelProvider = thinkingProviderForModel(
@@ -329,12 +325,24 @@ export function useComposerModelMenu({
       const nextBinding = candidate.models.find((entry) =>
         sameComposerModelId(entry.id, nextModelId),
       );
-      const nextThinkingLevel = activeSessionId
+      const nextModel = providerModels[candidate.id]?.find((entry) =>
+        sameComposerModelId(entry.modelId, nextModelId),
+      );
+      const selectedSameModel =
+        activeSessionId &&
+        candidate.id === provider?.id &&
+        sameComposerModelId(modelId ?? "", nextModelId);
+      const nextThinkingLevel = selectedSameModel
         ? thinkingLevelForProvider(nextModelProvider, thinkingLevel)
-        : initialThinkingLevelForBinding(
-            nextBinding,
-            nextModelProvider?.supportedThinkingLevels,
-          );
+        : ((nextModel?.catalogSource === "pi" || nextModel?.catalogSource === "models.dev")
+          ? initialThinkingLevelForBinding(
+              nextBinding,
+              nextModelProvider?.supportedThinkingLevels,
+            )
+          : initialThinkingLevelForUnmatchedModel(
+              nextBinding,
+              nextModelProvider?.supportedThinkingLevels,
+            ));
       const selectionChanged = candidate.id !== provider?.id || nextModelId !== modelId;
       const nextFastAvailable = mirrorCodingFastAvailable(candidate.mirrorCoding, nextModelId, nextBinding?.mirrorCodingGroupId);
       await configureActiveSession({
@@ -367,13 +375,6 @@ export function useComposerModelMenu({
     return queue.commit(level);
   };
 
-  const selectThinkingLevel = async (level: SessionThinkingLevel) => {
-    if (!(await commitThinkingLevel(level))) return;
-    setView("root");
-    setModelHighlight(-1);
-    setThinkingHighlight(-1);
-  };
-
   const onMenuKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
     if (event.nativeEvent.isComposing || event.nativeEvent.keyCode === 229) return;
     if (event.key === "Escape") {
@@ -394,13 +395,6 @@ export function useComposerModelMenu({
           void selectModel(entry.provider, entry.model.modelId);
         }
       }
-      if (event.key === "Enter" && view === "thinking") {
-        const level = thinkingMenuLevels[thinkingHighlight] ?? thinkingMenuLevels[0];
-        if (level) {
-          event.preventDefault();
-          void selectThinkingLevel(level);
-        }
-      }
       return;
     }
     if (view === "root") return;
@@ -414,13 +408,6 @@ export function useComposerModelMenu({
       });
       return;
     }
-    if (view === "group") return;
-    if (!thinkingMenuLevels.length) return;
-    const delta = event.key === "ArrowDown" ? 1 : -1;
-    setThinkingHighlight((current) => {
-      const base = current < 0 ? (delta > 0 ? -1 : thinkingMenuLevels.length) : current;
-      return (base + delta + thinkingMenuLevels.length) % thinkingMenuLevels.length;
-    });
   };
 
   const toggleFast = async () => {
@@ -446,19 +433,15 @@ export function useComposerModelMenu({
     setQuery,
     modelHighlight,
     setModelHighlight,
-    thinkingHighlight,
-    setThinkingHighlight,
     rootMenuRef,
     modelSearchRef,
     modelListRef,
-    thinkingListRef,
     modelGroups: filteredModelGroups,
     flatModels,
     thinkingMenuLevels,
     showView,
     selectModel,
     commitThinkingLevel,
-    selectThinkingLevel,
     onMenuKeyDown,
     controlsBlocked,
   };

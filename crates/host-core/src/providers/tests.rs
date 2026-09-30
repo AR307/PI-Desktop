@@ -61,6 +61,8 @@ fn mirrorcoding_sync_persists_group_and_model_bindings() {
                     context_window_source: Some("catalog".into()),
                     context_window: 128_000,
                     max_tokens: 8_192,
+                    max_tokens_source: Some("catalog".into()),
+                    thinking_protocol: None,
                     thinking_levels: vec!["off".into(), "medium".into()],
                     default_thinking_level: Some("medium".into()),
                     supports_images: None,
@@ -353,10 +355,12 @@ fn model_bindings_roundtrip_and_legacy_model_migrates_on_read() {
                     id: "reasoning-model".into(),
                     alias: Some("pro".into()),
                     context_window_source: None,
+                    max_tokens_source: None,
                     context_window: 256_000,
                     max_tokens: 16_000,
                     thinking_levels: vec!["high".into(), "medium".into()],
                     default_thinking_level: Some("medium".into()),
+                    thinking_protocol: Some("adaptive".into()),
                     supports_images: Some(true),
                     supports_documents: None,
                     available_for_subagents: Some(true),
@@ -369,10 +373,12 @@ fn model_bindings_roundtrip_and_legacy_model_migrates_on_read() {
                     id: "plain-model".into(),
                     alias: None,
                     context_window_source: None,
+                    max_tokens_source: None,
                     context_window: 128_000,
                     max_tokens: 8_192,
                     thinking_levels: vec![],
                     default_thinking_level: None,
+                    thinking_protocol: None,
                     supports_images: None,
                     supports_documents: Some(false),
                     available_for_subagents: None,
@@ -479,10 +485,12 @@ fn binding_with_alias(id: &str, alias: Option<&str>) -> ModelBinding {
         id: id.into(),
         alias: alias.map(str::to_string),
         context_window_source: None,
+        max_tokens_source: None,
         context_window: DEFAULT_CONTEXT_WINDOW,
         max_tokens: DEFAULT_MAX_TOKENS,
         thinking_levels: Vec::new(),
         default_thinking_level: None,
+        thinking_protocol: None,
         supports_images: None,
         supports_documents: None,
         available_for_subagents: None,
@@ -505,6 +513,22 @@ fn normalize_model_bindings_trims_aliases_and_drops_blank_ones() {
     assert_eq!(normalized[1].alias, None);
     assert_eq!(normalized[2].alias, None);
     assert_eq!(normalized[3].alias, None);
+}
+
+#[test]
+fn normalize_model_bindings_preserves_known_thinking_protocols_only() {
+    let normalized = normalize_model_bindings(&[
+        ModelBinding {
+            thinking_protocol: Some("adaptive".into()),
+            ..binding_with_alias("adaptive-model", None)
+        },
+        ModelBinding {
+            thinking_protocol: Some("unsupported".into()),
+            ..binding_with_alias("legacy-model", None)
+        },
+    ]);
+    assert_eq!(normalized[0].thinking_protocol.as_deref(), Some("adaptive"));
+    assert_eq!(normalized[1].thinking_protocol, None);
 }
 
 #[test]
@@ -1378,10 +1402,12 @@ fn binding_with_limits(id: &str, context_window: u32, max_tokens: u32) -> ModelB
         id: id.into(),
         alias: None,
         context_window_source: None,
+        max_tokens_source: None,
         context_window,
         max_tokens,
         thinking_levels: Vec::new(),
         default_thinking_level: None,
+        thinking_protocol: None,
         supports_images: None,
         supports_documents: None,
         available_for_subagents: None,

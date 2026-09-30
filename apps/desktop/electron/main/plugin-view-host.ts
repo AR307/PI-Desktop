@@ -10,6 +10,10 @@ import {
   viewEntryUrl,
 } from "./plugin-view-location";
 import {
+  scaleBoundsToDip,
+  type PluginViewBounds,
+} from "./plugin-view-bounds";
+import {
   applyPluginEgressPolicy,
   pluginSessionPartition,
   type PluginPanelBlockedRequest,
@@ -55,6 +59,8 @@ export type PluginViewOpenRequest = {
   htmlPath: string;
   /** Egress allowlist from `manifest.net.domains`. */
   netDomains?: readonly string[];
+  /** The install-time `net.anyHost` grant, passed through to the egress policy. */
+  netAnyHost?: boolean;
   /**
    * What this view should show, when the opener knows (D320 follow-up).
    *
@@ -70,12 +76,7 @@ export type PluginViewOpenRequest = {
   location?: string;
 };
 
-export type PluginViewBounds = {
-  x: number;
-  y: number;
-  width: number;
-  height: number;
-};
+export type { PluginViewBounds };
 
 type LiveView = {
   key: string;
@@ -105,6 +106,8 @@ export class PluginViewHost {
   /** The one view currently attached to the window, if any. */
   private visibleKey: string | null = null;
   private bounds: PluginViewBounds = { x: 0, y: 0, width: 0, height: 0 };
+  /** Last CSS-pixel rect from the renderer, so zoom changes can rescale. */
+  private lastCssBounds: PluginViewBounds | null = null;
   private clock = 0;
   private onBlockedRequest?: PluginPanelBlockedRequest;
   /**
@@ -153,7 +156,41 @@ export class PluginViewHost {
   setWindow(window: BrowserWindow | null): void {
     if (this.window === window) return;
     this.detachVisible();
+    this.unbindZoom();
     this.window = window;
+    this.bindZoom();
+  }
+
+  private zoomListener: (() => void) | null = null;
+
+  private bindZoom(): void {
+    const contents = this.window && !this.window.isDestroyed() ? this.window.webContents : null;
+    if (!contents || contents.isDestroyed()) return;
+    const onChange = () => {
+      if (this.lastCssBounds) {
+        this.bounds = scaleBoundsToDip(this.lastCssBounds, this.currentZoomFactor());
+      }
+      const visible = this.visibleKey ? this.views.get(this.visibleKey) : null;
+      visible?.view.setBounds(this.bounds);
+      this.emitSurface();
+    };
+    try {
+      contents.on("zoom-changed", onChange);
+    } catch {
+      // Older Electron may not emit zoom-changed; resize remeasures.
+    }
+    this.zoomListener = () => {
+      try {
+        contents.removeListener("zoom-changed", onChange);
+      } catch {
+        // contents already destroyed
+      }
+    };
+  }
+
+  private unbindZoom(): void {
+    this.zoomListener?.();
+    this.zoomListener = null;
   }
 
   /** Whether a live web contents exists for this view. */
@@ -247,15 +284,24 @@ export class PluginViewHost {
   }
 
   setBounds(bounds: PluginViewBounds): void {
-    this.bounds = {
-      x: Math.max(0, Math.round(Number(bounds.x) || 0)),
-      y: Math.max(0, Math.round(Number(bounds.y) || 0)),
-      width: Math.max(0, Math.round(Number(bounds.width) || 0)),
-      height: Math.max(0, Math.round(Number(bounds.height) || 0)),
+    // Renderer measures CSS pixels; WebContentsView.setBounds wants DIPs.
+    this.lastCssBounds = {
+      x: Number(bounds.x) || 0,
+      y: Number(bounds.y) || 0,
+      width: Number(bounds.width) || 0,
+      height: Number(bounds.height) || 0,
     };
+    this.bounds = scaleBoundsToDip(this.lastCssBounds, this.currentZoomFactor());
     const visible = this.visibleKey ? this.views.get(this.visibleKey) : null;
     visible?.view.setBounds(this.bounds);
     this.emitSurface();
+  }
+
+  private currentZoomFactor(): number {
+    const contents = this.window && !this.window.isDestroyed() ? this.window.webContents : null;
+    if (!contents || contents.isDestroyed()) return 1;
+    const zoom = Number(contents.getZoomFactor());
+    return Number.isFinite(zoom) && zoom > 0 ? zoom : 1;
   }
 
   /**
@@ -370,6 +416,7 @@ export class PluginViewHost {
     applyPluginEgressPolicy(ses, {
       pluginId: request.pluginId,
       netDomains: request.netDomains,
+      netAnyHost: request.netAnyHost,
       onBlockedRequest: this.onBlockedRequest,
     });
 

@@ -6,7 +6,6 @@ import {
   imageGenerationBindings,
   isImageGenerationModel,
   normalizeMode,
-  resolveBindingLimits,
   trustedExtensionAgentKeyFromProviderId,
   type CommandShellCatalog,
   type McpServerRecord,
@@ -36,13 +35,13 @@ import {
   catalogModelConfigFor,
   type ModelsDevCatalog,
 } from "../models-dev-catalog";
-import type { HostProcess } from "../host-process";
 import type { Logger } from "../logger";
 import type { PluginRuntime } from "../plugin-runtime";
 import type { UserMcpRuntime } from "../user-mcp";
 import { mirrorCodingChatAvailable } from "@pi-desktop/shared";
 import type { RuntimeState } from "./context";
 import type { RuntimeProvider } from "./provider-catalog";
+import type { LoadedSkillDocument } from "../skill-document";
 
 const ErrorCodes = {
   ...SharedErrorCodes,
@@ -71,7 +70,7 @@ export type SessionLaunchRuntimeDependencies = {
     modelId: string,
   ) => ModelBinding | undefined;
   effectiveSubagentModelConfig: (
-    provider: Pick<RuntimeProvider, "models">,
+    provider: RuntimeProvider,
     modelId: string,
     catalogModelConfig: Parameters<typeof modelConfigWithBinding>[0],
   ) => {
@@ -228,7 +227,7 @@ export function createSessionLaunchRuntime({
   async function loadUserSkillBody(
     id: string,
     projectPath: string | null,
-  ): Promise<{ id: string; name: string; body: string } | null> {
+  ): Promise<LoadedSkillDocument | null> {
     if (!runtimeState.host || id.includes("/")) return null;
     const result = await runtimeState.host!.call<{
       skill: UserSkillRecord | null;
@@ -239,7 +238,7 @@ export function createSessionLaunchRuntime({
     if (!isActiveInProject(skill, projectPath)) {
       throw new Error(`skill "${id}" is not enabled for this project`);
     }
-    return { id: skill.id, name: skill.name, body: result.body };
+    return { id: skill.id, name: skill.name, body: result.body, location: skill.path };
   }
 
   async function resolveEffectiveCommandShell(): Promise<CommandShellCatalog> {
@@ -278,6 +277,7 @@ export function createSessionLaunchRuntime({
       "providers.list",
       { includeDisabled: true },
     );
+    for (const row of providers.providers) modelsDevCatalog.configureAccount(row);
     const requestedProviderId = overrides.providerId ?? session.providerId;
     const savedProvider = providers.providers.find((item) => item.id === requestedProviderId);
     if (savedProvider?.authKind === "mirrorcoding" && !savedProvider.enabled) throw new Error("model_or_group_unavailable");
@@ -293,7 +293,9 @@ export function createSessionLaunchRuntime({
           authKind: "none",
           extensionAgentKey,
         }
-      : providers.providers.find((item) => item.id === requestedProviderId) ||
+      : requestedProviderId
+        ? providers.providers.find((item) => item.id === requestedProviderId && item.enabled !== false)!
+        :
         providers.providers.find((item) => item.id === settings.defaultProviderId) ||
         providers.providers.find(
           (item) => item.hasSecret || item.hasOauth || item.authKind === "none" || item.authKind === "mirrorcoding",
@@ -304,6 +306,7 @@ export function createSessionLaunchRuntime({
         errorCode: ErrorCodes.MODEL_NOT_CONFIGURED,
       });
     }
+    modelsDevCatalog.configureAccount(provider);
     // Plugin-owned agents resolve credentials and transport inside the trusted
     // extension; the host never reads or injects a secret for them.
     const isExtensionAgent = Boolean(extensionAgentKey);
@@ -374,16 +377,13 @@ export function createSessionLaunchRuntime({
     const baseUrl = mirrorCodingBinding?.baseUrl ?? vendorBinding?.baseUrl ?? provider.baseUrl;
     const catalogModelConfig = mirrorCodingBinding?.modelConfig ?? vendorBinding?.modelConfig ??
       catalogModelConfigFor(modelsDevCatalog, {
+        providerId: provider.id,
         vendorKey: provider.vendorKey,
         baseUrl,
         apiStyle,
         modelId,
       });
-    const resolvedLimits = resolveBindingLimits(catalogModelConfig, storedModel);
-    const modelConfig = modelConfigWithBinding(
-      resolvedLimits.catalogConfig,
-      resolvedLimits.binding,
-    );
+    const modelConfig = catalogModelConfig;
     const thinkingCapabilities = capabilitiesFromModelConfig(modelConfig);
     const thinkingLevel = clampThinkingLevel(
       thinkingCapabilities,
@@ -507,6 +507,7 @@ export function createSessionLaunchRuntime({
         vendorOAuth.bindingFor(pinned.id, pinnedModelId),
       resolveModel: async (pinned, pinnedModelId) => {
         const catalogModelConfig = catalogModelConfigFor(modelsDevCatalog, {
+          providerId: pinned.id,
           vendorKey: pinned.vendorKey,
           baseUrl: pinned.baseUrl,
           apiStyle: pinned.apiStyle,
@@ -598,13 +599,15 @@ export function createSessionLaunchRuntime({
           if (!vb) continue;
           catalogModelConfig =
             vb.modelConfig ?? catalogModelConfigFor(modelsDevCatalog, {
-              vendorKey: row.vendorKey,
+              providerId: row.id,
+            vendorKey: row.vendorKey,
               baseUrl: vb.baseUrl ?? row.baseUrl,
               apiStyle: vb.apiStyle ?? row.apiStyle,
               modelId: binding.id,
             });
         } else {
           catalogModelConfig = catalogModelConfigFor(modelsDevCatalog, {
+            providerId: row.id,
             vendorKey: row.vendorKey,
             baseUrl: row.baseUrl,
             apiStyle: row.apiStyle,

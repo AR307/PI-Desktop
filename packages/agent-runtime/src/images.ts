@@ -1,4 +1,4 @@
-import { createImagesModels, createImagesProvider, type ImagesModel, type ImagesOutputContent } from "@earendil-works/pi-ai";
+import { createModels, createProvider, type ImageModel, type ImagesOutputContent } from "@earendil-works/pi-ai";
 import { validateImageOptions, type ImageGenerationOptions, type ImageOutput, type ImageSessionBinding } from "@pi-desktop/shared";
 
 export type ImageTask = { jobId: string; binding: ImageSessionBinding; prompt: string; options?: ImageGenerationOptions };
@@ -19,7 +19,8 @@ export class ImageTasks {
     this.jobs.set(task.jobId, controller);
     const { binding } = task;
     const options = validateImageOptions(binding.model.capability, task.options, binding.references.length);
-    const model: ImagesModel<"mirrorcoding-images"> = {
+    const model: ImageModel<"mirrorcoding-images"> = {
+      type: "image",
       id: binding.model.modelId, name: binding.model.displayName, provider: binding.model.providerId,
       api: "mirrorcoding-images", baseUrl: binding.baseUrl, input: ["text", "image"], output: ["image"],
       cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
@@ -27,11 +28,11 @@ export class ImageTasks {
     // pi's image output carries inline pixels. Pending URLs remain transport
     // results for main to download and persist without account credentials.
     const outputs: ImageOutput[] = [];
-    const models = createImagesModels();
-    models.setProvider(createImagesProvider({
+    const models = createModels();
+    models.setProvider(createProvider({
       id: model.provider, models: [model],
       auth: { apiKey: { name: "Local MirrorCoding relay", async resolve() { return { auth: { headers: binding.headers } }; } } },
-      api: { async generateImages(selected, context, request) {
+      images: { [model.api]: { async generateImages(selected, context, request) {
         const refs = context.input.filter((entry) => entry.type === "image");
         const path = refs.length ? binding.model.capability.reference_path! : binding.model.capability.generation_path;
         const prompt = context.input.filter((entry) => entry.type === "text").map((entry) => entry.text).join("\n");
@@ -68,7 +69,7 @@ export class ImageTasks {
         }
         if (!outputs.length) throw new Error("invalid_image_response");
         return { api: selected.api, provider: selected.provider, model: selected.id, output, stopReason: "stop", timestamp: Date.now() };
-      } },
+      } } },
     }));
     try {
       const result = await models.generateImages(model, {

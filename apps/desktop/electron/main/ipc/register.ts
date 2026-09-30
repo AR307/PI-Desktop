@@ -19,7 +19,6 @@ import { registerNotificationIpc } from "./notification-ipc";
 import { registerPluginIpc } from "./plugin-ipc";
 import { registerPluginUiIpc } from "./plugin-ui-ipc";
 import { registerProviderIpc } from "./provider-ipc";
-import { registerPullsIpc } from "./pulls-ipc";
 import { registerScheduledIpc } from "./scheduled-ipc";
 import { registerSessionIpc } from "./session-ipc";
 import { registerSettingsIpc } from "./settings-ipc";
@@ -35,6 +34,8 @@ import { createComposerTemplateLoader, registerWorkspaceIpc } from "./workspace-
 import { registerComposerIpc } from "./composer-ipc";
 import { registerSpeechIpc } from "./speech-ipc";
 import { registerVoiceIpc } from "./voice-ipc";
+import { registerLiveVoiceIpc } from "./live-voice-ipc";
+import type { LiveCallService } from "../live-voice/call-service";
 import type { IpcRegistrar } from "./types";
 import type { createTraySessions } from "../tray-sessions";
 import { registerMirrorCodingIpc } from "../mirrorcoding/ipc";
@@ -63,6 +64,7 @@ export type RegisterIpcDependencies = {
   setNotificationViewingSessionId: (sessionId: string | null) => void;
   activeUserSubagentDocuments: (...args: any[]) => Promise<any>;
   disabledBuiltinSubagents: () => Promise<string[]>;
+  liveCallService?: LiveCallService;
   mcpOAuth?: McpOAuthManager;
   [name: string]: any;
 };
@@ -169,6 +171,7 @@ export function registerIpcHandlers(dependencies: RegisterIpcDependencies) {
     isDeveloperMode,
     sendToRenderer,
     voiceService,
+    liveCallService,
   } = dependencies;
 
 
@@ -280,7 +283,9 @@ export function registerIpcHandlers(dependencies: RegisterIpcDependencies) {
     applyDeveloperMode,
     applyPreventScreenSleep,
     applyKeepAwakeWhileRunning,
+    applyUpdatePreference: (preference) => updater.setPreference(preference),
     resolveEffectiveCommandShell,
+    liveCallService,
   });
   registerConfigSyncIpc({
     registrar,
@@ -297,6 +302,7 @@ export function registerIpcHandlers(dependencies: RegisterIpcDependencies) {
     listRuntimeProviders,
     enrichProviderList,
     bindingForModel,
+    onProviderInvalidated: (providerId) => liveCallService?.invalidateProvider(providerId),
   });
   registerImageIpc(registrar, mirrorCoding.images);
   registerMirrorCodingIpc({
@@ -332,7 +338,6 @@ export function registerIpcHandlers(dependencies: RegisterIpcDependencies) {
     markMenuRendererReady,
     executeNativeMenuAction,
   });
-  registerPullsIpc({ registrar, getHost });
   registerScheduledIpc({
     registrar,
     getHost,
@@ -354,7 +359,6 @@ export function registerIpcHandlers(dependencies: RegisterIpcDependencies) {
     plugins,
     browserHost,
     clipboardHistory,
-    logger,
     recordPastedClipboardFiles,
     currentWorkspacePath,
     setCurrentWorkspacePath,
@@ -486,6 +490,9 @@ export function registerIpcHandlers(dependencies: RegisterIpcDependencies) {
 
   if (voiceService) {
     registerVoiceIpc({ registrar, voiceService });
+  }
+  if (liveCallService) {
+    registerLiveVoiceIpc({ registrar, service: liveCallService, getMainWindow });
   }
 
   registerRemoteHostIpc({ registrar });
