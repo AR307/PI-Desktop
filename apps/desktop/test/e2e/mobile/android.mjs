@@ -111,6 +111,7 @@ try {
   await phone.getByRole("heading", { name: "Shared work", exact: true }).waitFor();
   check("native password login and secure credential write");
   await phone.getByRole("button", { name: "Pair desktop", exact: true }).click();
+  await phone.getByLabel("8-digit pairing code").click();
   await until(async () => /mInputShown=true|isInputViewShown=true/.test((await adb("shell", "dumpsys", "input_method")).stdout), "pairing keyboard");
   await adb("shell", "input", "keyevent", "4");
   await until(async () => !/mInputShown=true|isInputViewShown=true/.test((await adb("shell", "dumpsys", "input_method")).stdout), "pairing keyboard dismissed");
