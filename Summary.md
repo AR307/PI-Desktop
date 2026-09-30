@@ -724,5 +724,19 @@ This completion record supersedes the earlier pending acceptance notes.
 - Regression test failed on the original implementation and passes with the
   fix. All three Rust Fast tests, desktop/mobile typechecks, 36 i18n tests,
   i18n build, desktop build, fresh sidecar bundle, final host rebuild and Rust
-  formatting check passed. Controlled Electron/mobile acceptance is pending
-  at this commit.
+  formatting check passed. The 16 targeted Node configuration/catalog/relay
+  tests also passed.
+- Controlled acceptance used actual Electron and the mobile browser with a
+  local MC fixture: 79 checks passed with no renderer or cleanup errors. The
+  flow changed A to B, observed Fast off in both clients and absent at the HTTP
+  boundary, then manually enabled it and observed service_tier fast. Mobile
+  staged reset, cancel/apply, parent/child independence, running/queued turns,
+  restart and image behavior passed. Reviewed the desktop solid lightning,
+  mobile reset panel and narrow Chinese/light model-panel screenshots.
+- Task candidate: 46432fb310a668b39af49fa9b9eb00268e10dfae. Base main:
+  920b12b8e053165d343a421b3cb8ee93c50a436a (included in candidate). Evidence:
+  .artifacts/fast-reset-1790775408324/report.json and adjacent screenshots.
+- Restarted the manual test instance with its existing isolated profile after
+  user approval; verified the responsive PI-Desktop window and rebuilt host.
+  No production requests, push or release. Native Android/APK validation was
+  not repeated for this follow-up; mobile acceptance used the browser surface.
