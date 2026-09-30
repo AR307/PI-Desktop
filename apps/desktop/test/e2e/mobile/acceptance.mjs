@@ -247,13 +247,13 @@ try {
   await screenshot("mobile-fast-child");
   await screenshot("desktop-fast-child", page);
   await until(async () => !(await view()).busy && !(await view()).snapshot?.activeTurn, "Fast parent settles");
-  await invoke("session/configure", shared.id, { fast: true });
+  await invoke("session/configure", shared.id, { mode: "agent", fast: true });
   const ordinaryStart = fixture.chats.length;
   await mobileSend("mobile-ordinary-child: do not inherit parent Fast");
   await until(async () => fixture.chats.slice(ordinaryStart).filter(body => body.model === "gpt-5.1").length >= 2, "ordinary child tool continuation");
   check("ordinary child does not inherit parent Fast", fixture.chats.slice(ordinaryStart).filter(body => body.model === "gpt-5.1").every(body => body.service_tier === undefined));
   await until(async () => !(await view()).busy && !(await view()).snapshot?.activeTurn, "ordinary parent settles");
-  await invoke("session/configure", shared.id, { fast: false });
+  await invoke("session/configure", shared.id, { mode: "agent", fast: false });
   await invoke("session/configure", shared.id, { providerId: provider.id, modelId: "gpt-5", thinkingLevel: "medium", permissionMode: "ask", mode: "agent" });
   await phone.evaluate(() => window.__PI_MOBILE_CONTROLLER__.refreshSession());
   await mobileSend("mobile-slow stopped task"); await phone.getByRole("button", { name: "Stop", exact: true }).waitFor();
