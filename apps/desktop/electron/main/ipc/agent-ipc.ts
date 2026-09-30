@@ -14,6 +14,7 @@ import type { PersistenceOutbox } from "../persistence-outbox";
 import type { ComposerCommandService } from "./composer-ipc";
 import type { IpcRegistrar } from "./types";
 import { withPromptEnhancementTimeout } from "../prompt-enhancement-timeout";
+import { captureTurnConfiguration } from "../services/session-configuration";
 
 export type AgentIpcDependencies = {
   images: ImageService;
@@ -419,6 +420,7 @@ export function registerAgentIpc({
       req.sessionId,
       session,
       settings,
+      { fast: session.fast === true },
     );
     sidecar.setProjectInstructionRoot(req.sessionId, launch.projectPath);
 
@@ -434,6 +436,10 @@ export function registerAgentIpc({
       throw new Error("session.beginTurn returned no turn");
     }
     activeTurns.set(req.sessionId, durableTurnId);
+    captureTurnConfiguration(host, req.sessionId, durableTurnId, {
+      mode: launch.sidecarParams.mode, providerId: launch.providerId, modelId: launch.modelId,
+      thinkingLevel: launch.sidecarParams.thinkingLevel, fast: launch.sidecarParams.provider.fast === true,
+    });
     activeTurnUsages.delete(req.sessionId);
 
     // Slash expansion (D123, ADR 0024): templates expand before persistence

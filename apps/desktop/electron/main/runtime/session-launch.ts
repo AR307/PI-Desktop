@@ -1,5 +1,4 @@
 import { join } from "node:path";
-import { captureTurnConfiguration } from "../services/session-configuration";
 import {
   ErrorCodes as SharedErrorCodes,
   isActiveInProject,
@@ -266,7 +265,7 @@ export function createSessionLaunchRuntime({
     settings: any,
     overrides: {
       mode?: Mode;
-      turnId?: string;
+      fast?: boolean;
       providerId?: string;
       modelId?: string;
       thinkingLevel?: SessionThinkingLevel;
@@ -666,10 +665,8 @@ export function createSessionLaunchRuntime({
         ),
     );
     const mode = normalizeMode(overrides.mode ?? session.mode ?? settings.defaultMode ?? "agent");
-    const fast = Boolean(overrides.turnId && isMirrorCodingAccount && session.fast === true);
-    if (overrides.turnId) captureTurnConfiguration(runtimeState.host, sessionId, overrides.turnId, {
-      mode, providerId: provider.id, modelId, thinkingLevel, fast,
-    });
+    // Only user/approved-plan launches opt in. Auxiliary calls never inherit Fast.
+    const fast = isMirrorCodingAccount && overrides.fast === true;
     return {
       providerId: provider.id,
       modelId,
@@ -677,7 +674,6 @@ export function createSessionLaunchRuntime({
       sidecarParams: {
         sessionId,
         mode,
-        ...(overrides.turnId ? { turnId: overrides.turnId } : {}),
         thinkingLevel,
         infiniteProviderRetry: settings.infiniteProviderRetry === true,
         commandShell,

@@ -1,4 +1,4 @@
-import { releaseTurnConfiguration } from "../services/session-configuration";
+import { captureTurnConfiguration, releaseTurnConfiguration } from "../services/session-configuration";
 import { ErrorCodes, IPC, type AgentEventEnvelope, type AppNotification, type PlanExecution, type PlanExecutionFinishStatus, type UiMessage } from "@pi-desktop/shared";
 import { executionFromResponse, executionListFromResponse, planExecutionFromUnknown } from "@pi-desktop/host-runtime";
 import type { RuntimeState } from "./context";
@@ -445,7 +445,7 @@ async function dispatchApprovedPlan(rawExecution: unknown): Promise<void> {
       execution.sessionId,
       sessionResult.session,
       settings,
-      { mode: "agent" },
+      { mode: "agent", fast: sessionResult.session.fast === true },
     );
     const turn = await runtimeState.host.call<{ turnId: string }>("session.beginTurn", {
       sessionId: execution.sessionId,
@@ -455,6 +455,10 @@ async function dispatchApprovedPlan(rawExecution: unknown): Promise<void> {
     turnId = String(turn.turnId || "").trim();
     if (!turnId) throw new Error("execution turn was not created");
     activeTurns.set(execution.sessionId, turnId);
+    captureTurnConfiguration(runtimeState.host, execution.sessionId, turnId, {
+      mode: launch.sidecarParams.mode, providerId: launch.providerId, modelId: launch.modelId,
+      thinkingLevel: launch.sidecarParams.thinkingLevel, fast: launch.sidecarParams.provider.fast === true,
+    });
     activeTurnUsages.delete(execution.sessionId);
     approvedExecutionIdsBySession.set(execution.sessionId, execution.id);
     approvedExecutionTurns.set(execution.id, {
