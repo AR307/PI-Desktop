@@ -12,6 +12,21 @@ export * from "./types/sessions.js";
 export * from "./types/agent.js";
 export * from "./types/workspace.js";
 export * from "./types/providers.js";
+export * from "./types/mirrorcoding.js";
+export {
+  type ImageGenerationCapability,
+  type ImageGenerationOptions,
+  type ImageSessionConfig,
+  type ImageSessionBinding,
+  type ImageModelInfo,
+  type ImageGenerationRequest,
+  type GeneratedImage,
+  type ImageGenerationResult,
+  type ImageOutput,
+  type ImageGenerationState,
+  validateImageOptions,
+  parseImageCapability,
+} from "./types/images.js";
 export * from "./types/settings.js";
 export * from "./types/plugins.js";
 export * from "./types/capabilities.js";
@@ -23,3 +38,5 @@ export * from "./types/filesystem.js";
 export * from "./types/speech.js";
 export * from "./types/remote-host.js";
 export * from "./types/config-sync.js";
+export * from "./types/mobile-sync.js";
+export * from "./types/live-voice.js";

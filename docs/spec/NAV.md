@@ -42,6 +42,8 @@
 - [18-line-anchored-edit-contract.md](03-runtime/18-line-anchored-edit-contract.md)
 - [19-remote-agent-control-protocol.md](03-runtime/19-remote-agent-control-protocol.md)
 - [20-speech.md](03-runtime/20-speech.md)
+- [live-voice.md](03-runtime/live-voice.md)
+- [live-work-session.md](03-runtime/live-work-session.md)
 - [21-image-generation.md](03-runtime/21-image-generation.md)
 - [22-config-sync.md](03-runtime/22-config-sync.md)
 - [svg-attachment-input.md](03-runtime/svg-attachment-input.md)
@@ -102,3 +104,11 @@
 
 ## ADR
 - [../adr/README.md](../adr/README.md)
+
+- [MirrorCoding Account And Model Routing](/spec/03-runtime/21-mirrorcoding-account)
+
+- [Image generation](/spec/03-runtime/22-image-generation)
+
+- [Android companion and scoped desktop sync](/spec/03-runtime/23-mobile-companion)
+
+- [Ultra collaboration](/spec/03-runtime/ultra-collaboration)

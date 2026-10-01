@@ -1,7 +1,10 @@
+import { withMirrorCodingFast } from "./mirrorcoding-fast.js";
+import { accountModelStream, type UsageObserver } from "./request-usage.js";
 import {
   buildProviderModel,
   copilotRequestHeaders,
   createProviderModels,
+  providerRequestFetch,
   providerRequestKey,
   type RuntimeProviderConfig,
 } from "./provider-binding.js";
@@ -18,6 +21,7 @@ import {
 import { captureProviderResponse, carriesRetryDelayHeaders, createProviderRetryStream } from "./provider-retry.js";
 import type { AgentOptions } from "@earendil-works/pi-agent-core";
 import type { SubagentThinkingLevel } from "@pi-desktop/shared";
+import { upstreamRequestDiagnostics, type RequestDiagnostics } from "./request-diagnostics.js";
 import type { ClassifiedAgentError } from "./agent-errors.js";
 import type { ProviderFetchFailure } from "./provider-transport-recovery.js";
 
@@ -25,6 +29,11 @@ export type SubagentProviderRetryState = {
   headers?: Record<string, string>;
   status?: number;
   failure?: ProviderFetchFailure;
+  meaningful?: boolean;
+  request?: RequestDiagnostics;
+  attempts?: number;
+  requestId?: string;
+  startedAt?: number;
   claim: (error: ClassifiedAgentError, phase: "request" | "stream") => number | undefined;
 };
 
@@ -34,6 +43,7 @@ export function subagentModelBinding(opts: {
   thinkingLevel: SubagentThinkingLevel;
   sessionId: string;
   maxTokens?: number;
+  onUsage?: UsageObserver;
 }, retry: SubagentProviderRetryState) {
   // A definition may cap the delegate's own output (issue #171). The
   // catalog's published limit keeps applying otherwise, so this is an
@@ -58,6 +68,15 @@ export function subagentModelBinding(opts: {
     model,
     agentThinkingLevel,
     streamFn: (m, context, options) => {
+      // Empty or pre-content retries belong to the same response. A completed
+      // tool/answer starts a new response with its own counters.
+      if (retry.meaningful !== false) {
+        retry.startedAt = Date.now();
+        retry.attempts = 0;
+      }
+      retry.meaningful = false;
+      retry.requestId = undefined;
+      retry.request = undefined;
       retry.headers = undefined;
       retry.status = undefined;
       retry.failure = undefined;
@@ -71,15 +90,19 @@ export function subagentModelBinding(opts: {
             maxTokens: clampOutputToContext(m, context, options?.maxTokens),
             maxRetries: 0,
             sessionId: opts.sessionId,
-            fetch: captureProviderResponse(options?.fetch, (response, _bytes, failure) => {
-              retry.failure = failure;
-              retry.status = response?.status;
-              retry.headers = carriesRetryDelayHeaders(
-                response?.status,
-              )
-                ? response?.headers
-                : undefined;
-            }),
+            fetch: providerRequestFetch(
+              m.api,
+              captureProviderResponse(options?.fetch, (response, _bytes, failure) => {
+                retry.failure = failure;
+                retry.status = response?.status;
+                retry.requestId = response?.headers["x-request-id"] ?? response?.headers["request-id"];
+                retry.headers = carriesRetryDelayHeaders(
+                  response?.status,
+                )
+                  ? response?.headers
+                  : undefined;
+              }, (request) => { retry.request = upstreamRequestDiagnostics(request, opts.provider); retry.attempts = (retry.attempts ?? 0) + 1; }),
+            ),
           },
           {
             ...openCodeEndpointFromProvider(opts.provider, m),
@@ -90,15 +113,20 @@ export function subagentModelBinding(opts: {
           copilotRequestHeaders(opts.provider, context),
           opts.provider.headers,
         ),
+        m.api,
       );
       return createProviderRetryStream(
         m,
         context,
-        requestOptions,
-        (retryOptions) =>
+        withMirrorCodingFast(requestOptions, opts.provider),
+        (retryOptions) => accountModelStream(m, () =>
           omitThinking
             ? models.stream(omitThinkingModel, context, retryOptions)
-            : models.streamSimple(m, context, retryOptions),
+            : models.streamSimple(m, context, retryOptions), {
+              providerId: opts.provider.id,
+              nativeCost: opts.provider.modelConfig?.nativeCost,
+              onUsage: opts.onUsage,
+            }),
         {
           claim: (error, phase) => retry.claim(error, phase),
           headers: () => retry.headers,

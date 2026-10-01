@@ -17,6 +17,16 @@ import type { PlanningState } from "./plans.js";
  */
 export type SessionSource = "desktop" | "pi-native" | "remote";
 
+export type SessionConfigurationInput = {
+  mode: Mode;
+  providerId?: string;
+  modelId?: string;
+  thinkingLevel?: SessionThinkingLevel;
+  permissionMode?: PermissionMode;
+  ultra?: boolean;
+  fast?: boolean;
+};
+
 export type SessionCapabilities = {
   canPrompt: boolean;
   canStop: boolean;
@@ -24,6 +34,9 @@ export type SessionCapabilities = {
 };
 
 export type SessionSummary = {
+  /** Saved next-turn MC Fast preference; new sessions start disabled. */
+  ultra?: boolean;
+  fast?: boolean;
   id: string;
   /** Transcript authority. Omitted by older hosts and normalized to `desktop`. */
   source?: SessionSource;
@@ -143,6 +156,12 @@ export type AgentStatus = {
   planningState?: PlanningState;
   pendingPlanId?: string;
   activity?: AgentActivity;
+  /**
+   * Delegations still running detached from any turn (D628). They do not make
+   * the session busy — `isRunning` stays false while only delegates work — but
+   * surfaces can show that background work continues. Omitted when zero.
+   */
+  backgroundDelegations?: number;
 };
 
 /** Bounded provider diagnostics shown while the runtime waits before retrying. */

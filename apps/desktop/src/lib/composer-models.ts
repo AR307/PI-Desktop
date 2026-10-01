@@ -9,7 +9,7 @@ import {
   type ProviderPublic,
 } from "@pi-desktop/shared";
 
-type ConfiguredProvider = Pick<ProviderPublic, "id" | "models" | "defaultModelId">;
+type ConfiguredProvider = Pick<ProviderPublic, "id" | "models" | "defaultModelId" | "mirrorCoding">;
 
 /** UI identity is the complete wire id, not a catalog alias or a route suffix. */
 export function sameComposerModelId(left: string, right: string): boolean {
@@ -35,15 +35,23 @@ function configuredModelIds(provider: ConfiguredProvider): string[] {
 export function composerModelsForProvider(
   provider: ConfiguredProvider,
   discovered: readonly ModelInfo[] | undefined,
-  imageGeneration?: ImageGenerationBindings | null,
+  imageGenerationOrTask?: ImageGenerationBindings | null | "chat" | "image",
 ): ModelInfo[] {
-  return configuredModelIds(provider).filter((modelId) =>
-    !isImageGenerationModel(imageGeneration, provider.id, modelId),
-  ).map((modelId) => {
+  const task = typeof imageGenerationOrTask === "string" ? imageGenerationOrTask : "chat";
+  const imageGeneration = typeof imageGenerationOrTask === "string" ? undefined : imageGenerationOrTask;
+  return configuredModelIds(provider).filter((modelId) => {
+    if (provider.mirrorCoding) {
+      return task === "image"
+        ? Boolean(provider.mirrorCoding.imageRoutes?.[modelId] || provider.mirrorCoding.imageModels?.[modelId])
+        : Boolean(provider.mirrorCoding.routes[modelId]) && !isImageGenerationModel(imageGeneration, provider.id, modelId);
+    }
+    if (task === "image") return isImageGenerationModel(imageGeneration, provider.id, modelId);
+    return !isImageGenerationModel(imageGeneration, provider.id, modelId);
+  }).map((modelId) => {
     const metadata = (discovered ?? []).find((model) =>
       sameComposerModelId(model.modelId, modelId),
     );
-    const displayName = metadata?.displayName?.trim() || modelId;
+    const displayName = modelId;
     return metadata
       ? { ...metadata, modelId, displayName, providerId: provider.id }
       : {
@@ -56,14 +64,13 @@ export function composerModelsForProvider(
   });
 }
 
-/** The Composer uses the configured alias, then published name, then wire id. */
+/** The Composer uses the configured alias when set, otherwise the complete wire id. */
 export function composerModelDisplayName(
   provider: ConfiguredProvider | undefined,
   modelId: string,
-  fallback?: string,
 ): string {
   const alias = provider ? composerModelBinding(provider, modelId)?.alias?.trim() : undefined;
-  return alias || fallback?.trim() || modelId;
+  return alias || modelId;
 }
 
 /** Find only the binding for this complete wire id. */

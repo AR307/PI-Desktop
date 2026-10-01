@@ -139,7 +139,7 @@ test("picker attachments materialize a session before importing paths", () => {
 test("composer opens one unified file picker directly from the plus button", () => {
   const leftStart = composer.indexOf('<div className="composer-left">');
   const plusIndex = composer.indexOf('tooltip={t("chat.addFiles")}', leftStart);
-  const modeIndex = composer.indexOf("composer-mode-chip", leftStart);
+  const modeIndex = composer.indexOf("<ComposerModePicker", leftStart);
   assert.ok(leftStart >= 0 && plusIndex > leftStart && modeIndex > leftStart);
   assert.ok(plusIndex < modeIndex, "upload must precede the agent mode chip");
   assert.match(composer, /void pickAndAttach\(\);/);
@@ -269,7 +269,7 @@ test("large image attachments avoid whole-file startup reads", () => {
   assert.match(attachments, /await copyFile\(source, target, fsConstants\.COPYFILE_EXCL\)/);
   assert.doesNotMatch(attachments, /const bytes = readFileSync\(source\.absolute\)/);
   assert.match(history, /const size = \(await stat\(canonical\)\)\.size/);
-  assert.match(history, /shouldInline && size <= MAX_INLINE_IMAGE_BYTES/);
+  assert.match(history, /const canInline =[\s\S]*size <= MAX_INLINE_IMAGE_BYTES/);
   assert.match(history, /await copyFile\(source, target, fsConstants\.COPYFILE_EXCL\)/);
 });
 

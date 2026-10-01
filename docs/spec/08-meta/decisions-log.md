@@ -14,7 +14,7 @@ This log freezes previously open questions into concrete decisions.
 | D002 | SQLite ownership | **Rust host-core owns SQLite exclusively** | Single writer, clearer privilege boundary |
 | D003 | Default mode | **Agent** | Product is an agent desktop, not pure chat |
 | D004 | Former restricted profile | *(superseded by D189)* **The former Chat read-only profile is removed; persisted Chat values migrate to Plan.** | The product now has one Agent with a planning state and a separate approval boundary |
-| D005 | Permission timeout | **120s → deny** | Fail closed, do not hang forever |
+| D005 | Permission timeout *(amended by D636 / ADR 0310)* | **Historical: 120s → deny. Local permission approvals now have no automatic deadline; explicit decision or cancellation is required.** | D636 preserves explicit cancellation and tool execution budgets without turning an unattended card into an automatic decision |
 | D006 | `allow-session` scope | **By `toolName`** | Simple UX; workspace sandbox still enforces path safety |
 | D007 | `~/.pi` compatibility | **No auto-import in MVP** | Keep config ownership clean in `~/.pi-desktop` |
 | D008 | Node runtime packaging | **Dev uses system Node; release runs the bundled sidecar on the Electron binary via `ELECTRON_RUN_AS_NODE=1` (no separate Node shipped)** | Unblock M1–M4; resolved at M5, see 03-runtime/07-process-model §6 |
@@ -27,7 +27,10 @@ This log freezes previously open questions into concrete decisions.
 | D451 | Review opens only on explicit user action | **A tool result never opens, activates, or resizes the work panel. The `tool_end` artifact gate and `shouldOpenReviewArtifact` are removed; Review is reached only from the `+` New launcher row or from the retained session context the viewport-fixed toggle / `Cmd/Ctrl + J` reveals. A successful workspace Write/Edit still records its message-owned inline review card in the transcript.** | An agent edit silently revealing a side panel competes with the user's own reading and layout, and the transcript card already carries the change evidence. See ADR 0043, `04-ux/01-ui-ia.md`, `04-ux/08-component-spec.md` §5, `04-ux/09-interaction-patterns.md`, E2E-057. |
 | D452 | Plan and goal artifacts open in the bundled file view | **The contract approval card's artifact opener hands the immutable `.pi/plan/*.md` or `.pi/goal/*.md` path to the bundled `pi.file-manager` view whenever that view is launchable, and to the host file tab otherwise — the same preference and fallback a chat file reference already uses (ADR 0241). The artifact still creates or activates a tab in its originating session, so the approval reveal itself is unchanged; only the surface changes. Renderer-only; no protocol, host, storage, artifact-content, or permission change. See D189, ADR 0043, `04-ux/08-component-spec.md` §5.4 and §10A.2, `04-ux/09-interaction-patterns.md` §5A, E2E-106.** | The approval opener used a host file tab while every other project file the conversation names already opens in the user's own file view, so a plan or goal landed in the one surface the user does not browse project files in. |
 | D459 | Restore resizable sidebar width with collapse-below-threshold | **Amend D408 / ADR 0238 and restore ADR 0141 (ADR 0290): the expanded sidebar is again a renderer-owned `240px..520px` column (default `275px`) with a right-edge handle that previews on pointer-down, persists on release, and supports ArrowLeft/ArrowRight (16px), Home, and End. A pointer width below `160px` collapses as a user action without overwriting the preferred expanded width; keyboard resize never collapses. Live maximum is the three-column remainder after MainChat's 450px floor. Renderer only; existing `pi.desktop.sidebarWidth` preference. See E2E-168.** | Long labels need reclaimable width; ADR 0238's fixed 275px pin blocked that while the live three-column budget could already cap a user-chosen width. This decision was mistakenly recorded as D451 (already used by Review-opens-only-on-explicit-user-action); renumbered per issue #620. |
-| D457 | Signed macOS DMG is a two-icon install | **Amend D406 / ADR 0232 / ADR 0204: official and local DMGs contain only PI-Desktop.app and the Applications link on a branded 720×440 plate. They no longer include `If app won't open, read this.txt` or the command helper. macOS ZIP packages still ship both the opening note and `PI-Desktop-macOS-open.command` for trusted unsigned artifacts. See ADR 0296 and E2E-196b.** | Tagged DMGs are signed and notarized (D450); the unsigned-opening note on the installer read as an error. |
+| D457 | Signed macOS DMG is a two-icon install | *(amended by D634)* **Amend D406 / ADR 0232 / ADR 0204: official and local DMGs contain only PI-Desktop.app and the Applications link on a branded 720×440 plate. The ZIP contains PI-Desktop.app only. Neither macOS format includes the opening note or command helper, including unsigned debug artifacts. See ADR 0296 / ADR 0309 and E2E-196b.** | Tagged DMGs are signed and notarized (D450); unsigned first-launch guidance is no longer needed in package artifacts. |
+| D634 | Remove bundled macOS first-launch guidance | **Amend D457 / ADR 0296 and the macOS distribution provisions of ADR 0232 / ADR 0204: neither macOS DMG nor ZIP ships `PI-Desktop-macOS-open.command`, `PI-Desktop-macOS-opening-help.txt`, or another bundled quarantine-clearing helper or opening note. The ZIP contains `PI-Desktop.app` at its root; the DMG remains a two-icon install. This applies to signed releases and local or opt-in unsigned debug builds. See ADR 0309 and E2E-196b.** | The signed release lane has eliminated the user need for an unsigned first-launch workaround; shipping it beside debug builds risks suggesting a Gatekeeper bypass. |
+| D635 | Work-area-capped 800×560 window minimum | **Supersede the 1040×700 window minimum in D156 / D447 (and the matching clauses of ADR 0029 / ADR 0238) and the `1040..10000` `window/setWorkPanelChatWidth` range (ADR 0146): Electron enforces an 800×560 minimum, capped per dimension to the current display work area by `clampMinimumSizeToWorkArea`. The chat-width IPC and renderer accept `800..10000`. On narrow windows the existing `workPanelLayout` budget caps the docked panel so MainChat keeps its 450px floor, collapsing the sidebar first. See US-UI-19 and E2E-167.** | At 150% Windows scaling the work area is about 1280×672 DIP, so a fixed minimum could exceed the screen and leave the window unfittable. |
+| D636 | Local permission approvals have no automatic deadline | **Amend D005 / ADR 0011 and supersede the local tool-permission timeout clauses in the runtime and UX specs: a permission-gated `tools.execute` request remains pending in host-core, the renderer, and the transport until the user chooses Allow once, Allow for session, or Deny, or the request is cancelled / the process shuts down. Remove the 120-second countdown and timeout fields from the local permission contract. Tool-specific execution budgets and the separate RACP/Plan approval lifetimes remain unchanged. See ADR 0310, issue #1214, and E2E-017.** | A visible permission request could be missed while the user worked elsewhere; automatic denial after 120 seconds silently prevented the requested action. Keeping cancellation and execution budgets preserves control and resource safety without turning inattention into a decision. |
 | D450 | Signed macOS GitHub Releases | **Amend D078 / ADR 0022: GitHub tag releases Developer ID-sign, notarize (`notarytool` via electron-builder 26), staple, and Gatekeeper-verify macOS DMG/ZIP before upload, using identity `Developer ID Application: XingYu Liu (DUV63RKYTW)` / team `DUV63RKYTW` from Actions secrets (`CSC_LINK`, `CSC_KEY_PASSWORD`, `APPLE_ID`, `APPLE_APP_SPECIFIC_PASSWORD`, `APPLE_TEAM_ID`). Missing secrets fail the job. Local unsigned packaging without a certificate remains. `workflow_dispatch` may set `sign_macos: false` only for unsigned debug artifacts. Packaged macOS uses in-app `electron-updater` (ZIP + merged `latest-mac.yml`); Linux deb/rpm and Windows portable ZIP stay notify-and-link. No afterPack/afterSign adhoc codesign (ADR 0278).** | Production DMGs must open without a Gatekeeper warning, and signed macOS installs can download and restart into a new tag. See ADR 0289, E2E-196c, E2E-067A. |
 
 ## B. Secondary implementation defaults
@@ -87,7 +90,7 @@ This log freezes previously open questions into concrete decisions.
 | D403 | Press-and-move project title reorder | **Amend D402 / D093 / ADR 0228: mouse and pen reorder by pressing the project title and moving 8px; a click with no qualifying movement still selects and toggles collapse. Touch does not start a reorder. An accent insertion line shows before/after placement. ArrowUp/ArrowDown and Escape are unchanged. See ADR 0229 and E2E-253.** | A 400ms still press is a mobile long-press pattern and is slower than ChatGPT-style desktop sidebar lists. |
 | D404 | Skill ships with the Agent core tool set | **Amend D174 / D185 / ADR 0048 / ADR 0219: `Skill` joins the Agent-mode core tool set, so its schema is present on the first provider request whenever the skill catalog is non-empty. It is removed from the deferred catalog and never appears under `# On-demand tools`; the other on-demand capabilities and `ToolSearch` are unchanged, and Plan and Goal still omit the tool entirely. No protocol, storage, permission, or skill-body change. See ADR 0230 and E2E-254.** | A user-typed `/skill-id` and the `# Skills` section both ask the model to call `Skill`, and a tool that is absent from the schema cannot be called at all: the deferred entry added a discovery round trip before any skill body could load (issue #204). |
 | D405 | Ideographic comma opens the slash menu | **Amend D123 / D139 / ADR 0024: a `、` (U+3001) committed as the first character of an empty composer draft is rewritten to `/` before trigger detection, so a Chinese IME reaches the ordinary slash menu without switching input methods. Only that position is rewritten; a `、` anywhere else stays ordinary punctuation, and the `@` file menu is unaffected. Shared grammar and renderer only; no IPC, storage, or autocomplete-source change. See ADR 0231 and E2E-255.** | Reaching `/new`, `/compact`, a mode alias, or a Skill forced a Chinese IME user to switch to ASCII input mid-sentence and then switch back (issue #65). |
-| D406 | Keep macOS DMG opening guidance text-only | *(amended by D457)* **Amend D371 / ADR 0204: macOS DMGs expose the opening-help note as `If app won't open, read this.txt` and no longer include the executable `PI-Desktop-macOS-open.command`. macOS ZIP packages retain both the note and the helper. The note provides the narrow Terminal fallback for trusted unsigned builds; signed and notarized builds do not need it. See ADR 0232 and E2E-196b.** | The DMG should keep the normal app-to-Applications flow focused while still giving users a visible, actionable answer when an unsigned app does not open. |
+| D406 | Keep macOS DMG opening guidance text-only | *(amended by D457 and D634)* **Amend D371 / ADR 0204: macOS DMGs no longer expose the opening-help note or executable helper, and macOS ZIP packages no longer retain them. The narrow Terminal fallback was for trusted unsigned builds; signed and notarized builds do not need it. See ADR 0232, ADR 0296, ADR 0309, and E2E-196b.** | The DMG should keep the normal app-to-Applications flow focused while still giving users a visible, actionable answer when an unsigned app does not open. |
 | D407 | Restore archived projects after session import | **Additive renderer behavior for issue #250: when a core or plugin import adds a new project-bound session, the import-triggered session refresh normalizes its project path and clears the renderer's archived presentation state for that project. Pathless sessions, skipped imports, historical plugin paths without an active binding, and ordinary refreshes leave archive state unchanged. Host project rows, IPC channels, plugin methods, storage schema, and data formats do not change. See ADR 0236 and E2E-257.** | The host can successfully materialize an imported session under a project while the renderer still hides that project's sidebar row as archived. Restoring only the newly imported binding makes the result discoverable without weakening deliberate archive choices during ordinary refreshes (issue #250). |
 | D408 | Prioritize MainChat in the three-column shell | **Amend ADR 0226 / ADR 0151 / ADR 0033 for issue #267: MainChat keeps a hard 450px minimum, the work panel is capped by the live budget (`client width - 450px - expanded sidebar`, with no fixed maximum), and the expanded sidebar yields at that threshold — including while `sidebar-out` still occupies flex space. A manual sidebar reopen spends panel width first and otherwise targets 460px; closing the panel restores only a sidebar the layout collapsed. The native window never changes: the reservation seam stays at zero and no geometry is applied. Preview mode temporarily unmounts MainChat and uses a window-level chrome row; collapsed-sidebar macOS preview reserves 88px, or 8px in fullscreen, for traffic lights (D433). See ADR 0238 and E2E-LAYOUT-three-column-width-priority.** | The fixed client area had no explicit width priority, so the side docks could pin MainChat to its floor and leave the composer unusable. Making the yield order explicit keeps the chat readable inside the fixed window without reintroducing native window growth (issue #267). |
 | D409 | Host-owned session collaboration messages | *(amended by D446)* **Amend ADR 0237 / ADR 0165 / ADR 0213: Rust host-core owns a durable session-collaboration ledger keyed by message id and real source/target Session IDs. Plugin-mediated `spawn`, `send`, `status`, `result`, and `cancel` operations use the reviewed desktop-control gateway; the sender is bound to the active plugin Agent tool invocation, target turns retain their existing configuration, and each delivery is claimed by its actual durable turn. Completion callbacks are durable, at-most-once, and reference the settled turn. Provenance is persisted with transcript rows and cannot be forged, stripped, or edited through regeneration. The additive schema v16 migration retains queued work across restart without unattended replay, applies permission ceilings and bounded autonomous hops, and keeps the existing Task family unchanged. See ADR 0239 and E2E-PLUGIN-session-orchestrator-real-workers.** | The plugin's prior create/prompt polling path could infer neither a durable turn outcome nor a safe bidirectional sender identity. A host-owned ledger makes delivery, provenance, callback, cancellation, and restart behavior auditable without restoring the withdrawn A2A protocol. |
@@ -232,7 +235,7 @@ Gold source: local Codex electron captures; latest row wins where rows conflict.
 | D098 | Review tab reads the git working tree *(superseded by D180)* | **Historical decision: Review rendered the workspace's uncommitted state through the git CLI.** | Superseded because commits erased message-level evidence and could not support safe per-message rollback |
 | D099 | Terminal tab is a real PTY *(superseded by D251)* | **Historical decision: the former work panel exposed an interactive shell as a session-scoped terminal tab.** | The current product removes that separate shell surface; Agent Bash remains non-interactive and transcript-owned |
 | D100 | Browser tab embeds a WebContentsView | **The preview browser is a main-process WebContentsView with renderer-driven bounds sync, hardened (deny popups→external, deny permission requests, http(s)-only navigation, isolated persist partition); it hides while blocking overlays (palette, permission dialog, settings) are open. The user drives it; the agent does not.** | Recommended modern embedding without webview-tag caveats; hide rules resolve its compositor z-order over renderer overlays |
-| D138 | Session-scoped inline permission requests | **Tool approval is an inline PermissionCard owned by its originating `sessionId`, never a global dialog. Different sessions retain independent pending requests and absolute timeout deadlines; background message/tool/permission events update only scoped state and never activate, cover, or focus another conversation. Resolution and cleanup match both session and request identity. This supersedes only D100's permission-dialog overlay/hide clause; palette, search, settings, and other blocking surfaces retain their existing browser hide behavior.** | Concurrent agents must not steal the active workflow or overwrite each other's approval requests; the existing protocol already carries the required session/request identity. |
+| D138 | Session-scoped inline permission requests | **Tool approval is an inline PermissionCard owned by its originating `sessionId`, never a global dialog. Different sessions retain independent pending requests without automatic deadlines; background message/tool/permission events update only scoped state and never activate, cover, or focus another conversation. Resolution and cleanup match both session and request identity. This supersedes only D100's permission-dialog overlay/hide clause; palette, search, settings, and other blocking surfaces retain their existing browser hide behavior.** | Concurrent agents must not steal the active workflow or overwrite each other's approval requests; the existing protocol already carries the required session/request identity. |
 | D139 | Navigation intent and shortcut event guards | **Every explicit session, project, page, fork, or history navigation begins or reuses one renderer navigation intent; asynchronous work commits visible state only while that intent remains current. Global shortcuts ignore modifier-only and IME composition events, while history navigation also ignores key-repeat events.** | Late session/project loads and incomplete keyboard events must not cause unexplained page or history jumps. |
 | D128 | Artifact-driven work panel tabs (shortcut clause superseded by D207) | **The work panel has no empty manual entry point, welcome chooser, titlebar/menu command, or Cmd/Ctrl+J shortcut. A file/URL/BrowserPreview/successful-command artifact creates and activates a closeable top tab; successful active-session workspace Write/Edit artifacts create and activate the singleton Review tab. File tabs are keyed by lexically normalized path, singleton tool tabs deduplicate, closing the active tab selects its right neighbor then left, closing the last tab hides the panel, and the sole panel-level control collapses it without deleting retained runtime tabs. Changing the visible session or workspace closes and clears tabs so relative resources never cross context boundaries. Startup is closed with no tabs; only panel width persists, while temporary OS-window expansion is excluded from launch bounds. Background-session, failed, and scratch writes do not steal focus. This supersedes D097's fixed tab entry points and `{open, tab}` persistence, refines D098's automatic refresh, and supersedes only D112's welcome-chooser clause.** | Match Codex's output-driven work surface, avoid an empty tool launcher, and make each visible tab correspond to work the session actually produced or explicitly previewed. D128 corrects the initially duplicated D119 identifier; D119 remains the transcript file-store decision. |
 | D140 | Session-owned dirty-workspace transcript review entry *(superseded by D179)* | **After a session produces a successful workspace Write/Edit, its transcript ends with one explicit Review changes command outside collapsed activity groups while that Git working tree remains dirty; other sessions in the same project do not inherit the command. It reports the capped file count and addition/deletion totals and creates, reopens, or activates D128's singleton Review tab. The entry and Review share one workspace-keyed diff refreshed on workspace activation, successful Write/Edit/Bash completion (500ms debounce), explicit Review refresh, and window focus; sequenced requests discard prior-workspace responses. Clean and non-Git results clear review ownership for that workspace; clean, non-Git, missing-workspace, and failed-refresh states hide the entry. Review ownership is renderer-memory state discarded on relaunch with D142's work-panel contexts. This is a contextual artifact/status entry, not the empty manual launcher forbidden by D128.** | Automatic panel opening alone leaves no discoverable return path after collapse or tab close, while session ownership prevents unrelated conversations from claiming project-wide edits. Sharing the real diff makes the conversation entry accurate and keeps Review deduplicated. |
@@ -305,6 +308,7 @@ Gold source: local Codex electron captures; latest row wins where rows conflict.
 | D599 | A development build is its own installation | **Narrow D236 / amend ADR 0094: a development build (unpackaged, or `PI_DESKTOP_DEV=1`) takes `PI-Desktop Dev` as its Electron `userData` — and with it the single-instance lock, renderer `localStorage`, the plugin panel partitions, and browser pane cookies — and reads `~/.pi-desktop-dev`. An explicit `--user-data-dir` still wins, which is how the E2E harnesses point a build at a throwaway profile. A packaged installation keeps `PI-Desktop` and `~/.pi-desktop`, so no existing profile is relocated. `PI_DESKTOP_DATA_DIR` still overrides either profile and is made absolute before it reaches host-core as a child-process environment variable; Electron main publishes the resolved directory back to that variable so the plugin runtime reads one root. No IPC, protocol, schema, or packaged-installation path change. See `03-runtime/07-process-model.md` and E2E-150.** | A packaged app that was already running held the lock, so `pnpm dev` quit on arrival; a development host that won the race instead put a second host-core over the same single-writer `pi.sqlite`, the outbox, and the log tree. |
 | D602 | Crash dumps stay in the data directory | **Electron's Crashpad reporter starts local-only (`uploadToServer: false`) before `ready`. Dumps live under `<data_dir>/crash-dumps`, not the default Electron `userData` crashDumps path, so a `PI_DESKTOP_DATA_DIR` profile does not share dumps. The next lock-holding launch writes one `diagnostics` line for dumps newer than `crash-dumps.json`, classified by Crashpad `ptype`: `error` if any new dump is the browser/main process, `warn` for recovered renderer/GPU/utility crashes. Host-core and sidecar crashes stay on the supervisor path. No upload, no IPC, no schema change.** | A crash left a minidump nobody read. Crashpad also records recovered renderer crashes, so a next-launch `error` that said the previous run died was a lie; and dumps outside the data directory escaped `PI_DESKTOP_DATA_DIR` isolation. |
 | D619 | A copied formula is its TeX source | **Renderer only: a copy whose selection covers rendered math writes `text/plain` from the MathML `annotation` — `$…$` inline, `$$…$$` on its own lines, the delimiters `lib/latex-math.ts` normalizes `\(…\)` and `\[…\]` to, each run widened past any run inside the formula as a code span's fence is — instead of the two trees KaTeX paints. A cut that lands inside a formula grows to the whole formula. Only the formulas are rewritten: the reduced clone is read back through `Selection.toString()`, the serializer a copy itself runs, so prose, lists, tables and code blocks sharing the selection keep the platform's own reading — `user-select: none` chrome left behind included, which `innerText` would have written out. A selection with no formula in it, and a copy raised where the selection does not live, are left to the platform entirely. One flavour is written, `text/plain`: taking the event over drops the platform's `text/html` too and none is written back, because the reduced clone is app markup that would carry the `user-select: none` chrome the text reading drops, and because carrying the rendering instead would paste every formula twice — KaTeX's stylesheet is the only thing hiding the MathML tree and no stylesheet travels on the clipboard. One document `copy` listener owned by the shell, and the transcript's right-click Copy reads the same selection through the same module.** | A formula pasted as its glyphs, once per rendered tree, so it could not be carried into a LaTeX document or another Markdown editor (issue #414). ADR 0268 removed quoting on the grounds that the OS clipboard was the substitute; the clipboard had to actually carry the source. |
+| D620 | pi-ai built-in API-key services are named presets | **Add fifteen named endpoint presets — Ant Ling, Baseten, Cerebras, Hugging Face, Meta (`responses`), MiniMax (International), Moonshot AI (International), NVIDIA, OpenCode Zen, Vercel AI Gateway, Qwen Token Plan (`alibaba-token-plan`), Qwen Token Plan (China), Xiaomi Token Plan (China / Europe / Singapore) — to `NAMED_ENDPOINT_PRESETS`, each at its published host, with the pi-ai provider id kept as an alias wherever the models.dev key differs. Eight built-in providers remain exceptions with a recorded reason: Amazon Bedrock, Azure OpenAI, Cloudflare AI Gateway, Cloudflare Workers AI, Google Vertex AI (account- or region-scoped URLs), GitHub Copilot and OpenAI Codex (vendor-account rows), and Radius (`pi_messages` is account-only here). `packages/agent-runtime/src/pi-ai-provider-sync.test.ts` fails on a pi-ai upgrade that leaves a provider neither covered nor excepted. No protocol, storage, or IPC change.** | Every other pi-ai capability was already reachable, but the API-key half of the service catalog was hand-maintained and had drifted from the library's own provider list (ADR 0307). |
 
 
 ## M0. Model catalog decisions
@@ -350,7 +354,8 @@ Gold source: local Codex electron captures; latest row wins where rows conflict.
 | ID | Topic | Decision | Rationale |
 |---|---|---|---|
 | D118 | Platform application menu and window chrome | **macOS installs a conventional system application menu and keeps hidden-inset traffic lights. Windows/Linux use the shared 46px frameless shell with localized File/Edit/View/Window/Help menus and renderer-drawn minimize/maximize-or-restore/close controls. Both menu surfaces route renderer-owned actions through a fixed `AppMenuCommand` allowlist; renderer menus route native editing/window actions through a separate fixed allowlist. Target packaging builds the local release host before Electron packaging. This adds platform-ready shell behavior but does not reverse D010: Windows/Linux release qualification remains post-MVP.** | A default Electron menu leaves macOS shell commands incomplete, while a frameless Windows/Linux window otherwise loses both application menus and window controls. Shared allowlists keep behavior consistent without exposing an arbitrary privileged command bridge. |
-| D120 | Application update delivery | *(amended by D364 / D603)* **Electron Main exclusively owns a fixed GitHub Releases feed, update polling, typed state, and install lifecycle. Development is disabled; packaged macOS and non-AppImage Linux use notify-and-link delivery, while Windows NSIS and Linux AppImage download in-app and install on quit. Renderer IPC cannot provide feed URLs. Automatic failures stay ambient, explicit checks surface status, and downloaded state remains actionable. The updater always forces `allowPrerelease = false` so prerelease installs (for example `0.2.0-rc.6`) track GitHub's latest stable release instead of electron-updater's default same-channel pin. D126 later publishes every platform feed produced by the tag matrix while macOS remains manual until a signed channel is qualified.** | Keep package installation outside the sandboxed renderer, match delivery to each installer format, and provide one consistent state across menus, Settings, and the update banner (ADR 0022). Without the stable-channel pin, RC builds never surface newer stables because electron-updater treats `rc` as a custom channel. |
+| D120 | Application update delivery | *(amended by D364 / D603 / D628)* **Electron Main exclusively owns a fixed GitHub Releases feed, update polling, typed state, and install lifecycle. Development is disabled; packaged macOS and non-AppImage Linux use notify-and-link delivery, while Windows NSIS and Linux AppImage download in-app and install on quit. Renderer IPC cannot provide feed URLs. Automatic failures stay ambient, explicit checks surface status, and downloaded state remains actionable. The updater always forces `allowPrerelease = false` so prerelease installs (for example `0.2.0-rc.6`) track GitHub's latest stable release instead of electron-updater's default same-channel pin. D126 later publishes every platform feed produced by the tag matrix while macOS remains manual until a signed channel is qualified.** | Keep package installation outside the sandboxed renderer, match delivery to each installer format, and provide one consistent state across menus, Settings, and the update banner (ADR 0022). Without the stable-channel pin, RC builds never surface newer stables because electron-updater treats `rc` as a custom channel. |
+| D628 | User-selectable application update behavior | **Amend D120 / D603 / ADR 0022: persist a per-install `AppSettings.updatePreference` (`automatic` or `manual`). Automatic preserves the existing in-app download/install behavior; it is available only where the platform supports installation. Manual disables automatic download/install-on-quit, keeps scheduled stable-release checks, and reminds once per available version. `lastNotifiedUpdateVersion` persists in the existing Host-owned app settings; neither field is included in portable configuration sync. Default Automatic for Windows NSIS, packaged macOS, and Linux AppImage; default Manual for Windows ZIP/portable and non-AppImage Linux. Windows ZIP/portable can explicitly select Automatic after a warning that NSIS may replace the extracted no-install copy. No database schema or host protocol version bump.** | Give users control while preserving a safe default for no-install packages and preventing repeated notices. |
 | D313 | Main-owned GitHub issue feedback | **GitHub issue forms are the only intake path. The bug form requires description, reproduction steps, expected and actual behavior, app version, and OS; the feature form requires a problem and a proposed change. Settings → Info exposes one Report a problem action on `pi-desktop/app/openFeedback`. Electron Main builds a fixed `bug_report.yml` URL, prefills `app-version` / `os` / `environment` from Main-owned version info, and opens it with `shell.openExternal`. The renderer cannot supply a URL. Feature requests stay on GitHub's template picker. No host-protocol, storage, or update-feed change (ADR 0157).** | Reports without version or steps cannot be triaged, and a renderer-chosen destination would weaken the same Main-owned GitHub URL rule as D120. |
 | D330 | Main-owned `openExternal` protocol allowlist | **Every `shell.openExternal` call parses the URL first. Only `http:`, `https:` (hostname plus a written `//`), and `mailto:` (non-empty address) reach the OS, as a normalized href. `file:`, `javascript:`, `data:`, and custom URI schemes throw `DISALLOWED_EXTERNAL_URL` / plugin `INVALID_ARGUMENT`. Window-open handlers deny in-app and catch the error. Workspace files keep using `shell.openPath` after the path gate (ADR 0109). Preview "open in browser" uses the allowlist for web/mail URLs and `openPath` for an in-root file page (ADR 0168).** | Unvalidated `setWindowOpenHandler` → `openExternal` lets a clicked `ms-msdt:` / `file:` / custom-scheme link invoke an OS protocol handler. |
 | D332 | Classified plugin file preview and live workspace events | **Amend ADR 0104 / 0105 / 0109 / 0111: add `fs.readPreview` under `fs.read` (text / image data URL / binary / tooLarge, same caps as the host Files tab). Broadcast panel events to docked views as well as detached windows. Deliver `workspace:changed` to panels and plugin processes. The bundled Files view restores Open with default app, search, image preview, and copy path on those public channels.** | `fs.readText` cannot preview images or cap large binaries; docked views missed `appearance:changed`; Files polled for project switches. |
@@ -437,6 +442,8 @@ section mirrors only marketplace/catalog items still blocking nothing.
 | D123 | Composer slash commands, three sources | **Typing `/` at position 0 of the composer opens an inline command menu merging (a) pi prompt templates from `<workspace>/.pi/prompts/*.md` and `~/.pi/agent/prompts/*.md` (project overrides user-global on name conflict; frontmatter `description`/`argument-hint`), (b) builtin palette commands through slash aliases defined in one registry shared with palette search, and (c) plugin palette commands. On send, builtin/plugin invocations execute locally through the existing renderer switch / `commandPalette/execute` without creating a session or prompting the model; template invocations are expanded in the Electron main `agent/prompt` handler before persistence (`parseCommandArgs` + `substituteArgs` from pi-agent-core), persisting `content = expanded` plus a new optional `command` field carrying the typed form; unknown `/foo` is sent as literal text.** | Reuses pi's exact CLI semantics and template assets, keeps agent reseed faithful (reseed replays `content`), and keeps the transcript readable by rendering the typed invocation as a chip (ADR 0024). |
 | D124 | `@` file references are plain-text light references | **`@` at a token boundary opens a fuzzy file menu over a workspace index served by the new Electron-only channel `pi-desktop/fs/index` (files+dirs, `git ls-files -co --exclude-standard` fast path with ignore-set walk fallback, 8000-entry cap with truncation flag, short TTL cache, workspace-rooted, fails soft without a workspace). Accepting creates the canonical `@rel/path ` reference for files (quoted `@"a b.txt" ` when the path has spaces) and inserts `@dir/` without trailing space for directories; D209 amends completed-file draft presentation without changing the dispatched plain-text path. The model follows references with its Read tool in both Plan and Agent. No prompt content inlining or provider attachment conversion; clipboard file materialization is defined by D197.** | Matches pi CLI's model-facing semantics, avoids context inflation and truncation rules, and keeps user-driven file browsing out of the agent tool/permission path per ADR 0019. |
 | D125 | Composer autocomplete interaction and IME contract | **One menu component anchored above the composer, full composer width, focus always stays in the textarea. Keys while open: ↑/↓ cycle with wraparound, Enter/Tab accept, Escape closes only the menu (takes precedence over the composer's clear/blur Escape), typing filters live; Enter never sends while an item is highlighted, and an empty result list counts as closed. The menu closes on outside mousedown, blur, deleting past the trigger character, or session switch. All key handling and trigger detection sit behind the IME guard (`isComposing || keyCode === 229` plus composition start/end tracking): during composition nothing triggers, updates, or intercepts, and state is re-evaluated on compositionend.** | First explicit IME rule in the spec — zh-CN Enter-to-send plus candidate confirmation must never fight the menu; uniform insert-then-dispatch keeps two-Enter flows fast and predictable. |
+| D632 | Composer input history recall with ArrowUp/ArrowDown | **Amend D125 / D209 / D301: the accepted submissions of one conversation — a normal or steering prompt and a dispatched slash, extension, or mode command — are recorded newest-first in renderer-local `localStorage` (`pi.desktop.composerInputHistory`, one bounded bucket per conversation held newest-written-first, 100 entries per conversation, 20 conversations, consecutive duplicates collapsed) with the draft text and its file-reference snapshot, and recalling shows only that conversation's prompts. With the autocomplete menu closed and the draft empty (no text and no references), ArrowUp loads the newest entry and further ArrowUp walks older entries to the oldest; ArrowDown walks newer entries and past the newest returns to the empty draft. While browsing, both keys keep driving history even for a multi-line entry; any user input event, a submission, or a draft-key (session) change ends browsing, after which arrows are native again. IME composition and an open autocomplete menu keep priority over history. Because an entry is always recalled in the conversation that sent it, its file and image references are restored with its text, and no cross-conversation notice or i18n string exists. The caret moves to the end of the recalled text; the empty home composer (no conversation) recalls nothing, and a prompt sent from home is recorded in the conversation that submission materialized. Storage is best-effort: a missing, blocked, or corrupted store reads as empty and never breaks sending. No protocol, host, storage-schema, permission, theme, or packaging change. See `04-ux/09-interaction-patterns.md` and E2E-COMPOSER-input-history-recall.** | Retyping or re-copying a previous instruction is the most repeated composer action, and the app already keeps renderer-local MRU history for the plugin launcher (D219). Scoping the history to the conversation keeps a recalled draft's context intact and makes attachment restoration unconditional, because attachments live in that conversation's own scratch directory. |
+| D633 | Completed turn-process disclosures fold by default | **Amend ADR turn-process-and-thinking-display: Detailed opens the whole-process disclosure while a turn is active; on settlement, untouched process details start closed and explicit user choices remain authoritative. Compact recovery, search reveals, answer/action placement, and persistence are unchanged.** | The completed process was the only default-open branch, leaving progress and tool details expanded after work ended. Folding untouched processes restores the answer as the end-of-turn focus while keeping explicit inspection available. |
 | D197 | Composer clipboard files become session-scratch references | **When the composer clipboard contains one or more OS files/images, the renderer intercepts the file paste, transfers bounded bytes plus name/MIME metadata through the Electron-only `pi-desktop/composer/pasteFiles` channel, and includes the durable session id. Electron main verifies the session, sanitizes names, and writes unique files below `<data_dir>/scratch/<sessionId>/pasted/`; D209 amends the draft presentation while preserving each returned absolute path as the quoted-or-unquoted `@` reference sent to the agent. Text-only paste remains native. A home composer creates or reuses a durable session first. Clipboard bytes never enter the prompt, workspace, or artifact store, and session deletion removes the pasted files with the scratch root.** | Fixes the broken file/image paste path without dirtying the project or inventing provider-specific binary prompt plumbing; it reuses the existing scratch containment and lifecycle contract. |
 | D209 | Composer file references separate compact display from canonical prompt paths | **Completed workspace-file selections and materialized clipboard files become renderer-owned, session-scoped reference chips. A chip persistently displays only the leaf name, exposes the canonical path through tooltip/accessibility metadata, and can be removed without deleting scratch bytes. Immediately before submit, references serialize in stable order after the visible draft with D124's exact quoting, so reference-only drafts, slash templates, and Agent/Plan/Goal mode aliases retain their current behavior. Accepted dispatch clears the active editor but keeps a renderer-only, turn-scoped pre-serialization snapshot while smart Stop can still undo an unanswered send. That undo restores the original text and chips rather than prefilling serialized message content; abort after reply start keeps the partial transcript and restores nothing. Rejected/failed sends retain the active draft. `ComposerPastedFile.name` is the sanitized original leaf label while `path` retains the UUID-backed absolute storage identity. No binary payload, provider attachment, host RPC, or schema is added.** *(amended by D362: chips are inline sentinel-backed elements in the contenteditable draft)* | Long relative paths and UUID-backed scratch paths overwhelmed the prompt row even though only the agent needs them. Separating presentation from serialization preserves exact tool-readable paths, duplicate-name identity, textarea/IME behavior, and the text-only provider contract (ADR 0070). |
 | D362 | Accepted `@` files insert the same inline chip as paste | **Amend D209 / D125 in the renderer: accepting a completed workspace file from the `@` menu (Enter, Tab, or click) replaces the trigger token with one private-use sentinel in the draft and stores that token on the reference, the same path clipboard paste already uses. The chip paints at the caret; that confirmation never sends. Directories still insert `@dir/` as text. Token-less references are not a visible draft surface. Workspace-relative chips still drop on project switch; absolute scratch/paste paths stay. No IPC, storage, host-protocol, or schema change.** | After chips moved inline, file accept still stripped `@query` and stored a token-less reference that no longer painted, so Enter made the file vanish. |
@@ -466,9 +473,9 @@ section mirrors only marketplace/catalog items still blocking nothing.
 |---|---|---|---|
 | D126 | Three-platform release delivery (lifts D010) | *(amended by D364 / D603)* **Tag builds publish every artifact the matrix produces to the GitHub Release: macOS dmg/zip (arm64), Windows NSIS x64, Linux AppImage + deb (x64), each with blockmaps and the platform's `latest*.yml` electron-updater feed. Publishing the feeds activates D120's in-app update lanes for Windows NSIS and Linux AppImage; macOS stays in notify-and-link mode until a signed channel is qualified. The NSIS artifact name is pinned space-free (`PI-Desktop-Setup-${version}.${ext}`) because GitHub asset URLs mangle spaces. D010's macOS-only scope is lifted per the baseline-bump rule (baseline `0.4.7`); the release pipeline itself was qualified end-to-end on v0.1.1-rc.1/v0.1.1.** | The pipeline builds and validates all three platforms on every tag anyway; keeping installers as expiring Actions artifacts (90-day retention) withheld them from users without adding safety. Publishing the update feeds is the point of shipping: platforms with in-app lanes update silently, and future platform regressions surface through real installs instead of unused artifacts. |
 | D364 | Windows portable exe without installer | *(superseded by D603)* **Amend D120 / D126 / ADR 0022: tag builds publish a Windows x64 portable exe `PI-Desktop-Portable-${version}.exe` alongside the NSIS installer `PI-Desktop-Setup-${version}.exe`. The portable target does not write `latest.yml`. Packaged portable runs (`PORTABLE_EXECUTABLE_FILE`) use notify-and-link delivery. NSIS installs keep in-app download and quit-and-install. Data stays in the existing application data directory. Portable requests user execution level.** | Company environments that whitelist a single executable cannot run the NSIS installer. Applying the NSIS updater to a portable run would install the app, so portable stays manual (ADR 0197, E2E-211). |
-| D603 | Windows portable delivery uses a normal ZIP | **Amend D364 / ADR 0022 / ADR 0197: tag builds publish a Windows x64 portable ZIP `PI-Desktop-Portable-${version}.zip` alongside the NSIS installer `PI-Desktop-Setup-${version}.exe`. The Windows release helper builds NSIS and ZIP separately, stamps ZIP app metadata with `piDistribution = "zip"`, and keeps the ZIP target out of `latest.yml`. Extracted ZIP runs use notify-and-link delivery; the updater still recognizes `PORTABLE_EXECUTABLE_FILE` for older portable executables. Data stays in the existing application data directory.** | The self-extracting portable wrapper could trigger administrator prompts and did not provide a reliable normal executable identity for the taskbar. A user-extracted ZIP launches `PI-Desktop.exe` directly and preserves the manual-update boundary. |
+| D603 | Windows portable delivery uses a normal ZIP | *(amended by D628)* **Amend D364 / ADR 0022 / ADR 0197: tag builds publish a Windows x64 portable ZIP `PI-Desktop-Portable-${version}.zip` alongside the NSIS installer `PI-Desktop-Setup-${version}.exe`. The Windows release helper builds NSIS and ZIP separately, stamps ZIP app metadata with `piDistribution = "zip"`, and keeps the ZIP target out of `latest.yml`. Extracted ZIP runs use notify-and-link delivery; the updater still recognizes `PORTABLE_EXECUTABLE_FILE` for older portable executables. Data stays in the existing application data directory.** | The self-extracting portable wrapper could trigger administrator prompts and did not provide a reliable normal executable identity for the taskbar. A user-extracted ZIP launches `PI-Desktop.exe` directly and preserves the manual-update boundary. |
 | D260 | Release documentation is a version surface | **A stable version bump must update every version-bearing surface before the tag: the shipped-locale in-app changelog and its test list, every workspace `package.json` including `docs/package.json` (a third workspace root `scripts/release.mjs` previously skipped), the Cargo workspace version and `host-core` lockfile entry, `APP_VERSION`, and the `<major>.<minor>.x` release line stated in `README.md` and `README.zh-CN.md`. `scripts/check-release-docs.mjs` verifies all of them; `scripts/release.mjs` runs it after bumping and refuses to commit or tag while any surface disagrees, with `--skip-docs-check` reserved for deliberate non-release bumps. Extends D164.** | The in-app changelog gate alone left published documentation behind: the READMEs still advertised the `0.5.x` line at `0.10.8`, and `docs/package.json` sat at `0.5.8`. A tag is irreversible, so the check runs before the tag exists rather than as review etiquette. |
-| D371 | Explicit unsigned macOS first-launch helper | *(amended by D406 and D443)* **Every macOS distribution ships an executable `PI-Desktop-macOS-open.command`, placed on the DMG in a visible first-launch row below the drag-to-Applications gesture. It searches only `/Applications/PI-Desktop.app` and `~/Applications/PI-Desktop.app`, verifies `CFBundleIdentifier` is `net.aiuo.pi-desktop`, removes only `com.apple.quarantine` when present, and opens the app. It never uses `sudo`, accepts no arbitrary path, and does not replace Developer ID signing or notarization.** | The unsigned macOS lane can be blocked by quarantine with a misleading damaged-app message, and the terminal-only `xattr -cr` note was broader than the launch failure requires (ADR 0204, E2E-196b) |
+| D371 | Explicit unsigned macOS first-launch helper | *(amended by D406, D443, and D634)* **Every macOS distribution used to ship an executable `PI-Desktop-macOS-open.command`; that helper is no longer distributed. See ADR 0204, ADR 0309, and E2E-196b.** | The unsigned macOS lane can be blocked by quarantine with a misleading damaged-app message, and the terminal-only `xattr -cr` note was broader than the launch failure required (ADR 0204, E2E-196b) |
 | D443 | Canonical application ID and macOS codesign identifier | **Amend D141 / D371 / ADR 0204: the application ID is `net.aiuo.pi-desktop` (`APP_ID`, electron-builder `appId`, macOS `CFBundleIdentifier`, Windows AppUserModelID). Development macOS hosts use `net.aiuo.pi-desktop.dev`. Do not adhoc-sign the unsigned pack in `afterPack`/`afterSign`: nested Electron helpers are still unsigned and `codesign` fails with `code object is not signed at all`. See ADR 0278 and issue #524.** | The owner domain is `net.aiuo.pi-desktop`. Binding the unsigned outer identifier is deferred until a helper-safe pack path exists. |
 
 ## V. Extension activation decisions
@@ -1102,9 +1109,11 @@ section mirrors only marketplace/catalog items still blocking nothing.
   is not trustworthy.
 - `env` and `headers` resolve only from the plugin's own settings via
   `{ "setting": "<key>" }`; the host environment is never passed through (D018).
-  A stdio child gets `PATH`, temp/locale vars, and the declared values — nothing
-  else. `command` must be a bare PATH name or plugin-relative; `url` must be
-  `https` unless the host is loopback.
+  A stdio child gets `PATH`, temp/locale, profile/toolchain keys (`HOME`,
+  `USERPROFILE`, `PATHEXT`, `ComSpec`, `FNM_DIR`, …), and the declared values —
+  not provider secrets. Bare `npx`/`uvx` resolve to real binaries (official
+  Node, fnm, nvm, Volta). `command` must be a bare PATH name or plugin-relative;
+  `url` must be `https` unless the host is loopback.
 - Both transports ship rather than stdio alone: a hosted MCP endpoint is common
   enough that stdio-only would have pushed plugins to wrap it in a local shim,
   which is strictly worse — an extra process and an unreviewable proxy.
@@ -3388,7 +3397,7 @@ D193, and D194.
   mount refresh had been replacing it), the marketplace search and detail
   calls are stubbed while seeded, and `pi-plugins-row-details` /
   `pi-plugins-sheet` scenes are added. No protocol, storage, or runtime
-  behavior changes. Refines the Installed-tab clause of D169 and §3.5 of the UI
+  behavior changes. Refines the Installed-tab clause of D169 and §3.4 of the UI
   IA.
 
 ## 2026-09-05 — Scrollbars show only on hover or while scrolling (D300)
@@ -7020,3 +7029,341 @@ must keep splitting are covered by `markdown-blocks.test.mjs`.
 - The runtime remains inline-only: no background summary, user setting,
   protocol change, or transcript/storage rewrite. See ADR 0064,
   `03-runtime/02-agent-runtime.md`, and E2E-164.
+
+## 2026-09-24 — Windows stdio MCP resolves official Node and fnm npx (D624, issue #789)
+
+- Amend D176 / D600 / ADR 0038. D600 probes the login-shell PATH on Unix and
+  explicitly keeps Windows on the inherited PATH. That does not start
+  `npx.cmd`: `spawn({ shell: false })` returns ENOENT for `npx` and EINVAL
+  for the `.cmd` shim, even when official Node is on PATH (issue #789).
+- Electron main now resolves bare `npx`/`npm`/`node`/`uvx` before spawn:
+  PATH `node.exe` from an official install wins, then fnm/nvm-windows/Volta.
+  When `npx-cli.js` sits next to `node.exe`, the child is `node` plus that
+  script — no cmd.exe. Remaining `.cmd` files go through
+  `cmd.exe /d /s /c` with quoted literal arguments. PATHEXT is searched
+  before an extensionless Git-Bash `npx` shim.
+- Secrets still do not cross (D018). Command names stay bare. See ADR 0038
+  and `07-plugins/04-plugin-security.md`.
+
+## 2026-09-24 — The transcript occludes itself instead of the dock painting a band (D624, issue #728)
+
+- The opaque `--ds-bg-primary` band added for issue #728 kept transcript rows
+  from showing below the Composer, but it also covered whatever a contributed
+  theme had drawn on the conversation pane. A theme that fills `.main-pane` or
+  `.thread-scroll` (the theme studio's `main` / `thread` regions) got a
+  hard-edged rectangle of the built-in workspace colour across the bottom of the
+  chat. No theme region could reach that band: the only lever was
+  `--ds-bg-primary` itself, which every other primary surface follows.
+- `.composer-dock-docked` now paints nothing, and `.thread-scroll` masks its own
+  content out with `linear-gradient(to bottom, #000 calc(100% -
+  var(--composer-dock-height) - 16px), transparent calc(100% -
+  var(--composer-dock-height) + 2px))`. The gradient resolves against the
+  scrollport's own box, so it stays anchored to the pane while rows move through
+  it. `- 16px` is exactly the trailing reserve `.thread-content` adds below the
+  measured Composer height, so a transcript pinned to its end keeps its last row
+  fully opaque and only the rows crossing the boundary fade.
+- The mask belongs on the scroller rather than on `.thread-wrap`: the minimap
+  rail, the jump-to-latest button, the settle veil, and the navigation status
+  are `.thread-wrap` children that must stay fully painted. The dock's own
+  stacked plates (`.asktool-card`, `.plan-approval-bar`, queued prompts, the
+  shell) were already opaque and are siblings of `.thread-wrap`, so they are
+  unaffected. The scrollport's last 18px of scrollbar now fades instead of being
+  covered by the band.
+- Renderer CSS and the theme surface regression change only. The theme surface
+  probe pins the dock to fully transparent and asserts the mask tracks
+  `--composer-dock-height`. There is no scroll state, protocol, persistence,
+  theme schema, or permission change. See `04-ux/08-component-spec.md` and
+  E2E-CHAT-opaque-floating-decision-and-retry-surfaces.
+
+## 2026-09-25 — Model settings unify around one AI service list and a chosen-models summary (D625)
+
+- The model settings page asked too much before a user could connect anything.
+  API-key services opened on a closed Service menu, vendor subscriptions had
+  their own button and dialog further down the page, and plugin-declared
+  services sat elsewhere again, so the first decision was where to look rather
+  than what to connect. Users reported the flow as needlessly heavy. This
+  redesign keeps the immersive, borderless D297 tone (in-flow surfaces use
+  `--ds-tile`/`--ds-raised` and spacing, no borders; only floating menus and
+  dialogs keep a 0.5px stroke and a shadow) and collapses the choices into one
+  list and one add flow.
+- API services, plugin-declared services and vendor subscription accounts now
+  share a single AI service list (`ServiceList`, `ServiceRow`). A row is itself
+  the way in — a click or Enter opens its editor — so the only controls left on
+  a row are the enable switch and one overflow menu; the click lives on the row
+  element rather than a button so a card drag still starts anywhere on the card.
+  An account row still lives and dies through the vendor-account editor and
+  `deleteOauthAccount`, never the provider CRUD, so ownership boundaries are
+  unchanged even though the two kinds render in one list.
+- Adding a service starts on a searchable chooser (`ServiceChooser`), not a
+  closed menu: subscriptions and API-key services sit side by side as tiles and
+  the custom endpoint comes last, because it is the one choice that asks for
+  more than a key. Filtering never talks to the host. Picking a tile moves to
+  the service form (`ProviderSetupDialog`, two views), and the credential rows
+  live in their own component (`ProviderConnectionFields`, D310 + D625).
+- Both the service dialog and the vendor-account dialog open on a chosen-models
+  summary (`ChosenModelsSummary`) with the full two-pane picker
+  (`ModelSelectionPanes`) one click away, because most people keep the models a
+  service starts with. A new API service preselects recommended models
+  (`recommended-models.ts`, `useRecommendedModelSelection`): only tool-capable
+  chat models are candidates, and when models.dev metadata is present the newest
+  stable model per family wins (up to `RECOMMENDED_MODEL_LIMIT`), with the first
+  pick becoming the service default — so saving a key is enough to start
+  chatting. Without trustworthy discovery (a rejected key, a timeout or a
+  network failure) nothing is preselected; a named vendor that simply has no
+  `/models` route still counts as accepting the key.
+- Covered by `apps/desktop/test/service-chooser.test.mjs`,
+  `service-catalog.test.mjs`, `service-row-status.test.mjs`,
+  `recommended-models.test.mjs`, `provider-form-layout.test.mjs`,
+  `default-model-display.test.mjs` and the updated `settings-general.test.mjs`,
+  plus the `scripts/e2e/provider-api-style.tsx` probe (chooser tiles keyed by
+  `data-service-id`, the custom endpoint last, and the account dialog opening on
+  `provider-models-summary` with per-model controls behind Manage models and a
+  folded Advanced disclosure). ADR 0098 still governs vendor OAuth accounts.
+
+## 2026-09-25 — The custom endpoint leads the API-key group (D626)
+
+- The service chooser listed its API-key tiles in the shared preset order and
+  put the custom endpoint after all of them, so reaching one's own address
+  meant scrolling past every named host first. The custom endpoint now leads
+  the group instead: it is the one choice that needs nothing found before it,
+  and the group still reads as "connect with an API key". The groups keep
+  their order (subscriptions above API-key services), and the keyboard walk
+  still enters the grid at its first tile.
+- Covered by the updated `apps/desktop/test/service-chooser.test.mjs` and the
+  `scripts/e2e/provider-api-style.tsx` probe, which now asserts that the first
+  `[data-service-id]` tile is `custom` rather than the last.
+
+## 2026-09-25 — Model settings open on the two panes, and the fallback list is complete (D627)
+
+- Editing a service or a vendor account used to land on a chosen-models summary
+  (`ChosenModelsSummary`) with the real picker one click away, so reaching a
+  per-model control cost two decisions before it cost any work. Both dialogs now
+  render the two panes (`ModelSelectionPanes`) straight away — the service's own
+  list on the left, the models this credential will run on the right — and the
+  summary plus its Manage models / Collapse pair are gone, along with the
+  `autoPicked` hint that only the summary could show. Preselection is unchanged
+  (`recommended-models.ts`, `useRecommendedModelSelection`); the panel simply
+  states it where the picks are. A recommended model is a starting point, never
+  the only thing on screen.
+- The catalog stand-in for a service that publishes no model list is now the
+  provider's published set as a whole (`modelsForProvider({ includeNonChat: true })`
+  from the settings handler), so embedding, speech, image and reranking
+  endpoints a key can call appear next to the chat models instead of silently
+  missing. The default stays text-only, because session and agent paths ask for
+  what they can actually run, and automatic preselection still filters to
+  tool-capable chat models.
+- Covered by the updated `apps/desktop/test/provider-form-layout.test.mjs`
+  (both dialogs render the panes with no summary to fold),
+  `apps/desktop/test/settings-general.test.mjs`,
+  `apps/desktop/test/service-chooser.test.mjs` and the new
+  `apps/desktop/test/provider-model-list-scope.test.mjs` (the default list is
+  text-only, `includeNonChat` adds the hidden endpoints without dropping or
+  duplicating an id), plus the `scripts/e2e/provider-api-style.tsx` and
+  `scripts/e2e/image-generation-ui.tsx` probes, which no longer click Manage
+  models.
+
+## 2026-09-26 — Delegates detach from the turn and wake the idle session (D628-MC; fork-specific)
+
+- Amends D328 / D352 and ADR 0089; recorded in
+  `docs/adr/detached-delegation-and-wake.md`. Background delegates no longer
+  hold the parent turn open: when the parent stops calling tools, `turn_end` /
+  `agent_end` are emitted, `AgentStatus.isRunning` stops counting running
+  delegates, and the optional `AgentStatus.backgroundDelegations` count carries
+  them for the sidebar dot and the idle-session chip. Reports that settled
+  during the turn are injected once at that turn's boundary (single delivery
+  shot per record, `MAX_TASKWAIT_RESULT_CHARS` bound, heartbeat for the rest);
+  turn epochs no longer gate delivery.
+- A settlement while the session is idle queues one wake turn through the
+  host-owned queue (`session.queuePush`, D386): the queued content is the
+  stable `Subagent reports ready:` marker plus the settled ids, idempotent on
+  those ids, and one queued wake serves every settlement until a turn consumes
+  it. The wake turn's preflight recognizes the exact marker prefix — never
+  loose matching over user text — and expands the prompt with the undelivered
+  reports, marking them delivered only after preflight passes.
+- Stop semantics: user Stop and terminal parent errors end only the parent
+  turn; delegates keep running and `TaskStop` (or the Task card) stays the
+  explicit cancel. Only runtime disposal aborts delegates, settling them as
+  `aborted`. New prompts adopt running delegates, and the concurrency cap
+  counts them. Every settled status — `completed`, `failed`, `timed_out`,
+  `stopped`, `aborted`, and the restart-rebuilt `interrupted` — is resumable
+  through `Task.resume`; delegates do not survive an app restart, so the wake
+  applies only while the app runs.
+- Covered by `packages/agent-runtime/src/runtime.test.ts` ("detached
+  delegation and wake (D628)" plus the reshaped stop/error/boundary tests),
+  `delegation-chain.test.ts`, `delegation-history.test.ts`, and the updated
+  `apps/desktop/test/sidebar-session-status.test.mjs`; scenario
+  `E2E-SUBAGENT-detached-wake` in the E2E plan.
+
+## 2026-09-26 — User-selectable application update behavior (D628)
+
+- Settings → Info now stores Automatic / Manual per installation. Supported
+  installer builds default to Automatic; Windows ZIP/portable packages and
+  packages without an automatic-install lane default to Manual. Choosing Manual
+  disables automatic download and install-on-quit but keeps scheduled checks.
+- Manual mode announces an available version once. Host settings remember the
+  last reminded version across restarts; the renderer also suppresses a second
+  banner after route remount. The Settings row remains available for checking
+  status and opening the fixed Releases page.
+- Windows ZIP/portable users may explicitly opt into Automatic only after a
+  warning that the NSIS installer can replace the extracted copy. No database
+  migration or host protocol version change is required.
+- Covered by `apps/desktop/test/update-preference.test.mjs`, the updated
+  `apps/desktop/test/auto-update.test.mjs`, and E2E-UPDATE-preference-and-once-only-reminder.
+
+## 2026-09-26 — Bound aggregate image history without an arbitrary message cutoff (D629)
+
+- Vision history restoration keeps the existing 10 MB per-image ceiling and adds
+  a 30 MB aggregate raw-byte budget per runtime rebuild. Eligible refs are
+  considered newest-first; every image remains a provider image block when the
+  history fits, and only older attachments beyond the budget fall back to a
+  safe `@path`. The current prompt row is excluded before hydration so it cannot
+  consume the history allowance.
+- The sidecar reads only files admitted by the budget and clears stale transient
+  base64 from restored attachment objects. Durable host messages remain
+  metadata/ref-only. See ADR 0101, `03-runtime/01-ipc-protocol.md` §5.1,
+  `03-runtime/02-agent-runtime.md` §5c, and E2E-102j.
+
+## 2026-09-27 — Routed model metadata uses conservative last-segment matching (D630, PR #1047)
+
+- Supersede D622's broad catalog aliases for runtime enrichment. Compare only
+  the case-insensitive final `/` segment, so a routed or gateway wire ID can
+  reach a catalog row without treating arbitrary thinking, release-date,
+  deployment-marker, or vendor-dash suffixes as model identity.
+- When a leaf has multiple catalog candidates, select a unique official/source
+  provider only when its provider family agrees with an explicit model source;
+  otherwise borrow metadata only when all candidates expose identical
+  capabilities and thinking metadata. If neither rule proves identity, leave
+  the row unmatched. A known provider may still borrow the exact ID from other
+  publishers; unknown providers do not use unanchored consensus or marker
+  fallback.
+- Composer keeps the complete configured wire ID on model rows. Unmatched
+  models expose the canonical thinking ladder for manual opt-in, but start a
+  new draft/session at `off` unless an explicit binding default exists. An
+  empty binding level array is the generic unknown-model seed, not an explicit
+  disable; a non-empty binding override remains authoritative. Known catalog
+  matches retain the D303 binding-default/highest-enabled behavior.
+- The change is metadata/UI projection only: it does not rewrite persisted wire
+  IDs, provider identity, or host capability ownership. See
+  `03-runtime/13-model-catalog-and-selection.md` §11.3 and
+  `04-ux/08-component-spec.md` §11.
+
+## 2026-09-27 — Agent workspace search is available from turn one (D631)
+
+- Amend D185 / D208 and ADR 0069's Agent activation boundary: `Glob` and
+  `Grep` are included with `Read`, `Bash`, `Edit`, and `Write` in the first
+  Agent request. Routine workspace discovery no longer needs a `ToolSearch`
+  round trip.
+- `BrowserPreview`, plugin tools, and plugin-development helpers remain
+  deferred; ToolSearch, successful-activation restoration, host permissions,
+  and the Plan/Goal tool sets are unchanged.
+- See the 2026-09-27 amendments to ADR 0048, ADR 0069, and ADR 0230, plus
+  `03-runtime/03-tools-and-permissions.md` and E2E-013/E2E-019e.
+
+## 2026-09-27 — Composer recalls its own conversation's submissions with ArrowUp/ArrowDown (D632)
+
+- The composer had no way to reuse what was just sent: repeating or tweaking an
+  instruction meant retyping it or copying it back out of the transcript, even
+  though a terminal, a shell history, and this app's own plugin launcher (D219)
+  all keep recent input one keystroke away.
+- The history belongs to the conversation. Recalling shows only the prompts
+  accepted in the conversation on screen, so a draft never appears with another
+  conversation's context and a deleted conversation's prompts cannot surface in a
+  live one. Store shape: one renderer-local `localStorage` key
+  (`pi.desktop.composerInputHistory`) holding bounded buckets newest-written
+  first, 100 entries per conversation and 20 conversations, with consecutive
+  duplicates collapsed. No schema, host, or IPC change.
+- Scoping by conversation also settles attachments. Picked, pasted, and dropped
+  files are copied into the sending session's scratch directory, and the image
+  input loader accepts them only under the current project, the current session
+  scratch, or `data_dir/attachments`; a recalled entry therefore always belongs
+  to the session whose scratch root holds its files, so its chips and previews
+  come back with its text and no "attachments were left behind" notice is
+  needed. (An earlier shape of this change kept one global history and stripped
+  attachments on a cross-session recall, which is why that notice and its i18n
+  string existed; both are gone.)
+- Recording happens only on an accepted submission. The four accept paths — a
+  normal or steering prompt, a dispatched extension command, a dispatched
+  builtin or palette command, and a mode command with a body — record the
+  submitted draft under the submitting conversation; a blocked slash source, an
+  unconfigured model, an empty draft, and a rejected send do not. A rejected send
+  restores its draft exactly as before and leaves history untouched. The empty
+  home composer has no session, so it recalls nothing. On acceptance,
+  `sendPrompt` passes the actual target session ID to history recording; it is
+  not inferred by rereading global `activeSessionId` after the asynchronous send.
+  Thus a Home-first send that finishes after navigation remains in the session
+  that the submission materialized.
+- ArrowUp starts browsing only from an empty draft (no text and no references),
+  which is what keeps the feature out of the way of a multi-line draft where the
+  same key has to move the caret. Once browsing, ↑/↓ keep driving history —
+  including through a recalled multi-line entry — until a user edit, a
+  submission, or a conversation change (the draft key) ends browsing. IME
+  composition and an open autocomplete menu are checked first, so ↑/↓ still cycle
+  menu items and a confirming Enter during composition still commits text rather
+  than sending it (D125).
+- Storage is best-effort, matching `plugin-launcher-history.ts`: an unreadable
+  store, malformed JSON, a row that fails validation, a payload in the earlier
+  array shape, or a throwing `setItem` degrades to no history instead of failing
+  a send.
+- `composer-input-history.test.mjs` covers storage, per-conversation navigation,
+  and the `sendPrompt` callback retaining the materialized session across a
+  selection change. `pnpm test:e2e:composer-paste` mounts the production input,
+  draft, history, and submit hooks in an Electron renderer; it checks keyboard
+  navigation, session isolation, a rendered file chip, the delayed Home-send
+  switch, and restoration from a second Electron process using the same test
+  profile (E2E-COMPOSER-input-history-recall).
+
+## 2026-09-27 — Completed turn-process disclosures fold by default (D633)
+
+- Detailed mode opens the whole-process disclosure while a turn is active.
+  Once the turn settles, untouched process details default to closed; explicit
+  user choices remain authoritative. Search reveals and actionable/error
+  surfaces outside the process remain unchanged.
+- Renderer presentation only: no transcript, persistence, provider-thinking,
+  or host behavior changes. See ADR turn-process-and-thinking-display,
+  `04-ux/08-component-spec.md`, and E2E-CHAT-turn-process-and-thinking-display.
+
+## 2026-09-27 — Remove bundled macOS first-launch guidance (D634)
+
+- The DMG remains a two-icon app/Applications install, and the ZIP contains
+  `PI-Desktop.app` at its root. Neither format ships an opening note or
+  executable quarantine-clearing helper, including for local or unsigned debug
+  builds.
+- The signing, notarization, stapling, and updater lanes are unchanged. Unsigned
+  debug artifacts do not imply Gatekeeper qualification.
+- `packaging-footprint.test.mjs` guards the builder configuration; E2E-196b
+  covers native DMG and ZIP archive inspection.
+- D634 amends D457 / ADR 0296 and supersedes the macOS distribution provisions
+  of ADR 0232 / ADR 0204. See ADR 0309.
+
+## 2026-09-29 — Work-area-capped 800×560 window minimum (D635)
+
+- The app-wide window minimum is 800×560 DIP. `clampMinimumSizeToWorkArea`
+  caps each dimension to the current display's work area (floored, at least 1)
+  wherever Main sets the minimum: window creation, display reconciliation,
+  Stage Manager recovery, and the work-panel resize paths. At 150% scaling on
+  Windows the work area is about 1280×672 DIP, so a fixed minimum could be
+  larger than the screen.
+- `window/setWorkPanelChatWidth` and the renderer's chat-width clamp accept
+  `800..10000px`; the two floors share one constant so a renderer-valid width
+  is never rejected by Main.
+- On a narrow window the existing three-column budget (`workPanelLayout`)
+  still applies: the docked panel is capped so MainChat keeps its 450px floor,
+  and the expanded sidebar auto-collapses first. Saved panel widths are not
+  rewritten.
+- D635 supersedes the 1040×700 minimum in D156 / D447 (and the matching
+  clauses of ADR 0029 / ADR 0238) and the `1040..10000` chat-width range in
+  ADR 0146. `work-panel-window.test.mjs` and `work-panel-resize.test.mjs`
+  cover the clamp and chat-width range; see US-UI-19 and E2E-167.
+
+## 2026-09-29 — Local permission approvals remain pending until resolved (D636)
+
+- D636 amends D005 / ADR 0011 for the local desktop permission gate. A
+  permission-gated `tools.execute` request has no automatic deadline: host-core
+  keeps it in `permissions.pending`, the renderer keeps the inline card, and
+  the transport does not install a timer. Allow once, allow for session, deny,
+  explicit cancellation, and process shutdown remain the settlement paths.
+- The permission request no longer carries `timeoutMs`; pending snapshots no
+  longer expose `expiresAt` or `remainingMs`, and the UI has no countdown.
+  Tool-specific command/plugin execution budgets and the independent Plan/Goal
+  and RACP approval lifetimes are unchanged. See ADR 0310, issue #1214, and
+  E2E-017.

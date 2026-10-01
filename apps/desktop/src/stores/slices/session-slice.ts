@@ -1,5 +1,4 @@
 import i18n from "i18next";
-import { prepareTranscriptAction } from "../runtime/transcript-action";
 import type {
   Mode,
   PlanProposal,
@@ -26,7 +25,6 @@ import {
   retainSessionPane,
 } from "../../lib/session-panes";
 import {
-  normalizeProjectPath,
   projectPathsForNewSessions,
   sessionMatchesProject,
 } from "../../lib/sidebar-session-groups";
@@ -48,12 +46,9 @@ import { sessionReadLooksEmpty } from "../../lib/session-transcript-read";
 import type {
   AppState,
   DraftSessionConfiguration,
-  NavigationOptions,
-  PendingPlanRefreshResult,
   SessionHistoryWindow,
 } from "../app-state";
 import {
-  type SessionConfiguration,
   type SessionRuntime,
 } from "../runtime/session-runtime";
 import type { StoreAccess } from "./types";
@@ -243,6 +238,7 @@ export function createSessionSlice({
         );
       }
       set({ selectingSessionId: id, page: "chat" });
+      const outcomeAcknowledgement = get().acknowledgeSessionOutcome(id);
 
       const commitSelection = (
         messages: UiMessage[],
@@ -422,7 +418,6 @@ export function createSessionSlice({
         }
         rememberSessionCompactions(id, detail.session);
         void get().restorePendingPlan(id);
-        void get().acknowledgeSessionOutcome(id);
         const selected = get().sessions.find((session) => session.id === id);
         if (
           selected &&
@@ -460,6 +455,7 @@ export function createSessionSlice({
           }
         }
       } finally {
+        await outcomeAcknowledgement;
         if (runtime.isCurrentSessionSelection(selection)) {
           runtime.clearSessionSelection(selection);
           set((state) =>
@@ -574,10 +570,11 @@ export function createSessionSlice({
 
     forkAssistantMessage: async (messageId) => {
       const intent = runtime.beginNavigationIntent();
-      const state = await prepareTranscriptAction({ get, set }, runtime, messageId);
-      if (!state || !runtime.navigationIntentIsCurrent(intent)) return;
+      // Fork needs only the anchor id: the host reads the canonical prefix.
+      // Hydrating the source here would overwrite its concurrently streaming tail.
+      const state = get();
       const sessionId = state.activeSessionId;
-      if (!sessionId || state.runningSessions[sessionId]) return;
+      if (!sessionId || state.selectingSessionId) return;
       const message = state.messages.find((candidate) => candidate.id === messageId);
       const source = state.sessions.find((session) => session.id === sessionId);
       if (!message || message.role !== "assistant" || !source) return;
@@ -607,6 +604,8 @@ export function createSessionSlice({
         set((state) => ({
           draftConfiguration: {
             mode: config.mode,
+            ultra: config.ultra ?? ((config.providerId === state.draftConfiguration?.providerId && config.modelId === state.draftConfiguration?.modelId) && state.draftConfiguration?.ultra === true),
+            fast: config.fast ?? state.draftConfiguration?.fast ?? false,
             thinkingLevel: config.thinkingLevel,
             providerId:
               config.providerId ?? state.draftConfiguration?.providerId,
@@ -618,32 +617,7 @@ export function createSessionSlice({
         return;
       }
       if (get().pendingPlans[sessionId]?.status === "pending") return;
-      if (
-        get().runningSessions[sessionId] ||
-        runtime.sessionConfigurationFlushes.has(sessionId)
-      ) {
-        runtime.pendingSessionConfigurations.set(
-          sessionId,
-          runtime.mergeSessionConfiguration(
-            runtime.pendingSessionConfigurations.get(sessionId),
-            config,
-          ),
-        );
-        set((state) => ({
-          sessions: state.sessions.map((session) =>
-            session.id === sessionId
-              ? applyOptimisticSessionConfiguration(session, config)
-              : session,
-          ),
-        }));
-        return;
-      }
-      const payload = runtime.mergeSessionConfiguration(
-        runtime.pendingSessionConfigurations.get(sessionId),
-        config,
-      );
-      runtime.pendingSessionConfigurations.delete(sessionId);
-      const result = await api.configureSession(sessionId, payload);
+      const result = await api.configureSession(sessionId, config);
       set((state) => ({
         sessions: state.sessions.map((session) =>
           session.id === sessionId

@@ -213,6 +213,7 @@ export const RacpEventEnvelopeSchema = Type.Object({
   kind: RacpEventKindSchema,
   occurredAt: Type.String(),
   parentToolCallId: Type.Optional(Type.String()),
+  nestedParentToolCallId: Type.Optional(Type.String()),
   agentName: Type.Optional(Type.String()),
   payload: Type.Unknown(),
 });
@@ -237,6 +238,7 @@ export const RacpItemSummarySchema = Type.Object({
   sequence: Type.Optional(Type.Integer({ minimum: 1 })),
   createdAt: Type.String(),
   parentToolCallId: Type.Optional(Type.String()),
+  nestedParentToolCallId: Type.Optional(Type.String()),
   agentName: Type.Optional(Type.String()),
   content: Type.Unknown(),
 });
@@ -270,6 +272,7 @@ export const RacpApprovalRequestSchema = Type.Object({
   risk: Type.Optional(Type.Union([Type.Literal("low"), Type.Literal("medium"), Type.Literal("high")])),
   agentName: Type.Optional(Type.String()),
   parentToolCallId: Type.Optional(Type.String()),
+  nestedParentToolCallId: Type.Optional(Type.String()),
   title: Type.Optional(Type.String()),
   question: Type.Optional(Type.String()),
   artifact: Type.Optional(
@@ -326,6 +329,7 @@ export const RacpInputRequestSchema = Type.Object({
   expiresAt: Type.String(),
   agentName: Type.Optional(Type.String()),
   parentToolCallId: Type.Optional(Type.String()),
+  nestedParentToolCallId: Type.Optional(Type.String()),
   questions: Type.Array(
     Type.Object({
       id: Type.String({ minLength: 1 }),
@@ -389,6 +393,24 @@ export const RacpSessionSnapshotSchema = Type.Object({
 });
 export type RacpSessionSnapshot = Static<typeof RacpSessionSnapshotSchema>;
 
+/**
+ * A snapshot without the transcript page: everything a client needs to refresh
+ * live session state (turns, approvals, inputs, cursor) when it already holds
+ * the transcript, at a fraction of the payload of `session/snapshot`.
+ */
+export const RacpSessionStateSchema = Type.Object({
+  session: RacpSessionSchema,
+  activeTurn: Type.Optional(RacpTurnSchema),
+  queuedTurns: Type.Array(RacpTurnSchema),
+  activeItems: Type.Array(RacpItemSummarySchema),
+  pendingApprovals: Type.Array(RacpApprovalRequestSchema),
+  pendingInputs: Type.Array(RacpInputRequestSchema),
+  cursor: RacpCursorSchema,
+  revision: Type.Integer({ minimum: 0 }),
+  generatedAt: Type.String(),
+});
+export type RacpSessionState = Static<typeof RacpSessionStateSchema>;
+
 // ---------------------------------------------------------------------------
 // Initialization (spec §3)
 // ---------------------------------------------------------------------------
@@ -419,6 +441,10 @@ export const RacpServerCapabilitiesSchema = Type.Object({
   toolRelay: Type.Boolean(),
   terminal: Type.Boolean(),
   notifications: Type.Boolean(),
+  /** `session/state` light refresh is served (mobile profile addition). */
+  sessionState: Type.Optional(Type.Boolean()),
+  /** `session/item` chunked full-content reads are served (mobile profile addition). */
+  itemContent: Type.Optional(Type.Boolean()),
   bindings: Type.Array(Type.Union([Type.Literal("RACP-WS"), Type.Literal("RACP-HTTP"), Type.Literal("RACP-GRPC")])),
 });
 export type RacpServerCapabilities = Static<typeof RacpServerCapabilitiesSchema>;
@@ -528,6 +554,7 @@ export const RACP_OPERATIONS = {
   "session/get": { role: "viewer", profile: "v1", mutation: false },
   "session/create": { role: "controller", profile: "v1", mutation: true },
   "session/attach": { role: "viewer", profile: "v1", mutation: false },
+  "session/modelCatalog": { role: "viewer", profile: "remote-host", mutation: false },
   "session/history": { role: "viewer", profile: "v1", mutation: false },
   "events/subscribe": { role: "viewer", profile: "v1", mutation: false },
   "events/unsubscribe": { role: "viewer", profile: "v1", mutation: false },
@@ -679,6 +706,8 @@ export function racpKindForAgentEvent(
       return { kind: options.interrupted ? "turn.interrupted" : "turn.completed", durable: true };
     case "error":
       return { kind: "turn.failed", durable: true };
+    case "usage":
+      return { kind: "turn.activity", durable: false };
     case "turn_start":
     case "turn_end":
     case "status":
@@ -719,6 +748,7 @@ export const LOCAL_AGENT_EVENT_TYPES: readonly AgentEvent["type"][] = [
   "agent_end",
   "turn_start",
   "turn_end",
+  "usage",
   "message_start",
   "message_update",
   "message_end",
@@ -835,6 +865,7 @@ export const RACP_SCHEMAS = {
   EventEnvelope: RacpEventEnvelopeSchema,
   ItemSummary: RacpItemSummarySchema,
   SessionSnapshot: RacpSessionSnapshotSchema,
+  SessionState: RacpSessionStateSchema,
   ApprovalRequest: RacpApprovalRequestSchema,
   ApprovalResponse: RacpApprovalResponseSchema,
   ApprovalResult: RacpApprovalResultSchema,

@@ -19,7 +19,7 @@ const { buildBootstrapScript, parseBootstrapOutput, shellQuote } = await import(
 const VERSION = "0.15.1-beta.5";
 const BUNDLE_DIR = `pi-host-${VERSION}-linux-x64`;
 const ARTIFACT_NAME = `${BUNDLE_DIR}.tar.gz`;
-const ARTIFACT_URL = `https://github.com/vastsa/PI-Desktop/releases/download/v${VERSION}/${ARTIFACT_NAME}`;
+const ARTIFACT_URL = `https://github.com/AR307/PI-Desktop/releases/download/v${VERSION}/${ARTIFACT_NAME}`;
 const DIGEST = "0123456789abcdef".repeat(4);
 /** The sandbox the script's `HOME`/`PATH` point at, outside the real user's. */
 const WORK_SUBDIR = ".pi-desktop/pi-host/.bootstrap";
@@ -172,6 +172,14 @@ test("buildBootstrapScript interpolates every input as a quoted literal", () => 
   assert.ok(script.includes("PORT='0'"));
   assert.ok(script.includes("PAIRING_LIFETIME_MS='600000'"));
   assert.ok(script.includes("READY_TIMEOUT_SEC='30'"));
+  assert.match(
+    script,
+    /chmod 700 "\$work" 2>\/dev\/null \|\| die "bootstrap-permissions"/,
+  );
+  assert.match(
+    script,
+    /chmod 600 "\$tarball" 2>\/dev\/null \|\| die "artifact-permissions"/,
+  );
   // The Node floor is injected from the module, not left as an empty shell var.
   assert.match(script, /^MIN_NODE_MAJOR='\d+'$/m);
   assert.ok(script.includes('$MIN_NODE_MAJOR'));

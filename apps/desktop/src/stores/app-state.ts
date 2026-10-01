@@ -1,5 +1,6 @@
 import type {
   AgentEventEnvelope,
+  BrowserState,
   AgentQueueChangedEvent,
   AgentStatus,
   AppNotification,
@@ -24,6 +25,7 @@ import type {
   ReviewRollbackResult,
   SessionSummary,
   SessionThinkingLevel,
+  SessionTodoSnapshot,
   UiMessage,
 } from "@pi-desktop/shared";
 import type { SettingsTabId } from "../lib/settings-search";
@@ -40,7 +42,6 @@ import type {
   QueuedPromptDirection,
   QueuedPrompts,
 } from "../lib/queued-prompts";
-import type { SubagentPanelSelection } from "../lib/subagent-panel";
 import type {
   ComposerDraftSnapshot,
   ComposerPrefill,
@@ -58,12 +59,16 @@ export type ToastItem = {
   variant: ToastVariant;
   /** Auto-dismiss delay in ms; 0 keeps the toast until dismissed. */
   duration: number;
+  /** Notification chime is enabled by default. */
+  sound: boolean;
 };
 
 export type ToastOptions = {
   variant?: ToastVariant;
   /** Override the variant default (4s, error 8s); 0 disables auto-dismiss. */
   duration?: number;
+  /** Suppress the default soft chime when another notification surface already played it. */
+  sound?: boolean;
 };
 
 export type AgentTurnResult = {
@@ -94,6 +99,8 @@ export type RefreshSessionsOptions = {
 
 /** Toolbar selections retained on the unpersisted new-task draft. */
 export type DraftSessionConfiguration = {
+  ultra?: boolean;
+  fast?: boolean;
   mode: Mode;
   thinkingLevel: SessionThinkingLevel;
   providerId?: string;
@@ -141,12 +148,14 @@ export type AppState = {
   runningSessions: Record<string, boolean>;
   /** Runtime-owned phase for explaining quiet intervals in active turns. */
   agentStatuses: Record<string, AgentStatus>;
+  /** Detached delegates still running per session (D628); survives turn end. */
+  backgroundDelegations: Record<string, number>;
   /** Latest in-memory result for each session, used by the active transcript. */
   latestTurnResults: Record<string, AgentTurnResult>;
   /** Latest terminal outcome per session for compact sidebar feedback. */
   sessionOutcomes: Record<string, SidebarSessionOutcome>;
   /** Every checkpoint a session has installed, oldest first. */
-  sessionCompactions: Record<string, ContextCompactionMark[]>;
+  sessionCompactions: Record<string, (ContextCompactionMark & { summary?: string })[]>;
   providers: ProviderPublic[];
   /** Discovered model lists per provider id (composer model menu). */
   providerModels: Record<string, ModelInfo[]>;
@@ -169,10 +178,13 @@ export type AppState = {
   pendingPlans: Record<string, PlanProposal>;
   /** Latest immutable Plan checkpoint/execution snapshot per session. */
   planCheckpoints: Record<string, PlanProposal>;
+  /** Host-authoritative Todo snapshots keyed by session. */
+  sessionTodos: Record<string, SessionTodoSnapshot>;
+  applyTodosChanged: (snapshot: SessionTodoSnapshot) => void;
   toasts: ToastItem[];
   notifications: AppNotification[];
   unreadNotificationCount: number;
-  page: "chat" | "pulls" | "scheduled" | "plugins" | "settings";
+  page: "chat" | "scheduled" | "plugins" | "settings";
   /** Tab ids come from the shared settings index. */
   settingsTab: SettingsTabId;
   /** Pending row anchor (i18n key) to flash after landing on a settings tab. */
@@ -199,6 +211,8 @@ export type AppState = {
   forkSession: (id: string) => Promise<void>;
   forkAssistantMessage: (messageId: string) => Promise<void>;
   configureActiveSession: (config: {
+    ultra?: boolean;
+    fast?: boolean;
     mode: Mode;
     providerId?: string;
     modelId?: string;
@@ -210,6 +224,7 @@ export type AppState = {
     content: string,
     draft?: ComposerDraftSnapshot,
     targetSessionId?: string,
+    onAccepted?: (sessionId: string) => void,
   ) => Promise<boolean>;
   steerPrompt: (content: string, draft?: ComposerDraftSnapshot) => Promise<boolean>;
   enqueuePrompt: (
@@ -350,8 +365,6 @@ export type AppState = {
   dismissToast: (id: number) => void;
   composerPrefill: ComposerPrefill | null;
   clearComposerPrefill: () => void;
-  /** Renderer-only subagent details selected from the transcript. */
-  subagentPanel: SubagentPanelSelection | null;
   workPanelOpen: boolean;
   workPanelTabs: WorkPanelTab[];
   activeWorkPanelTabId: string | null;
@@ -360,9 +373,8 @@ export type AppState = {
   workPanelWidth: number;
   /** Chat-initiated "preview this file" request consumed by the files viewer. */
   workPanelFileRequest: { path: string; seq: number; mimeType?: string } | null;
-  /** Toggle the selected subagent detail. */
-  toggleSubagentPanel: (delegationId: string) => void;
-  closeSubagentPanel: () => void;
+  /** Open (or activate) the transcript tab of one delegated subagent. */
+  openSubagentTab: (delegationId: string, agentName?: string) => void;
   /** Abort one session's running turn, visible or not. */
   abortSession: (sessionId: string) => Promise<void>;
   openWorkPanel: () => void;
@@ -386,6 +398,7 @@ export type AppState = {
   setWorkPanelWidth: (width: number) => void;
   openFileInWorkPanel: (path: string, mimeType?: string) => void;
   openUrlInWorkPanel: (url: string) => void;
+  updateBrowserWorkPanelTab: (state: BrowserState) => void;
 };
 
 export type AppStateData = {

@@ -24,6 +24,7 @@ class FakeApprovalPort implements ApprovalPort {
   async listPendingTools(): Promise<PendingToolRequest[]> {
     return this.pending;
   }
+  async listPendingContracts() { return []; }
 }
 
 const toolRequest: ToolPermissionRequest = {
@@ -141,7 +142,7 @@ describe("ApprovalBroker", () => {
     const again = await broker.resolve({ approvalId: "req_1", decision: "allow-once", context: { requestId: "r" } }, principal, 3);
     expect(again.alreadyResolved).toBe(true);
     expect(port.tool).toEqual([]);
-    expect(broker.cancelForSession("s2", 4).map((result) => result.status)).toEqual(["canceled"]);
+    expect(broker.cancelToolsForSession("s2", 4).map((result) => result.status)).toEqual(["canceled"]);
     expect(broker.list()).toEqual([]);
   });
 

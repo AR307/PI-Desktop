@@ -55,33 +55,19 @@ pub fn gate_session_configure(
     db: &Database,
     session_id: &str,
     requested_mode: &str,
-    requested_provider_id: Option<&str>,
-    requested_model_id: Option<&str>,
-    requested_thinking_level: Option<&str>,
+    _requested_provider_id: Option<&str>,
+    _requested_model_id: Option<&str>,
+    _requested_thinking_level: Option<&str>,
     requested_permission_mode: Option<&str>,
 ) -> Result<()> {
     expire_pending_approvals(db)?;
-    let Some((
-        current_mode,
-        current_provider_id,
-        current_model_id,
-        current_thinking_level,
-        current_permission_mode,
-    )) = db
+    let Some((current_mode, current_permission_mode)) = db
         .conn()
         .query_row(
-            "SELECT mode, provider_id, model_id, thinking_level, permission_mode
+            "SELECT mode, permission_mode
              FROM sessions WHERE id = ?1",
             params![session_id],
-            |row| {
-                Ok((
-                    row.get::<_, String>(0)?,
-                    row.get::<_, Option<String>>(1)?,
-                    row.get::<_, Option<String>>(2)?,
-                    row.get::<_, String>(3)?,
-                    row.get::<_, String>(4)?,
-                ))
-            },
+            |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
         )
         .optional()?
     else {
@@ -89,20 +75,12 @@ pub fn gate_session_configure(
     };
     let requested_mode = sessions::normalize_mode(Some(requested_mode));
     let mode_changes = current_mode != requested_mode;
-    let provider_changes = requested_provider_id
-        .is_some_and(|provider| current_provider_id.as_deref() != Some(provider));
-    let model_changes =
-        requested_model_id.is_some_and(|model| current_model_id.as_deref() != Some(model));
-    let thinking_changes =
-        requested_thinking_level.is_some_and(|level| level != current_thinking_level);
     let permission_changes =
         requested_permission_mode.is_some_and(|permission| permission != current_permission_mode);
-    if !mode_changes
-        && !provider_changes
-        && !model_changes
-        && !thinking_changes
-        && !permission_changes
-    {
+    // Provider/model/thinking changes are persisted as the next-turn
+    // selection. The running turn has already captured its launch binding,
+    // so only mode and permission transitions need the plan/turn gate.
+    if !mode_changes && !permission_changes {
         return Ok(());
     }
     let blocked: bool = db.conn().query_row(

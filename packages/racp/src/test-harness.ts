@@ -120,6 +120,7 @@ export function buildHost(limits: Partial<import("@pi-desktop/shared").RacpLimit
     async listPendingTools() {
       return [];
     },
+    async listPendingContracts() { return []; },
   };
   const host = new AgentHost({ runtime, sessions: sessionPort, approvals: approvalPort, limits: { replayWindowEvents: 50, ...limits } });
   return { host, runtime, sessions, approvals };

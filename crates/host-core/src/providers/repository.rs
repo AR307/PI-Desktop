@@ -56,6 +56,9 @@ pub(crate) fn provider_from_row(
             .get::<_, String>(11)
             .ok()
             .and_then(|raw| config_limit_f64(&raw, "temperature")),
+        mirror_coding: serde_json::from_str::<serde_json::Value>(&config_raw)
+            .ok()
+            .and_then(|value| serde_json::from_value(value.get("mirrorCoding")?.clone()).ok()),
         owner_plugin_id: row.get(14)?,
         created_at: ms_to_ts(row.get(12)?),
         updated_at: ms_to_ts(row.get(13)?),
@@ -366,6 +369,12 @@ pub fn update_provider(
             now_ms(),
             input.id
         ])?;
+    if let (Some(metadata), Some(models)) = (current.mirror_coding.as_ref(), input.models.as_ref())
+    {
+        if metadata.scope.as_deref() == Some("account") {
+            super::mirrorcoding::project_account_model_settings(db, metadata.account_id, models)?;
+        }
+    }
     get_provider(db, secrets, &input.id)
 }
 
@@ -473,4 +482,19 @@ pub fn get_provider(
         .query_row(params![id], |row| provider_from_row(row, secrets))
         .optional()
         .map_err(Into::into)
+}
+
+/// Whether `id` names a row, whoever owns it.
+///
+/// Reference checks ask this instead of `get_provider` because they only need
+/// to know whether the row still exists: an existing row that is disabled or
+/// carries no credential keeps its references, since the user can repair that
+/// in Settings.
+pub(crate) fn provider_exists(db: &Database, id: &str) -> Result<bool> {
+    Ok(db
+        .conn()
+        .prepare_cached("SELECT 1 FROM providers WHERE id = ?1")?
+        .query_row(params![id], |_| Ok(()))
+        .optional()?
+        .is_some())
 }

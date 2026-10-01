@@ -27,7 +27,8 @@ export type SubagentModelChoiceGroup = {
 export function isSubagentModelProvider(provider: ProviderPublic): boolean {
   return (
     provider.enabled &&
-    (provider.hasSecret || Boolean(provider.hasOauth) || provider.authKind === "none")
+    provider.mirrorCoding?.scope !== "account" &&
+    (provider.hasSecret || Boolean(provider.hasOauth) || provider.authKind === "none" || provider.authKind === "mirrorcoding")
   );
 }
 

@@ -44,9 +44,9 @@ test("main opens only a resolved session scratch directory", () => {
   assert.doesNotMatch(handler, /input\.path/);
 });
 
-test("developer-mode conversation overflow copies the id then opens scratch", () => {
+test("conversation id is available without developer mode; scratch remains developer-only", () => {
   assert.match(sidebarSource, /data-action="copy-conversation-id"/);
-  assert.match(sidebarSource, /navigator\.clipboard\.writeText\(session\.id\)/);
+  assert.match(sidebarSource, /api\.writeClipboardText\(session\.id\)/);
   assert.match(sidebarSource, /data-action="open-session-path"/);
   assert.match(sidebarSource, /api\.openSessionScratchPath\(session\.id\)/);
   assert.doesNotMatch(sidebarSource, /data-action="copy-session-path"/);
@@ -62,7 +62,7 @@ test("developer-mode conversation overflow copies the id then opens scratch", ()
     sidebarSource.indexOf("settings?.developerMode === true"),
     deleteIndex,
   );
-  assert.match(developerBlock, /copy-conversation-id/);
+  assert.doesNotMatch(developerBlock, /copy-conversation-id/);
   assert.match(developerBlock, /open-session-path/);
 });
 

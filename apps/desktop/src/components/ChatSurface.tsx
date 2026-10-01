@@ -5,6 +5,7 @@ import {
   vendorAccountOmitsSessionModel,
 } from "../lib/chat-launch-error";
 import { Composer } from "./Composer";
+import { BackgroundDelegationsChip } from "../features/chat/BackgroundDelegationsChip";
 import { HomeMascotLogo } from "./HomeMascotLogo";
 import { HomeProjectSwitcher } from "./HomeProjectSwitcher";
 import { IconX } from "./icons";
@@ -202,6 +203,7 @@ export const ChatSurface = memo(function ChatSurface({
               />
             ))}
           </div>
+          <BackgroundDelegationsChip />
           <StableComposer variant="docked" />
         </>
       )}

@@ -24,6 +24,7 @@ mod session_collaboration;
 mod session_search;
 mod sessions;
 mod state;
+mod todos;
 mod tool_budget;
 mod tools;
 mod transcripts;
@@ -37,6 +38,9 @@ use tokio::sync::Mutex;
 use tracing_subscriber::EnvFilter;
 
 use crate::state::AppState;
+
+#[global_allocator]
+static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {

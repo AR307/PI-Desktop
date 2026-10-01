@@ -1,5 +1,12 @@
 # 05. Change Checklist
 
+Workflow correction: follow root `AGENTS.md` §§5, 16 for request-worktree and
+candidate validation. The historical checklist statements below requiring a
+local-main merge before E2E/push are superseded. Record the tested request
+candidate and incorporated `origin/main`; do not use primary checkout/main as
+an integration workspace. Publishing/cleanup follows explicitly authorized
+delivery scope, including requests for local commits only.
+
 > A practical checklist agents must run before finishing work.  
 > Cross-references: [ai-development-workflow](03-ai-development-workflow.md) · [e2e-test-plan](04-e2e-test-plan.md) · [decisions-log](../08-meta/decisions-log.md) · [ADR index](../../adr/README.md) · [BOARD](../../project/BOARD.md)
 

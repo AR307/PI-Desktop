@@ -7,7 +7,7 @@ export function settledDelegationMessage(
 ): UiMessage {
   const result = {
     content: [
-      { type: "text", text: `Delegation ${summary.delegationId}: ${summary.status}.` },
+      { type: "text", text: [`Delegation ${summary.delegationId}: ${summary.status}.`, typeof summary.report === "string" ? summary.report : ""].filter(Boolean).join("\n\n") },
     ],
     details: summary,
   };

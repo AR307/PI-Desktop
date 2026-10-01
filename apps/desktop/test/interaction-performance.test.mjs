@@ -71,22 +71,19 @@ test("stream rendering avoids duplicate frame state and coalesces following", ()
   // commit that reveals it, or the reveal shows one empty frame (ADR 0137).
   assert.match(
     transcript,
-    /const renderedMessages =\s*readingWindow \|\| firstCommit \|\| paneRevealed \? messages : deferredMessages/,
+    /const renderedProjection =\s*readingWindow \|\| firstCommit \|\| paneRevealed \? projection : deferredProjection/,
   );
-  assert.match(transcript, /const \{ entries, visible \} = useMemo/);
-  assert.match(
-    transcript,
-    /buildTranscriptEntries\(renderedMessages, renderedCompactions\)/,
-  );
+  assert.match(transcript, /getTranscriptProjection\(messages, compactions\)/);
+  assert.match(transcript, /useDeferredValue\(projection\)/);
+  assert.doesNotMatch(transcript, /buildTranscriptEntries\(renderedMessages/);
   assert.match(transcript, /const TranscriptHistory = memo/);
   assert.match(transcript, /const TranscriptTail = memo/);
   assert.match(transcript, /function transcriptEntryEqual/);
-  // Memoized on `entries`: a re-render that changed no message must hand
-  // `TranscriptHistory` the same array so its comparator bails on identity
-  // instead of deep-walking every mounted row (D261).
+  // The incremental projection preserves the history array across tail updates;
+  // runtime work-count tests cover its behavior, not only this wiring.
   assert.match(
     transcript,
-    /const allHistoryEntries = useMemo\(\(\) => entries\.slice\(0, -1\), \[entries\]\)/,
+    /history: allHistoryEntries \} = renderedProjection/,
   );
   assert.match(transcript, /<TranscriptHistory entries=\{historyEntries\}/);
   assert.match(transcript, /<TranscriptTail[\s\S]*?entry=\{tailEntry\}/);
@@ -100,7 +97,7 @@ test("expanded live tool output stays local to the changed row", () => {
   assert.match(transcript, /const ToolRow = memo\(function ToolRow/);
   assert.match(transcript, /function toolRowPropsEqual\(/);
   assert.match(transcript, /if \(previous.variant !== "topology"\) return true;/);
-  assert.match(transcript, /const autoOpenLatest =\s*!compact && isLast && itemIndex === items.length - 1/);
+  assert.match(transcript, /const autoOpenLatest =\s*!compact && isLast && item === lastItem/);
   assert.match(transcript, /if \(variant !== "topology" && open && hasDetails && disclosure\.parentVisible/);
   assert.match(transcript, /const blocks = variant !== "topology" && open && hasDetails \? presentation\.current\?\.blocks : null/);
 });
@@ -119,7 +116,7 @@ test("tool errors stay local to their rows instead of failing the activity group
   assert.doesNotMatch(toolRow, /tool-activity-group[\s\S]*?failed/);
   // Failures remain visible in the row header; automatic open is last-tool
   // ownership, not error ownership.
-  assert.match(toolRow, /const disclosure = useAutomaticDisclosure\(\s*autoOpen && !failed && status !== "denied",\s*revealRequest,\s*disclosureKey\("tool"/);
+  assert.match(toolRow, /const disclosure = useAutomaticDisclosure\(\s*autoOpen && !returned && !failed && status !== "denied",\s*revealRequest,\s*disclosureKey\("tool"/);
   assert.match(transcript, /bodyEvents: \{ onPointerDownCapture: claim, onFocusCapture: claim \}/);
   assert.match(toolRow, /status === "error"\s*\? t\("chat.toolFailed"\)/);
 });

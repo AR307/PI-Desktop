@@ -33,8 +33,9 @@ Principles:
 | `fs` | Work panel workspace file listing/reading/reveal, chat file-reference completion against the project, session scratch, and attachment roots, plus user-initiated open with the OS default handler (read-only) |
 | `window` | Frameless window state, controls, and compatibility work-panel geometry channels |
 | `menu` | Allowlisted application-menu commands and native editing/window actions |
-| `notification` | Durable inbox list/read/clear and new/activated events |
+| `notification` | Durable inbox list/read/clear, new/activated events, and native-notification sound cues |
 | `stats` | Completed-turn token history (host RPC; dashboard is plugin-owned) |
+| `voice/live` | App-owned real-time calls, secret-free status/settings DTOs, and per-call media ports |
 
 ## 3. Channel Conventions
 
@@ -149,7 +150,11 @@ name matches a loaded pi prompt template, the main-process handler expands
 the invocation (`parseCommandArgs` + `substituteArgs`) before persisting.
 The persisted user message stores `content = expanded text` plus an optional
 `command: string` field carrying the typed invocation for transcript
-display. Reseed replays `content`, so the agent context is identical across
+display. Explicit Skill invocations also persist validated `skillMentions`
+with UTF-16 offsets into `command`, allowing the transcript to show each
+Skill separately from the user's remaining text after reopening a session.
+These optional transcript metadata fields do not alter the model-facing
+`content`. Reseed replays `content`, so the agent context is identical across
 restarts. Builtin/plugin slash aliases never reach this channel — the
 renderer executes them locally. Unknown `/foo` passes through as literal
 content. Ordinary `@path` tokens are not transformed anywhere in the pipeline
@@ -197,13 +202,15 @@ content-addressed attachment store, and derives the effective model transport
 from the published model record plus the exact binding's `supportsImages`
 override. An absent or `null` override follows the published image capability;
 `true` enables and `false` disables image input for that configured model.
-Eligible images become transient pi-ai image blocks when the effective
-capability is enabled. Unknown/custom models without an explicit override,
-non-vision models, and images above the 10 MB inline bound receive a safe
-`@path` fallback.
-Main uses streamed hashing and file copying for images above that bound, and the
-sidecar uses the same bounded-read rule when rebuilding history. The durable
-user message stores `content` plus attachment metadata/ref, never base64.
+For a vision-capable model, images within the 10 MB per-image bound become
+transient pi-ai image blocks. Restored history also has a 30 MB aggregate raw
+image-byte budget: the sidecar considers persisted attachments newest-first and
+preserves every eligible image when the total fits. If the budget is exceeded,
+older images use the existing safe `@path` fallback. Unknown/custom models
+without an explicit image override, non-vision models, oversized images, and
+unavailable refs also use the safe fallback. Main uses streamed hashing and file
+copying for oversized images. The durable user message stores `content` plus
+attachment metadata/ref, never base64.
 Invalid attachment paths fail with `PATH_OUTSIDE_WORKSPACE`.
 
 Regenerate history (D109) also uses session channels:
@@ -215,11 +222,13 @@ Regenerate history (D109) also uses session channels:
 Root user turns may include `revisionRootId`, `revisionCount`, and
 `activeRevision`. Activating a revision replaces the live tail with
 `prefix + archived branch` and disposes the session agent.
-The sidecar receives only the prepared attachment subset needed for the
-current turn. On a vision runtime, persisted image refs are hydrated from the
-session-bound attachment/scratch roots when history is rebuilt; oversized or
-unavailable images remain path fallbacks. This keeps renderer, main, sidecar, the models.dev catalog, and host
-persistence on one capability-aware contract.
+The sidecar receives only the prepared attachment subset needed for the current
+turn. On a vision runtime, persisted refs are hydrated from session-bound
+attachment/scratch/project roots. The current prompt row is excluded by message
+id before hydration, so it does not consume the history budget; oversized,
+over-budget, or unavailable images remain safe path fallbacks. This keeps
+renderer, main, sidecar, the models.dev catalog, and host persistence on one
+capability-aware contract.
 
 ### 5.1a Steer an active turn
 
@@ -837,6 +846,11 @@ Main sends two events:
 - `pi-desktop/notification/event/activated` after the user clicks Electron's
   native system notification. Renderer follows its existing session-selection
   path, including project activation for a project-bound session.
+- `pi-desktop/notification/event/sound` is a payload-free, one-way cue for a
+  plugin-native notification that Electron successfully showed. Renderer plays
+  the shared soft chime; the event carries no notification content and creates
+  no inbox row. Native task, interactive, and plugin banners are silent so the
+  in-app chime is not doubled by a platform-specific sound.
 
 Plugin-owned session mutations additionally emit
 `pi-desktop/session/event/changed` after a successful write. The renderer
@@ -1092,8 +1106,12 @@ configuration.
 `session/fork` is a protocol-v5 channel that creates an independent
 session from the source session's current active transcript. When optional
 `throughMessageId` is present, the copied snapshot ends at that message; an
-unknown id returns `NOT_FOUND`. Electron rejects
-the request with `AGENT_BUSY` while that source session has an active turn.
+unknown id returns `NOT_FOUND`. While a Desktop source has an active turn,
+`throughMessageId` may select an already-completed assistant prefix containing
+no messages owned by a running turn. The host validates this under its RPC lock;
+whole-session and active-turn forks still return `AGENT_BUSY`. Native Pi forks
+retain their existing idle/ownership guard. The source continues running when
+the child is activated; the renderer never reloads history over its live tail.
 Electron owns localization and supplies the user-facing branch title; the host
 fallback title is reserved for non-UI callers.
 The host assigns a new session id, message ids, and tool-call ids; it copies
@@ -1462,6 +1480,14 @@ project records from the global set by id or case-insensitive label before it
 filters disabled records, so a disabled project record still shadows a global
 one. The desktop-only `mcp/test` IPC action forces one connection test and
 returns its status to the MCP editor.
+The desktop's `mcp.list` IPC response probes previously ready remote connections
+before reporting their status. If a server no longer responds, its row reports
+`failed` instead of retaining a stale `ready` status; Test connection retries it. A failed settings probe does not interrupt an in-flight tool call; Test connection closes the old client before retrying.
+Stopping a session aborts its in-flight user MCP tool calls. The client sends
+`notifications/cancelled` for each active request without closing a connection
+used by other sessions; a completed or canceled tool call is never replayed.
+Cancellation stops the local wait, while a server may ignore the notification
+and finish an already started side effect.
 
 Desktop-only channels scan configuration written by other agent tools on the
 same machine — Claude Desktop (`claude_desktop_config.json` on macOS, Windows
@@ -1528,6 +1554,17 @@ The list contains frontmatter-derived `name` and `description`, not the body.
 Only the description enters the prompt, and the body is fetched when the model
 invokes `Skill` (D174). A missing file is removed from the list and its local
 state is pruned during the next scan.
+
+The desktop `pi-desktop/skill/import` channel keeps the file picker
+single-select and returns `{ skill }` for that path. With
+`sourceKind: "dir"`, it lets the user select multiple directories and returns
+`{ imported: UserSkillRecord[], failed: { path, error }[] }`. Cancellation
+returns `{ canceled: true }` for either picker. Main calls `skills.import`
+separately for each selected directory so one error cannot roll back the
+others. After a successful folder import, Main stores the parent of the
+last successfully imported source folder in machine-local app data. The next
+directory picker opens there while that parent still exists. Cancellation and
+all-failed batches do not replace this preference.
 
 Desktop-only channels scan skill folders written by other agent tools on this
 machine — `~/.claude/skills/`, `<project>/.claude/skills/`, and the app's own
@@ -1596,6 +1633,12 @@ Desktop-only MCP market channels (not host RPC) live on Electron IPC:
 ### MCP OAuth (ADR 0283)
 
 Browser-based OAuth 2.1 authentication for HTTP MCP servers is handled in the Electron main process via non-blocking IPC invocations and an event stream:
+
+Discovery preserves authorization-server issuer paths, trying OAuth path insertion,
+OIDC path insertion, then OIDC path appending (root issuers use the two root URLs).
+The authorization request uses the initial 401 Bearer challenge's `scope`, otherwise
+all valid protected-resource `scopes_supported` entries, otherwise omits `scope`.
+Authorization-server scope catalogs do not add or select requested permissions.
 
 - `pi-desktop/mcp/oauth/start({ id, level?, projectPath? }) -> { ok: true, loginId }`
   Initiates OAuth metadata discovery and PKCE authorization code flow. Returns immediately; user browser navigation and callback exchange proceed asynchronously in the background.
@@ -1726,12 +1769,16 @@ Renderer IPC kept for the Plan-safe preview facade and URL fallback:
 
 - `browser/openExternal({url?})` — allowlisted http(s)/mailto, or the current
   guest URL when omitted
-- event: `browser/event/state {url, title, isLoading, canGoBack, canGoForward}`
+- Renderer plugin-view open/close requests may carry `sessionId` and `tabId`.
+  Open binds the resource tab after checking the plugin contribution and scope;
+  close releases only that tab's retained page (or the session's pages when no
+  tab id is supplied). The shared plugin chrome is not closed with a sibling page.
+- event: `browser/event/state {url, title, isLoading, canGoBack, canGoForward, loadError?, sessionId?, tabId?}`
   (also pushed to plugin views as `browser:state`)
 - agent preview event: `browser/event/preview {sessionId, path?, url?}`.
   Electron Main validates a workspace `path` inside that session's project,
-  loads the guest when that conversation's plugin view is visible, and the
-  renderer opens `plugin:pi.browser/browser` with `location` in the matching
+  asks the renderer to create a Browser resource tab before navigation, with
+  `location` in the matching
   runtime panel context. Navigation of a background session does not steal the
   visible guest.
 
@@ -1754,10 +1801,14 @@ Renderer IPC kept for the Plan-safe preview facade and URL fallback:
   containment as `fs/read`. Never returns non-image bytes. Renderer-only;
   not a plugin host API.
 - `fs/reveal({path})` → reveal in Finder. Same containment as `fs/read`.
-- `fs/open({path})` → open with the OS default application. Same lexical
-  containment as `fs/read` (without the extra realpath step used by reads).
+- `fs/open({path, mimeType?})` → open an existing regular file with the OS
+  default application. It uses the same realpath containment as `fs/read`,
+  including rejection of symlink escapes. For a content-addressed
+  `attachments/<sha256>` blob declared as `video/mp4`, the host creates a
+  `.mp4` symlink inside its private app-data directory before the OS handoff,
+  so the extensionless blob has a media association without copying its bytes.
 - `fs/resolveRef({ref, sessionId?})` → `FsChatRefResolveResult`
-  (`{ match: FsChatRefMatch | null }`, the match naming the answering `root`
+  (`{ match: FsChatRefMatch | null, reason?: "outside-allowed-roots" }`, the match naming the answering `root`
   (`workspace` / `scratch` / `attachments`), the `relativePath` relative to that
   root, the absolute `absolutePath`, `matchedBy` (`exact-relative` /
   `exact-absolute` / `path-suffix` / `basename`), and — for a `workspace` match
@@ -1765,8 +1816,8 @@ Renderer IPC kept for the Plan-safe preview facade and URL fallback:
   that answered); `sessionId` selects the
   session whose scratch store is searched. Completes a file reference the agent
   printed in chat, because the renderer cannot see the session's own scratch
-  store: an absolute reference that already names a real file inside a known
-  root wins outright, and an `attachments/<sha256>` blob resolves against the
+  store: an absolute reference only matches that exact file inside a known
+  root, and an `attachments/<sha256>` blob resolves against the
   attachment store directly; otherwise the roots are searched in priority order
   — the open project first, the session's own scratch store
   (`<data_dir>/scratch/<sessionId>/`, ADR 0124) second, the attachment store
@@ -1776,8 +1827,13 @@ Renderer IPC kept for the Plan-safe preview facade and URL fallback:
   so a shorthand resolves in a sibling folder as readily as in the primary one,
   and the match names the folder that answered. Inside one root an exact path
   beats a shorthand; among shorthands the longest matching tail wins, then the
-  shallowest path. The files-panel ignore set applies. A reference that matches
-  nothing returns `match: null`; resolving never opens anything (ADR 0262).
+  shallowest path. Relative and indexed candidates must resolve to regular files
+  whose real paths remain inside their answering root; an exact path through an
+  escaping or dangling link cannot fall back to a same-name indexed file. The
+  files-panel ignore set applies. A reference that matches
+  nothing returns `match: null`; an absolute path outside every allowed root
+  also returns `reason: "outside-allowed-roots"`, without trying a same-name
+  file inside a root. Resolving never opens anything (ADR 0262).
 - `fs/list` stays workspace-only; traversal outside is rejected
   (`INVALID_ARGUMENT`).
 
@@ -2111,7 +2167,7 @@ app/openFeedback() -> { ok: true }
 ```
 
 Electron Main builds a fixed GitHub bug-form URL
-(`https://github.com/vastsa/PI-Desktop/issues/new?template=bug_report.yml`)
+(`https://github.com/AR307/PI-Desktop/issues/new?template=bug_report.yml`)
 and opens it with `shell.openExternal`. Query fields `app-version`, `os`, and
 `environment` are filled from Main-owned version info. The renderer cannot
 supply a URL. Construction that leaves that origin or template is rejected.
@@ -2327,3 +2383,38 @@ done and total for that phase, and the bytes when they are known. A long upload
 of many resource objects is therefore not an interface with nothing to show.
 Background polls report nothing, since only the manual path has a caller
 watching.
+
+## 16. Live Voice API
+
+Live Voice is a main-window-only, app-owned call path described in
+[live-voice.md](live-voice.md). Its DTOs are defined in
+`packages/shared/src/types/live-voice.ts`; the preload exposes only the
+allowlisted channels below. Main derives the owner from the invoking trusted
+frame and sends call events only to that frame. No payload can supply an owner
+identity or credentials.
+
+| IPC channel | Direction | contract |
+|---|---|---|
+| `pi-desktop/voice/live/status` | Renderer → Main | redacted feature status, binding readiness and settings revision |
+| `pi-desktop/voice/live/prepare` | Renderer → Main | idempotent call preparation by request ID; synchronously reserves the shared microphone lease |
+| `pi-desktop/voice/live/connect` | Renderer → Main | connects a prepared call; Codex may include a bounded SDP offer |
+| `pi-desktop/voice/live/setMuted` | Renderer → Main | sets mute state with a monotonically increasing capture epoch |
+| `pi-desktop/voice/live/reportMedia` | Renderer → Main | reports capture, connection and release lifecycle; release acknowledgement is required before lease reuse |
+| `pi-desktop/voice/live/reportPlayback` | Renderer → Main | bounded list of played PCM cursors used for interruption/truncation |
+| `pi-desktop/voice/live/reportDelegation` | Renderer → Main | reports a provider-requested delegation; v1 rejects execution and never forwards it to Agent/MCP |
+| `pi-desktop/voice/live/reportControlApplied` | Renderer → Main | acknowledges a supported provider control or a rejected unsupported action |
+| `pi-desktop/voice/live/end` | Renderer → Main | idempotently ends an active call or cancels its pending request |
+| `pi-desktop/voice/live/heartbeat` | Renderer → Main | keeps the owning call alive while its renderer is responsive |
+| `pi-desktop/voice/live/event/changed` | Main → Renderer | redacted call phase, error, notice and activity updates |
+| `pi-desktop/voice/live/event/port` | Main → Renderer | transfers exactly one call-scoped `MessagePort` with its call ID and one-time nonce |
+| `pi-desktop/voice/live/event/control` | Main → Renderer | provider control request, limited to the explicit v1 control vocabulary |
+| `pi-desktop/voice/live/event/transcript` | Main → Renderer | transient bounded transcript event for the current call |
+
+The `MessagePort` is provisioned only after successful owner validation, then
+relayed by preload to the renderer window. The owner echoes the per-call nonce
+in its first `hello`; Main accepts the port once and only after the call ID and
+nonce match the prepared call. Its binary frames are bounded PCM audio, capture
+epochs, release acknowledgements, playback cursors and protocol readiness
+signals. It is not a generic IPC tunnel: it carries no provider
+credentials, arbitrary commands, workspace paths, Agent messages or durable
+transcripts. A port is closed on call end or owner loss.

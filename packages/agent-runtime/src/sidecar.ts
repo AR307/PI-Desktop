@@ -1,3 +1,4 @@
+import { ImageTasks, type ImageTask } from "./images.js";
 /**
  * Node pi agent sidecar.
  * Protocol: NDJSON JSON-RPC on stdio with Electron main.
@@ -25,7 +26,9 @@ import {
   normalizeSupportedThinkingLevels,
   normalizeThinkingLevel,
 } from "./sidecar-config.js";
+import { matchesExpectedTurnId } from "./turn-target.js";
 import { applyNodeNetworkProxy } from "./node-proxy.js";
+import { applyAdditiveDefaultCaCertificates } from "./system-ca.js";
 import { NATIVE_PI_SESSION_PREFIX, nativePiService } from "./native-pi-session.js";
 import {
   isCommandShellOption,
@@ -92,6 +95,7 @@ type RuntimeParams = {
   /** Durable host turn ID for the prompt currently being executed. */
   turnId?: string;
   thinkingLevel?: SessionThinkingLevel;
+  ultra?: boolean;
   infiniteProviderRetry?: boolean;
   provider: RuntimeProviderConfig;
   commandShell: CommandShellOption;
@@ -206,7 +210,7 @@ async function runtimeFor(
       errorCode: "AGENT_BUSY",
     });
   }
-  const reusable = existing?.matches({
+  const nextConfiguration = {
     mode,
     provider,
     thinkingLevel,
@@ -221,17 +225,19 @@ async function runtimeFor(
     projectMemory: params.projectMemory,
     projectPath: params.projectPath,
     commandShell: params.commandShell,
-  })
-    ? existing
-    : undefined;
+  };
+  const reusable = existing?.matches(nextConfiguration) || existing?.canRebindTurn(nextConfiguration)
+    ? existing : undefined;
   if (existing && !reusable) {
     await existing.dispose();
     runtimes.delete(sessionId);
   }
   if (reusable) {
+    if (!reusable.matches(nextConfiguration)) reusable.rebindTurn(nextConfiguration);
     reusable.setCompactionSettings(params.compactionSettings);
     reusable.setInfiniteProviderRetry(params.infiniteProviderRetry === true);
     reusable.setMode(mode);
+    reusable.setTurnReasoning(thinkingLevel, params.ultra === true);
     return reusable;
   }
 
@@ -244,8 +250,17 @@ async function runtimeFor(
         compaction?: ContextCompactionRecord;
       } | null;
     }>("session.get", { id: sessionId });
+    let restoredMessages = detail?.session?.messages ?? [];
+    // The current prompt is sent separately below. Exclude its persisted row
+    // before attachment hydration so it cannot consume the history byte budget.
+    if (currentPrompt !== undefined && params.userMessageId) {
+      const last = restoredMessages.at(-1);
+      if (last?.role === "user" && last.id === params.userMessageId) {
+        restoredMessages = restoredMessages.slice(0, -1);
+      }
+    }
     const supportsVision = visionFromModelConfig(params.provider.modelConfig);
-    history = await hydrateAttachmentHistory(detail?.session?.messages ?? [], {
+    history = await hydrateAttachmentHistory(restoredMessages, {
       scratchDir: params.scratchDir,
       projectPath: params.projectPath,
       attachmentsDir: params.attachmentsDir,
@@ -255,13 +270,10 @@ async function runtimeFor(
   } catch {
     // History restore is best-effort; a prompt can still start cleanly.
   }
-  if (currentPrompt !== undefined) {
+  // Older callers without a stable message id retain the previous content match.
+  if (currentPrompt !== undefined && !params.userMessageId) {
     const last = history.at(-1);
-    if (
-      last?.role === "user" &&
-      ((params.userMessageId && last.id === params.userMessageId) ||
-        (!params.userMessageId && last.content === currentPrompt))
-    ) {
+    if (last?.role === "user" && last.content === currentPrompt) {
       history = history.slice(0, -1);
     }
   }
@@ -273,6 +285,7 @@ async function runtimeFor(
     provider,
     commandShell: params.commandShell,
     thinkingLevel,
+    ultra: params.ultra === true,
     infiniteProviderRetry: params.infiniteProviderRetry === true,
     history,
     compaction,
@@ -382,6 +395,8 @@ async function handle(method: string, params: any): Promise<unknown> {
     case "agent.testRuntimeIdentity": {
       return testRuntimeIdentity(String(params.sessionId ?? ""));
     }
+    case "image.generate": return imageTasks.generate(params as ImageTask);
+    case "image.abort": return { aborted: imageTasks.abort(String(params.jobId)) };
     case "agent.prompt": {
       const sessionId = String(params.sessionId);
       const content = String(params.content ?? "");
@@ -416,6 +431,7 @@ async function handle(method: string, params: any): Promise<unknown> {
       }
       const prompt: RuntimePrompt = {
         text: content,
+        ...(params.delegationNotification === true ? { delegationNotification: true } : {}),
         attachments,
         ...(params.sessionMessage ? { sessionMessage: params.sessionMessage as SessionMessageOrigin } : {}),
       };
@@ -489,12 +505,22 @@ async function handle(method: string, params: any): Promise<unknown> {
       }
       const runtime = runtimes.get(sessionId);
       const turnId = typeof params.turnId === "string" ? params.turnId : undefined;
-      if (turnId && runtime?.getStatus().currentTurnId !== turnId) return { ok: false, aborted: false };
+      if (!matchesExpectedTurnId(runtime?.getStatus().currentTurnId, turnId)) return { ok: false, aborted: false };
       await hostProxy.call("plans.abort", { sessionId, ...(turnId ? { turnId } : {}) }).catch(() => undefined);
-      if (runtime && runtimes.get(sessionId) === runtime && (!turnId || runtime.getStatus().currentTurnId === turnId)) {
+      if (runtime && runtimes.get(sessionId) === runtime && matchesExpectedTurnId(runtime.getStatus().currentTurnId, turnId)) {
         await runtime.abort();
       }
       return { ok: true };
+    }
+    case "agent.stopDelegations": {
+      const runtime = runtimes.get(String(params.sessionId));
+      if (!runtime) return { stopped: [], pending: [] };
+      const ids = Array.isArray(params.delegationIds) ? params.delegationIds.map(String) : [];
+      const result = await runtime.stopDelegations(ids);
+      return {
+        stopped: result.details.stopped.map((entry) => entry.delegationId),
+        pending: result.details.stopPending.map((entry) => entry.delegationId),
+      };
     }
     case "agent.stop": {
       const sessionId = String(params.sessionId);
@@ -502,6 +528,10 @@ async function handle(method: string, params: any): Promise<unknown> {
         return nativePiService().abort(sessionId);
       }
       const runtime = runtimes.get(sessionId);
+      const turnId = typeof params.turnId === "string" ? params.turnId : undefined;
+      if (!matchesExpectedTurnId(runtime?.getStatus().currentTurnId, turnId)) {
+        return { requested: false };
+      }
       return runtime?.requestGracefulStop() ?? { requested: false };
     }
     case "asktool.resolve": {
@@ -562,6 +592,8 @@ async function handle(method: string, params: any): Promise<unknown> {
   }
 }
 
+const imageTasks = new ImageTasks();
+
 readNdjsonLines(process.stdin, async (line) => {
   if (!line.trim()) return;
   let msg: any;
@@ -616,4 +648,7 @@ if (bootProxy) {
     // Invalid boot payload is ignored; sidecar.configure will replace it.
   }
 }
+// The default TLS context is configured before any provider request can be
+// issued, so the merged CA set covers every transport this sidecar builds.
+applyAdditiveDefaultCaCertificates();
 process.stderr.write("[agent-sidecar] ready (host-proxy mode)\n");

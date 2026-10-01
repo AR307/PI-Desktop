@@ -1,4 +1,5 @@
 import { basename } from "node:path";
+import { createHash } from "node:crypto";
 
 import type {
   PendingToolRequest,
@@ -8,7 +9,7 @@ import type {
   SessionSummary,
 } from "@pi-desktop/agent-host";
 import { RacpError } from "@pi-desktop/agent-host";
-import type { RacpItemSummary, RacpPermissionMode, UiMessage } from "@pi-desktop/shared";
+import type { RacpItemSummary, RacpPermissionMode, UiMessage, VoiceOrigin } from "@pi-desktop/shared";
 
 /** Rust host-core over stdio JSON-RPC, as the ports below need it. */
 export type HostRpc = {
@@ -26,7 +27,17 @@ export type HostSessionRecord = {
   createdAt?: string;
   updatedAt?: string;
   messages?: UiMessage[];
+  messageStart?: number;
+  hasMoreBefore?: boolean;
 };
+
+/** Opaque Main/Host authorization fingerprint; never send the source identity to the renderer or model. */
+export function sessionWorkspaceIdentity(input: { projectId?: unknown; projectPath?: unknown }): string | null {
+  const projectId = typeof input.projectId === "string" ? input.projectId.trim() : "";
+  const projectPath = typeof input.projectPath === "string" ? input.projectPath.trim() : "";
+  if (!projectId && !projectPath) return null;
+  return createHash("sha256").update(JSON.stringify([projectId, projectPath])).digest("hex");
+}
 
 export function requireHostRpc(getHost: () => HostRpc | null): HostRpc {
   const host = getHost();
@@ -46,6 +57,7 @@ export function toSessionSummary(record: HostSessionRecord): SessionSummary {
     id: record.id,
     title: record.title ?? "",
     ...(record.projectId ? { projectId: record.projectId } : {}),
+    workspaceIdentity: sessionWorkspaceIdentity(record),
     ...(record.projectPath ? { workspaceLabel: basename(record.projectPath) } : {}),
     mode,
     permissionMode,
@@ -64,6 +76,7 @@ export function toRacpItem(message: UiMessage): RacpItemSummary {
     status: message.status === "streaming" ? "streaming" : "completed",
     createdAt: message.createdAt,
     ...(message.parentToolCallId ? { parentToolCallId: message.parentToolCallId } : {}),
+    ...(message.nestedParentToolCallId ? { nestedParentToolCallId: message.nestedParentToolCallId } : {}),
     ...(message.agentName ? { agentName: message.agentName } : {}),
     content: message,
   };
@@ -71,10 +84,10 @@ export function toRacpItem(message: UiMessage): RacpItemSummary {
 
 /** Session metadata and transcript pages straight from host `session.get`. */
 export function createHostSessionPort(getHost: () => HostRpc | null): SessionPort {
-  async function fetchSession(sessionId: string): Promise<HostSessionRecord | null> {
+  async function fetchSession(sessionId: string, window: Record<string, unknown> = { messageLimit: 1 }): Promise<HostSessionRecord | null> {
     const host = getHost();
     if (!host) return null;
-    const result = await host.call<{ session?: HostSessionRecord | null }>("session.get", { id: sessionId });
+    const result = await host.call<{ session?: HostSessionRecord | null }>("session.get", { id: sessionId, ...window });
     return result.session ?? null;
   }
   return {
@@ -82,15 +95,23 @@ export function createHostSessionPort(getHost: () => HostRpc | null): SessionPor
       const record = await fetchSession(sessionId);
       return record ? toSessionSummary(record) : null;
     },
-    async history(sessionId, { limit, beforeItemId }) {
-      const record = await fetchSession(sessionId);
-      const messages = record?.messages ?? [];
-      const end = beforeItemId ? messages.findIndex((message) => message.id === beforeItemId) : messages.length;
-      const cut = end === -1 ? messages.length : end;
-      const start = Math.max(0, cut - limit);
+    async history(sessionId, { limit, beforeItemId, contentLimit }) {
+      let messageBefore: number | undefined;
+      if (beforeItemId) {
+        const anchor = await fetchSession(sessionId, { messageAround: beforeItemId, messageLimit: 1, contentLimit: 1 });
+        if (!anchor?.messages?.some((message) => message.id === beforeItemId)) throw new RacpError("NOT_FOUND", "history_anchor_not_found");
+        messageBefore = anchor.messageStart;
+      }
+      const record = await fetchSession(sessionId, {
+        messageLimit: limit,
+        ...(messageBefore !== undefined ? { messageBefore } : {}),
+        // Presentation cap per field (host-core `content_limit`): without it a
+        // single multi-megabyte message bursts the transport frame limit.
+        ...(contentLimit !== undefined ? { contentLimit } : {}),
+      });
       return {
-        items: messages.slice(start, cut).map(toRacpItem),
-        hasMore: start > 0,
+        items: (record?.messages ?? []).map(toRacpItem),
+        hasMore: record?.hasMoreBefore === true,
       };
     },
   };
@@ -104,6 +125,8 @@ export type HostQueueEntry = {
   inputHash: string;
   content: string;
   sessionMessageId?: string;
+  userMessageId?: string;
+  voiceOrigin?: VoiceOrigin;
   attachments?: unknown;
   permissionMode: string;
   position: number;
@@ -120,6 +143,8 @@ export function fromHostQueueEntry(entry: HostQueueEntry): QueuedTurnRecord {
     principalSubject: entry.principal,
     content: entry.content,
     ...(entry.sessionMessageId ? { sessionMessageId: entry.sessionMessageId } : {}),
+    ...(entry.userMessageId ? { userMessageId: entry.userMessageId } : {}),
+    ...(entry.voiceOrigin ? { voiceOrigin: entry.voiceOrigin } : {}),
     ...(Array.isArray(entry.attachments) ? { attachments: entry.attachments as QueuedTurnRecord["attachments"] } : {}),
     effectivePermissionMode: permissionMode,
     ...(entry.idempotencyKey ? { idempotencyKey: entry.idempotencyKey } : {}),
@@ -147,6 +172,8 @@ export function createHostQueueStore(getHost: () => HostRpc | null): QueueStore 
         inputHash: record.inputHash,
         content: record.content,
         ...(record.sessionMessageId ? { sessionMessageId: record.sessionMessageId } : {}),
+        ...(record.userMessageId ? { userMessageId: record.userMessageId } : {}),
+        ...(record.voiceOrigin ? { voiceOrigin: record.voiceOrigin } : {}),
         ...(record.attachments ? { attachments: record.attachments } : {}),
         permissionMode: record.effectivePermissionMode,
       });

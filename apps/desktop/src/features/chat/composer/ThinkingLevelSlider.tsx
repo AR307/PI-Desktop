@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type CSSProperties } from "react";
-import type { SessionThinkingLevel } from "@pi-desktop/shared";
+import type { ThinkingSelection } from "@pi-desktop/shared";
 
 const SLIDER_KEYS = new Set([
   "ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown",
@@ -7,10 +7,10 @@ const SLIDER_KEYS = new Set([
 ]);
 
 type Props = {
-  levels: readonly SessionThinkingLevel[];
+  levels: readonly ThinkingSelection[];
   level: string;
   label: string;
-  commit: (level: SessionThinkingLevel) => Promise<boolean>;
+  commit: (level: ThinkingSelection) => Promise<boolean>;
 };
 
 /** Native input owns interaction; the decorative thumb owns visual motion. */
@@ -97,7 +97,7 @@ export function ThinkingLevelSlider({ levels, level, label, commit }: Props) {
         data-hovered={hoveredIndex === stop ? "true" : undefined}
         className={`composer-thinking-tick ${index === stop ? "active" : ""}`}
         title={candidate} onMouseDown={(event) => event.preventDefault()}
-        onClick={() => select(stop)}>{candidate}</button>)}
+        onClick={() => select(stop)}>{candidate === "ultra" ? "Ultra" : candidate}</button>)}
     </div>
   </div>;
 }

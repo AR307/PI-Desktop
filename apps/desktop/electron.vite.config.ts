@@ -51,17 +51,26 @@ export default defineConfig({
     // kills the whole Main bundle before the app starts, so state the documented
     // "no native accelerator" input to that branch at build time instead.
     define: {
+      // Resolve extracted Main resource paths at the emitted ESM module.
+      __dirname: "import.meta.dirname",
       "process.env.WS_NO_BUFFER_UTIL": "\"1\"",
       "process.env.WS_NO_UTF_8_VALIDATE": "\"1\"",
     },
     build: {
       rollupOptions: {
-        // Bundle JS workspace packages into Main. Only runtime modules that
-        // must resolve from the packaged node_modules stay external.
+        // Bundle JS workspace packages into Main. Native voice modules must
+        // resolve from packaged node_modules because their loaders locate
+        // platform libraries relative to their own package directories.
         // jiti is loaded lazily by the sidecar's trusted-extension loader
         // (D387); Electron main never calls it, and its transpiled dist
         // breaks the main bundle's esbuild transform.
-        external: ["electron-updater", "jiti", "jiti/static"],
+        external: [
+          "electron-updater",
+          "jiti",
+          "jiti/static",
+          "@picovoice/pvrecorder-node",
+          "transcribe-cpp",
+        ],
         input: {
           index: resolve(__dirname, "electron/main/index.ts"),
           // Forked per plugin by PluginRuntime (ADR 0008); must stay a

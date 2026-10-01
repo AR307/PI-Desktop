@@ -249,6 +249,26 @@ describe("classifyAgentError", () => {
       .toMatchObject({ code: "PROVIDER_ERROR", retriable: false });
   });
 
+  it("treats a request option an adapter refuses as non-retriable", () => {
+    expect(
+      classifyAgentError(
+        "Custom fetch is not supported by the Google Generative AI adapter",
+      ),
+    ).toMatchObject({ code: "PROVIDER_ERROR", retriable: false });
+    expect(
+      classifyAgentError(
+        "Custom fetch is not supported by the Google Vertex adapter",
+      ),
+    ).toMatchObject({ code: "PROVIDER_ERROR", retriable: false });
+    // A status some layer attached to the same message must not re-arm the
+    // transient retry budget for a request the adapter will refuse again.
+    expect(
+      classifyAgentError(
+        "502: Custom fetch is not supported by the Google Generative AI adapter",
+      ),
+    ).toMatchObject({ code: "PROVIDER_ERROR", retriable: false });
+  });
+
   it("detects context overflow from 400 bodies and bare messages", () => {
     expect(
       classifyAgentError(
@@ -537,5 +557,33 @@ describe("classifyAgentError", () => {
         "getaddrinfo ENOTFOUND user:pass@api.example.com?api_key=sk-1",
       ).details,
     ).not.toHaveProperty("networkHost");
+  });
+
+  it("classifies host capacity exhaustion and timeout distinctly from provider failures (#1071)", () => {
+    // Error caused by host RPC slot exhaustion during credential/config resolution
+    const overloadError = new Error(
+      "API key auth failed for provider chatgpt: host RPC capacity is exhausted",
+    );
+    expect(classifyAgentError(overloadError)).toMatchObject({
+      code: "HOST_OVERLOADED",
+      retriable: true,
+      details: { origin: "host" },
+    });
+
+    const typedOverload = Object.assign(new Error("RPC failed"), {
+      errorCode: "HOST_OVERLOADED",
+    });
+    expect(classifyAgentError(typedOverload)).toMatchObject({
+      code: "HOST_OVERLOADED",
+      retriable: true,
+      details: { origin: "host" },
+    });
+
+    const unavailableError = new Error("host RPC timeout: session.appendMessage");
+    expect(classifyAgentError(unavailableError)).toMatchObject({
+      code: "HOST_UNAVAILABLE",
+      retriable: true,
+      details: { origin: "host" },
+    });
   });
 });

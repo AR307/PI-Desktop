@@ -166,6 +166,45 @@ test("tool-call disclosure headers span the conversation band", () => {
   assert.match(row, /min-width:\s*0;/);
 });
 
+test("delegation node copy wraps within the responsive card", () => {
+  const metrics = stylesSource.match(
+    /\.subagent-activity-metrics \{([^}]*)\}/,
+  )?.[1];
+  assert.ok(metrics);
+  assert.match(metrics, /overflow-wrap:\s*anywhere;/);
+  assert.match(metrics, /white-space:\s*normal;/);
+
+  const titleRow = stylesSource.match(
+    /\.subagent-topology-node-title-row \{([^}]*)\}/,
+  )?.[1];
+  assert.ok(titleRow);
+  assert.match(titleRow, /flex-wrap:\s*wrap;/);
+
+  const title = stylesSource.match(
+    /\.subagent-topology-node-title \{([^}]*)\}/,
+  )?.[1];
+  assert.ok(title);
+  assert.match(title, /-webkit-line-clamp:\s*2;/);
+  assert.match(title, /overflow-wrap:\s*anywhere;/);
+  assert.match(title, /white-space:\s*normal;/);
+  assert.doesNotMatch(title, /white-space:\s*nowrap;/);
+
+  const summary = stylesSource.match(
+    /\.subagent-topology-node-summary \{([^}]*)\}/,
+  )?.[1];
+  assert.ok(summary);
+  assert.match(summary, /-webkit-line-clamp:\s*2;/);
+  assert.match(summary, /overflow-wrap:\s*anywhere;/);
+  assert.match(summary, /white-space:\s*normal;/);
+
+  const steps = stylesSource.match(
+    /\.subagent-topology-node-steps \{([^}]*)\}/,
+  )?.[1];
+  assert.ok(steps);
+  assert.match(steps, /overflow-wrap:\s*anywhere;/);
+  assert.match(steps, /white-space:\s*normal;/);
+});
+
 test("assistant turns stay transparent full-width prose", () => {
   assert.match(
     stylesSource,
@@ -256,6 +295,20 @@ test("wrapped user links keep plaintext alignment", () => {
   assert.ok(userLinkStyles);
   assert.match(userLinkStyles, /text-align:\s*start;/);
   assert.match(userLinkStyles, /overflow-wrap:\s*anywhere;/);
+});
+
+test("user-message links stay selectable inside the inert button baseline", () => {
+  // base.css makes every <button> unselectable, and a class selector outranks
+  // that type rule. Without this opt-in a drag across the message skips the
+  // URL and copying drops it.
+  assert.match(
+    stylesSource,
+    /button,\s*\[role="button"\],[\s\S]*?\{\s*-webkit-user-select:\s*none;\s*user-select:\s*none;/,
+  );
+  const userLinkStyles = stylesSource.match(/\.chat-text-link \{([^}]*)\}/)?.[1];
+  assert.ok(userLinkStyles);
+  assert.match(userLinkStyles, /-webkit-user-select:\s*text;/);
+  assert.match(userLinkStyles, /(?<!-webkit-)user-select:\s*text;/);
 });
 
 test("user-message file chips reuse the composer chip node", () => {

@@ -5,6 +5,7 @@ import {
   useRef,
   useState,
   type MouseEvent as ReactMouseEvent,
+  type ReactNode,
 } from "react";
 import { useTranslation } from "react-i18next";
 import type { UiMessage } from "@pi-desktop/shared";
@@ -20,17 +21,51 @@ import {
 } from "../../../components/icons";
 import { TooltipButton } from "../../../components/ui";
 import { userMessageMenuItems } from "./menu-items";
+import { ActionSlotSide } from "./ActionBarSlots";
+import { slotMessage } from "../../../plugins/renderer-slots/slot-message";
 import { SessionMessageOrigin } from "./SessionMessageOrigin";
 import {
   CopyButton,
   FileRefChip,
   LinkifiedText,
   MessageAttachmentImage,
+  MessageTimestamp,
 } from "./shared";
 import {
   useChatTextActions,
   useTranscriptMenu,
 } from "./TranscriptMenu";
+
+function SkillInvocationText({ message }: { message: UiMessage }) {
+  const command = message.command ?? "";
+  const mentions = message.skillMentions ?? [];
+  const parts: ReactNode[] = [];
+  let cursor = 0;
+  for (const mention of mentions) {
+    if (
+      !Number.isInteger(mention.start) ||
+      !Number.isInteger(mention.end) ||
+      mention.start < cursor ||
+      mention.end > command.length ||
+      !command.slice(mention.start, mention.end).startsWith("/")
+    ) {
+      return <LinkifiedText text={command} attachments={message.attachments} />;
+    }
+    if (mention.start > cursor) {
+      parts.push(<LinkifiedText key={`text-${cursor}`} text={command.slice(cursor, mention.start)} attachments={message.attachments} />);
+    }
+    parts.push(
+      <code key={`skill-${mention.start}`} className="chat-command-chip" title={mention.id}>
+        {command.slice(mention.start, mention.end)}
+      </code>,
+    );
+    cursor = mention.end;
+  }
+  if (cursor < command.length) {
+    parts.push(<LinkifiedText key={`text-${cursor}`} text={command.slice(cursor)} attachments={message.attachments} />);
+  }
+  return <>{parts}</>;
+}
 
 export const MessageRow = memo(function MessageRow({
   message,
@@ -51,6 +86,8 @@ export const MessageRow = memo(function MessageRow({
   const editableUserMessage = isUser && !isSessionMessage;
   const workspaceRoot = useAppStore((s) => s.workspace?.path);
   const openFileRef = useOpenChatFileRef();
+  // userAction belongs to user cards; other rows keep a plugin-free bar.
+  const slotUser = isUser ? slotMessage("user", message) : undefined;
   // Slash prompts are stored expanded; editing works on the typed form so the
   // resent turn re-expands the template (D123).
   const editSeed =
@@ -236,6 +273,7 @@ export const MessageRow = memo(function MessageRow({
                             name={attachment.name}
                             path={attachment.ref}
                             kind={attachment.kind}
+                            mimeType={attachment.mimeType}
                             onOpen={openFileRef}
                           />
                         </span>
@@ -246,17 +284,19 @@ export const MessageRow = memo(function MessageRow({
                 {message.content ? (
                   <div className="message-user-text selectable">
                     {editableUserMessage && message.command ? (
-                      // Slash invocations show the typed form as a chip; the
-                      // expanded template body lives in `content` (hover reveals
-                      // it) and is what regenerate/reseed replay (D123).
-                      <code
-                        className="chat-command-chip"
-                        data-source-start={0}
-                        data-source-end={message.content.length}
-                        title={String(message.content || "")}
-                      >
-                        {message.command}
-                      </code>
+                      message.skillMentions?.length ? (
+                        <SkillInvocationText message={message} />
+                      ) : (
+                        // Templates retain the existing whole-invocation chip.
+                        <code
+                          className="chat-command-chip"
+                          data-source-start={0}
+                          data-source-end={message.content.length}
+                          title={String(message.content || "")}
+                        >
+                          {message.command}
+                        </code>
+                      )
                     ) : (
                       <LinkifiedText text={String(message.content || "")} attachments={message.attachments} />
                     )}
@@ -272,6 +312,8 @@ export const MessageRow = memo(function MessageRow({
         ) : null}
         {!editing && (hasAnswer || showRevisionPager) ? (
           <div className="message-actions">
+            <MessageTimestamp createdAt={message.createdAt} />
+            <ActionSlotSide slot="userAction" side="left" message={slotUser} />
             {showRevisionPager ? (
               <div className="message-revision-pager" role="group" aria-label={t("chat.revisions")}>
                 <TooltipButton
@@ -330,6 +372,7 @@ export const MessageRow = memo(function MessageRow({
                 <IconTrash size={13} />
               </TooltipButton>
             ) : null}
+            <ActionSlotSide slot="userAction" side="right" message={slotUser} />
           </div>
         ) : null}
       </div>

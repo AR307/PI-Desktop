@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { useBlockingOverlay } from "../../lib/blocking-overlay";
 import { useTranslation } from "react-i18next";
 import {
   canCancelInstall,
@@ -6,7 +7,7 @@ import {
   type PluginInstallJob,
 } from "../../features/plugins/install-progress";
 import { useAppStore } from "../../stores/app-store";
-import { Button, cx } from "../ui";
+import { Button, cx, portalOverlay } from "../ui";
 import {
   IconCircleCheck,
   IconCopy,
@@ -43,6 +44,8 @@ type Props = {
  * the same request again; a success shows and steps aside.
  */
 export function PluginInstallDialog({ job, onCancel, onRetry, onClose }: Props) {
+  // Hide docked native plugin views while this host install sheet is open.
+  useBlockingOverlay();
   const { t } = useTranslation();
   const showToast = useAppStore((state) => state.showToast);
   const [hovered, setHovered] = useState(false);
@@ -106,7 +109,7 @@ export function PluginInstallDialog({ job, onCancel, onRetry, onClose }: Props) 
     return <IconDownload size={size} />;
   };
 
-  return (
+  return portalOverlay(
     <div className="plugins-modal-backdrop" role="presentation">
       <div
         className="plugins-modal plugins-install-modal"
@@ -252,6 +255,6 @@ export function PluginInstallDialog({ job, onCancel, onRetry, onClose }: Props) 
           )}
         </div>
       </div>
-    </div>
+    </div>,
   );
 }

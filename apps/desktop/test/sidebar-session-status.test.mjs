@@ -66,11 +66,60 @@ test("prioritizes in-progress and selected states over terminal outcomes", () =>
   assert.equal(sidebarSessionStatus({ running: false, selected: false }), null);
 });
 
-test("opening a conversation acknowledges its outcome badge", () => {
+test("shows background subagents on an idle session but yields to a running turn (D628)", () => {
+  assert.equal(
+    sidebarSessionStatus({
+      running: false,
+      selected: true,
+      outcome: "completed",
+      backgroundDelegations: 2,
+    }),
+    "subagents",
+  );
+  assert.equal(
+    sidebarSessionStatus({
+      running: true,
+      selected: false,
+      backgroundDelegations: 2,
+    }),
+    "running",
+  );
+  assert.equal(
+    sidebarSessionStatus({
+      running: false,
+      selected: false,
+      hasPendingPermission: true,
+      backgroundDelegations: 2,
+    }),
+    "permission",
+  );
+  assert.equal(
+    sidebarSessionStatus({
+      running: false,
+      selected: true,
+      backgroundDelegations: 0,
+    }),
+    "selected",
+  );
+});
+
+test("opening a conversation acknowledges its outcome badge before loading details", () => {
   const sessionSource = readStoreModuleSync("slices/session-slice.ts");
   const catalogSource = readStoreModuleSync("slices/catalog-slice.ts");
   const selectBlock = sessionSource.match(/selectSession: async[\s\S]*?\n    newSession:/)?.[0] ?? "";
-  assert.match(selectBlock, /acknowledgeSessionOutcome\(id\)/);
+  const acknowledgementStart = selectBlock.indexOf(
+    "const outcomeAcknowledgement = get().acknowledgeSessionOutcome(id);",
+  );
+  const detailLoadStart = selectBlock.indexOf(
+    "const detailPromise = runtime.loadSessionDetail(id",
+  );
+  assert.ok(acknowledgementStart >= 0);
+  assert.ok(detailLoadStart >= 0);
+  assert.ok(
+    acknowledgementStart < detailLoadStart,
+    "session outcome acknowledgement must start before detail loading",
+  );
+  assert.match(selectBlock, /await outcomeAcknowledgement/);
 
   const ackBlock = catalogSource.slice(
     catalogSource.indexOf("acknowledgeSessionOutcome: async"),
@@ -96,6 +145,7 @@ test("renders semantic, shape-distinct sidebar status indicators", () => {
   assert.match(sidebar, /sessionSelected[\s\S]*sessionCompleted[\s\S]*sessionFailed/);
   assert.match(sidebar, /IconCheck[\s\S]*IconCircleAlert/);
   assert.match(styles, /thread-item-status\.running::before[\s\S]*--ds-warning/);
+  assert.match(styles, /thread-item-status\.subagents::before[\s\S]*--ds-warning/);
   assert.match(styles, /thread-item-status\.selected::before[\s\S]*--ds-accent/);
   assert.match(styles, /thread-item-status\.completed[\s\S]*--ds-success/);
   assert.match(styles, /thread-item-status\.failed[\s\S]*--ds-error/);

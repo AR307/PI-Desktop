@@ -17,7 +17,21 @@ import {
   type ResumableChain,
 } from "./delegation-history.js";
 
-const RESUMABLE_STATUSES = new Set(["completed", "failed", "timed_out"]);
+/**
+ * Every settled status is resumable (D628): a stopped, aborted, or
+ * restart-interrupted delegate keeps its persisted transcript, and `Task.resume`
+ * replays it the same way it replays a completed one. Only a run that is still
+ * live stays out — the registry checks `runningDelegationIds` first, and
+ * "running" here covers a stale chain whose runtime records are gone.
+ */
+const RESUMABLE_STATUSES = new Set([
+  "completed",
+  "failed",
+  "timed_out",
+  "stopped",
+  "aborted",
+  "interrupted",
+]);
 
 export type ChainLookupError =
   | { kind: "unknown" }
@@ -89,8 +103,11 @@ export class DelegationChainRegistry {
     originalTask: string;
     objective: string;
     latestModelId?: string;
+    latestFast?: boolean;
+    latestThinkingLevel?: import("@pi-desktop/shared").SessionThinkingLevel;
     /** `providerId/modelId` key that resolved, so a resume can re-resolve it. */
     latestModelKey?: string;
+    latestGroupId?: string;
     resumedFrom?: DelegationChain;
   }): DelegationChain {
     const existing = options.resumedFrom
@@ -104,7 +121,10 @@ export class DelegationChainRegistry {
           latestDelegationId: options.delegationId,
           latestObjective: options.objective || existing.latestObjective,
           latestModelId: options.latestModelId ?? existing.latestModelId,
+          latestThinkingLevel: options.latestThinkingLevel ?? existing.latestThinkingLevel,
+          latestFast: options.latestFast ?? existing.latestFast ?? false,
           latestModelKey: options.latestModelKey ?? existing.latestModelKey,
+          latestGroupId: options.latestGroupId ?? existing.latestGroupId,
           latestStatus: "running",
           lastActivityAt: Date.now(),
         }
@@ -119,7 +139,10 @@ export class DelegationChainRegistry {
           latestDelegationId: options.delegationId,
           latestObjective: options.objective,
           latestModelId: options.latestModelId,
+          latestThinkingLevel: options.latestThinkingLevel,
+          latestFast: options.latestFast ?? false,
           latestModelKey: options.latestModelKey,
+          latestGroupId: options.latestGroupId,
           latestStatus: "running",
           lastActivityAt: Date.now(),
         };
@@ -149,7 +172,7 @@ export class DelegationChainRegistry {
   /** Record the binding the running delegate switched to (fallback models). */
   retarget(
     delegateSessionId: string,
-    binding: { modelKey?: string; modelId: string },
+    binding: { modelKey?: string; groupId?: string; modelId: string; thinkingLevel?: import("@pi-desktop/shared").SessionThinkingLevel },
   ): void {
     const chain = this.chains.get(delegateSessionId);
     if (!chain) return;
@@ -157,6 +180,8 @@ export class DelegationChainRegistry {
       ...chain,
       ...(binding.modelKey ? { latestModelKey: binding.modelKey } : {}),
       latestModelId: binding.modelId,
+      latestGroupId: binding.groupId,
+      latestThinkingLevel: binding.thinkingLevel ?? chain.latestThinkingLevel,
       lastActivityAt: Date.now(),
     });
   }

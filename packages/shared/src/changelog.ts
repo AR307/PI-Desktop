@@ -30,6 +30,33 @@ export type ChangelogEntry = {
 
 const enEntries: ChangelogEntry[] = [
   {
+    "version": "0.15.11",
+    "date": "2026-10-01",
+    "highlights": [
+      "Add Ultra collaboration with model-specific reasoning, asynchronous parent handoff, and resumable cross-model subagents.",
+      "Show persistent ReturnToParent result cards and truthful subagent status, with individual and stop-all controls.",
+      "Align MirrorCoding catalogs, native protocols and per-session Fast; preserve partial responses and offer explicit continuation.",
+      "Update Android model and mode controls, synchronized Fast and Ultra, image generation, and mobile result cards."
+    ]
+  },
+
+  {
+    version: "0.15.10",
+    date: "2026-09-28",
+    highlights: [
+      "Marketplace plugins now appear in a randomized order instead of alphabetically.",
+    ],
+  },
+
+  {
+    version: "0.15.9",
+    date: "2026-09-27",
+    highlights: [
+      "Remove obsolete first-launch helper files from macOS DMG and ZIP packages.",
+    ],
+  },
+
+  {
     version: "0.15.6",
     date: "2026-09-23",
     highlights: [
@@ -843,6 +870,33 @@ const enEntries: ChangelogEntry[] = [
 
 const zhCNEntries: ChangelogEntry[] = [
   {
+    "version": "0.15.11",
+    "date": "2026-10-01",
+    "highlights": [
+      "新增 Ultra 协作：按模型选择原生推理等级、主代理异步交接、跨模型子代理与续跑。",
+      "子代理通过可展开的 ReturnToParent 卡片回传结果，修正运行状态并支持单独停止或全部停止。",
+      "对齐 MirrorCoding 目录、原生协议及会话 Fast；保留部分响应并提供主动继续。",
+      "更新安卓模型与模式设置、同步 Fast 和 Ultra、生图及子代理结果展示。"
+    ]
+  },
+
+  {
+    version: "0.15.10",
+    date: "2026-09-28",
+    highlights: [
+      "插件市场列表改为随机顺序展示，不再按名称排序。",
+    ],
+  },
+
+  {
+    version: "0.15.9",
+    date: "2026-09-27",
+    highlights: [
+      "移除 macOS DMG 和 ZIP 包中已过时的首次启动助手与说明文件。",
+    ],
+  },
+
+  {
     version: "0.15.6",
     date: "2026-09-23",
     highlights: [
@@ -1655,6 +1709,33 @@ const zhCNEntries: ChangelogEntry[] = [
 ];
 
 const zhTWEntries: ChangelogEntry[] = [
+  {
+    "version": "0.15.11",
+    "date": "2026-10-01",
+    "highlights": [
+      "新增 Ultra 協作：依模型選擇原生推理等級、主代理非同步交接、跨模型子代理與續跑。",
+      "子代理透過可展開的 ReturnToParent 卡片回傳結果，修正執行狀態並支援個別或全部停止。",
+      "對齊 MirrorCoding 目錄、原生協定及工作階段 Fast；保留部分回應並提供主動繼續。",
+      "更新 Android 模型與模式設定、同步 Fast 和 Ultra、生圖及子代理結果顯示。"
+    ]
+  },
+
+  {
+    version: "0.15.10",
+    date: "2026-09-28",
+    highlights: [
+      "外掛市集改為隨機順序顯示，不再按名稱排序。",
+    ],
+  },
+
+  {
+    version: "0.15.9",
+    date: "2026-09-27",
+    highlights: [
+      "Remove obsolete first-launch helper files from macOS DMG and ZIP packages.",
+    ],
+  },
+
   {
     version: "0.15.6",
     date: "2026-09-23",

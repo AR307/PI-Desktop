@@ -14,12 +14,11 @@ import {
   removeLiveSessionMessage,
   upsertLiveSessionMessage,
 } from "../../lib/session-transcript";
+import { getSessionMessageSnapshot, getSessionToolMessagePositions } from "../../lib/session-transcript-updates";
 import { sessionReadLooksEmpty } from "../../lib/session-transcript-read";
-import { sessionIsArchived, type SessionMeta } from "../../lib/sidebar-preferences";
-import {
-  normalizeProjectPath,
-  sessionMatchesProject,
-} from "../../lib/sidebar-session-groups";
+import type { SessionMeta } from "../../lib/sidebar-preferences";
+import { normalizeProjectPath } from "../../lib/sidebar-session-groups";
+import { latestSessionInScope } from "../../lib/session-scope";
 import type { ComposerDraftSnapshot } from "../../lib/composer-smart-stop";
 import { formatToolValue } from "../../lib/tool-display";
 import { recordPaneTranscript } from "../../lib/session-panes";
@@ -41,7 +40,7 @@ export type SessionConfiguration = Pick<
   SessionSummary,
   "mode" | "providerId" | "modelId" | "thinkingLevel"
 > &
-  Partial<Pick<SessionSummary, "permissionMode">>;
+  Partial<Pick<SessionSummary, "permissionMode" | "fast" | "ultra">>;
 
 export type SessionSelection = { id: string; intent: number };
 
@@ -51,8 +50,6 @@ export type SessionRuntime = {
   readonly liveSessionTranscripts: Set<string>;
   readonly sessionHistoryCache: Map<string, SessionHistoryWindow>;
   readonly submittedComposerDrafts: Map<string, SubmittedComposerDraft>;
-  readonly pendingSessionConfigurations: Map<string, SessionConfiguration>;
-  readonly sessionConfigurationFlushes: Map<string, Promise<void>>;
   beginNavigationIntent: () => number;
   navigationIntentIsCurrent: (intent: number) => boolean;
   newSessionScopeKey: (projectPath?: string | null) => string;
@@ -100,6 +97,7 @@ export type SessionRuntime = {
       args: unknown;
       createdAt: string;
       parentToolCallId?: string;
+      nestedParentToolCallId?: string;
       agentName?: string;
     },
   ) => void;
@@ -108,6 +106,7 @@ export type SessionRuntime = {
     args: unknown;
     createdAt: string;
     parentToolCallId?: string;
+    nestedParentToolCallId?: string;
     agentName?: string;
   } | undefined;
   removeToolStart: (toolCallId: string) => void;
@@ -127,8 +126,6 @@ export function createSessionRuntime({ get, set }: StoreAccess): SessionRuntime 
   const liveSessionTranscripts = new Set<string>();
   const sessionHistoryCache = new Map<string, SessionHistoryWindow>();
   const submittedComposerDrafts = new Map<string, SubmittedComposerDraft>();
-  const pendingSessionConfigurations = new Map<string, SessionConfiguration>();
-  const sessionConfigurationFlushes = new Map<string, Promise<void>>();
   const sessionDetailLoads = new Map<string, ReturnType<typeof api.getSession>>();
   const toolStartsByCallId = new Map<string, ToolStart>();
   const planSyncGenerations = new Map<string, number>();
@@ -264,11 +261,12 @@ export function createSessionRuntime({ get, set }: StoreAccess): SessionRuntime 
         next = upsertLiveSessionMessage(current, event.message);
         break;
       case "message_update": {
-        const previous = current.find((message) => message.id === event.message.id);
-        next = upsertLiveSessionMessage(current, applyMessageUpdate(previous, event));
+        const normalized = dedupeSessionMessages(current);
+        const index = getSessionMessageSnapshot(normalized).positions.get(event.message.id);
+        const previous = index === undefined ? undefined : normalized[index];
+        next = upsertLiveSessionMessage(normalized, applyMessageUpdate(previous, event));
         break;
       }
-        break;
       case "message_end": {
         next = projectMessageEnd(current, event);
         break;
@@ -287,17 +285,16 @@ export function createSessionRuntime({ get, set }: StoreAccess): SessionRuntime 
           ...(envelope.parentToolCallId
             ? { parentToolCallId: envelope.parentToolCallId }
             : {}),
+          ...(envelope.nestedParentToolCallId ? { nestedParentToolCallId: envelope.nestedParentToolCallId } : {}),
           ...(envelope.agentName ? { agentName: envelope.agentName } : {}),
         });
         break;
       case "tool_update": {
         if (event.partialResult === undefined) return current;
-        const existing = current.find(
-          (message) =>
-            message.toolCallId === event.toolCallId &&
-            message.toolStatus === "running",
-        );
-        if (!existing) return current;
+        const index = getSessionToolMessagePositions(current, event.toolCallId)
+          .find((position) => current[position].toolStatus === "running");
+        if (index === undefined) return current;
+        const existing = current[index];
         next = upsertLiveSessionMessage(current, {
           ...existing,
           content:
@@ -394,23 +391,12 @@ export function createSessionRuntime({ get, set }: StoreAccess): SessionRuntime 
     sessionHistoryCache,
     syncTranscriptProjection,
     submittedComposerDrafts,
-    pendingSessionConfigurations,
-    sessionConfigurationFlushes,
     beginNavigationIntent: () => navigationIntents.begin(),
     navigationIntentIsCurrent: (intent) => navigationIntents.isCurrent(intent),
     newSessionScopeKey: (projectPath) =>
       normalizeProjectPath(projectPath) ?? "<temporary>",
     latestSessionInScope: (sessions, projectPath, sessionMeta) =>
-      sessions
-        .filter((session) => sessionMatchesProject(session, projectPath))
-        .sort((a, b) => {
-          const aUpdated = Date.parse(a.updatedAt);
-          const bUpdated = Date.parse(b.updatedAt);
-          const aTime = Number.isFinite(aUpdated) ? aUpdated : 0;
-          const bTime = Number.isFinite(bUpdated) ? bUpdated : 0;
-          return bTime - aTime || b.id.localeCompare(a.id);
-        })
-        .find((session) => !sessionIsArchived(session.id, sessionMeta)),
+      latestSessionInScope(sessions, projectPath, sessionMeta),
     liveMessageCountForSession: (id, state) =>
       state.activeSessionId === id
         ? state.messages.length

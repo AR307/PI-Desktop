@@ -23,6 +23,7 @@ const shared = {
   FileRefChip: () => null,
   LinkifiedText: ({ text }) => text,
   MessageAttachmentImage: () => null,
+  MessageTimestamp: () => null,
 };
 
 function loadComponent(name, extras = {}) {
@@ -48,6 +49,8 @@ function loadComponent(name, extras = {}) {
       useTranscriptMenu: () => () => {},
       useChatTextActions: () => ({ copyText: () => {}, selectText: () => {} }),
     },
+    "./ActionBarSlots": { ActionSlotSide: () => null },
+    "../../../plugins/renderer-slots/slot-message": { slotMessage: () => undefined },
     ...extras,
   };
   const module = { exports: {} };

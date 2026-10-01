@@ -1,3 +1,5 @@
+import { SUBAGENT_REPORT_SUBJECT } from "@pi-desktop/shared";
+import { delegationNotification } from "./runtime/delegation-notification";
 import {
   AgentHost,
   RacpError,
@@ -5,6 +7,7 @@ import {
   type Principal,
   type QueueEntryView,
   type RuntimePort,
+  type SubscriptionSink,
   type TurnStartRequest,
   type TurnSteerRequest,
 } from "@pi-desktop/agent-host";
@@ -18,8 +21,10 @@ import type {
   AgentQueueChangedEvent,
   AgentQueuePushRequest,
   AskToolResolution,
+  PlanProposal,
   QueuedTurnSummary,
   RacpApprovalResult,
+  RacpEventEnvelope,
   RacpPermissionMode,
 } from "@pi-desktop/shared";
 import { IPC, isGlobalPermissionMode } from "@pi-desktop/shared";
@@ -122,7 +127,11 @@ export function createAgentHostBridge(options: AgentHostBridgeOptions) {
           {
             sessionId: request.sessionId,
             content: request.content,
+            ...(request.principal.subject === SUBAGENT_REPORT_SUBJECT ? { [delegationNotification]: true } : {}),
+            ...(request.userMessageId ? { messageId: request.userMessageId } : {}),
             ...(request.sessionMessageId ? { sessionMessageId: request.sessionMessageId } : {}),
+            ...(request.userMessageId ? { messageId: request.userMessageId } : {}),
+            ...(request.voiceOrigin ? { voiceOrigin: request.voiceOrigin } : {}),
             ...(request.attachments ? { attachments: request.attachments } : {}),
             ...(permissionModeOverride ? { permissionMode: permissionModeOverride } : {}),
           },
@@ -158,7 +167,10 @@ export function createAgentHostBridge(options: AgentHostBridgeOptions) {
             sessionId: request.sessionId,
             expectedTurnId: request.turnId,
             content: request.content,
-            ...(request.sessionMessageId ? { messageId: request.sessionMessageId } : {}),
+            ...((request.userMessageId ?? request.sessionMessageId)
+              ? { messageId: request.userMessageId ?? request.sessionMessageId }
+              : {}),
+            ...(request.voiceOrigin ? { voiceOrigin: request.voiceOrigin } : {}),
             ...(request.attachments ? { attachments: request.attachments } : {}),
           },
         ])) as { accepted?: boolean } | undefined;
@@ -232,6 +244,9 @@ export function createAgentHostBridge(options: AgentHostBridgeOptions) {
       }
     },
     listPendingTools: (sessionId) => listPendingToolRequests(options.getHost, sessionId),
+    async listPendingContracts(sessionId) {
+      return (await requireHost().call<{ plans: PlanProposal[] }>("plans.pending", { sessionId })).plans;
+    },
   };
 
   // Session reads and the persisted turn queue (schema v15, ADR 0213) go
@@ -245,21 +260,23 @@ export function createAgentHostBridge(options: AgentHostBridgeOptions) {
     approvals,
     queueStore,
     onQueueChange: (sessionId, entries) => {
-      options.onQueueChange?.({ sessionId, entries: entries.map(toQueueSummary) });
+      options.onQueueChange?.({ sessionId, entries: entries.filter((entry) => entry.principalSubject !== SUBAGENT_REPORT_SUBJECT).map(toQueueSummary) });
     },
   });
 
   /** The desktop's queue operations, all under the owner principal. */
   const queue = {
-    async push(request: AgentQueuePushRequest): Promise<QueuedTurnSummary> {
+    async push(request: AgentQueuePushRequest, notification = false): Promise<QueuedTurnSummary> {
       const result = await forIpc(() =>
-        agentHost.startTurn(DESKTOP_PRINCIPAL, {
+        agentHost.startTurn(notification ? { ...DESKTOP_PRINCIPAL, subject: SUBAGENT_REPORT_SUBJECT } : DESKTOP_PRINCIPAL, {
           sessionId: request.sessionId,
           admission: "queue",
-          ...(request.idempotencyKey ? { idempotencyKey: request.idempotencyKey } : {}),
+            ...(request.idempotencyKey ? { idempotencyKey: request.idempotencyKey } : {}),
           input: {
             text: request.content,
             ...(request.sessionMessageId ? { sessionMessageId: request.sessionMessageId } : {}),
+            ...(request.userMessageId ? { userMessageId: request.userMessageId } : {}),
+            ...(request.voiceOrigin ? { voiceOrigin: request.voiceOrigin } : {}),
             ...(request.attachments ? { attachments: request.attachments } : {}),
           },
           context: { requestId: `desktop-queue-${Date.now().toString(36)}` },
@@ -273,13 +290,15 @@ export function createAgentHostBridge(options: AgentHostBridgeOptions) {
             sessionId: request.sessionId,
             content: request.content,
             ...(request.sessionMessageId ? { sessionMessageId: request.sessionMessageId } : {}),
+            ...(request.userMessageId ? { userMessageId: request.userMessageId } : {}),
+            ...(request.voiceOrigin ? { voiceOrigin: request.voiceOrigin } : {}),
             ...(request.attachments ? { attachments: request.attachments } : {}),
             position: 0,
             createdAt: new Date().toISOString(),
           };
     },
     list(sessionId: string): QueuedTurnSummary[] {
-      return agentHost.queueEntries(sessionId).map(toQueueSummary);
+      return agentHost.queueEntries(sessionId).filter((entry) => entry.principalSubject !== SUBAGENT_REPORT_SUBJECT).map(toQueueSummary);
     },
     async remove(turnId: string): Promise<void> {
       const turn = agentHost.getTurn(turnId);
@@ -308,7 +327,34 @@ export function createAgentHostBridge(options: AgentHostBridgeOptions) {
 
   return {
     agentHost,
+    observeWorkTarget(sessionId: string): string | null {
+      return agentHost.observeWorkTarget(sessionId).activeTurnId;
+    },
+    lookupWorkAdmission(request: {
+      sessionId: string;
+      idempotencyKey: string;
+      userMessageId: string;
+      voiceOrigin: import("@pi-desktop/shared").VoiceOrigin;
+    }) {
+      return agentHost.lookupTurnByIdempotency(DESKTOP_PRINCIPAL, request);
+    },
     queue,
+    async steerWorkSession(input: { sessionId: string; expectedTurnId: string; content: string; userMessageId: string; voiceOrigin: import("@pi-desktop/shared").VoiceOrigin }): Promise<boolean> {
+      const result = await options.invoke(options.channels.agentSteer, [{
+        sessionId: input.sessionId,
+        expectedTurnId: input.expectedTurnId,
+        content: input.content,
+        messageId: input.userMessageId,
+        voiceOrigin: input.voiceOrigin,
+      }]) as { accepted?: boolean } | undefined;
+      return result?.accepted === true;
+    },
+    async stopWorkSession(input: { sessionId: string; expectedTurnId: string; urgency: "graceful" | "immediate" }): Promise<{ status: "requested" | "stale-target" | "already-terminal" }> {
+      const channel = input.urgency === "graceful" ? options.channels.agentStop : options.channels.agentAbort;
+      const result = await options.invoke(channel, [{ sessionId: input.sessionId, turnId: input.expectedTurnId }]) as { requested?: boolean; aborted?: boolean; ok?: boolean } | undefined;
+      const accepted = input.urgency === "graceful" ? result?.requested === true : result?.aborted === true || result?.ok === true;
+      return accepted ? { status: "requested" } : { status: "stale-target" };
+    },
     /** A ledger stores the actual durable turn, which can differ from a queue ID. */
     async interruptSessionMessage(sessionId: string, turnId: string): Promise<boolean> {
       const result = await options.invoke(options.channels.agentAbort, [{ sessionId, turnId }]) as { aborted?: boolean } | undefined;
@@ -373,6 +419,41 @@ export function createAgentHostBridge(options: AgentHostBridgeOptions) {
         });
       }
     },
+    onSessionEvent(sessionId: string, listener: (event: RacpEventEnvelope) => void): () => void {
+      let subscriptionId: string | null = null;
+      const sink: SubscriptionSink = {
+        deliver(envelope) {
+          try {
+            listener(envelope);
+          } catch (error) {
+            options.log("warn", "agent host session event listener failed", {
+              sessionId,
+              eventKind: envelope.kind,
+              error: String(error),
+            });
+          } finally {
+            if (subscriptionId && envelope.sequence !== undefined) {
+              agentHost.ack(subscriptionId, envelope.sequence);
+            }
+          }
+        },
+        close(error) {
+          options.log("warn", "agent host session event subscription closed", {
+            sessionId,
+            errorCode: error.code,
+          });
+        },
+      };
+      const subscription = agentHost.subscribe(DESKTOP_PRINCIPAL, {
+        scope: "session",
+        sessionId,
+      }, sink);
+      subscriptionId = subscription.subscriptionId;
+      return () => {
+        if (subscriptionId) agentHost.unsubscribe(subscriptionId, sessionId);
+        subscriptionId = null;
+      };
+    },
     markAborting(sessionId: string): void {
       abortingSessions.add(sessionId);
     },
@@ -402,6 +483,8 @@ function toQueueSummary(entry: QueueEntryView): QueuedTurnSummary {
     sessionId: entry.turn.sessionId,
     content: entry.content,
     ...(entry.sessionMessageId ? { sessionMessageId: entry.sessionMessageId } : {}),
+    ...(entry.userMessageId ? { userMessageId: entry.userMessageId } : {}),
+    ...(entry.voiceOrigin ? { voiceOrigin: entry.voiceOrigin } : {}),
     ...(entry.attachments ? { attachments: entry.attachments } : {}),
     position: entry.turn.queuePosition ?? 0,
     ...(entry.priority !== undefined ? { priority: entry.priority } : {}),

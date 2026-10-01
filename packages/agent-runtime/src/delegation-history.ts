@@ -1,3 +1,4 @@
+import { isSubagentThinkingLevel } from "./ultra-policy.js";
 /**
  * Rebuild a delegate's model context from its persisted transcript rows
  * (ADR 0279).
@@ -65,8 +66,11 @@ export type DelegationChain = {
   latestObjective?: string;
   /** Provider/model used by the latest run; resume must keep it. */
   latestModelId?: string;
+  latestFast?: boolean;
+  latestThinkingLevel?: import("@pi-desktop/shared").SessionThinkingLevel;
   /** `providerId/modelId` key the latest run resolved (ADR 0279 §4). */
   latestModelKey?: string;
+  latestGroupId?: string;
   /** Settled status of the latest run; `running` while it works. Owns the
    * resumability gate so pruning finished delegation records cannot make a
    * stopped chain look reusable (ADR 0279). */
@@ -510,6 +514,10 @@ export type RebuiltTaskCall = {
   objective: string;
   task?: string;
   modelId?: string;
+  modelKey?: string;
+  groupId?: string;
+  fast?: boolean;
+  thinkingLevel?: import("@pi-desktop/shared").SessionThinkingLevel;
   createdAt: number;
   /** Settled status this call's `Task` row recorded, when it recorded one. */
   status?: string;
@@ -585,6 +593,10 @@ export function rebuildChainsFromTranscript(
       objective: taskObjectiveFromArgs(args),
       ...(task ? { task } : {}),
       ...(modelId ? { modelId } : {}),
+      modelKey: typeof details?.modelKey === "string" ? details.modelKey : undefined,
+      groupId: typeof details?.groupId === "string" ? details.groupId : undefined,
+      fast: details?.fast === true,
+      thinkingLevel: isSubagentThinkingLevel(details?.thinkingLevel) ? details.thinkingLevel : undefined,
       status: chainStatusFromDetail(details, row),
       createdAt: timestampMs(row.createdAt) || Date.now(),
     };
@@ -647,6 +659,10 @@ export function rebuildChainsFromTranscript(
       latestDelegationId: latest?.delegationId,
       latestObjective: latest?.objective ?? root.objective,
       latestModelId: latest?.modelId,
+      latestModelKey: latest?.modelKey,
+      latestGroupId: latest?.groupId,
+      latestFast: latest?.fast === true,
+      latestThinkingLevel: latest?.thinkingLevel,
       latestStatus: latest?.status,
       lastActivityAt: latest?.createdAt ?? root.createdAt,
     });

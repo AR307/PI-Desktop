@@ -40,10 +40,9 @@ test("launch resolves definition-only pins without granting Task.model selection
     logger: { app() {} }, userMcp: { setRecords() {}, toolsForProject: async () => [] },
     plugins: { listLoaded: () => [], getSkills: () => [], getTools: () => [], getAgentExtensions: () => [] },
     sessionProjects: new Map(), dataDir: root, vendorOAuth: {},
-    modelsDevCatalog: { ensureLoaded: async () => {}, findModel: () => undefined },
+    modelsDevCatalog: { configureAccount: () => {}, ensureLoaded: async () => {}, findModel: () => undefined },
     getWorkspacePath: () => root, pluginActiveInProject: () => true,
     bindingForModel: (row, id) => row.models.find((m) => m.id === id),
-    modelsDevModelFor: () => undefined,
     effectiveSubagentModelConfig: (row, id, catalog) => {
       const modelConfig = modelConfigWithBinding(catalog, row.models.find((m) => m.id === id));
       return { modelConfig, capabilities: capabilitiesFromModelConfig(modelConfig) };
@@ -57,13 +56,13 @@ test("launch resolves definition-only pins without granting Task.model selection
   assert.ok(initial.subagentProviders["fixture/private"]);
   assert.ok(initial.subagentProviders["fixture/backup"]);
   assert.deepEqual(initial.subagents.find((d) => d.name === "private-reviewer").fallbackModels, [{ providerId: "fixture", modelId: "backup" }]);
-  assert.deepEqual(initial.subagentModelKeys, ["fixture/allowed"]);
+  assert.deepEqual(initial.subagentModelKeys, ["fixture-provider/allowed"]);
   assert.equal(initial.subagents.find((d) => d.name === "private-reviewer").model.modelId, "private");
 
   // A pin already in the resolved map still needs an independent opt-in.
   provider.models[1].availableForSubagents = true;
   const optedIn = (await launch()).sidecarParams;
-  assert.deepEqual(optedIn.subagentModelKeys, ["fixture/private", "fixture/allowed"]);
+  assert.deepEqual(optedIn.subagentModelKeys, ["fixture-provider/private", "fixture-provider/allowed"]);
   provider.models[1].availableForSubagents = false;
   provider.models[2].availableForSubagents = false;
   const revoked = (await launch()).sidecarParams;
@@ -79,4 +78,120 @@ test("launch resolves definition-only pins without granting Task.model selection
   assert.equal(collision.subagentProviders["fixture/private"].id, provider.id);
   assert.equal(collision.subagentProviders["other-account/private"].id, "other-account");
   assert.deepEqual(collision.subagentModelKeys, ["other-account/private"]);
+});
+
+test("MirrorCoding delegates require opt-in and selected-group chat capability, including dual-mode models", async (t) => {
+  const root = mkdtempSync(join(tmpdir(), "pi-mc-model-launch-"));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  const account = {
+    id: "mc-account",
+    vendorKey: "mirrorcoding",
+    name: "MirrorCoding",
+    enabled: true,
+    authKind: "mirrorcoding",
+    models: [
+      { id: "chat-a", thinkingLevels: ["off"], mirrorCodingGroupId: "group" },
+      { id: "chat-b", thinkingLevels: ["off"], mirrorCodingGroupId: "removed-default", availableForSubagents: true },
+      { id: "image-1", thinkingLevels: ["off"], mirrorCodingGroupId: "group", availableForSubagents: true },
+    ],
+    mirrorCoding: {
+      scope: "account",
+      accountId: 1,
+      groups: [{ id: "second", routes: { "chat-b": "openai" }, modelCapabilities: { "chat-b": { modes: ["text"] } } }, { id: "group", routes: { "chat-a": "openai", "chat-b": "openai" }, modelCapabilities: { "chat-a": { modes: ["text"] }, "chat-b": { modes: ["text", "image"] }, "image-1": { modes: ["image"] } } }],
+      routes: { "chat-a": "openai", "chat-b": "openai" },
+      imageModels: { "image-1": { generation_path: "/v1/images/generations" }, "chat-b": { generation_path: "/v1/images/generations" } },
+      imageRoutes: { "image-1": { generation: "image-generation" } },
+    },
+  };
+  const group = {
+    ...account,
+    id: "mc-group",
+    name: "Images",
+    models: account.models,
+    mirrorCoding: {
+      scope: "group",
+      groupId: "group",
+      modelCapabilities: { "chat-b": { modes: ["text", "image"] } },
+      accountId: 1,
+      routes: { "chat-b": "openai" },
+      imageModels: { "image-1": { generation_path: "/v1/images/generations" } },
+    },
+  };
+  const second = { ...group, id: "mc-second", name: "Second channel", mirrorCoding: { ...group.mirrorCoding, groupId: "second" } };
+  const bound = [];
+  const shell = { id: "bash", label: "Bash", dialect: "posix", available: true, isDefault: true };
+  const runtime = createSessionLaunchRuntime({
+    runtimeState: { host: {
+      isAvailable: () => true,
+      call: async (method) => {
+        if (method === "commandShells.list") return { configuredId: "bash", effective: shell, fallback: false, choices: [shell] };
+        if (method === "providers.list") return { providers: [account, group, second] };
+        if (method === "providers.getSecret") return {};
+        if (method === "agents.active") return { subagents: [] };
+        if (method === "skills.active") return { skills: [] };
+        if (method === "mcp.active") return { servers: [] };
+        if (method === "project.memory.get") return {};
+        throw new Error(`Unexpected host call ${method}`);
+      },
+    } },
+    logger: { app() {} }, userMcp: { setRecords() {}, toolsForProject: async () => [] },
+    plugins: { listLoaded: () => [], getSkills: () => [], getTools: () => [], getAgentExtensions: () => [] },
+    sessionProjects: new Map(), dataDir: root, vendorOAuth: {},
+    modelsDevCatalog: { configureAccount: () => {}, ensureLoaded: async () => {}, findModel: () => undefined },
+    getWorkspacePath: () => root, pluginActiveInProject: () => true,
+    bindingForModel: (row, id) => row.models.find((m) => m.id === id),
+    effectiveSubagentModelConfig: (row, id, catalog) => {
+      const modelConfig = modelConfigWithBinding(catalog, row.models.find((m) => m.id === id));
+      return { modelConfig, capabilities: capabilitiesFromModelConfig(modelConfig) };
+    },
+    normalizeThinkingLevel: () => "off",
+    mirrorCodingBindingFor: async (providerId, modelId) => {
+      bound.push({ providerId, modelId });
+      return {
+        id: providerId,
+        name: "MirrorCoding",
+        vendorKey: "mirrorcoding",
+        modelId,
+        apiKey: "relay",
+        authKind: "mirrorcoding",
+        supportsReasoning: false,
+        supportedThinkingLevels: ["off"],
+      };
+    },
+  });
+  const launched = (await runtime.resolveAgentRuntimeLaunch("session", {
+    providerId: account.id, modelId: "chat-a", projectPath: root, fast: true,
+  }, {})).sidecarParams;
+  assert.deepEqual(
+    [...new Map(bound.map((row) => [`${row.providerId}:${row.modelId}`, row])).values()],
+    [
+      { providerId: "mc-account", modelId: "chat-a" },
+      { providerId: "mc-group", modelId: "chat-b" },
+      { providerId: "mc-second", modelId: "chat-b" },
+    ],
+  );
+  assert.deepEqual(launched.subagentModelKeys, [
+    "mc-group/chat-b", "mc-second/chat-b",
+  ]);
+  assert.equal(launched.subagentProviders["mc-group/chat-b"].id, "mc-group");
+  assert.equal(launched.subagentProviders["mc-second/chat-b"].id, "mc-second");
+  const { resolveSubagentModelSource } = await import("../electron/main/runtime/subagent-model-sources.ts");
+  assert.equal(resolveSubagentModelSource([account, group, second], "mc-second", "chat-b").provider.id, "mc-second");
+  assert.throws(() => resolveSubagentModelSource([account, group, second], "mirrorcoding", "chat-b"), /Choose a channel explicitly/);
+  const denied = { ...account, models: account.models.map(model => ({ ...model, availableForSubagents: false })) };
+  assert.throws(() => resolveSubagentModelSource([denied, group, second], "mc-second", "chat-b"), /not enabled for subagents/);
+  assert.equal(launched.provider.fast, false, "auxiliary resolution never inherits saved Fast");
+  const fastLaunch = (await runtime.resolveAgentRuntimeLaunch("session", {
+    providerId: account.id, modelId: "chat-a", projectPath: root, fast: true,
+  }, {}, { fast: true })).sidecarParams;
+  assert.equal(fastLaunch.provider.fast, true, "user launch explicitly carries Fast");
+});
+
+
+test("ordinary providers with the same model remain independently selectable by exact channel", async () => {
+  const { subagentModelSources, resolveSubagentModelSource } = await import("../electron/main/runtime/subagent-model-sources.ts");
+  const providers = ["channel-a", "channel-b"].map(id => ({ id, vendorKey: "openai", name: id, enabled: true, authKind: "none", models: [{ id: "shared-model", availableForSubagents: true }] }));
+  assert.deepEqual(subagentModelSources(providers).map(source => source.key), ["channel-a/shared-model", "channel-b/shared-model"]);
+  assert.equal(resolveSubagentModelSource(providers, "channel-b", "shared-model").provider.id, "channel-b");
+  assert.throws(() => resolveSubagentModelSource(providers, "openai", "shared-model"), /matches multiple accounts/);
 });

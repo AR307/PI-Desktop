@@ -5,7 +5,8 @@ import type { HostProcess } from "./host-process";
 type MessageAppend = {
   key: string;
   sessionId: string;
-  message: unknown;
+  message?: unknown;
+  usage?: unknown;
   turnId?: string;
 };
 
@@ -89,9 +90,9 @@ export class PersistenceOutbox {
       const currentHost = getHost();
       if (!currentHost || !currentHost.isAvailable()) return;
       try {
-        await currentHost.call("session.appendMessage", {
+        await currentHost.call(current.usage ? "session.recordUsage" : "session.appendMessage", {
           sessionId: current.sessionId,
-          message: current.message,
+          ...(current.usage ? { usage: current.usage } : { message: current.message }),
           turnId: current.turnId,
         });
       } catch (error) {
@@ -107,6 +108,15 @@ export class PersistenceOutbox {
           // on this message). Drop only this entry and keep draining so one
           // poisoned head cannot starve later transcript rows (D597).
           this.logger("warn", "session persistence flush dropped poisoned message", {
+            key: current.key,
+            data: String(error),
+          });
+        } else if (isForeignKeyError(error)) {
+          // The parent row (session or turn) was lost — typically after a
+          // sidecar crash that restarted before the outbox could drain.
+          // The host will never accept a child row whose parent is gone,
+          // so drop it and keep draining (#996).
+          this.logger("warn", "session persistence flush dropped orphaned message", {
             key: current.key,
             data: String(error),
           });
@@ -137,7 +147,7 @@ export class PersistenceOutbox {
             entry &&
             typeof entry.key === "string" &&
             typeof entry.sessionId === "string" &&
-            "message" in entry
+            ("message" in entry || ("usage" in entry && typeof entry.turnId === "string"))
           );
         });
       }
@@ -180,4 +190,13 @@ function isDuplicateMessageIdError(error: unknown): boolean {
  */
 function isPoisonMessageError(error: unknown): boolean {
   return /(?<![A-Z_])PERMISSION_DENIED:/i.test(String(error));
+}
+
+/**
+ * The parent row (session or turn) no longer exists. This happens after a
+ * sidecar or host-core crash where the parent was deleted or never committed.
+ * Retrying is pointless — the FK will never be satisfied.
+ */
+function isForeignKeyError(error: unknown): boolean {
+  return /FOREIGN KEY constraint failed/i.test(String(error));
 }

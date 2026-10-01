@@ -1,9 +1,19 @@
+import { returnToParent } from "./return-to-parent.js";
+import { highestThinkingLevel, isReturnToParent } from "@pi-desktop/shared";
+import { delegationGuidance, delegationHandoffGuidance, delegationSystemPrompt, resolveDelegationThinking, shouldHandOffDelegations } from "./ultra-policy.js";
+import { assertMirrorCodingFast, withMirrorCodingFast } from "./mirrorcoding-fast.js";
+import { assistantReplay, canRestorePartialResponse, responseContentFacts, responseDiagnostics, responseOutcome, responseOutcomeError, restoredAssistantBlocks } from "./response-outcome.js";
+import { upstreamRequestDiagnostics, type RequestDiagnostics } from "./request-diagnostics.js";
+import { accountModelStream } from "./request-usage.js";
+import { modeToolDenial, retainModeToolDeclaration, withModeExecutionGuard } from "./mode-tool-access.js";
 import { restoreHostedSearchReplay } from "./hosted-search-replay.js";
 import { requestExtensionUi } from "./extensions/ui-request.js";
 import { readLocalRequestErrorDetails } from "./local-request-errors.js";
 import { imageGenerationDescription, imageGenerationParameters } from "./image-generation/tool.js";
+import { todoWriteDescription, todoWriteParameters } from "./todo-tool.js";
 import { scheduledToolParameters, scheduledToolDescriptions } from "./scheduled-tools.js";
 import { withPiFileOpToolNames } from "./pi-file-ops.js";
+import { IMAGE_TOOL_DESCRIPTIONS, IMAGE_TOOL_PARAMETERS } from "./image-tools.js";
 import { randomUUID } from "node:crypto";
 import {
   settledDelegationMessage,
@@ -99,12 +109,14 @@ import {
   contextCompactionMark,
   cumulativeDelta,
   DEFAULT_SUBAGENT_PERMISSION,
+  askToolOptionLabel,
   formatAskToolOutput,
   formatSessionMessage,
   hostedSearchFromMessage,
   isCommandShellOption,
   isToolsOutputParams,
   MAX_SUBAGENT_CONCURRENCY,
+  normalizeAskToolOption,
   normalizeSubagentName,
   proposalKindForMode,
   resolveSubagentToolNames,
@@ -147,6 +159,7 @@ import {
   createExtensionAgentModels,
   createProviderModels,
   DEFAULT_CONTEXT_WINDOW,
+  providerRequestFetch,
   providerRequestKey,
   type RuntimeProviderConfig,
 } from "./provider-binding.js";
@@ -265,6 +278,8 @@ export type RuntimePromptAttachment = AgentPromptAttachment & {
 };
 
 export type RuntimePrompt = {
+  /** Supplied only by the host-owned notification queue. */
+  delegationNotification?: boolean;
   text: string;
   sessionMessage?: SessionMessageOrigin;
   attachments?: RuntimePromptAttachment[];
@@ -461,7 +476,10 @@ export type DelegationRecord = {
   taskTurnId?: string;
   agentName: string;
   modelId: string;
+  modelKey?: string;
+  groupId?: string;
   thinkingLevel: SubagentThinkingLevel;
+  fast?: boolean;
   status: DelegationStatus;
   startedAt: number;
   completedAt?: number;
@@ -477,13 +495,11 @@ export type DelegationRecord = {
   lastToolName?: string;
   lastPhase?: AgentActivityAgentPhase;
   lastActivityAt: number;
-  /** `prompt()` / `executeApprovedPlan()` generation that started this run.
-   * Resume-after-idle only waits for the current turn's delegates (D352). */
-  startedEpoch: number;
   /** The settled report reached the parent's context once: through a
-   * `TaskWait` result or the resume-after-idle prompt. Auto-delivery is a
-   * single shot per record. */
+   * `TaskWait` result, the turn-boundary delivery, or a wake turn (D628).
+   * Auto-delivery is a single shot per record. */
   reportDelivered: boolean;
+  returnPublished?: boolean;
   /** Stable chain identity; never appears in a tool parameter (ADR 0279). */
   delegateSessionId: string;
   /** Prior `delegationId` this run continues, when `Task.resume` was set. */
@@ -502,7 +518,10 @@ function delegationSummary(record: DelegationRecord): Record<string, unknown> {
     delegationId: record.delegationId,
     agent: record.agentName,
     modelId: record.modelId,
+    modelKey: record.modelKey,
+    groupId: record.groupId,
     thinkingLevel: record.thinkingLevel,
+    fast: record.fast === true,
     status: record.status,
     startedAt: record.startedAt,
     turns: record.result?.turns ?? record.turns,
@@ -518,6 +537,9 @@ function delegationSummary(record: DelegationRecord): Record<string, unknown> {
       : {}),
     ...(record.result?.contextDegraded
       ? { contextDegraded: record.result.contextDegraded }
+      : {}),
+    ...(record.result?.scratchReportPath
+      ? { scratchReportPath: record.result.scratchReportPath }
       : {}),
     ...(record.resumedFrom ? { resumedFrom: record.resumedFrom } : {}),
     ...(record.modelChangedFrom
@@ -579,6 +601,18 @@ function formatDelegationHeartbeat(record: DelegationRecord): string {
 
 const DELEGATION_RESUME_PROMPT =
   "The following subagents have finished. Integrate their reports and continue the user's original task. Call TaskStop only if you have decided a still-running delegate should not continue.";
+
+/**
+ * Stable first line of the wake turn a settled delegation queues while the
+ * session is idle (D628). The runtime recognizes a wake turn by this exact
+ * prefix — never by loose matching over arbitrary user text — and expands it
+ * with the undelivered reports at prompt preflight. The queued content carries
+ * only this marker and the delegation ids; report bodies stay out of the queue.
+ */
+export const DELEGATION_WAKE_PREFIX = "Subagent reports ready:";
+
+const DELEGATION_WAKE_PROMPT =
+  "The subagent reports below settled while the session was idle. Integrate them and continue the user's original task. Call TaskStop only if you have decided a still-running delegate should not continue.";
 
 /** Join delegation results into one bounded text block for the model. */
 function formatDelegationResults(
@@ -671,6 +705,8 @@ const PATH_MUTATING_TOOLS = new Set(["Write", "Edit"]);
 const CHAT_CORE_TOOL_NAMES = new Set(["Read", "Glob", "Grep", ASK_TOOL_NAME]);
 const AGENT_CORE_TOOL_NAMES = new Set([
   "Read",
+  "Glob",
+  "Grep",
   "Write",
   "Edit",
   "Bash",
@@ -741,16 +777,13 @@ function pathInstructionScope(path: string): string {
 }
 
 /**
- * Appended for one automatic re-run after a turn that produced nothing the
- * user can see. Two shapes were observed: a wholly empty response, and a
- * finished conclusion written into reasoning while the visible text stayed
- * empty. The same nudge covers both, because both need the same next move.
+ * Appended only for the single retry of a normally completed, wholly empty
+ * response. Thinking-only and partial responses require explicit Continue.
  */
 const SILENT_TURN_NUDGE = [
   "<no_output_recovery>",
-  "Your previous turn ended with no visible text and no tool call, so the user saw nothing happen.",
-  "Your reasoning is never shown to the user. If you already reached the answer, state it now in plain text.",
-  "Otherwise continue the unfinished work, starting with one sentence about what you are doing.",
+  "Your previous response ended without text, thinking, or a tool call.",
+  "Respond to the user's request with an answer or the necessary tool calls.",
   "</no_output_recovery>",
 ].join("\n");
 
@@ -904,6 +937,7 @@ export type AgentRuntimeOptions = {
   turnId?: string;
   provider: RuntimeProviderConfig;
   thinkingLevel: SessionThinkingLevel;
+  ultra?: boolean;
   /** Persisted opt-in for retrying transient provider failures until success. */
   infiniteProviderRetry?: boolean;
   systemPrompt?: string;
@@ -960,6 +994,7 @@ export type RuntimeMatchConfig = {
   mode: Mode;
   provider: RuntimeProviderConfig;
   thinkingLevel: SessionThinkingLevel;
+  ultra?: boolean;
   pluginTools?: PluginToolDef[];
   pluginSkills?: PluginSkillDef[];
   trustedExtensions?: TrustedExtensionSpec[];
@@ -1210,13 +1245,26 @@ function shellSyntaxGuidance(shell: CommandShellOption): string {
   }
 }
 
+export function formatScratchDirForShell(
+  shell: CommandShellOption,
+  scratchDir?: string,
+): string | undefined {
+  if (!scratchDir) return undefined;
+  if (shell.dialect === "posix") {
+    // POSIX shells (including Git Bash on Windows) require forward slashes.
+    return scratchDir.replaceAll("\\", "/");
+  }
+  return scratchDir;
+}
+
 export function commandShellGuidance(
   shell: CommandShellOption,
   scratchDir?: string,
 ): string {
   const scratchVariable = shellScratchVariable(shell);
-  const scratch = scratchDir
-    ? `The session scratch directory is \`${scratchDir}\`; use ${scratchVariable} for it and keep temporary files there.`
+  const formattedScratch = formatScratchDirForShell(shell, scratchDir);
+  const scratch = formattedScratch
+    ? `The session scratch directory is \`${formattedScratch}\`; use ${scratchVariable} for it and keep temporary files there.`
     : `When PI_SCRATCH_DIR is available, use ${scratchVariable} for the session scratch directory and keep temporary files there.`;
   return [
     `Shell commands run through ${shell.label} (${shell.id}). The protocol tool remains named Bash for compatibility, even when the active shell is PowerShell or cmd.`,
@@ -1229,13 +1277,14 @@ function commandShellToolDescription(
   shell: CommandShellOption,
   scratchDir?: string,
 ): string {
+  const formattedScratch = formatScratchDirForShell(shell, scratchDir);
   return [
     `Run a non-interactive command through ${shell.label} in the workspace root.`,
     "The protocol tool remains named Bash for compatibility; write commands for the active shell dialect.",
     shellSyntaxGuidance(shell),
     `The session scratch directory variable is ${shellScratchVariable(shell)}.`,
     `An optional timeout from 1 to ${MAX_COMMAND_TIMEOUT_SECONDS} seconds may be supplied; without it, the command defaults to a 60-second timeout.`,
-    ...(scratchDir ? [`The session scratch directory is ${scratchDir}.`] : []),
+    ...(formattedScratch ? [`The session scratch directory is ${formattedScratch}.`] : []),
   ].join(" ");
 }
 
@@ -1563,12 +1612,12 @@ export class DesktopAgentRuntime {
   private models: Models;
   private model: Model<Api>;
   private turnId?: string;
-  private hostTurnId?: string;
   private disposed = false;
   readonly sessionId: string;
   private mode: Mode;
   private provider: RuntimeProviderConfig;
   private thinkingLevel: SessionThinkingLevel;
+  private ultra = false;
   private host: RuntimeHost;
   private onEvent: (envelope: AgentEventEnvelope) => void;
   private streamSink: StreamCoalescer;
@@ -1618,6 +1667,17 @@ export class DesktopAgentRuntime {
   private resumablePromptStale = false;
   /** Set by `abort` / `dispose` so a finishing delegate cannot restart the parent. */
   private runCancelled = false;
+  /** A `prompt()` / `executeApprovedPlan()` call is between entry and return,
+   * so a settlement defers its wake to that call's boundary delivery (D628). */
+  private turnActive = false;
+  /** The current run's `agent_end` reached listeners: the visible turn is
+   * closed, so a boundary delivery must fall back to the wake queue (D628). */
+  private turnEndEmitted = false;
+  /** A dispatched Ultra batch releases this turn, including already-settled reports. */
+  private delegationHandoff = false;
+  /** A wake turn is queued and not yet consumed; further settlements ride it
+   * instead of queueing their own (D628). Reset when any turn starts. */
+  private queuedDelegationWake = false;
   /**
    * Permission scope of the delegate currently executing one tool call,
    * keyed by tool call id (ADR 0089). The host reads it on `tools.execute` and
@@ -1695,12 +1755,14 @@ export class DesktopAgentRuntime {
   private providerRetryInProgress = false;
   private suppressProviderRetryRunEnd = false;
   private providerRetryAbort?: AbortController;
-  /* Silent-turn recovery: a turn that ends with no tool call and no visible
-   * text is invisible to the user. 15 of 255 recorded sessions ended a turn
-   * that way, and every one of them was followed by the user typing "继续".
-   * One automatic re-run per prompt, then the failure becomes visible. */
+  /* Wholly empty completion retries once per prompt. Thinking or partial
+   * output is preserved and never enters this automatic recovery path. */
   private pendingSilentTurnRerun = false;
   private silentTurnRerunAttempted = false;
+  private providerHasContent = false;
+  private providerRequestDiagnostics?: RequestDiagnostics;
+  private providerRequestId?: string;
+  private providerRequestAttempts = 0;
   /**
    * The first settled reply to a current Host-ledger completion notice may
    * need no acknowledgement (D446). Spent by that reply, and revoked as soon
@@ -1772,12 +1834,12 @@ export class DesktopAgentRuntime {
 
   constructor(opts: AgentRuntimeOptions) {
     this.sessionId = opts.sessionId;
-    this.hostTurnId = opts.turnId;
     this.turnId = opts.turnId;
     this.mode = opts.mode;
     this.planningState = proposalKindForMode(this.mode) ? "planning" : "inactive";
     this.provider = opts.provider;
-    this.thinkingLevel = clampThinkingLevel(opts.provider, opts.thinkingLevel);
+    this.ultra = opts.ultra === true;
+    this.thinkingLevel = this.ultra ? highestThinkingLevel(opts.provider) : clampThinkingLevel(opts.provider, opts.thinkingLevel);
     this.infiniteProviderRetry = opts.infiniteProviderRetry === true;
     this.host = opts.host;
     this.hostCloseUnsubscribe = this.host.onClose?.(() => {
@@ -1813,7 +1875,6 @@ export class DesktopAgentRuntime {
     const tools = this.activeTools();
     const models = createProviderModels(this.provider, model);
     this.models = models;
-    const runtimeApiKey = providerRequestKey(this.provider);
 
     this.transcriptHistory = [...(opts.history ?? [])];
     this.fullEntries = this.historyToEntries(this.transcriptHistory);
@@ -1826,63 +1887,22 @@ export class DesktopAgentRuntime {
     // SYSTEM.md must not remove (tool guidance, delegation, scratch, skills).
     const defaultSystemPromptParts = [
       DEFAULT_RUNTIME_SYSTEM_PROMPT,
-      // Collaboration rules. Measured sessions ran hours with 380 assistant
-      // messages and exactly one non-empty text body: a reasoning model reads
-      // "prefer concise" as "say nothing", writes its conclusion into thinking
-      // (which the user never sees), and the user is left sending "继续" to
-      // find out whether anything happened. Every clause below is one of those
-      // observed failures stated as a hard rule.
-      "Collaboration: answer in the same language the user writes in. Before each batch of tool calls, write one short sentence saying what you are about to do in the same assistant message as those calls; never leave the user with no new text for more than one tool batch or 60 seconds of work. Whatever the user asked must be answered in your visible text — your reasoning is not shown to them, so a conclusion that lives only there never reached them. Make the final message self-contained: the outcome, what you changed, and anything still open, without asking the user to re-read intermediate updates. Carry the work through end to end; when you hit a blocker, try to clear it yourself and report what you tried, instead of stopping at analysis or a half-finished change.",
-      // Delegation steering (ADR 0089). The trigger patterns below are the
-      // proactive half of the Task tool's own description: models delegate
-      // when the system prompt names the situations, and keep doing everything
-      // inline when it only says "you may".
-      ...(this.subagents.length
-        ? [
-            `## Delegation
-Work splits into independent pieces — delegate, and keep your context for the synthesis. Subagents run in their own context and report back through TaskWait.
-
-Use the Task tool when:
-- Parallel exploration: two or more independent directions (for example one subagent per subsystem, or backend + frontend + tests). Start one Task per direction in the same assistant message.
-- Adversarial review: after implementing a non-trivial change, delegate a read-only review of it to code-reviewer before you commit.
-- Implementation: a multi-file change with a complete, self-contained spec — delegate to fixer, which may write inside the workspace.
-- Context economy: wide searches, long logs, multi-file surveys whose intermediate output you do not need — explorer / test-runner.
-- Batch sharding: the same bounded job repeated over many independent targets.
-
-Delegation rules:
-- Task returns immediately with a delegation id. Do not sit idle: keep working on your own independent line, then converge with TaskWait (mode="any" + minCompleted to converge early) when you need results, TaskList to check progress, TaskStop to stop.
-- Always fill Task's \`description\` so the user sees what each subagent is doing. Integrate findings and say which subagent produced what.
-- You may talk to the user while subagents run. Do not TaskStop unless you have decided the work should not continue. The runtime keeps them alive and delivers their reports when they finish — ending your turn does not abort them.
-- Never delegate what you can finish in a couple of tool calls, and never delegate anything that needs the user.`,
-            ...(this.subagentModelSummary()
-              ? [this.subagentModelSummary()!]
-              : []),
-          ]
-        : []),
-      // Search-tool steering. Read/Grep/Glob are host-bounded and scopeable;
-      // hand-rolled shell pipelines are not, and unbounded shell output is
-      // what exhausted context and forced repeated re-searching.
-      "Searching and reading: prefer the Read, Grep, and Glob tools over shell `cat`, `sed`, `head`, `grep`, or `find`. Read accepts only an existing regular text file, never a directory. If a file name is uncertain or a directory must be listed, use Glob instead of guessing a file name or calling Read on the directory; in Agent mode, activate it with ToolSearch for the current prompt when it is unavailable. Scope every search with the native parameters: Grep takes a file-or-directory `path` plus `include`, `outputMode`, and `headLimit`; Glob takes a directory `path` and `limit`; Read takes `offset` and `limit`, always reports `totalLines`, and paginates any supported text file however large; for files beyond the default window, use Grep to locate the target lines first, then Read the relevant range. Use `outputMode: \"filesWithMatches\"` or `\"count\"` when file contents are not needed, and use `include` to avoid scanning generated or vendor trees. These tools bound their own output; a shell pipeline does not, and one unscoped search over a whole workspace costs context you will need later. Workspace-relative paths are portable across macOS, Linux, and Windows; an explicit path outside the workspace and session scratch roots asks for permission unless the effective mode is Auto, so do not retry a denied path blindly. Grep uses the system's `rg` when it is installed and an in-process searcher otherwise — call Grep, do not shell out to `rg`. When a search genuinely needs Bash, use the active shell's syntax and a bounded command, and never assume POSIX utilities, `/`-based paths, or PowerShell commands on every platform. Do not re-run a search whose answer you already have.",
-      // Observed leak: OpenAI-style models sometimes emit the internal
-      // `multi_tool_use.parallel` wrapper as assistant text. PI-Desktop has no
-      // such tool, so the whole batch is silently lost as prose.
-      "Call tools through the native tool-call interface only. Never write a tool call as text, and never emit a `multi_tool_use.parallel` / `{\"tool_uses\": [...]}` wrapper — there is no such tool here, and a call written as prose does not run. To run several tools at once, emit several real tool calls in one assistant message.",
-      "Editing workflow: use the built-in Edit or Write tool directly on the deliverable file whenever it is inside the advertised workspace. Use Edit for one small unique line-anchored change (path + tag + ops) and Write for a coherent whole-file rewrite. Do not invoke shell apply_patch, git apply, or patch commands; do not create or hand-edit unified-diff files in scratch or repeatedly repair their hunk headers. Treat an edit or shell patch failure as recoverable state: classify the error, perform the required fresh Read or use a complete reveal, regenerate the change, and retry with a corrected payload. A path may have three counted failures per prompt; stop after the third and report the exact mismatch instead of looping. Never issue concurrent Write/Edit calls for the same path. When a dedicated worktree is outside the advertised workspace, make one guarded, deterministic edit inside that worktree with Bash, then verify it with git diff or an equivalent check.",
-      // Work panel browser preview (D100): workspace HTML files render
-      // in the embedded browser with live reload on file changes.
-      `For user-visible HTML pages, call the BrowserPreview tool once after creating the page or making the first meaningful visual edit, using its workspace-relative path (e.g. \`index.html\` or \`demo/index.html\`) to show it in PI-Desktop's built-in browser panel. Reuse that preview while iterating: it live-reloads as you edit, so no repeat call or manual refresh is needed. Skip generated, test-only, and non-visual HTML files. If BrowserPreview is not in the current tool list, load it first with ${TOOL_SEARCH_NAME}.`,
+      // Workflow rules.
+      "Complete the requested work and relevant checks without expanding scope. Preserve unrelated user changes. Resolve recoverable blockers yourself.",
+      // Visibility rules.
+      "Before each tool batch, briefly state its purpose. Keep the user informed during long work. The final response must state the outcome, verification, and remaining blockers. Never claim actions or checks you did not perform.",
+      // Delegation guidance is composed per turn so Ultra changes stay coherent.
+      // Editing workflow.
+      `Editing workflow: inside the advertised workspace, use Edit for small, uniquely anchored changes and Write for new files or intentional whole-file rewrites. Never modify the same path concurrently. Do not use shell apply_patch, git apply, patch, or hand-edited unified-diff files. On failure, diagnose the cause, refresh content or anchors with Read or a complete tool-provided reveal when needed, and correct the payload before retrying. After three failed edit attempts on the same path in one user turn, stop editing that path, report the exact error, and continue unblocked work. For an authorized worktree outside the advertised workspace, use a guarded, deterministic Bash edit that aborts on unexpected content, then verify the diff.`,
       // Shell dialect and scratch variable are selected by host-core.
       commandShellGuidance(this.commandShell, this.scratchDir),
-      // Session scratch directory (D114): temp files must not dirty
-      // the user's workspace or its git status.
+      // Session scratch directory (D114).
       ...(this.scratchDir
         ? [
-            `Your scratch directory for this session is \`${this.scratchDir}\` (in Bash: $PI_SCRATCH_DIR). Write ALL temporary and intermediate files there using absolute paths — one-off scripts, downloaded data, drafts, experiment output — never into the workspace. Only write into the workspace when the file is a deliverable the user asked for. Scratch files persist across turns of this session and are cleaned up automatically when the session is deleted.`,
+            `Your scratch directory for this session is \`${formatScratchDirForShell(this.commandShell, this.scratchDir)}\` (in Bash: ${shellScratchVariable(this.commandShell)}). Store ad-hoc temporary and intermediate files there using absolute paths. Workspace writes must be task-related project files or required toolchain outputs. Scratch persists across turns and is deleted with the session.`,
           ]
         : []),
-      // Plugin skills (D174): the catalog rides in the base prompt so a
-      // path-scoped instruction reload never drops it, and it stays ahead of
-      // the instruction chain so the user's own AGENTS.md keeps the last word.
+      // Plugin skills (D174).
       ...(skillsPrompt ? [skillsPrompt] : []),
     ];
     // A custom SYSTEM.md replaces only the product persona line, never the
@@ -1899,6 +1919,10 @@ Delegation rules:
     this.agent = new Agent({
       streamFn: (m, context, options) => {
         this.setAgentActivity({ phase: "waiting-model", since: Date.now() });
+        this.providerHasContent = false;
+        this.providerRequestDiagnostics = undefined;
+        this.providerRequestId = undefined;
+        if (!this.currentAssistant) this.providerRequestAttempts = 0;
         this.providerResponseStatus = undefined;
         this.providerRetryHeaders = undefined;
         this.providerRequestBytes = undefined;
@@ -1920,27 +1944,35 @@ Delegation rules:
           withOpenCodeSessionHeaders(
             {
               ...options,
+              ...(this.provider.temperature !== undefined && options?.temperature === undefined
+                ? { temperature: this.provider.temperature }
+                : {}),
               maxRetries: PROVIDER_REQUEST_MAX_RETRIES,
               sessionId: this.sessionId,
               // pi-ai only exposes onResponse after a request succeeds. Capture the
               // failed response separately so a 429 can honor Retry-After headers,
               // and capture the transport cause of a rejection while the original
               // Error still exists (issue #234).
-              fetch: captureProviderResponse(
-                options?.fetch,
-                (response, requestBytes, failure) => {
-                  this.providerResponseStatus = response?.status;
-                  this.providerRequestBytes = requestBytes;
-                  this.providerFetchFailure = failure;
-                  if (failure) this.recoverProviderTransport(failure);
-                  // A gateway 502/503 can also state Retry-After, so keep headers
-                  // for every status whose delay is usable, not only for 429.
-                  this.providerRetryHeaders = carriesRetryDelayHeaders(
-                    response?.status,
-                  )
-                    ? response?.headers
-                    : undefined;
-                },
+              fetch: providerRequestFetch(
+                m.api,
+                captureProviderResponse(
+                  options?.fetch,
+                  (response, requestBytes, failure) => {
+                    this.providerResponseStatus = response?.status;
+                    this.providerRequestId = response?.headers["x-request-id"] ?? response?.headers["request-id"];
+                    this.providerRequestBytes = requestBytes;
+                    this.providerFetchFailure = failure;
+                    if (failure) this.recoverProviderTransport(failure);
+                    // A gateway 502/503 can also state Retry-After, so keep headers
+                    // for every status whose delay is usable, not only for 429.
+                    this.providerRetryHeaders = carriesRetryDelayHeaders(
+                      response?.status,
+                    )
+                      ? response?.headers
+                      : undefined;
+                  },
+                  (request) => { this.providerRequestDiagnostics = upstreamRequestDiagnostics(request, this.provider); this.providerRequestAttempts++; },
+                ),
               ),
               onResponse: async (response, responseModel) => {
                 this.providerResponseStatus = response.status;
@@ -1956,8 +1988,9 @@ Delegation rules:
             copilotRequestHeaders(this.provider, context),
             this.provider.headers,
           ),
+          m.api,
         );
-        const hookedOptions = this.withExtensionProviderHooks(requestOptions, m);
+        const hookedOptions = withMirrorCodingFast(this.withExtensionProviderHooks(requestOptions, m), this.provider);
         // The watchdog must be able to *stop* what it abandons. It wraps the
         // retry adapter, so draining alone would let the adapter wake from its
         // backoff and open a second request for this turn while the runtime is
@@ -1979,20 +2012,25 @@ Delegation rules:
             stallAbort.signal,
           ]),
         };
+        const usageTurnId = this.turnId;
         const retryStream = createProviderRetryStream(
           m,
           context,
           attemptOptions,
-          (retryOptions) =>
+          (retryOptions) => accountModelStream(m, () =>
             this.thinkingLevel === "omit"
               ? this.models.stream(omitThinkingModel(m), context, retryOptions)
-              : this.models.streamSimple(m, context, retryOptions),
+              : this.models.streamSimple(m, context, retryOptions), {
+                providerId: this.provider.id,
+                nativeCost: this.provider.modelConfig?.nativeCost,
+                onUsage: (usage) => this.emit({ type: "usage", usage }, usageTurnId),
+              }),
           {
             claim: (error, phase) => this.claimProviderRetry(error, phase),
             headers: () => this.providerRetryHeaders,
             status: () => this.providerResponseStatus,
             failure: () => this.providerFetchFailure,
-            onRetry: ({ error, phase, attempt, delayMs }) => {
+            onRetry: ({ error, attempt, delayMs }) => {
               this.setAgentActivity({
                 phase: "retrying",
                 since: Date.now(),
@@ -2014,7 +2052,7 @@ Delegation rules:
       },
       // A vendor account has no long-lived key. Leaving it unset keeps pi-ai
       // from overriding the auth the provider just resolved for this request.
-      getApiKey: async () => runtimeApiKey || undefined,
+      getApiKey: async () => providerRequestKey(this.provider) || undefined,
       // The provider's rule that a tool-call id is unique is enforced here, on
       // the last view before the wire: the request is the only place it can be
       // guaranteed for both a rebuilt context and one that grew in this process.
@@ -2043,12 +2081,15 @@ Delegation rules:
       // ordering guarantee is untouched.
       toolExecution: "parallel",
       steeringMode: "all",
-      // pi-agent-core 0.87 replaces shouldStopAfterTurn with finishTurn. A
-      // queued renderer prompt ends a completed turn at the next boundary,
-      // without treating an error or abort as a graceful stop.
-      finishTurn: async ({ message }) => {
-        if (!this.gracefulStopRequested) return;
-        if (message.stopReason === "error" || message.stopReason === "aborted") return;
+      // Finish the entire tool batch before either a graceful stop or Ultra
+      // handoff. Ending normally releases the parent without aborting workers.
+      finishTurn: async (turn) => {
+        if (turn.message.stopReason === "error" || turn.message.stopReason === "aborted") return;
+        if (this.ultra && this.mode === "agent" && !this.runCancelled &&
+            shouldHandOffDelegations(turn, id => this.delegations.has(id))) {
+          this.delegationHandoff = true;
+        }
+        if (!this.gracefulStopRequested && !this.delegationHandoff) return;
         this.gracefulStopRequested = false;
         return { action: "end" };
       },
@@ -2102,8 +2143,39 @@ Delegation rules:
     this.setPlanningState(planningState, details);
   }
 
+  /** Idle parent boundary only: running workers retain their launch snapshots. */
+  setTurnReasoning(level: SessionThinkingLevel, ultra: boolean): void {
+    if (this.getStatus().isRunning) throw new Error("AGENT_BUSY");
+    this.ultra = ultra;
+    this.thinkingLevel = ultra ? highestThinkingLevel(this.provider) : clampThinkingLevel(this.provider, level);
+    this.agent.state.thinkingLevel = agentThinkingLevel(this.thinkingLevel);
+    this.rebuildToolCatalog();
+    this.setAgentTools(this.activeTools());
+    this.setAgentSystemPrompt(this.composeSystemPrompt());
+  }
+
   getMode(): Mode {
     return this.mode;
+  }
+
+  /** Rebind only the idle parent's model; existing workers own their launch bindings. */
+  canRebindTurn(config: RuntimeMatchConfig): boolean {
+    return !this.provider.extensionAgentKey && !config.provider.extensionAgentKey &&
+      this.matches({ ...config, provider: this.provider, subagentProviders: this.subagentProviders });
+  }
+
+  rebindTurn(config: RuntimeMatchConfig): void {
+    if (this.getStatus().isRunning || !this.canRebindTurn(config)) throw new Error("AGENT_BUSY");
+    const model = buildProviderModel(config.provider);
+    const models = createProviderModels(config.provider, model);
+    this.provider = config.provider;
+    this.model = model;
+    this.models = models;
+    this.subagentProviders = config.subagentProviders ?? {};
+    this.subagentOverrideProviders = {};
+    this.agent.state.model = model;
+    this.providerTransportHealth.reset();
+    this.setAgentMessages(this.liveSessionContext().messages);
   }
 
   private agentUsesTranscriptSystemMessages(): boolean {
@@ -2162,6 +2234,7 @@ Delegation rules:
       this.mode,
       [
         this.baseSystemPrompt,
+        ...(this.subagents.length ? [delegationSystemPrompt(this.ultra && this.mode === "agent"), this.subagentModelSummary() ?? ""] : []),
         ...(this.customSystemPrompt?.append ? [this.customSystemPrompt.append] : []),
         ...(optionalToolsPrompt ? [optionalToolsPrompt] : []),
         ...(projectPrompt ? [projectPrompt] : []),
@@ -2332,7 +2405,12 @@ Delegation rules:
         reason: `${[...MODE_TRANSITION_TOOL_NAMES].join(", ")} must be the only tool call in the assistant message.`,
       };
     }
-    if (!transition) return this.extensionToolCall(context);
+    if (!transition) {
+      if (!this.isToolAllowedInMode(context.toolCall.name)) {
+        return { block: true, reason: modeToolDenial(context.toolCall.name, this.mode) };
+      }
+      return this.extensionToolCall(context);
+    }
     const enterKind = enterToolKind(context.toolCall.name);
     if (enterKind && this.mode !== "agent") {
       return {
@@ -2399,6 +2477,8 @@ Delegation rules:
       (this.provider.baseUrl ?? "") === (config.provider.baseUrl ?? "") &&
       this.provider.apiKey === config.provider.apiKey &&
       this.provider.authKind === config.provider.authKind &&
+      this.provider.fast === config.provider.fast &&
+      this.provider.fastAvailable === config.provider.fastAvailable &&
       (this.provider.apiStyle ?? "") === (config.provider.apiStyle ?? "") &&
       providerHeadersEqual(this.provider.headers, config.provider.headers) &&
       this.provider.supportsReasoning === config.provider.supportsReasoning &&
@@ -2409,8 +2489,6 @@ Delegation rules:
       !this.disposed &&
       providerMatches &&
       this.mode === config.mode &&
-      this.thinkingLevel ===
-        clampThinkingLevel(config.provider, config.thinkingLevel) &&
       current === next &&
       safeJson(this.commandShell) === safeJson(config.commandShell) &&
       safeJson(this.baseProjectInstructions ?? null) ===
@@ -2717,7 +2795,9 @@ Delegation rules:
       // parent's model context (ADR 0062): the parent only ever saw the `Task`
       // report, and replaying a delegate's messages would both contradict that
       // and reintroduce the context cost delegation exists to avoid.
-      if (m.parentToolCallId) continue;
+      // ReturnToParent is a runtime-owned receipt, not a parent model call.
+      // Its report is restored through the settled Task result exactly once.
+      if (m.parentToolCallId || isReturnToParent(m)) continue;
       const timestamp = Date.parse(m.createdAt) || Date.now();
       if (m.role === "user") {
         toolCarrier = undefined;
@@ -2740,11 +2820,13 @@ Delegation rules:
         append(m.id, { role: "user", content, timestamp });
       } else if (m.role === "assistant") {
         toolCarrier = undefined;
-        // Failed provider responses belong in the transcript for diagnosis,
-        // but must never become model context on the next turn.
-        if (m.status === "error" || m.isError || m.error) continue;
+        // Replay only valid partial content. Error strings and incomplete
+        // tool calls remain display-only; native blocks use pi's converter.
+        if ((m.status === "error" || m.isError || m.error) && !canRestorePartialResponse(m)) continue;
         const content: AssistantMessage["content"] = [];
-        if (m.thinking?.trim()) {
+        if (m.assistantReplay) {
+          content.push(...restoredAssistantBlocks(m.assistantReplay));
+        } else if (m.thinking?.trim() && !m.error) {
           // Completions DeepSeek replay needs thinkingSignature so convertMessages
           // maps the block to reasoning_content instead of dropping it (#296).
           content.push({
@@ -2756,7 +2838,7 @@ Delegation rules:
           });
         }
         content.push(...restoreHostedSearchReplay(m.hostedSearch));
-        if (m.content?.trim()) {
+        if (!m.assistantReplay && m.content?.trim()) {
           content.push({ type: "text" as const, text: m.content });
         }
         // Kept even when empty: a call-only turn has no text of its own and
@@ -2765,9 +2847,10 @@ Delegation rules:
         const assistant: AssistantMessage = {
           role: "assistant",
           content,
-          api,
-          provider: this.provider.id,
-          model: this.provider.modelId,
+          api: m.assistantReplay?.api ?? api,
+          provider: m.assistantReplay?.provider ?? this.provider.id,
+          model: m.assistantReplay?.model ?? this.provider.modelId,
+          ...(m.assistantReplay?.providerThinkingLevel ? { providerThinkingLevel: m.assistantReplay.providerThinkingLevel } : {}),
           usage: usageToPi(m.usage),
           stopReason: "stop",
           timestamp,
@@ -2890,6 +2973,7 @@ Delegation rules:
     const describe = (toolName: string): string => {
       if (toolName === "GenerateImages") return imageGenerationDescription;
       if (scheduledToolDescriptions[toolName]) return scheduledToolDescriptions[toolName];
+      if (IMAGE_TOOL_DESCRIPTIONS[toolName]) return IMAGE_TOOL_DESCRIPTIONS[toolName];
       switch (toolName) {
         case "BrowserPreview":
           return "Open a workspace HTML file in PI-Desktop's built-in browser panel. `path` is workspace-relative (e.g. \"demo/index.html\"). The preview live-reloads on later edits to the file or its sibling assets, so call once per page.";
@@ -2926,8 +3010,10 @@ Delegation rules:
           return `Replace, insert, or delete lines in an existing file. Names positions and supplies new content only — never old_string. Required: path, tag (4 hex from the latest Read/Grep/Write/Edit), ops. Ops: PUT N.=M: replace inclusive lines N–M; PUT <N: insert before N; PUT >N: insert after N; PUT >$: append; CUT N.=M delete; REM delete the file; MV DEST rename after other ops. Body rows are + plus the final line text. Every PUT with body rows must include the trailing colon, for example PUT 48.=48:; PUT 48.=48 followed by + rows is invalid. A colonless PUT is only for a register paste such as PUT <1 @name. No -old or context rows. Ranges name only the lines being changed. Re-ground on the tag returned by every successful write. After one failed Edit, classify the error: Read the live file for a stale tag or unseen lines (or retry unchanged on a complete EDIT_LINES_UNSEEN reveal), but correct syntax or range errors directly; do not guess. Do not edit the same path concurrently.${scratchPathHint}${externalPathHint}`;
         case "Bash":
           return `${commandShellToolDescription(this.commandShell, this.scratchDir)} Use Edit or Write instead of apply_patch, git apply, or patch; do not retry a failed shell patch command repeatedly.`;
+        case "TodoWrite":
+          return todoWriteDescription;
         case ASK_TOOL_NAME:
-          return "Ask the user one or more questions. Each question has selectable options and the desktop card always provides a custom user-input option; unanswered questions are returned as empty answers.";
+          return "Ask the user one or more questions. Use Markdown in question text and option labels when formatting helps (for example, emphasis, inline code, or lists); the desktop card renders it safely. Plain strings and existing `{ label, description? }` options are accepted; descriptions remain plain text and answers return the selected source label. The card always provides a custom user-input option.";
         case "PluginScaffold":
           return "Create a PI-Desktop plugin from a template and load it for development. `directory` is workspace-relative and must be empty or new; `template` is one of panel-basic, agent-tool-basic, skill-pack, full-demo. Use this instead of hand-writing plugin files.";
         case "PluginCheck":
@@ -2942,6 +3028,8 @@ Delegation rules:
     // stopped being readable.
     const parameters: Record<string, Parameters<typeof Type.Object>[0]> = {
       GenerateImages: imageGenerationParameters,
+      ...IMAGE_TOOL_PARAMETERS,
+      TodoWrite: todoWriteParameters,
       Read: {
         path: pathParam(
           "Existing regular file only, never a directory; workspace-relative or explicitly approved.",
@@ -3088,7 +3176,7 @@ Delegation rules:
             })
           : undefined;
         const abort = () => {
-          if ((!isBash && toolName !== "GenerateImages") || abortRequested || settled) return;
+          if ((!isBash && toolName !== "GenerateImages" && toolName !== "GenerateImage") || abortRequested || settled) return;
           abortRequested = true;
           abortPromise = this.host
             .call("tools.abort", {
@@ -3274,6 +3362,8 @@ Delegation rules:
         let details: unknown = rawContent;
         if (typeof rawContent === "string") {
           text = rawContent;
+        } else if (isRecord(rawContent) && rawContent.kind === "image-generation") {
+          text = JSON.stringify(rawContent);
         } else if (isRecord(rawContent) && Array.isArray(rawContent.images)) {
           text =
             typeof rawContent.text === "string"
@@ -3348,7 +3438,15 @@ Delegation rules:
         questions: Type.Array(
           Type.Object({
             question: Type.String(),
-            options: Type.Array(Type.String()),
+            options: Type.Array(
+              Type.Union([
+                Type.String(),
+                Type.Object({
+                  label: Type.String(),
+                  description: Type.Optional(Type.String()),
+                }),
+              ]),
+            ),
             multiSelect: Type.Optional(Type.Boolean()),
           }),
         ),
@@ -3385,8 +3483,8 @@ Delegation rules:
 
     // BrowserPreview is non-mutating (renders an existing workspace file in
     // the work panel browser), so it ships in every mode. PluginCheck only
-    // reads a directory; PluginScaffold and PluginPack write, so they follow
-    // Write/Edit/Bash into agent mode only.
+    // reads a directory; PluginScaffold and PluginPack write and remain
+    // Agent-only. Write/Edit keep guarded declarations in contract modes.
     const tools =
       this.mode === "agent"
         ? [
@@ -3398,11 +3496,14 @@ Delegation rules:
             "Grep",
             "BrowserPreview",
             "PluginCheck",
+            "TodoWrite",
           ]
-        : ["Read", "Glob", "Grep", "BrowserPreview", "Bash"];
+        : ["Read", "Glob", "Grep", "BrowserPreview", "Bash", "Write", "Edit"];
     if (this.mode === "agent") {
       tools.push("PluginScaffold", "PluginPack", "GenerateImages", ...Object.keys(scheduledToolParameters));
     }
+    tools.push("ListImageModels");
+    if (this.mode === "agent") tools.push("GenerateImage");
     const builtins = tools.map(exec);
 
     // Plugins contribute Agent tools by default. Plan/Goal modes only
@@ -3460,12 +3561,11 @@ Delegation rules:
       this.mode === "agent"
         ? [this.buildEnterModeTool("plan"), this.buildEnterModeTool("goal")]
         : [this.buildSubmitTool(this.mode)];
-    // Delegation is an Agent-mode capability: Plan and Goal are read-only
-    // contract negotiations, and a delegate with Bash or Edit would drive
-    // straight through that (ADR 0062). The whole lifecycle rides together:
-    // `Task` starts, `TaskWait`/`TaskList`/`TaskStop` converge (ADR 0089).
+    // Keep configured delegation declarations stable across mode changes.
+    // Contract modes reject execution before handlers can spawn/control a
+    // delegate; publishing a schema never grants delegation permission.
     const subagentTools =
-      this.mode === "agent" && this.subagents.length
+      this.subagents.length
         ? [
             this.buildSubagentTool(),
             this.buildSubagentWaitTool(),
@@ -3499,7 +3599,7 @@ Delegation rules:
   private rebuildToolCatalog(): void {
     const catalog = new Map<string, AgentTool>();
     for (const tool of this.buildToolDefinitions()) {
-      if (!this.isToolAllowedInMode(tool.name)) continue;
+      if (!this.isToolAllowedInMode(tool.name) && !retainModeToolDeclaration(tool.name)) continue;
       // The execution mode is decided here, in one place, so no tool can grow
       // an accidental parallel batch: everything is sequential except `Task`.
       // pi runs a whole batch sequentially when it holds one sequential tool,
@@ -3509,11 +3609,14 @@ Delegation rules:
       // same declaration (#864).
       catalog.set(
         tool.name,
-        withExplicitRequired({
-          ...tool,
-          executionMode:
-            tool.name === SUBAGENT_TOOL_NAME ? "parallel" : "sequential",
-        }),
+        withModeExecutionGuard(
+          withExplicitRequired({
+            ...tool,
+            executionMode:
+              tool.name === SUBAGENT_TOOL_NAME ? "parallel" : "sequential",
+          }),
+          () => this.isToolAllowedInMode(tool.name) ? undefined : modeToolDenial(tool.name, this.mode),
+        ),
       );
     }
     this.toolCatalog = catalog;
@@ -3552,7 +3655,7 @@ Delegation rules:
     if (!kind) return true;
     // Contract modes are read-only: inspection tools, plan-safe plugin
     // actions (ADR 0211), and the one submit tool that belongs to this kind.
-    if (this.isPlanSafePluginTool(name)) return true;
+    if (this.isPlanSafePluginTool(name) || name === "ListImageModels") return true;
     return new Set([
       "Read",
       "Glob",
@@ -3567,7 +3670,9 @@ Delegation rules:
 
   private isCoreTool(name: string): boolean {
     return (
+      name === "ListImageModels" || (name === "GenerateImage" && this.mode === "agent") ||
       name === CONTEXT_COMPACTION_TOOL_NAME ||
+      retainModeToolDeclaration(name) ||
       MODE_TRANSITION_TOOL_NAMES.has(name) ||
       // The whole delegation lifecycle stays in the core set rather than the
       // on-demand catalog: a capability the model has to go looking for is one
@@ -3814,7 +3919,7 @@ Delegation rules:
     try {
       const result = await (this.host as any).call(
         "provider.resolveSubagentModel",
-        { key },
+        { key, sessionId: this.sessionId },
       );
       // A late response cannot authorize work in a newer turn or after disposal.
       if (this.disposed || grants !== this.subagentOverrideProviders) return undefined;
@@ -3839,8 +3944,8 @@ Delegation rules:
         grants[key] = provider;
         return provider;
       }
-    } catch {
-      // Host does not support on-demand resolution or the key is invalid.
+    } catch (error) {
+      throw new Error(`Model/channel "${key}" is not available for delegation: ${error instanceof Error ? error.message : String(error)}`);
     }
     return undefined;
   }
@@ -3885,12 +3990,14 @@ Delegation rules:
         ? provider.supportedThinkingLevels.join("/")
         : "none";
       lines.push(
-        `- \`${key}\` — ${provider.name}, ${reasoning}, thinking: ${levels}`,
+        `- \`${key}\` — ${provider.name}${provider.mirrorCodingGroupId ? `, channel/group: ${provider.mirrorCodingGroupId}` : ""}, model: ${provider.modelId}, ${reasoning}, thinking: ${levels}, Fast: ${provider.fastAvailable ? "available (request fast:true)" : "unavailable"}`,
       );
     }
     lines.push(
       "",
-      "Pick cheaper/faster models for simple searches and read-only reviews. Reserve expensive reasoning models for complex multi-step analysis.",
+      this.ultra
+        ? "Default to the parent model and group by omitting Task.model unless the user pinned a definition model. Choose a listed authorized override when it materially helps the task."
+        : "Pick cheaper/faster models for simple searches and read-only reviews. Reserve expensive reasoning models for complex multi-step analysis.",
     );
     return lines.join("\n");
   }
@@ -3921,7 +4028,7 @@ Delegation rules:
     }
     if (this.scratchDir && (tools.has("Bash") || tools.has("Write"))) {
       blocks.push(
-        `Write temporary and intermediate files into the session scratch directory \`${this.scratchDir}\` (in Bash: $PI_SCRATCH_DIR) using absolute paths, never into the workspace.`,
+        `Write temporary and intermediate files into the session scratch directory \`${formatScratchDirForShell(this.commandShell, this.scratchDir)}\` (in Bash: ${shellScratchVariable(this.commandShell)}) using absolute paths, never into the workspace.`,
       );
     }
     if (tools.has(SKILL_TOOL_NAME)) {
@@ -3984,12 +4091,12 @@ Delegation rules:
           message: `Delegation ${error.delegationId} is still running. Call TaskWait to converge with it first, or start a new delegation. Resuming a running delegation is not queued.`,
         };
       case "not-resumable":
+        // Every settled status is resumable (D628), so this only fires for a
+        // chain whose recorded status is still "running" while the runtime has
+        // no live record for it — a stale registry entry, not a settled run.
         return {
           ok: false,
-          message:
-            error.status === "interrupted"
-              ? `Delegation ${resume} was interrupted — the app closed while it worked — so there is nothing to continue. Start a new delegation instead.`
-              : `Delegation ${resume} ended as "${error.status}" and cannot be resumed. Only completed or failed delegations continue; start a new delegation instead.`,
+          message: `Delegation ${resume} reads as "${error.status}" and cannot be resumed right now. Call TaskList to check its state, or start a new delegation.`,
         };
       case "agent-mismatch":
         return {
@@ -4045,10 +4152,12 @@ Delegation rules:
       ? this.subagentProviders[key] ?? this.subagentOverrideProviders[key]
       : undefined;
     const matches = (candidate: RuntimeProviderConfig | undefined) =>
-      candidate?.modelId.trim().toLowerCase() === modelId;
+      candidate?.modelId.trim().toLowerCase() === modelId &&
+      (chain.latestGroupId === undefined || candidate?.mirrorCodingGroupId === chain.latestGroupId);
     if (chain.latestModelKey) {
-      const keyed = binding(chain.latestModelKey) ??
-        await this.resolveSubagentModel(chain.latestModelKey);
+      const current = `${this.provider.id}/${this.provider.modelId}` === chain.latestModelKey ? this.provider : undefined;
+      const keyed = current ?? binding(chain.latestModelKey) ??
+        await this.resolveSubagentModel(chain.latestModelKey).catch(() => undefined);
       // A known binding must not silently become a different account with the
       // same model id after its grant disappears.
       return matches(keyed) ? keyed : undefined;
@@ -4064,15 +4173,17 @@ Delegation rules:
   private delegationModelKeyFor(
     provider: RuntimeProviderConfig,
   ): string | undefined {
+    const sameBinding = (candidate: RuntimeProviderConfig) => candidate.id === provider.id &&
+      candidate.modelId === provider.modelId && candidate.mirrorCodingGroupId === provider.mirrorCodingGroupId;
     for (const [key, candidate] of Object.entries(this.subagentProviders)) {
-      if (candidate === provider) return key;
+      if (sameBinding(candidate)) return key;
     }
     for (const [key, candidate] of Object.entries(
       this.subagentOverrideProviders,
     )) {
-      if (candidate === provider) return key;
+      if (sameBinding(candidate)) return key;
     }
-    return undefined;
+    return `${provider.id}/${provider.modelId}`;
   }
 
   /**
@@ -4124,18 +4235,20 @@ Delegation rules:
       name: SUBAGENT_TOOL_NAME,
       label: "Task",
       description: [
-        "Start one subagent in the background and return immediately; you keep working while it runs, then converge with TaskWait when you need its report.",
-        "Use it when the work is separable: parallel exploration of independent directions (one Task per direction in the same assistant message), a multi-file implementation with a complete spec (fixer), an adversarial read-only review of a change you just made (code-reviewer), or a wide search / long log / multi-file survey whose intermediate output would otherwise fill this context (explorer, test-runner).",
+        delegationGuidance(this.ultra && this.mode === "agent"),
+        "Start one subagent in the background and return immediately.",
+        delegationHandoffGuidance(this.ultra && this.mode === "agent"),
+        "Use it only when the work is genuinely separable and substantial: parallel exploration of independent directions that each need many tool calls (one Task per direction in the same assistant message), a large multi-file implementation with a complete spec (fixer), an adversarial read-only review of a non-trivial change you already finished (code-reviewer), or a wide search whose raw output would fill this context (explorer, test-runner). A single file lookup or a small edit does not warrant delegation.",
         "Do not delegate what you can finish in a couple of tool calls, and do not delegate anything that needs the user — a subagent cannot ask a question or propose a plan on your behalf.",
         ...(this.availableSubagentModelKeys().length
           ? [
-              "Only pass `model` when deliberately overriding the definition default with a listed delegation model; otherwise omit it. Repeating the definition's own Default model key, or the exact parent provider/model, is the same as omitting `model`.",
+              "Use the exact listed provider/model key to select both model and channel. Never drop an explicitly requested model/channel after a failure or claim that an inherited model is the requested one. Read the actual binding returned by Task. Only pass `model` when deliberately overriding the definition default with a listed delegation model; otherwise omit it. Repeating the definition's own Default model key, or the exact parent provider/model, selects that binding explicitly without model fallback.",
             ]
           : [
               "No delegation model overrides are configured. Omit `model` to use the definition's default, or the parent model when no default is pinned. Repeating a definition's own Default model key is the same as omitting `model`; never invent a provider/model key.",
             ]),
         "`task` is the delegate's only instruction. It cannot see this conversation, and you cannot correct it while it runs, so state the goal, the paths and facts it cannot infer, and exactly what to report back.",
-        "To run delegates concurrently, emit several Task calls in one assistant message. A message that mixes Task with any other tool runs one call at a time. You may keep working or talk to the user while they run; the runtime delivers their reports when they finish. Call TaskStop only to cancel.",
+        "To run delegates concurrently, emit several Task calls in one assistant message. A message that mixes Task with any other tool runs one call at a time. Call TaskStop only to cancel.",
         "To continue a previous subagent, pass its `resume` id (the `delegationId` returned by Task). Saying \"reuse\" in prose is not enough. Do not pass `model` when resuming; start a new delegation to change models.",
         `Available subagents:\n${catalog}`,
       ].join("\n\n"),
@@ -4159,6 +4272,10 @@ Delegation rules:
               "Override the delegate's model for this run, e.g. 'anthropic/claude-sonnet-4-20250514'. Omit to use the subagent's default. Repeating the definition's own Default model key is the same as omitting this parameter. Only choose a different override from the available delegation model catalog. Forbidden when `resume` is set.",
           }),
         ),
+        thinkingLevel: Type.Optional(Type.String({ description: "Native thinking level explicitly requested by the user. Ultra defaults each new worker to its own model highest supported level. Resume omission keeps that worker previous level. Never pass ultra." })),
+        fast: Type.Optional(Type.Boolean({
+          description: "Request MC Fast for this delegation. New runs default to false and never inherit parent Fast. Resume omission retains this delegate’s previous value. Only use true when the resolved model/group advertises Fast.",
+        })),
         resume: Type.Optional(
           Type.String({
             description:
@@ -4213,7 +4330,7 @@ Delegation rules:
             if (!provider) {
               return this.subagentToolError(
                 toolCallId,
-                `The ${definition.name} subagent pins ${definition.model?.providerId}/${definition.model?.modelId}, which is not configured in PI-Desktop. Do this work yourself or delegate to another subagent.`,
+                `The ${definition.name} subagent pins ${definition.model?.providerId}/${definition.model?.modelId}, which is not configured in PI-Desktop. Restore that model/channel or ask the user before changing the requested delegation.`,
               );
             }
           } else if (this.isSessionModelOverride(modelOverride)) {
@@ -4225,8 +4342,8 @@ Delegation rules:
             if (!provider) {
               try {
                 provider = await this.resolveSubagentModel(modelOverride);
-              } catch {
-                // Resolution failed; fall through to the error below.
+              } catch (error) {
+                return this.subagentToolError(toolCallId, error instanceof Error ? error.message : String(error));
               }
             }
           }
@@ -4245,7 +4362,7 @@ Delegation rules:
           if (!provider) {
             return this.subagentToolError(
               toolCallId,
-              `The ${definition.name} subagent pins ${definition.model?.providerId}/${definition.model?.modelId}, which is not configured in PI-Desktop. Do this work yourself or delegate to another subagent.`,
+              `The ${definition.name} subagent pins ${definition.model?.providerId}/${definition.model?.modelId}, which is not configured in PI-Desktop. Restore that model/channel or ask the user before changing the requested delegation.`,
             );
           }
         }
@@ -4274,9 +4391,8 @@ Delegation rules:
         const resumedChain = resumeLookup?.ok ? resumeLookup.chain : undefined;
         // A resume keeps the chain's own binding (ADR 0279 §4): changing the
         // parent's session model must not strand a chain, and a delegate must
-        // never swap models by accident. When the recorded binding is gone the
-        // run continues on the definition's current one and says so in its
-        // lifecycle details, because refusing would strand the chain forever.
+        // never swap models by accident. Missing authorization requires restoring
+        // the recorded binding or starting a new delegation explicitly.
         const resumeEpoch = this.turnEpoch;
         const resumedProvider = resumedChain
           ? await this.resumedChainProvider(resumedChain, definition)
@@ -4296,6 +4412,14 @@ Delegation rules:
           );
         }
         if (resumedProvider) provider = resumedProvider;
+        const fast = isRecord(params) && typeof params.fast === "boolean" ? params.fast : resumedChain?.latestFast ?? false;
+        if (resumedChain?.latestModelId && !resumedProvider) {
+          return this.subagentToolError(toolCallId, "The delegation model is no longer available. Restore its model/group authorization; resume cannot switch models.");
+        }
+        if (provider.authKind === "mirrorcoding" || fast) provider = { ...provider, fast };
+        try { assertMirrorCodingFast(provider, fast); } catch (error) {
+          return this.subagentToolError(toolCallId, error instanceof Error ? error.message : "PI_FAST_UNAVAILABLE");
+        }
         const modelChangedFrom =
           resumedChain?.latestModelId && !resumedProvider
             ? resumedChain.latestModelId
@@ -4318,17 +4442,16 @@ Delegation rules:
         }
         const delegationId = randomUUID();
         const controller = new AbortController();
-        const thinkingLevel: SubagentThinkingLevel =
-          definition.thinkingLevel === "omit"
-            ? "omit"
-            : clampThinkingLevel(
-                provider,
-                definition.thinkingLevel ?? this.thinkingLevel,
-              );
-        // Only TaskStop, user Stop, dispose, and a parent fatal error abort a
-        // delegate (D328 / D352). The Task tool call returns immediately; tying
-        // the background run to that call's signal would kill it when the parent
-        // loop idled.
+        let thinkingLevel: SubagentThinkingLevel;
+        try {
+          thinkingLevel = resolveDelegationThinking({ provider, definition, requested: isRecord(params) ? params.thinkingLevel : undefined, resumed: resumedChain?.latestThinkingLevel, parent: this.thinkingLevel, ultra: this.ultra });
+        } catch (error) {
+          return this.subagentToolError(toolCallId, error instanceof Error ? error.message : String(error));
+        }
+        // Only TaskStop and dispose abort a delegate (D628): user Stop and a
+        // parent fatal error end the parent turn alone, and the run detaches.
+        // The Task tool call returns immediately; tying the background run to
+        // that call's signal would kill it when the parent loop idled.
         const abortSignal = controller.signal;
         let resolveCompletion: () => void = () => {};
         const completion = new Promise<void>((resolve) => {
@@ -4347,6 +4470,9 @@ Delegation rules:
           originalTask: resumedChain?.originalTask ?? task,
           objective,
           latestModelId: provider.modelId,
+          latestGroupId: provider.mirrorCodingGroupId,
+          latestFast: fast,
+          latestThinkingLevel: thinkingLevel,
           ...(providerKey ? { latestModelKey: providerKey } : {}),
           resumedFrom: resumedChain,
         });
@@ -4355,8 +4481,11 @@ Delegation rules:
           taskTurnId: this.turnId,
           agentName: definition.name,
           modelId: provider.modelId,
+          modelKey: providerKey,
+          groupId: provider.mirrorCodingGroupId,
           thinkingLevel,
           status: "running",
+          fast,
           startedAt,
           completion,
           resolveCompletion,
@@ -4366,7 +4495,6 @@ Delegation rules:
           toolCalls: 0,
           lastActivityAt: startedAt,
           lastPhase: "waiting-model",
-          startedEpoch: this.turnEpoch,
           reportDelivered: false,
           delegateSessionId: chain.delegateSessionId,
           ...(resumedChain ? { resumedFrom: resume } : {}),
@@ -4381,21 +4509,27 @@ Delegation rules:
             sessionId: this.sessionId,
             turnId: this.turnId,
             parentToolCallId: toolCallId,
+            delegationId: record.delegationId,
+            scratchDir: this.scratchDir,
             task,
             provider,
             infiniteProviderRetry: this.infiniteProviderRetry,
             thinkingLevel,
-            fallbackModels: (definition.fallbackModels ?? []).map((pin) => ({
+            fallbackModels: (modelOverride || resumedChain ? [] : definition.fallbackModels ?? []).map((pin) => ({
               key: subagentModelKey(pin),
               provider: this.subagentProviders[subagentModelKey(pin)],
             })),
             inheritedThinkingLevel: this.thinkingLevel,
             onModelChange: (next, level) => {
               record.modelId = next.modelId;
+              record.modelKey = this.delegationModelKeyFor(next);
+              record.groupId = next.mirrorCodingGroupId;
               record.thinkingLevel = level;
               this.delegationChains.retarget(record.delegateSessionId, {
                 modelKey: this.delegationModelKeyFor(next),
                 modelId: next.modelId,
+                groupId: next.mirrorCodingGroupId,
+                thinkingLevel: level,
               });
               this.publishDelegationSettlement(record);
             },
@@ -4473,7 +4607,7 @@ Delegation rules:
           content: [
             {
               type: "text",
-              text: `Delegation ${delegationId} started: the ${definition.name} subagent is working in the background${label ? ` (${label})` : ""}. Continue your own independent work, then call TaskWait with this delegationId to converge, or TaskStop to stop it.`,
+              text: `Actual model: ${provider.modelId}; provider/channel: ${provider.name} (${provider.id})${provider.mirrorCodingGroupId ? `; group: ${provider.mirrorCodingGroupId}` : ""}; thinking: ${thinkingLevel}. Delegation ${delegationId} started: the ${definition.name} subagent is working in the background${label ? ` (${label})` : ""}. ${delegationHandoffGuidance(this.ultra && this.mode === "agent")}`,
             },
           ],
           details: {
@@ -4482,7 +4616,10 @@ Delegation rules:
             status: "running",
             startedAt,
             modelId: provider.modelId,
+            modelKey: providerKey,
+            groupId: provider.mirrorCodingGroupId,
             thinkingLevel,
+            fast,
             ...(resumedChain ? { resumedFrom: resume } : {}),
           },
         };
@@ -4547,6 +4684,8 @@ Delegation rules:
       this.refreshDelegationWait();
       this.refreshResumablePrompt();
       this.pruneFinishedDelegations();
+      this.publishBackgroundDelegationStatus();
+      this.maybeQueueDelegationWake();
     }
   }
 
@@ -4558,20 +4697,43 @@ Delegation rules:
     this.emit(
       {
         type: "message_end",
-        message: settledDelegationMessage(record.taskMessage, delegationSummary(record)),
+        message: settledDelegationMessage(record.taskMessage, {
+          ...delegationSummary(record),
+          ...(record.result ? { report: record.result.report } : {}),
+        }),
       },
       record.taskTurnId,
     );
+    if (record.status !== "running" && record.result && !record.returnPublished) {
+      this.emit({
+        type: "message_end",
+        message: returnToParent({
+          delegationId: record.delegationId, agent: record.agentName,
+          status: record.status, report: record.result.report,
+          completedAt: record.completedAt ?? record.startedAt,
+          summary: delegationSummary(record),
+        }),
+      }, record.taskTurnId);
+      record.returnPublished = true;
+    }
   }
 
   /** Cap retained history so a long session cannot grow the registry forever.
-   * Finished records are dropped oldest-first; running ones never are. */
+   * Finished records are dropped oldest-first; running ones never are, and
+   * settled records whose report was never delivered go last, so a burst of
+   * settlements cannot prune a report before its wake turn reads it (D628). */
   private pruneFinishedDelegations(): void {
     const finished = [...this.delegations.values()]
       .filter((record) => record.status !== "running")
       .sort((left, right) => (left.completedAt ?? 0) - (right.completedAt ?? 0));
     const excess = finished.length - MAX_RETAINED_DELEGATIONS;
-    for (const record of finished.slice(0, Math.max(0, excess))) {
+    if (excess <= 0) return;
+    const undelivered = new Set(this.undeliveredSettledDelegations());
+    const pruneOrder = [
+      ...finished.filter((record) => !undelivered.has(record)),
+      ...finished.filter((record) => undelivered.has(record)),
+    ];
+    for (const record of pruneOrder.slice(0, excess)) {
       this.delegations.delete(record.delegationId);
     }
   }
@@ -4582,65 +4744,143 @@ Delegation rules:
     );
   }
 
-  /** Abort every running delegation (user Stop, dispose, parent fatal error). */
+  /** Abort every running delegation. Only `dispose` takes this path (D628):
+   * user Stop, parent fatal errors, and new prompts leave delegates running. */
   private abortRunningDelegations(): void {
     for (const record of this.runningDelegations()) {
       record.abort();
     }
   }
 
-  private currentTurnDelegations(): DelegationRecord[] {
-    return this.runningDelegations().filter(
-      (record) => record.startedEpoch === this.turnEpoch,
-    );
-  }
-
   /**
-   * Current-turn delegates whose report the parent has not seen yet: still
-   * running, or settled before the parent idled and never read through
-   * `TaskWait`. A delegate that finished in a few hundred milliseconds is
-   * "done and unpublished", not "unfinished"; keying the idle resume on
-   * running delegates alone dropped such reports (#226). Stopped and
-   * aborted runs are not auto-delivered.
+   * Settled delegates whose report never reached the parent: not read through
+   * `TaskWait` and not yet injected by a boundary delivery or wake turn. A
+   * delegate that finished in a few hundred milliseconds is "done and
+   * unpublished", not "unfinished" (#226). Turn epochs no longer gate this
+   * (D628): a report that settled during an earlier turn is still owed to the
+   * parent. Stopped and aborted runs are not auto-delivered — cancellation is
+   * explicit, and their chains stay resumable instead.
    */
-  private pendingCurrentTurnDelegations(): DelegationRecord[] {
+  private undeliveredSettledDelegations(): DelegationRecord[] {
     return [...this.delegations.values()].filter(
       (record) =>
-        record.startedEpoch === this.turnEpoch &&
+        record.status !== "running" &&
         !record.reportDelivered &&
         record.status !== "stopped" &&
         record.status !== "aborted",
     );
   }
 
-  private abortDelegationsFromPreviousTurns(): void {
-    for (const record of this.runningDelegations()) {
-      if (record.startedEpoch !== this.turnEpoch) record.abort();
-    }
-  }
-
   /**
-   * Parent fatal error: abort leftover delegates so the session can go idle
-   * and Continue is not rejected as `AGENT_BUSY` (D352).
+   * Parent fatal error: end the turn's own bookkeeping. Delegates detach and
+   * keep running (D628); their reports arrive through the wake queue, and the
+   * session reads idle because `getStatus` no longer counts them.
    */
   private terminateParentTurn(): void {
     this.turnHadError = true;
     this.acceptingSteering = false;
     this.steeringWaitAbort?.abort();
     this.retainPendingSteering();
-    this.abortRunningDelegations();
     this.delegationWaitTargets = undefined;
     this.clearAgentActivity();
   }
 
-  /** D328 keeps the turn open on parent idle, not on a fatal parent error. */
-  private keepTurnOpenForDelegates(): boolean {
+  /**
+   * D628: the turn stays open only long enough to deliver reports that already
+   * settled — a bounded continuation, not an open-ended wait. Running delegates
+   * never hold the turn; they wake the session when they settle.
+   */
+  private holdTurnForUndeliveredReports(): boolean {
     return (
-      (this.runningDelegations().length > 0 ||
-        this.pendingCurrentTurnDelegations().length > 0) &&
+      !this.delegationHandoff &&
+      this.undeliveredSettledDelegations().length > 0 &&
       !this.runCancelled &&
       !this.turnHadError
     );
+  }
+
+  /**
+   * Queue one wake turn through the host-owned queue (D386) when a settled
+   * report has no turn to ride: the session is idle, so the queued marker
+   * starts a turn whose preflight injects the undelivered reports. One queued
+   * wake serves every settlement until a turn consumes it; the queue push is
+   * idempotent on the settled ids.
+   */
+  private maybeQueueDelegationWake(): void {
+    if (this.disposed || this.turnActive || this.queuedDelegationWake) return;
+    const undelivered = this.undeliveredSettledDelegations();
+    if (undelivered.length === 0) return;
+    const ids = undelivered.map((record) => record.delegationId).sort();
+    this.queuedDelegationWake = true;
+    void this.host
+      .call("session.queuePush", {
+        sessionId: this.sessionId,
+        idempotencyKey: `delegation-wake:${ids.join("+")}`,
+        content: `${DELEGATION_WAKE_PREFIX} ${ids.join(", ")}`,
+        notification: "subagent-report",
+      })
+      .catch(() => {
+        // The next settlement or turn boundary retries; losing one push must
+        // not strand the reports.
+        this.queuedDelegationWake = false;
+        process.stderr.write(
+          `[agent-runtime] delegation wake push failed (session=${this.sessionId})\n`,
+        );
+      });
+  }
+
+  /**
+   * Recognize a queued wake turn by its stable marker prefix and expand the
+   * prompt with every undelivered report before the model reads it (D628).
+   * Reports are marked delivered only once the turn actually starts, so a
+   * preflight failure (compaction, context budget) leaves them claimable by
+   * the next wake.
+   */
+  private prepareDelegationWakeDelivery(
+    input: string | RuntimePrompt,
+  ):
+    | { input: string | RuntimePrompt; markDelivered: () => void }
+    | undefined {
+    if (typeof input === "string" || !input.delegationNotification) return undefined;
+    const settled = this.undeliveredSettledDelegations();
+    const still = this.runningDelegations();
+    const formatted = formatDelegationResults(
+      settled.map((record) => ({
+        delegationId: record.delegationId,
+        agent: record.agentName,
+        status: record.status,
+        report: record.result?.report ?? `(${record.status} without a report)`,
+      })),
+    );
+    const heartbeat =
+      still.length > 0
+        ? `Still running:\n${still.map(formatDelegationHeartbeat).join("\n")}`
+        : "";
+    const body =
+      settled.length > 0
+        ? [DELEGATION_WAKE_PROMPT, formatted.text, heartbeat]
+            .filter((part) => part.trim())
+            .join("\n\n")
+        : still.length > 0
+          ? `No new subagent reports; they were already delivered.\n\n${heartbeat}`
+          : "All subagent reports were already delivered. Continue the user's original task.";
+    const expanded = `${input.text}\n\n${body}`;
+    return {
+      input: { ...input, text: expanded },
+      markDelivered: () => {
+        for (const record of settled) {
+          if (formatted.includedDelegationIds.has(record.delegationId)) {
+            record.reportDelivered = true;
+          }
+        }
+      },
+    };
+  }
+
+  /** Background delegates changed: let status listeners re-read the count (D628). */
+  private publishBackgroundDelegationStatus(): void {
+    if (this.disposed) return;
+    this.emit({ type: "status", status: this.getStatus() });
   }
 
   private noteDelegationActivity(
@@ -4706,6 +4946,7 @@ Delegation rules:
     const tagged: UiMessage = {
       ...row,
       parentToolCallId: envelope.parentToolCallId ?? row.parentToolCallId,
+      nestedParentToolCallId: envelope.nestedParentToolCallId ?? row.nestedParentToolCallId,
       agentName: envelope.agentName ?? row.agentName,
     };
     const key =
@@ -4739,6 +4980,7 @@ Delegation rules:
       toolStatus: event.isError ? "error" : "success",
       isError: Boolean(event.isError),
       parentToolCallId: envelope.parentToolCallId,
+      nestedParentToolCallId: envelope.nestedParentToolCallId,
       agentName: envelope.agentName,
     };
   }
@@ -4793,12 +5035,14 @@ Delegation rules:
   }
 
   /**
-   * Keep the parent turn open until running delegates finish, then feed their
-   * reports back so the main agent can continue (D328). User Stop / dispose
-   * set `runCancelled` and abort the delegates instead. A parent fatal error
-   * aborts leftover delegates and returns without a resume prompt (D352).
+   * Turn-boundary delivery (D628): inject reports that settled while the
+   * parent worked and were never read through `TaskWait`, then let the turn
+   * close. This is a bounded continuation — running delegates never hold the
+   * turn open; they detach and wake the idle session through the host queue
+   * when they settle. When the run's `agent_end` already reached listeners,
+   * the visible turn is closed and delivery falls back to the wake queue too.
    */
-  private async resumeAfterDelegations(): Promise<void> {
+  private async deliverSettledDelegationReports(): Promise<void> {
     if (this.disposed || this.runCancelled || this.turnHadError) {
       if (this.turnHadError) this.terminateParentTurn();
       return;
@@ -4809,37 +5053,15 @@ Delegation rules:
       !this.runCancelled &&
       !this.turnHadError &&
       epoch === this.turnEpoch &&
-      this.pendingCurrentTurnDelegations().length > 0
+      !this.turnEndEmitted &&
+      !this.delegationHandoff
     ) {
-      const targets = this.pendingCurrentTurnDelegations();
-      this.beginDelegationWait(targets);
-      const waitAbort = new AbortController();
-      this.steeringWaitAbort = waitAbort;
-      try {
-        if (!this.pendingSteering.size) {
-          await this.waitForDelegations(targets, targets.length, null, waitAbort.signal);
-        }
-      } finally {
-        if (this.steeringWaitAbort === waitAbort) this.steeringWaitAbort = undefined;
-        this.endDelegationWait();
-      }
-      if (this.pendingSteering.size && !this.runCancelled && !this.turnHadError) {
+      if (this.pendingSteering.size) {
         await this.waitForIdleAndSteering();
         if (!(await this.runPendingRecoveries())) return;
         continue;
       }
-      if (
-        this.disposed ||
-        this.runCancelled ||
-        this.turnHadError ||
-        epoch !== this.turnEpoch
-      ) {
-        if (this.turnHadError) this.terminateParentTurn();
-        return;
-      }
-      const settled = targets.filter(
-        (record) => record.status !== "running" && !record.reportDelivered,
-      );
+      const settled = this.undeliveredSettledDelegations();
       if (settled.length === 0) return;
       const results = settled.map((record) => ({
         delegationId: record.delegationId,
@@ -4848,7 +5070,7 @@ Delegation rules:
         report:
           record.result?.report ?? `(${record.status} without a report)`,
       }));
-      const still = this.currentTurnDelegations();
+      const still = this.runningDelegations();
       const heartbeat =
         still.length > 0
           ? `Still running:\n${still.map(formatDelegationHeartbeat).join("\n")}`
@@ -4911,7 +5133,7 @@ Delegation rules:
         ),
       }),
       executionMode: "sequential",
-      execute: async (toolCallId, params, signal) => {
+      execute: async (_toolCallId, params, signal) => {
         const ids =
           isRecord(params) && Array.isArray(params.delegationIds)
             ? params.delegationIds.map(String)
@@ -4971,10 +5193,16 @@ Delegation rules:
           agent: record.agentName,
           status: record.status,
           modelId: record.modelId,
+          modelKey: record.modelKey,
+          groupId: record.groupId,
           thinkingLevel: record.thinkingLevel,
+          fast: record.fast === true,
           startedAt: record.startedAt,
           ...(record.completedAt ? { completedAt: record.completedAt } : {}),
           ...(record.result?.error ? { error: record.result.error } : {}),
+          ...(record.result?.scratchReportPath
+            ? { scratchReportPath: record.result.scratchReportPath }
+            : {}),
           report:
             record.status === "running"
               ? formatDelegationHeartbeat(record)
@@ -5024,7 +5252,7 @@ Delegation rules:
   /**
    * Resolve once `targetCompleted` of the targets are settled, or the deadline
    * passes, or the calling run aborts. Returns true on timeout/abort.
-   * `deadline` null waits until they settle (D328 auto-resume).
+   * `deadline` null waits until they settle.
    */
   private waitForDelegations(
     targets: DelegationRecord[],
@@ -5078,12 +5306,69 @@ Delegation rules:
           delegations.length === 0
             ? "No subagents have been started in this session."
             : delegations
-                .map((record) => `- ${formatDelegationHeartbeat(record)}`)
+                .map(
+                  (record) =>
+                    `- ${formatDelegationHeartbeat(record)}${
+                      record.status === "stopped" || record.status === "aborted"
+                        ? " (resumable)"
+                        : ""
+                    }`,
+                )
                 .join("\n");
         return {
           content: [{ type: "text", text }],
           details: { delegations: delegations.map(delegationSummary) },
         };
+      },
+    };
+  }
+
+  /** Shared cancellation path for TaskStop and native transcript controls. */
+  async stopDelegations(ids: string[] = []) {
+    const targets = ids.length
+      ? ids
+          .map((id) => this.delegations.get(id))
+          .filter(
+            (record): record is DelegationRecord =>
+              record !== undefined && record.status === "running",
+          )
+      : this.runningDelegations();
+    for (const record of targets) {
+      record.stopRequested = true;
+      record.abort();
+    }
+    // Cancellation is cooperative: bound the wait so a worker that ignores
+    // abort cannot wedge the parent tool call. Still-running workers are
+    // explicitly returned as pending, never mislabeled as stopped.
+    let stopTimeout: ReturnType<typeof setTimeout> | undefined;
+    await Promise.race([
+      Promise.all(targets.map((record) => record.completion)),
+      new Promise<void>((resolve) => {
+        stopTimeout = setTimeout(resolve, 5_000);
+      }),
+    ]);
+    if (stopTimeout !== undefined) clearTimeout(stopTimeout);
+    const pending = targets.filter((record) => record.status === "running");
+    const stopped = targets.filter((record) => record.status === "stopped");
+    const settled = targets.filter(
+      (record) => record.status !== "running" && record.status !== "stopped",
+    );
+    const text =
+      targets.length === 0
+        ? "No matching running subagents to stop."
+        : pending.length > 0
+          ? `Cancellation requested for ${targets.length} subagent${targets.length === 1 ? "" : "s"}; ${pending.length} have not confirmed termination and remain running.`
+          : settled.length > 0
+            ? `Cancellation settled for ${targets.length} subagent${targets.length === 1 ? "" : "s"}: ${stopped.length} stopped and ${settled.length} had already finished.`
+            : `Stopped ${stopped.length} subagent${stopped.length === 1 ? "" : "s"}.`;
+    return {
+      content: [{ type: "text" as const, text }],
+      details: {
+        stopped: stopped.map(delegationSummary),
+        stopPending: pending.map(delegationSummary),
+        ...(settled.length > 0
+          ? { settled: settled.map(delegationSummary) }
+          : {}),
       },
     };
   }
@@ -5109,54 +5394,7 @@ Delegation rules:
           isRecord(params) && Array.isArray(params.delegationIds)
             ? params.delegationIds.map(String)
             : [];
-        const targets = ids.length
-          ? ids
-              .map((id) => this.delegations.get(id))
-              .filter(
-                (record): record is DelegationRecord =>
-                  record !== undefined && record.status === "running",
-              )
-          : this.runningDelegations();
-        for (const record of targets) {
-          record.stopRequested = true;
-          record.abort();
-        }
-        // Cancellation is cooperative: bound the wait so a worker that ignores
-        // abort cannot wedge the parent tool call. Still-running workers are
-        // explicitly returned as pending, never mislabeled as stopped.
-        let stopTimeout: ReturnType<typeof setTimeout> | undefined;
-        await Promise.race([
-          Promise.all(targets.map((record) => record.completion)),
-          new Promise<void>((resolve) => {
-            stopTimeout = setTimeout(resolve, 5_000);
-          }),
-        ]);
-        if (stopTimeout !== undefined) clearTimeout(stopTimeout);
-        const pending = targets.filter((record) => record.status === "running");
-        const stopped = targets.filter((record) => record.status === "stopped");
-        const settled = targets.filter(
-          (record) => record.status !== "running" && record.status !== "stopped",
-        );
-        const text =
-          targets.length === 0
-            ? "No matching running subagents to stop."
-            : pending.length > 0
-              ? `Cancellation requested for ${targets.length} subagent${targets.length === 1 ? "" : "s"}; ${pending.length} have not confirmed termination and remain running.`
-              : settled.length > 0
-                ? `Cancellation settled for ${targets.length} subagent${targets.length === 1 ? "" : "s"}: ${stopped.length} stopped and ${settled.length} had already finished.`
-                : `Stopped ${stopped.length} subagent${stopped.length === 1 ? "" : "s"}.`;
-        return {
-          content: [{ type: "text", text }],
-          details: {
-            stopped: stopped.map(delegationSummary),
-            ...(pending.length > 0
-              ? { stopPending: pending.map(delegationSummary) }
-              : {}),
-            ...(settled.length > 0
-              ? { settled: settled.map(delegationSummary) }
-              : {}),
-          },
-        };
+        return this.stopDelegations(ids);
       },
     };
   }
@@ -5365,17 +5603,22 @@ Delegation rules:
     for (const raw of params.questions) {
       if (!isRecord(raw)) return undefined;
       const question = typeof raw.question === "string" ? raw.question.trim() : "";
-      const options = Array.isArray(raw.options)
-        ? raw.options
-            .filter((option): option is string => typeof option === "string")
-            .map((option) => option.trim())
-            .filter(Boolean)
-        : [];
+      const options: AskToolQuestion["options"] = [];
+      const seenLabels = new Set<string>();
+      if (Array.isArray(raw.options)) {
+        for (const rawOption of raw.options) {
+          const option = normalizeAskToolOption(rawOption);
+          if (!option) continue;
+          const label = askToolOptionLabel(option);
+          if (seenLabels.has(label)) continue;
+          seenLabels.add(label);
+          options.push(option);
+        }
+      }
       if (!question || options.length === 0) return undefined;
-      const uniqueOptions = [...new Set(options)];
       questions.push({
         question,
-        options: uniqueOptions,
+        options,
         ...(raw.multiSelect === true ? { multiSelect: true } : {}),
       });
     }
@@ -5584,7 +5827,7 @@ Delegation rules:
     error: ReturnType<typeof classifyAgentError>,
     phase: "request" | "stream",
   ): number | undefined {
-    if (!error.retriable || error.details?.origin === "local") return undefined;
+    if (this.providerHasContent || !error.retriable || error.details?.origin === "local") return undefined;
     const infinite = this.infiniteProviderRetry;
     if (error.code === "PROVIDER_RATE_LIMITED") {
       if (
@@ -5756,7 +5999,11 @@ Delegation rules:
     // A failed stream can be represented by more than one trailing assistant
     // message after a tool round. Remove the whole failed suffix before
     // continuing; pi-agent-core rejects any assistant-terminated transcript.
-    while (messages.at(-1)?.role === "assistant") messages.pop();
+    while (messages.at(-1)?.role === "assistant") {
+      const last = messages.at(-1);
+      if (last?.role !== "assistant" || responseContentFacts(last).meaningful) break;
+      messages.pop();
+    }
     this.setAgentMessages(messages);
 
     this.providerRetryInProgress = true;
@@ -5816,7 +6063,8 @@ Delegation rules:
     // agentLoopContinue refuses a transcript ending in an assistant message,
     // and this one carries nothing worth resending anyway.
     const messages = [...this.agent.state.messages];
-    while (messages.at(-1)?.role === "assistant") messages.pop();
+    const last = messages.at(-1);
+    if (last?.role === "assistant" && !responseContentFacts(last).meaningful) messages.pop();
     this.setAgentMessages(messages);
 
     const promptBefore = this.agentSystemPromptContent();
@@ -6821,12 +7069,14 @@ Delegation rules:
     preparation: ShapedPreparation,
     signal: AbortSignal,
   ): Promise<Awaited<ReturnType<typeof compact>>> {
+    const usageTurnId = this.turnId;
     return compact(
       preparation,
       // The summary is a provider request like any other turn, but
       // pi-agent-core builds its options itself and never reaches `streamFn`,
       // so the headers have to ride on the collection.
-      withCompactionRequestHeaders(this.models, this.provider, this.sessionId),
+      withCompactionRequestHeaders(this.models, this.provider, this.sessionId,
+        usage => this.emit({ type: "usage", usage }, usageTurnId)),
       this.model,
       undefined,
       agentThinkingLevel(this.thinkingLevel),
@@ -7189,6 +7439,7 @@ Delegation rules:
         break;
       case "message_start": {
         if (event.message.role === "assistant") {
+          this.providerHasContent = responseContentFacts(event.message).meaningful;
           this.clearAgentActivity();
           this.streamStartedAt = Date.now();
           const content = assistantContent((event.message as any).content);
@@ -7237,6 +7488,7 @@ Delegation rules:
       }
       case "message_update": {
         if (this.currentAssistant && event.message.role === "assistant") {
+          this.providerHasContent ||= responseContentFacts(event.message).meaningful;
           this.applyHostedSearch(event.message);
           const content = assistantContent((event.message as any).content);
           const previousText = this.currentAssistant.content;
@@ -7305,9 +7557,11 @@ Delegation rules:
           // pi-agent-core encodes stream failures in the final message
           // (stopReason "error"/"aborted" + errorMessage) and resolves the
           // prompt normally, so this is where provider/model errors surface.
+          this.providerHasContent ||= responseContentFacts(event.message).meaningful;
+          const outcome = responseOutcome(event.message);
           const stopReason = event.message.stopReason;
           const localError = readLocalRequestErrorDetails(event.message);
-          const overflow = !localError && isContextOverflow(
+          const overflow = !localError && stopReason !== "length" && isContextOverflow(
             event.message,
             effectiveModelContextWindow(this.model) || DEFAULT_CONTEXT_WINDOW,
           );
@@ -7343,7 +7597,13 @@ Delegation rules:
           // from an earlier recovery attempt. Recovery classification must
           // inspect only the response that just ended, or a silent retry after
           // progress text would look non-silent forever.
-          const responseText = content.hasText ? content.text : "";
+          const finalDiagnostics = {
+            ...responseDiagnostics(event.message, Math.max(1, this.providerRequestAttempts)),
+            ...this.providerRequestDiagnostics,
+            ...(this.provider.mirrorCodingGroupId ? { group: this.provider.mirrorCodingGroupId } : {}),
+            ...(this.providerResponseStatus !== undefined ? { httpStatus: this.providerResponseStatus } : {}),
+            ...(this.providerRequestId ? { requestId: this.providerRequestId } : {}),
+          };
           if (looksLikePseudoToolCall(nextText)) {
             // The visible text is a lost tool batch, not an answer. Logging it
             // separates "the model went quiet" from "the model tried to act and
@@ -7383,6 +7643,7 @@ Delegation rules:
             this.streamStartedAt !== undefined
               ? Math.max(0, endedAt - this.streamStartedAt)
               : undefined;
+          if (!(this.allowSilentCompletion && outcome === "thinking-only")) classifiedError ??= responseOutcomeError(outcome);
           if (classifiedError) {
             classifiedError = this.providerErrorWithDiagnostics(
               classifiedError,
@@ -7401,21 +7662,22 @@ Delegation rules:
           const silence =
             !failed &&
             !aborted &&
-            responseText.trim().length === 0 &&
-            !messageRequestsTools(event.message);
+            outcome === "empty" &&
+            !this.providerHasContent;
           // A completion notice needs no acknowledgement, so its own reply may
           // stay silent (D446). The exception covers exactly that reply: the
           // first settled response spends it, whether silent, textual, or a
           // tool batch, so later replies in the same run answer tool results
           // or user input under the ordinary contract. A provider failure
           // keeps it for the retried attempt.
-          const exemptSilence = silence && this.allowSilentCompletion;
+          const exemptSilence = !failed && !aborted && (silence || outcome === "thinking-only") && this.allowSilentCompletion;
           if (!failed && !aborted) this.allowSilentCompletion = false;
           const silentTurn = silence && !exemptSilence;
           if (silentTurn && !this.silentTurnRerunAttempted) {
             this.silentTurnRerunAttempted = true;
             this.pendingSilentTurnRerun = true;
             this.suppressSilentTurnRunEnd = true;
+            this.setAgentActivity({ phase: "retrying", since: Date.now(), attempt: 1 });
             // Hold the bubble open. The re-run streams into this same one, so
             // a recovered turn leaves no empty message behind in the
             // transcript and the user never learns it happened.
@@ -7458,6 +7720,7 @@ Delegation rules:
             !failed &&
             !aborted &&
             !silentTurn &&
+            !classifiedError &&
             this.autonomousExecution &&
             !this.silentTurnRerunAttempted &&
             !this.progressTurnRerunAttempted &&
@@ -7533,7 +7796,9 @@ Delegation rules:
               : content.hasThinking
                 ? { thinking: undefined }
                 : {}),
-            status: failed || emptyResponse
+            responseDiagnostics: { ...finalDiagnostics, ...(streamMs !== undefined ? { durationMs: streamMs } : {}) },
+            assistantReplay: assistantReplay(event.message),
+            status: failed || emptyResponse || classifiedError !== undefined
               ? "error"
               : aborted
                 ? "aborted"
@@ -7550,6 +7815,13 @@ Delegation rules:
               : {}),
             ...(hostedSearch ? { hostedSearch } : {}),
           };
+          if (classifiedError) {
+            this.currentAssistant.error = { ...classifiedError, details: { ...classifiedError.details, response: this.currentAssistant.responseDiagnostics } };
+            // Stop pi's tool/continuation loop on a truncated or thinking-only
+            // answer. The original termination is retained in diagnostics.
+            event.message.stopReason = "error";
+            event.message.errorMessage = classifiedError.message;
+          }
           this.emit({ type: "message_end", message: this.currentAssistant });
           this.activeProviderRetryAttempt = 0;
           this.streamStartedAt = undefined;
@@ -7557,6 +7829,7 @@ Delegation rules:
           const canRecoverOverflow =
             this.compactionEnabled &&
             overflow &&
+            !this.providerHasContent &&
             !this.overflowRecoveryAttempted;
           if (exemptSilence) {
             // Accepted silence is still nothing worth resending: keep it out
@@ -7569,10 +7842,18 @@ Delegation rules:
             if (messages.at(-1) === event.message) {
               this.setAgentMessages(messages.slice(0, -1));
             }
-          } else if (!failed && !aborted && !emptyResponse) {
+          } else if (!failed && !aborted && !emptyResponse && !classifiedError) {
             this.appendLiveEntry(assistantId, event.message);
           } else {
             this.turnHadError = true;
+            // The UI keeps the failure; model history receives only valid native
+            // text/thinking, never an incomplete tool call or an error string.
+            const replayContent = restoredAssistantBlocks(assistantReplay(event.message));
+            if (!aborted && this.providerHasContent && replayContent.length) {
+              const retained: AssistantMessage = { ...event.message, content: replayContent, stopReason: "stop", errorMessage: undefined };
+              this.appendLiveEntry(assistantId, retained);
+              this.setAgentMessages(this.agent.state.messages.map(message => message === event.message ? retained : message));
+            }
           }
           if (canRecoverOverflow) {
             this.pendingOverflow = true;
@@ -7666,7 +7947,7 @@ Delegation rules:
           this.suppressProviderRetryRunEnd ||
           this.suppressSilentTurnRunEnd ||
           this.suppressProgressTurnRunEnd ||
-          this.keepTurnOpenForDelegates()
+          this.holdTurnForUndeliveredReports()
         )
           break;
         const subagentUsage = this.turnSubagentUsage;
@@ -7679,13 +7960,17 @@ Delegation rules:
       case "agent_end":
         // Input admitted after pi's last queue poll still belongs to this turn.
         // Continue after the current run settles; never wake the follow-up FIFO.
-        if (this.pendingSteering.size && this.acceptingSteering && !this.runCancelled && !this.turnHadError) break;
+        if (this.pendingSteering.size && this.acceptingSteering && !this.runCancelled && !this.turnHadError) {
+          // Explicitly admitted user input is not automatic delegation polling.
+          this.delegationHandoff = false;
+          break;
+        }
         if (
           this.suppressOverflowRunEnd ||
           this.suppressProviderRetryRunEnd ||
           this.suppressSilentTurnRunEnd ||
           this.suppressProgressTurnRunEnd ||
-          this.keepTurnOpenForDelegates()
+          this.holdTurnForUndeliveredReports()
         )
           break;
         this.acceptingSteering = false;
@@ -7693,6 +7978,7 @@ Delegation rules:
         this.autonomousExecution = false;
         this.clearAgentActivity();
         this.reportMutationTermination();
+        this.turnEndEmitted = true;
         this.emit({
           type: "agent_end",
           messageIds: [],
@@ -7845,7 +8131,6 @@ Delegation rules:
     // Claims are message-scoped: a later prompt must observe edited or newly
     // created instruction files instead of reusing a previous chain.
     this.pathInstructionClaims.clear();
-    this.hostTurnId = durableTurnId;
     this.turnId = durableTurnId;
     this.acceptingSteering = true;
     this.pendingUserMessageId = undefined;
@@ -7853,12 +8138,29 @@ Delegation rules:
     this.runCancelled = false;
     this.resetRunRecoveryState();
     this.turnEpoch += 1;
-    this.abortDelegationsFromPreviousTurns();
+    // Delegates from previous turns are adopted, not aborted (D628). This turn
+    // consumes a queued wake: its boundary delivery takes over the reports.
+    this.queuedDelegationWake = false;
+    this.turnEndEmitted = false;
+    this.delegationHandoff = false;
     this.currentAssistant = undefined;
     this.requestStartedAt = Date.now();
     this.setMode("agent");
     this.autonomousExecution = true;
+    this.turnActive = true;
+    try {
+      return await this.runApprovedPlanTurn(execution, durableTurnId);
+    } finally {
+      this.turnActive = false;
+      this.maybeQueueDelegationWake();
+    }
+  }
 
+  /** Turn body of `executeApprovedPlan`, inside the D628 turn scope. */
+  private async runApprovedPlanTurn(
+    execution: PlanExecution,
+    turnId: string,
+  ): Promise<{ turnId: string }> {
     const kind = execution.kind === "goal" ? "goal" : "plan";
     const instruction =
       kind === "goal"
@@ -7905,7 +8207,7 @@ Delegation rules:
         if (this.compactionAborted) {
           this.terminateParentTurn();
           this.finalizeCurrentAssistant("aborted");
-          return { turnId: this.turnId };
+          return { turnId };
         }
         if (this.automaticCompactionWouldExceedHardLimit()) {
           this.failCurrentPreflight({
@@ -7914,7 +8216,7 @@ Delegation rules:
               "Automatic context compaction failed before approved plan execution",
             retriable: false,
           });
-          return { turnId: this.turnId };
+          return { turnId };
         }
       }
     }
@@ -7925,20 +8227,20 @@ Delegation rules:
           "The approved plan still exceeds the safe model context budget after compaction",
         retriable: false,
       });
-      return { turnId: this.turnId };
+      return { turnId };
     }
     await this.agent.continue();
     await this.waitForIdleAndSteering();
     // Same recovery contract as a user prompt: a plan execution that overflows,
     // hits a retriable stream failure, or comes back silent must not end as a
     // run with no end events at all.
-    if (!(await this.runPendingRecoveries())) return { turnId: this.turnId };
+    if (!(await this.runPendingRecoveries())) return { turnId };
     if (this.turnHadError) {
       this.terminateParentTurn();
-      return { turnId: this.turnId };
+      return { turnId };
     }
-    await this.resumeAfterDelegations();
-    return { turnId: this.turnId };
+    await this.deliverSettledDelegationReports();
+    return { turnId };
   }
 
   async prompt(
@@ -7948,17 +8250,15 @@ Delegation rules:
   ): Promise<{ turnId: string }> {
     if (this.disposed) throw new Error("runtime disposed");
     this.assertNotRunning();
-    const modelInput = typeof input !== "string" && input.sessionMessage
+    let modelInput = typeof input !== "string" && input.sessionMessage
       ? { ...input, text: formatSessionMessage(input.text, input.sessionMessage), sessionMessage: undefined }
       : input;
     this.retainPendingSteering();
     const nextTurnId = durableTurnId?.trim() || randomUUID();
-    this.hostTurnId = nextTurnId;
     this.turnId = nextTurnId;
     this.acceptingSteering = true;
     this.gracefulStopRequested = false;
     this.runCancelled = false;
-    this.turnSubagentUsage = undefined;
     // Capabilities and path-scoped instruction claims belong to one prompt.
     this.subagentOverrideProviders = {};
     this.resetDeferredToolsForPrompt();
@@ -7970,13 +8270,22 @@ Delegation rules:
     // Main resolves this provenance from the Host ledger. Never infer it from
     // prompt text, model output, extension content, or restored history.
     const origin = typeof input === "string" ? undefined : input.sessionMessage;
-    this.allowSilentCompletion = origin?.kind === "completion" &&
+    this.allowSilentCompletion = (typeof input !== "string" && input.delegationNotification === true) || origin?.kind === "completion" &&
       origin.targetSessionId === this.sessionId &&
       Boolean(origin.messageId?.trim() && origin.replyToMessageId?.trim());
     this.turnEpoch += 1;
-    this.abortDelegationsFromPreviousTurns();
+    // Any turn consumes a queued wake: running delegates were adopted, and
+    // reports settled by now leave through this turn's boundary delivery.
+    this.queuedDelegationWake = false;
+    this.turnEndEmitted = false;
+    this.delegationHandoff = false;
+    // A queued wake turn expands here, before the compaction preflight, so the
+    // injected reports count against the context budget (D628).
+    const wakeDelivery = this.prepareDelegationWakeDelivery(modelInput);
+    if (wakeDelivery) modelInput = wakeDelivery.input;
     this.requestStartedAt = Date.now();
     this.setAgentActivity({ phase: "starting", since: Date.now() });
+    this.turnActive = true;
     try {
       const content = promptContent(modelInput);
       const incomingUserMessage: AgentMessage = {
@@ -8031,6 +8340,9 @@ Delegation rules:
         this.keepPreflightUserMessage(incomingUserMessage);
         throw turnAbortedError("Turn aborted during extension hooks");
       }
+      // Every preflight passed: the wake turn's reports are now part of the
+      // model request, so their single delivery shot is spent (D628).
+      wakeDelivery?.markDelivered();
       if (typeof modelInput === "string") {
         await this.agent.prompt(modelInput);
       } else {
@@ -8044,7 +8356,7 @@ Delegation rules:
         this.terminateParentTurn();
         return { turnId: this.turnId };
       }
-      await this.resumeAfterDelegations();
+      await this.deliverSettledDelegationReports();
     } catch (err) {
       const classifiedError = classifyAgentError(err);
       const diagnosticError =
@@ -8064,6 +8376,11 @@ Delegation rules:
       );
       if (classifiedError.code === "TURN_ABORTED") throw err;
       throw Object.assign(new Error(diagnosticError.message), diagnosticError);
+    } finally {
+      this.turnActive = false;
+      // Reports that settled after the boundary delivery checked (or on an
+      // aborted/failed turn) still need a ride: queue the wake now (D628).
+      this.maybeQueueDelegationWake();
     }
     return { turnId: this.turnId };
   }
@@ -8081,19 +8398,11 @@ Delegation rules:
     }
     if (!runner.hasHandlers("before_agent_start")) return;
     const base = this.composeSystemPrompt();
-    const result = await runner.emit<{ systemPrompt?: string }>(
-      "before_agent_start",
-      {
-        type: "before_agent_start",
-        prompt: typeof input === "string" ? input : input.text,
-        systemPrompt: base,
-        systemPromptOptions: {},
-      },
-      (acc, next) => ({ ...(acc ?? {}), ...next }),
+    const prompt = await runner.emitBeforeAgentStart(
+      typeof input === "string" ? input : input.text,
+      base,
     );
-    this.setAgentSystemPrompt(
-      typeof result?.systemPrompt === "string" ? result.systemPrompt : base,
-    );
+    this.setAgentSystemPrompt(prompt ?? base);
   }
   /**
    * `before_provider_request` rides pi-ai's `onPayload`, `after_provider_response`
@@ -8226,8 +8535,9 @@ Delegation rules:
     this.steeringWaitAbort?.abort();
     this.extensionRunner?.cancelPending();
     this.resolvePendingAskTools();
-    this.abortRunningDelegations();
-    this.turnSubagentUsage = undefined;
+    // User Stop ends the parent turn only (D628): delegates keep running in
+    // the background, and TaskStop or the Task card stays the way to cancel
+    // one. Their accumulated usage is consumed by the next turn_end.
     this.agent.abort();
     this.providerRetryAbort?.abort();
     if (this.compactionInProgress) this.compactionAborted = true;
@@ -8245,19 +8555,23 @@ Delegation rules:
   }
 
   getStatus(): AgentStatus {
+    // Detached delegates do not make the session busy (D628): the queue can
+    // start the next turn — including their wake turn — while they run. Their
+    // count rides along so surfaces can show the background work.
+    const backgroundDelegations = this.runningDelegations().length;
     return {
       sessionId: this.sessionId,
       isRunning:
         this.agent.state.isStreaming ||
         this.compactionInProgress ||
-        this.agentActivity !== undefined ||
-        (!this.turnHadError && !this.runCancelled && this.runningDelegations().length > 0),
+        this.agentActivity !== undefined,
       currentTurnId: this.turnId,
       modelId: this.provider.modelId,
       pendingToolConfirmations: 0,
       planningState: this.planningState,
       ...(this.pendingPlanId ? { pendingPlanId: this.pendingPlanId } : {}),
       ...(this.agentActivity ? { activity: this.agentActivity } : {}),
+      ...(backgroundDelegations > 0 ? { backgroundDelegations } : {}),
     };
   }
 

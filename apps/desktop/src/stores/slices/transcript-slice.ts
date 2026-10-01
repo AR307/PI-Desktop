@@ -1,6 +1,5 @@
 import i18n from "i18next";
 import type {
-  ReviewRollbackResult,
   UiMessage,
 } from "@pi-desktop/shared";
 import { api } from "../../lib/api";
@@ -29,7 +28,6 @@ export type TranscriptSliceDependencies = StoreAccess & {
     state: Pick<AppState, "page" | "activeSessionId">,
     sessionId: string,
   ) => string | null;
-  flushPendingSessionConfiguration: (sessionId: string) => Promise<void>;
 };
 
 export function createTranscriptSlice({
@@ -38,7 +36,6 @@ export function createTranscriptSlice({
   runtime,
   promptAttachmentsFromMessage,
   viewingSessionIdForPrompt,
-  flushPendingSessionConfiguration,
 }: TranscriptSliceDependencies): Pick<
   AppState,
   | "compactContext"
@@ -523,7 +520,6 @@ export function createTranscriptSlice({
               // Best effort — the local transcript already reflects the undo.
             }
           }
-          void flushPendingSessionConfiguration(sessionId);
           return;
         }
         set((current) =>
@@ -567,7 +563,6 @@ export function createTranscriptSlice({
         isRunning: false,
         runningSessions: { ...current.runningSessions, [sessionId]: false },
       }));
-      void flushPendingSessionConfiguration(sessionId);
     },
   };
 }

@@ -60,7 +60,7 @@ function packageRoot(packageName: string): string {
   try {
     return realpathSync(require.resolve(`${packageName}/package.json`).replace(/[\\/]package\.json$/, ""));
   } catch {
-    const entry = fileURLToPath(esmResolve(packageName));
+    const entry = fileURLToPath(esmResolve(packageName)).replaceAll("\\", "/");
     const marker = entry.lastIndexOf("/dist/");
     if (marker < 0) throw new Error(`cannot locate the dist root of ${packageName}`);
     return realpathSync(entry.slice(0, marker));

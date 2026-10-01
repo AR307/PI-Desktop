@@ -1,3 +1,4 @@
+import { captureTurnConfiguration, releaseTurnConfiguration } from "../services/session-configuration";
 import { ErrorCodes, IPC, type AgentEventEnvelope, type AppNotification, type PlanExecution, type PlanExecutionFinishStatus, type UiMessage } from "@pi-desktop/shared";
 import { executionFromResponse, executionListFromResponse, planExecutionFromUnknown } from "@pi-desktop/host-runtime";
 import type { RuntimeState } from "./context";
@@ -156,6 +157,7 @@ function finishTurn(
   // turn it does not own. Callers still persist the event as history.
   const turnId = String(options?.turnId ?? "").trim();
   if (!id || !turnId) return Promise.resolve();
+  if (runtimeState.host) releaseTurnConfiguration(runtimeState.host, id, turnId);
 
   const finalizationKey = planSubmissionTurnKey(id, turnId);
   // A second call joins the first claim. That is what stops a late abort from
@@ -443,7 +445,7 @@ async function dispatchApprovedPlan(rawExecution: unknown): Promise<void> {
       execution.sessionId,
       sessionResult.session,
       settings,
-      { mode: "agent" },
+      { mode: "agent", fast: sessionResult.session.fast === true, ultra: sessionResult.session.ultra === true },
     );
     const turn = await runtimeState.host.call<{ turnId: string }>("session.beginTurn", {
       sessionId: execution.sessionId,
@@ -453,6 +455,10 @@ async function dispatchApprovedPlan(rawExecution: unknown): Promise<void> {
     turnId = String(turn.turnId || "").trim();
     if (!turnId) throw new Error("execution turn was not created");
     activeTurns.set(execution.sessionId, turnId);
+    captureTurnConfiguration(runtimeState.host, execution.sessionId, turnId, {
+      mode: launch.sidecarParams.mode, providerId: launch.providerId, modelId: launch.modelId,
+      thinkingLevel: launch.sidecarParams.thinkingLevel, ultra: launch.sidecarParams.ultra, fast: launch.sidecarParams.provider.fast === true,
+    });
     activeTurnUsages.delete(execution.sessionId);
     approvedExecutionIdsBySession.set(execution.sessionId, execution.id);
     approvedExecutionTurns.set(execution.id, {

@@ -74,8 +74,8 @@ interface AgentRuntime {
 pi 消费排队输入时保留渲染器提供的消息 id；即使补充输入早于最初用户消息被消费，
 也遵循这一规则。如果输入在 pi 最后一次检查队列后才获准进入，运行时抑制终态事件，
 等 pi 释放执行后沿用同一回合继续，不再次公开发出 `agent_start`。现有上下文和提供商
-恢复流程优先于这次继续执行。补充指令也会唤醒正在空闲等待后台委托的父代理，
-不会取消这些委托。
+恢复流程优先于这次继续执行。后台委托不再让回合保持打开（D628），因此补充指令没有
+“空闲等待”可唤醒；它也从不取消委托。
 
 中止、优雅停止、致命错误和终态落定都会关闭接收入口。已接收但尚未消费的输入保留在
 转录和上下文历史中，并从 pi steering 队列移除，避免在后续回合独立执行。
@@ -87,7 +87,7 @@ pi 消费排队输入时保留渲染器提供的消息 id；即使补充输入�
 1. 加载持久会话，会话缺失则拒绝
 2. 解析该会话的 mode/provider/model 与项目绑定（app/当前工作区默认值仅作为
    旧版回退）
-3. 针对该确切的 provider/API URL 与 model 解析完整的 models.dev 元数据记录，
+3. 针对该确切的 provider/API URL 与 model 解析完整的 Pi catalog 元数据记录，
    并把持久会话的思考级别钳制到它最接近的受支持值；快照中不存在的 id 使用
    显式的通用回退
 4. 验证 model/secret 可用性
@@ -540,16 +540,16 @@ Goal 批准所承诺的内容与 Plan 批准所承诺的内容完全相同：`mo
   和 `max`。会话（及子智能体）选择器还接受 `omit`，它不是目录/绑定能力：
   运行时把智能体记账保持为 `off`，走低层 provider 流，不合成思考覆盖
   （ADR 0194 / ADR 0295）。
-- 随包的 models.dev 发布快照对于已发布的推理支持具有权威性，
+- 随包的 Pi catalog 发布快照对于已发布的推理支持具有权威性，
   思维层面的映射、限制、输入模式、定价、标题和适配器
   每个已解决的已知模型的兼容性。
 - 提供商配置不能覆盖已知模型语义。未知
   自由格式的 id 仍然可以通过通用的纯文本、非推理的方式运行
   模型，因此仅公开 `off`。
-- 不支持的请求级别采用所选 models.dev 模型的最近受支持级别规则：先向上扫描
+- 不支持的请求级别采用所选 Pi catalog 模型的最近受支持级别规则：先向上扫描
   先向上，然后向下。非推理提供商总是决心
   `off`。
-- 视觉支持由同一条 models.dev 记录解析：只有 `input.includes("image")` 才启用
+- 视觉支持由同一条 Pi catalog 记录解析：只有 `input.includes("image")` 才启用
   图片传输。未知/自定义模型 id 保持为保守的 text/path 模型，即使发现到的元数据
   声称支持 `vision`。
 - 有效级别会传给 pi `Agent`；特定于提供商的请求
@@ -656,8 +656,8 @@ Frontmatter 新增 `permission: inherit | ask | accept-edits | auto`（默认
   （50k）。`timeoutSeconds` 默认 600 秒并被夹到 900 秒：等待会阻塞回合，
   所以这个上限决定了会话最长能看起来卡住多久。到点不是失败，也不会停掉委托
   （D328）—— 等待返回心跳（谁、状态、已用时、轮数、最后工具）以及已完成的
-  报告。运行时会保持父级回合打开，并在它们完成时把剩余报告交回，即使父级已经
-  停止调用工具。只有 `TaskStop` 或用户 Stop 才会中止委托。
+  报告。未完成的委托在回合结束后转入后台继续运行，报告经回合边界投递或唤醒
+  回合送达（D628）。只有 `TaskStop` 或运行时销毁才会中止委托。
 - `TaskList()` — 报告会话的每个委托及其状态和运行中心跳。
 - `TaskStop(delegationIds?)` — 停止正在运行的委托（默认全部）；等待每次
   中止结算后，在 `details.stopped[]` 上持久化 `status: "stopped"` 与
@@ -666,9 +666,9 @@ Frontmatter 新增 `permission: inherit | ask | accept-edits | auto`（默认
 **委托循环。** `SubagentRun` 是同一 sidecar 进程中的第二个 pi `Agent`，
 使用该定义的系统提示、其（可能已固定的）provider/model、其声明的工具，
 以及与父级相同的主机连接，并遵循与父级相同的有界提供程序重试策略。
-委托没有轮次上限：它会在自己结束时、父级调用 `TaskStop` 时、用户 Stop 时结束，
-或因父级终态错误而被中止（ADR 0253）。仍声明 `maxTurns` 的文档会正常加载，该键
-会像其他任何无法识别的 frontmatter 键一样被忽略。
+委托没有轮次上限：它会在自己结束时、父级调用 `TaskStop` 时或运行时销毁时结束
+—— 用户 Stop 与父级终态错误不再中止它（D628 修订 ADR 0253）。仍声明 `maxTurns`
+的文档会正常加载，该键会像其他任何无法识别的 frontmatter 键一样被忽略。
 `maxTokens` 是可选的按定义输出上限（最大 200000）；省略、`none` 或 `0` 表示跟随模型
 已发布的上限。它会覆盖为该委托构建的模型上的 `maxTokens`，因此适配器派生出的
 `max_tokens` / `max_completion_tokens` / `max_output_tokens` 都会带上它；它只约束该
@@ -685,19 +685,40 @@ Frontmatter 新增 `permission: inherit | ask | accept-edits | auto`（默认
 渲染器展示委托时长的事实来源；`Task` 那次立即返回的工具调用时长只覆盖启动
 后台工作这一段。
 
-**委托生命周期（D328）。** 运行时不再用空闲或总时长掐死委托。
+**委托生命周期（D328，经 D628 修订）。** 运行时不再用空闲或总时长掐死委托。
 `idle-timeout` / `max-duration` 仍会解析以便旧文档能加载，但不会被武装。
-委托一直跑到自己结束、失败、被 `TaskStop`，或用户
-Stop / 运行时销毁。主 Agent 用 `TaskStop` 判断要不要取消；运行中只能看到
-一行心跳（谁、状态、已用时、轮数、最后工具）。
+委托一直跑到自己结束、失败、被 `TaskStop`，或运行时销毁。主 Agent 用
+`TaskStop` 判断要不要取消；运行中只能看到一行心跳（谁、状态、已用时、轮数、
+最后工具）。
 
-当父级在委托仍在跑时停止调用工具，运行时吞掉这次 `agent_end`，保持持久
-回合打开，等委托完成后再把报告塞回父级。父级收工不会中止它们。
+**委托后台化与唤醒（D628，修订 D328/D352）。** 当父级在委托仍在跑时停止调用
+工具，回合正常结束：`turn_end` / `agent_end` 照常发出，会话读作空闲 ——
+`AgentStatus.isRunning` 不再计入运行中的委托，可选的
+`AgentStatus.backgroundDelegations` 计数把它们带给状态表面 —— 委托继续在
+后台运行。回合期间已结算、且未经 `TaskWait` 读取的报告在该回合边界注入一次
+（每条记录单次交付、合并上限 `MAX_TASKWAIT_RESULT_CHARS`、附仍在运行者的
+心跳）；回合 epoch 不再限制交付，更早回合结算的报告会在下一个边界送达。
 
-致命的 provider/stream 错误（包括耗尽的 HTTP 429）、父级中止，仍分别保留它们既有的
-`failed` 和 `aborted` 结果。
-父级终态错误还会中止残留委托、跳过续跑提示，并把会话恢复为空闲，这样
-“继续”不会变成 `AGENT_BUSY`（D352）。
+会话空闲时的结算会经 Host 队列（`session.queuePush`，D386）排入一个唤醒
+回合：队列内容是稳定的 `Subagent reports ready:` 标记行加已结算的委托 id ——
+报告正文不进队列 —— 且一次排队的唤醒服务其后所有结算，推送以这些 id 幂等。
+唤醒回合的预检按精确前缀识别标记（绝不对任意用户文本做宽松匹配），在模型
+读取前把全部未交付报告与心跳展开进提示；报告只在预检通过后才记为已交付，
+压缩或上下文预算失败会把它们留给下一次唤醒。`stopped` 与 `aborted` 的运行
+永不自动交付，它们的链保持可恢复。新提示会收养运行中的委托而不是中止它们，
+`MAX_SUBAGENT_CONCURRENCY` 计入所有运行中的委托。
+
+每个终态结果都会先解除父级等待、再做尽力而为的转录发布；`SubagentRun`
+初始化失败返回工具错误，绝不留下运行中的记录。用户 Stop 只结束父级回合。
+致命的 provider/stream 错误（包括耗尽的 HTTP 429）同样只结束父级回合并让
+会话回到空闲 —— 因为 `isRunning` 不再计入委托，“继续”不会变成
+`AGENT_BUSY`（修订 D352）。只有 `TaskStop` 与运行时销毁会中止委托；销毁把
+它们结算为可恢复的 `aborted`。委托不跨应用重启存续：应用关闭时仍在工作的
+运行会从转录重建为可恢复的 `interrupted` 链，唤醒只在应用运行期间生效。
+
+Provider output-limit endings remain failures with SUBAGENT_OUTPUT_TRUNCATED,
+outputTruncated: true and a bounded partial report. A later normal delegate
+turn clears the marker. This does not change the fork detached-parent policy.
 
 **可恢复的委托（ADR 0279）。** `Task` 接受一个可选的 `resume` 参数，携带同一会话中
 某个已结算委托的 `delegationId`。恢复后的委托是一个新的 `SubagentRun`，以该链此前的
@@ -714,9 +735,11 @@ Stop / 运行时销毁。主 Agent 用 `TaskStop` 判断要不要取消；运行
 能挺过一次 sidecar 重启。链的身份（`delegateSessionId`）始终留在内部；父级只会传
 `delegationId`，由反向映射解析它。
 
-只有 `completed` 与 `failed` 的链可恢复；`stopped` 和 `aborted` 的运行是终态，只能靠
-新建委托重来；而应用在它还在工作时被关掉的那种运行会重建成 `interrupted`，同样不可
-恢复。只读工具输出超过 `MAX_RESUMABLE_READ_LINES`（50000）的链会从可复用清单里消失，
+每条已结算的链都可恢复（D628）：`completed`、`failed`、`timed_out`、`stopped`、
+`aborted` 以及重启后重建的 `interrupted` 都能经 `Task.resume` 续跑，恢复重放的
+是链的持久转录。只有最近一次运行仍在进行的链拒绝恢复，`TaskList` 会为
+`stopped`/`aborted` 记录标注 `(resumable)`。
+只读工具输出超过 `MAX_RESUMABLE_READ_LINES`（50000）的链会从可复用清单里消失，
 且不做链内裁剪，因此恢复绝不会悄悄丢掉历史。注册表按定义名最多保留
 `MAX_RESUMABLE_CHAINS_PER_AGENT`（2）条可复用链，并在每次委托结算时淘汰最久未活动的
 那些；仍在工作的链永不淘汰，所以这个上限只算可复用链，活跃链可以让它暂时超出。
@@ -746,7 +769,7 @@ transcript 把一条链渲染成它最新 `Task` 卡片下的一段连续多轮�
 “已恢复”标记。
 
 **模型引脚。** Frontmatter 中的 `model: <provider>/<model>` 在每次启动时于
-Electron main 里解析一次——凭据与 models.dev 快照都在那里——匹配提供商 id、
+Electron main 里解析一次——凭据与 Pi catalog 快照都在那里——匹配提供商 id、
 厂商键或显示名称，且最多 `MAX_SUBAGENT_PROVIDERS`（8）个不同的提供商。无法
 解析的引脚会被有意地排除在绑定映射之外；运行时把这个缺失的条目转成一个点名
 该引脚的工具错误，绝不回退到会话模型。定义中的 `thinkingLevel` 会按第 5c 节
@@ -877,7 +900,9 @@ Composer 增强使用与 agent 请求相同的已解析提供商绑定和重试�
 调用方自带的标头会覆盖 client 与 User-Agent 默认值。空的会话标头会由对话 id
 补回，使 OpenCode Go 不会返回 `MissingSessionID`。提供商行上的 `headers` 映射
 在这次合并之后应用（标头加上一层 fetch 包装），因此自定义值优先于 OpenCode
-默认值，也优先于适配器的最后写入。保留键无法冲掉 `x-opencode-session`。这属于
+默认值，也优先于适配器的最后写入。Google 适配器只接收合并后的 `headers`、
+不带该包装，因为它们会拒绝任何其他 `fetch`（issue #1072）。保留键无法冲掉
+`x-opencode-session`。这属于
 agent 运行时的职责，与官方 Pi 编码 agent 的归属层保持一致；pi-ai 的 `sessionId`
 流选项并不会发出 `x-opencode-session`。
 
@@ -885,6 +910,15 @@ agent 运行时的职责，与官方 Pi 编码 agent 的归属层保持一致；
 会话的 stream 函数，因此 agent 运行时把这次标头合并应用到交给压缩的模型集合
 上。该请求携带会话自己的对话 id，而不是 harness 否则会生成的按次 id，这样摘要
 就与它所压缩的对话落在同一个网关后端。
+
+同一接缝也会补回对话标识本身：pi-agent-core 对摘要请求要求
+`cacheRetention: "none"`，而 Responses 形状的适配器据此不发送
+`prompt_cache_key`，于是只有摘要请求会丢掉其他回合都会携带的身份；对接 Codex
+后端的网关会以 400 `invalid_responses_request` 拒绝这种请求。因此对
+`openai-responses` 与 `openai-codex-responses`，摘要载荷会带上会话 id 作为
+`prompt_cache_key`（按适配器的 64 字符上限截断），除非适配器或调用方已设置过。
+其他线协议的载荷保持适配器构造的原样；该键添加在副本上，因此调用方的载荷钩子仍
+保留自己的对象，其返回值仍然生效。
 
 
 ## 7. 系统提示组成
@@ -1148,3 +1182,18 @@ System/Direct/Custom 代理路由保持不变。
 终态。结构化原因会穿过 adapter 的错误扁平化，保留在最终错误行中，也不会触发
 provider transport 重建。`EPROTO` 等协议错误继续使用原有重试行为。详见
 [证书信任 ADR](../../../adr/provider-system-certificates.md)。
+
+## Pi 0.99.1 execution boundary
+
+Published model metadata and account entitlement come from one account-scoped
+Pi Models collection. Effective binding projection is shared by launch, delegates
+and compaction. Dispatch thinking normalization uses the resolved physical Pi
+model; native null/unsupported mappings remain unavailable without mutating
+saved preferences. Agent bookkeeping and omitted request reasoning are distinct.
+
+Every physical stream attempt has an operation identity before dispatch. Usage
+survives stream/result projection and events through Host/remote/renderer paths;
+retries and images retain physical account/model attribution. Nested immediate
+parent and owning Task remain distinct. The migration does not add coding-agent
+AgentSession, Codemode or virtual routing. See the coding-agent design review for
+future adoption conditions.

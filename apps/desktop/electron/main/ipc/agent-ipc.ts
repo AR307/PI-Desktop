@@ -1,4 +1,6 @@
-import { IPC, ErrorCodes, compactionRecordId, isGlobalPermissionMode, isRpcTimeoutError, type AgentEventEnvelope, type AgentPromptRequest, type AgentSteerRequest, type UiMessage, type AgentQueuePushRequest, type AgentStopRequest, type AskToolResolution, type GlobalPermissionMode, type MessageUsage, type PlanExecutionFinishStatus, type PlanResolutionResult, type PlanResolveRequest, type PromptEnhancementRequest, type SessionSummarizeTitleRequest, canonicalThinkingLevel, type ThinkingLevel } from "@pi-desktop/shared";
+import { delegationNotification, type InternalAgentPrompt } from "../runtime/delegation-notification";
+import type { ImageService } from "../images/service";
+import { IPC, ErrorCodes, compactionRecordId, findSkillMentions, isGlobalPermissionMode, isRpcTimeoutError, type AgentEventEnvelope, type AgentPromptRequest, type AgentSteerRequest, type UiMessage, type AgentQueuePushRequest, type AgentStopRequest, type AskToolResolution, type GlobalPermissionMode, type MessageUsage, type PlanExecutionFinishStatus, type PlanResolutionResult, type PlanResolveRequest, type PromptEnhancementRequest, type SessionSummarizeTitleRequest, type VoiceOrigin, canonicalThinkingLevel, type ThinkingLevel } from "@pi-desktop/shared";
 import type { FinishTurn } from "../runtime/plans";
 import { expandSlashInvocation, enhancePromptDraft, summarizeSessionTitle, visionFromModelConfig, type ComposerTemplate, type RuntimeProviderConfig } from "@pi-desktop/agent-runtime";
 import { OAUTH_AUTH_KIND, type VendorOAuth } from "../oauth";
@@ -13,8 +15,10 @@ import type { PersistenceOutbox } from "../persistence-outbox";
 import type { ComposerCommandService } from "./composer-ipc";
 import type { IpcRegistrar } from "./types";
 import { withPromptEnhancementTimeout } from "../prompt-enhancement-timeout";
+import { captureTurnConfiguration } from "../services/session-configuration";
 
 export type AgentIpcDependencies = {
+  images: ImageService;
   registrar: IpcRegistrar;
   getHost: () => HostProcess | null;
   getSidecar: () => AgentSidecar | null;
@@ -56,8 +60,28 @@ function rejectNativeAgentOperation(sessionId: string): void {
   }
 }
 
+function parseVoiceOrigin(value: unknown): VoiceOrigin | undefined {
+  if (value === undefined) return undefined;
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw Object.assign(new Error("voiceOrigin is invalid"), { errorCode: ErrorCodes.INVALID_ARGUMENT });
+  }
+  const origin = value as Record<string, unknown>;
+  const keys = Object.keys(origin);
+  if (
+    keys.length !== 2 ||
+    !keys.includes("callId") ||
+    !keys.includes("operationId") ||
+    typeof origin.callId !== "string" || !origin.callId.trim() || origin.callId.length > 128 ||
+    typeof origin.operationId !== "string" || !origin.operationId.trim() || origin.operationId.length > 128
+  ) {
+    throw Object.assign(new Error("voiceOrigin is invalid"), { errorCode: ErrorCodes.INVALID_ARGUMENT });
+  }
+  return { callId: origin.callId, operationId: origin.operationId };
+}
+
 /** Register prompt, agent lifecycle, queue, approval and plan channels. */
 export function registerAgentIpc({
+  images,
   registrar,
   getHost,
   getSidecar,
@@ -256,6 +280,7 @@ export function registerAgentIpc({
         errorCode: ErrorCodes.INVALID_ARGUMENT,
       });
     }
+    const voiceOrigin = parseVoiceOrigin(req.voiceOrigin);
     // A steering input belongs to the turn it names: it is refused once that
     // turn was cancelled, has started finalizing, or no longer owns the session.
     if (!isTurnDispatchable(req.sessionId, req.expectedTurnId)) {
@@ -280,6 +305,7 @@ export function registerAgentIpc({
       createdAt: new Date().toISOString(),
       steering: true,
       ...(prepared.length ? { attachments: prepared.map((attachment) => attachment.message) } : {}),
+      ...(voiceOrigin ? { voiceOrigin } : {}),
     };
     // Revalidate inside the runtime after all file/host IO. A stale target must
     // never turn into a normal prompt or alter the next turn's configuration.
@@ -293,9 +319,15 @@ export function registerAgentIpc({
     });
   });
 
-  handle(IPC.invoke.agentPrompt, async (req: AgentPromptRequest) => {
+  handle(IPC.invoke.agentPrompt, async (req: InternalAgentPrompt) => {
     if (!sidecar) throw new Error("sidecar unavailable");
+    const voiceOrigin = parseVoiceOrigin(req.voiceOrigin);
     if (req.sessionId.startsWith("native-pi:")) {
+      if (voiceOrigin) {
+        throw Object.assign(new Error("Live Voice work is unsupported for native Pi sessions"), {
+          errorCode: "NATIVE_PI_UNSUPPORTED",
+        });
+      }
       if (req.sessionMessageId || req.truncateFromMessageId || req.truncateBefore !== undefined || req.attachments?.length) {
         throw Object.assign(new Error("Native Pi continuation currently supports text prompts only"), {
           errorCode: ErrorCodes.INVALID_ARGUMENT,
@@ -416,6 +448,7 @@ export function registerAgentIpc({
       req.sessionId,
       session,
       settings,
+      { fast: session.fast === true, ultra: session.ultra === true },
     );
     sidecar.setProjectInstructionRoot(req.sessionId, launch.projectPath);
 
@@ -431,6 +464,10 @@ export function registerAgentIpc({
       throw new Error("session.beginTurn returned no turn");
     }
     activeTurns.set(req.sessionId, durableTurnId);
+    captureTurnConfiguration(host, req.sessionId, durableTurnId, {
+      mode: launch.sidecarParams.mode, providerId: launch.providerId, modelId: launch.modelId,
+      thinkingLevel: launch.sidecarParams.thinkingLevel, ultra: launch.sidecarParams.ultra, fast: launch.sidecarParams.provider.fast === true,
+    });
     activeTurnUsages.delete(req.sessionId);
 
     // Slash expansion (D123, ADR 0024): templates expand before persistence
@@ -442,28 +479,42 @@ export function registerAgentIpc({
     // /names stay literal text.
     let promptContent = sessionMessage?.content ?? req.content;
     let slashCommand: string | undefined;
-    if (!sessionMessage && req.content.startsWith("/")) {
+    let skillMentions: UiMessage["skillMentions"];
+    if (!sessionMessage && /(^|\s)\/\S/.test(req.content)) {
       try {
         const root = await optionalWorkspaceRoot();
         const commandEnd = req.content.search(/\s/);
-        const commandName = req.content.slice(
-          1,
-          commandEnd === -1 ? undefined : commandEnd,
-        );
+        const commandName = req.content.startsWith("/")
+          ? req.content.slice(1, commandEnd === -1 ? undefined : commandEnd)
+          : "";
         const commands = await composerCommandService.buildComposerCommands(
           launch.projectPath ?? root,
         );
         const command = commands.find((item) => item.name === commandName);
-        if (command?.kind === "skill" && command.skillId) {
-          const body = commandEnd === -1 ? "" : req.content.slice(commandEnd).trim();
+        const activeSkills = new Map(
+          commands.flatMap((item) => item.kind === "skill" && item.skillId
+            ? [[item.name, item.skillId] as const]
+            : []),
+        );
+        const mentions = findSkillMentions(req.content, activeSkills);
+        if (mentions.length > 0 && (!command || command.kind === "skill")) {
+          let body = "";
+          let end = 0;
+          for (const mention of mentions) {
+            body += req.content.slice(end, mention.start);
+            end = mention.end;
+          }
+          body = (body + req.content.slice(end)).trim();
+          const ids = [...new Set(mentions.map((mention) => mention.id))];
           promptContent = [
-            `Call the \`Skill\` tool with id ${JSON.stringify(command.skillId)} before answering this request. Follow the loaded skill instructions.`,
+            `Call the \`Skill\` tool with each of these ids before answering this request, in order: ${ids.map((id) => JSON.stringify(id)).join(", ")}. Follow the loaded skill instructions.`,
             body,
           ]
             .filter(Boolean)
             .join("\n\n");
           slashCommand = req.content;
-        } else {
+          skillMentions = mentions;
+        } else if (req.content.startsWith("/")) {
           const templates = await loadComposerTemplatesCached(root);
           const expansion = expandSlashInvocation(req.content, templates);
           if (expansion) {
@@ -530,7 +581,9 @@ export function registerAgentIpc({
       ...(preparedAttachments.length
         ? { attachments: preparedAttachments.map((attachment) => attachment.message) }
         : {}),
+      ...(voiceOrigin ? { voiceOrigin } : {}),
       ...(slashCommand ? { command: slashCommand } : {}),
+      ...(skillMentions ? { skillMentions } : {}),
       ...(revisionMeta?.revisionCount
         ? {
             revisionRootId: revisionMeta.rootUserId,
@@ -539,36 +592,37 @@ export function registerAgentIpc({
           }
         : {}),
     };
-    try {
-      await host.call("session.appendMessage", {
+    if (!req[delegationNotification]) {
+      try {
+        await host.call("session.appendMessage", {
+          sessionId: req.sessionId,
+          message: userMessage,
+          turnId: durableTurnId,
+        });
+      } catch (error) {
+        await finishTurn(
+          req.sessionId,
+          "error",
+          (error as { data?: { errorCode?: string }; errorCode?: string })?.data
+            ?.errorCode ??
+            (error as { errorCode?: string })?.errorCode,
+          { turnId: durableTurnId },
+        );
+        // A turn whose user message could not be appended must not be started:
+        // restarting it here would run a prompt the transcript does not contain.
+        throw error;
+      }
+      emitAgentEvent({
         sessionId: req.sessionId,
-        message: userMessage,
-        turnId: durableTurnId,
-      });
-    } catch (error) {
-      await finishTurn(
-        req.sessionId,
-        "error",
-        (error as { data?: { errorCode?: string }; errorCode?: string })?.data
-          ?.errorCode ??
-          (error as { errorCode?: string })?.errorCode,
-        { turnId: durableTurnId },
-      );
-      // A turn whose user message could not be appended must not be started:
-      // restarting it here would run a prompt the transcript does not contain.
-      throw error;
+        ts: Date.now(),
+        event: { type: "message_start", message: userMessage },
+      } satisfies AgentEventEnvelope);
+      emitAgentEvent({
+        sessionId: req.sessionId,
+        ts: Date.now(),
+        event: { type: "message_end", message: userMessage },
+      } satisfies AgentEventEnvelope);
     }
-    emitAgentEvent({
-      sessionId: req.sessionId,
-      ts: Date.now(),
-      event: { type: "message_start", message: userMessage },
-    } satisfies AgentEventEnvelope);
-    emitAgentEvent({
-      sessionId: req.sessionId,
-      ts: Date.now(),
-      event: { type: "message_end", message: userMessage },
-    } satisfies AgentEventEnvelope);
-
     let result: { accepted: boolean; turnId: string };
     try {
       result = await sidecar.call<{ accepted: boolean; turnId: string }>(
@@ -590,7 +644,8 @@ export function registerAgentIpc({
               size: attachment.message.size,
               data: attachment.inlineData,
             })),
-          userMessageId: userMessage.id,
+          userMessageId: req[delegationNotification] ? undefined : userMessage.id,
+          ...(req[delegationNotification] ? { delegationNotification: true } : {}),
           // Per-turn permission ceiling override (R1 leftover; spec §7.3). The
           // sidecar records it on the turn context; enforcement of a NARROWER
           // ceiling still routes through the session's stored mode until
@@ -665,7 +720,16 @@ export function registerAgentIpc({
     return result;
   });
 
+  handle(IPC.invoke.agentStopDelegations, async (req: import("@pi-desktop/shared").AgentStopDelegationsRequest) => {
+    if (!sidecar) throw new Error("sidecar unavailable");
+    if (!req.sessionId || (req.delegationIds !== undefined && (!Array.isArray(req.delegationIds) || req.delegationIds.some((id) => typeof id !== "string" || !id)))) {
+      throw new Error("Invalid subagent stop request");
+    }
+    return sidecar.call("agent.stopDelegations", req);
+  });
+
   handle(IPC.invoke.agentAbort, async (req: { sessionId: string; turnId?: string }) => {
+    if (images.abortSession(req.sessionId)) return { ok: true, aborted: true };
     if (!sidecar) throw new Error("sidecar unavailable");
     const releaseSessionOperation = req.turnId ? await acquireSessionOperation(req.sessionId) : undefined;
     try {
@@ -712,8 +776,13 @@ export function registerAgentIpc({
 
   handle(IPC.invoke.agentStop, async (req: AgentStopRequest) => {
     if (!sidecar) throw new Error("sidecar unavailable");
+    const activeTurnId = activeTurns.get(req.sessionId);
+    if (req.turnId && activeTurnId !== req.turnId) {
+      return { requested: false };
+    }
     logger.app("session", "info", "prompt graceful stop requested", {
       sessionId: req.sessionId,
+      ...(req.turnId ? { turnId: req.turnId } : {}),
     });
     // The runtime owns the boundary decision. Do not close the durable turn
     // here: agent_end must arrive after the current reply/tool batch completes
@@ -722,6 +791,7 @@ export function registerAgentIpc({
   });
 
   handle(IPC.invoke.agentGetStatus, async (sessionId: string) => {
+    if (images.states().some((job) => job.sessionId === sessionId)) return { status: { sessionId, isRunning: true, pendingToolConfirmations: 0 } };
     if (!sidecar) throw new Error("sidecar unavailable");
     return sidecar.call("agent.getStatus", { sessionId });
   });

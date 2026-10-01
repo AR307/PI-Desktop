@@ -13,6 +13,7 @@ pub(crate) use crate::secrets::{
 
 mod catalog;
 mod credentials;
+mod mirrorcoding;
 mod model;
 mod order;
 mod repository;
@@ -20,6 +21,7 @@ mod validation;
 
 pub use catalog::{cache_discovered_models, list_models};
 pub use credentials::get_secret_for_provider;
+pub use mirrorcoding::{sync_mirrorcoding, MirrorCodingGroupSync, MirrorCodingProviderSync};
 pub use model::{
     DiscoveredModelInput, ModelBinding, ModelCatalogItem, ProviderCreateInput, ProviderPublic,
     ProviderUpdateInput,
@@ -30,7 +32,7 @@ pub use repository::{
     create_provider, delete_provider, get_provider, list_providers, set_provider_secret,
     update_provider,
 };
-pub(crate) use repository::{delete_provider_row, provider_owner_plugin};
+pub(crate) use repository::{delete_provider_row, provider_exists, provider_owner_plugin};
 
 pub(crate) use catalog::{
     config_model_bindings, config_thinking_levels_override, config_with_model_bindings,

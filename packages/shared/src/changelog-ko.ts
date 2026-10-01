@@ -2,6 +2,33 @@ import type { ChangelogEntry } from "./changelog.js";
 
 export const koEntries: ChangelogEntry[] = [
   {
+    "version": "0.15.11",
+    "date": "2026-10-01",
+    "highlights": [
+      "Ultra는 모델별 추론 수준, 비동기 인계, 다른 모델을 사용하는 하위 에이전트와 재개를 지원합니다.",
+      "지속적으로 보관되는 ReturnToParent 카드에 결과와 정확한 상태를 표시하고 개별 또는 전체 중지를 지원합니다.",
+      "MirrorCoding 카탈로그, 기본 프로토콜 및 세션별 Fast를 정렬하고 부분 응답을 보존하여 이어갈 수 있습니다.",
+      "Android 모델 및 모드 제어, Fast와 Ultra 동기화, 이미지 생성 및 결과 카드를 업데이트했습니다."
+    ]
+  },
+
+  {
+    "version": "0.15.10",
+    "date": "2026-09-28",
+    "highlights": [
+      "플러그인 마켓플레이스 목록을 이름순 대신 무작위 순서로 표시합니다.",
+    ],
+  },
+
+  {
+    version: "0.15.9",
+    date: "2026-09-27",
+    highlights: [
+      "macOS DMG 및 ZIP 패키지에서 오래된 첫 실행 도우미 파일을 제거합니다.",
+    ],
+  },
+
+  {
     version: "0.15.6",
     date: "2026-09-23",
     highlights: [

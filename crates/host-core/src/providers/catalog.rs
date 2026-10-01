@@ -7,16 +7,17 @@ pub(crate) const PROVIDER_SELECT: &str =
 
 pub(crate) const CANONICAL_THINKING_LEVELS: &[&str] =
     &["off", "minimal", "low", "medium", "high", "xhigh", "max"];
-/// Recognised context-window provenance markers. Anything else is dropped so a
+const THINKING_PROTOCOLS: &[&str] = &["legacy", "adaptive"];
+/// Recognised per-limit provenance markers. Anything else is dropped so a
 /// row always falls back to the documented rule instead of a third state no
 /// reader understands.
-const CONTEXT_WINDOW_SOURCES: &[&str] = &["catalog", "user"];
+const MODEL_LIMIT_SOURCES: &[&str] = &["catalog", "user"];
 pub(crate) const DEFAULT_CONTEXT_WINDOW: u32 = 128_000;
 pub(crate) const DEFAULT_MAX_TOKENS: u32 = 8_192;
 
-fn normalize_context_window_source(value: Option<&str>) -> Option<String> {
+fn normalize_model_limit_source(value: Option<&str>) -> Option<String> {
     let trimmed = value?.trim().to_ascii_lowercase();
-    CONTEXT_WINDOW_SOURCES
+    MODEL_LIMIT_SOURCES
         .contains(&trimmed.as_str())
         .then_some(trimmed)
 }
@@ -37,6 +38,11 @@ pub(crate) fn normalize_model_bindings(bindings: &[ModelBinding]) -> Vec<ModelBi
                 return None;
             }
             let thinking_levels = normalize_thinking_levels(&binding.thinking_levels);
+            let thinking_protocol = binding
+                .thinking_protocol
+                .as_deref()
+                .filter(|protocol| THINKING_PROTOCOLS.contains(protocol))
+                .map(str::to_string);
             let default_thinking_level = binding
                 .default_thinking_level
                 .as_deref()
@@ -52,8 +58,11 @@ pub(crate) fn normalize_model_bindings(bindings: &[ModelBinding]) -> Vec<ModelBi
                     .map(str::trim)
                     .filter(|value| !value.is_empty())
                     .map(str::to_string),
-                context_window_source: normalize_context_window_source(
+                context_window_source: normalize_model_limit_source(
                     binding.context_window_source.as_deref(),
+                ),
+                max_tokens_source: normalize_model_limit_source(
+                    binding.max_tokens_source.as_deref(),
                 ),
                 context_window: if binding.context_window == 0 {
                     DEFAULT_CONTEXT_WINDOW
@@ -67,10 +76,26 @@ pub(crate) fn normalize_model_bindings(bindings: &[ModelBinding]) -> Vec<ModelBi
                 },
                 thinking_levels,
                 default_thinking_level,
+                thinking_protocol,
                 supports_images: binding.supports_images,
                 supports_documents: binding.supports_documents,
                 available_for_subagents: binding.available_for_subagents,
                 native_web_search: binding.native_web_search,
+                mirror_coding_group_id: binding
+                    .mirror_coding_group_id
+                    .as_deref()
+                    .map(str::trim)
+                    .filter(|value| !value.is_empty())
+                    .map(str::to_string),
+                temperature: binding
+                    .temperature
+                    .filter(|value| value.is_finite() && *value >= 0.0),
+                api_style: binding
+                    .api_style
+                    .as_deref()
+                    .map(str::trim)
+                    .filter(|value| !value.is_empty())
+                    .map(str::to_string),
             })
         })
         .collect()
@@ -84,14 +109,19 @@ fn legacy_model_binding(model_id: Option<String>) -> Vec<ModelBinding> {
                 id: id.trim().to_string(),
                 alias: None,
                 context_window_source: None,
+                max_tokens_source: None,
                 context_window: DEFAULT_CONTEXT_WINDOW,
                 max_tokens: DEFAULT_MAX_TOKENS,
                 thinking_levels: Vec::new(),
                 default_thinking_level: None,
+                thinking_protocol: None,
                 supports_images: None,
                 supports_documents: None,
                 available_for_subagents: None,
                 native_web_search: None,
+                mirror_coding_group_id: None,
+                temperature: None,
+                api_style: None,
             }]
         })
         .unwrap_or_default()
@@ -368,13 +398,18 @@ mod tests {
             alias: None,
             context_window,
             context_window_source: None,
+            max_tokens_source: None,
             max_tokens: DEFAULT_MAX_TOKENS,
             thinking_levels: Vec::new(),
             default_thinking_level: None,
+            thinking_protocol: None,
             supports_images: None,
             supports_documents: None,
             available_for_subagents: None,
             native_web_search: None,
+            mirror_coding_group_id: None,
+            temperature: None,
+            api_style: None,
         }
     }
 
@@ -390,22 +425,29 @@ mod tests {
     #[test]
     fn a_catalog_sourced_binding_survives_the_config_round_trip() {
         let raw = r#"{"models":[{"id":"terra","contextWindow":1048576,"maxTokens":64000,
-            "contextWindowSource":"catalog"}]}"#;
+            "contextWindowSource":"catalog","maxTokensSource":"catalog"}]}"#;
         let saved = config_with_model_bindings("{}", &read(raw)).unwrap();
         let value: serde_json::Value = serde_json::from_str(&saved).unwrap();
         assert_eq!(value["models"][0]["contextWindowSource"], "catalog");
+        assert_eq!(value["models"][0]["maxTokensSource"], "catalog");
         assert_eq!(
             read(&saved)[0].context_window_source.as_deref(),
+            Some("catalog")
+        );
+        assert_eq!(
+            read(&saved)[0].max_tokens_source.as_deref(),
             Some("catalog")
         );
 
         let mut user_binding = binding("terra", 128_000);
         user_binding.context_window_source = Some("user".to_string());
+        user_binding.max_tokens_source = Some("user".to_string());
         let saved = config_with_model_bindings("{}", &[user_binding]).unwrap();
         assert_eq!(
             read(&saved)[0].context_window_source.as_deref(),
             Some("user")
         );
+        assert_eq!(read(&saved)[0].max_tokens_source.as_deref(), Some("user"));
     }
 
     /// Records written before the marker name no source. They stay `None` so
@@ -415,6 +457,7 @@ mod tests {
         let bindings =
             read(r#"{"models":[{"id":"legacy","contextWindow":128000,"maxTokens":8192}]}"#);
         assert_eq!(bindings[0].context_window_source, None);
+        assert_eq!(bindings[0].max_tokens_source, None);
         let saved = config_with_model_bindings("{}", &bindings).unwrap();
         let value: serde_json::Value = serde_json::from_str(&saved).unwrap();
         assert!(value["models"][0].get("contextWindowSource").is_none());
@@ -426,9 +469,10 @@ mod tests {
     fn an_unknown_source_is_dropped_instead_of_persisted() {
         let bindings = read(
             r#"{"models":[{"id":"odd","contextWindow":256000,"maxTokens":8192,
-                "contextWindowSource":"derived"}]}"#,
+                "contextWindowSource":"derived","maxTokensSource":"derived"}]}"#,
         );
         assert_eq!(bindings[0].context_window_source, None);
+        assert_eq!(bindings[0].max_tokens_source, None);
     }
 
     /// The zero-value normalisation is what keeps a freshly added model from

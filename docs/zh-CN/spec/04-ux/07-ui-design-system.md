@@ -225,7 +225,7 @@ PI-Desktop 的行为类似于桌面应用程序 shell，因此意外拖动
 | 状态 | 语义色彩 | 形状/运动 | 含义 |
 |---|---|---|---|
 | 已选择 | 中性口音 | 静态轮廓环 | 当前对话 |
-| 进行中 | 橙色警告 | 呼吸脉冲受限的实心点 | 代理人正在生产或执行 |
+| 进行中 | 橙色警告 | 呼吸两次后常亮的实心点 | 代理人正在生产或执行 |
 | 已完成 | 成功绿色 | 复选标记 | 最新未读任务轮已完成 |
 | 失败 | 错误红色 | 带圆圈的警报标记 | 最新未读任务转失败 |
 
@@ -238,6 +238,9 @@ PI-Desktop 的行为类似于桌面应用程序 shell，因此意外拖动
 标记。将行标记为已读、将全部行标记为已读或清除收件箱也会关闭匹配的
 任务本机横幅；该 durable id 的迟到事件不能恢复标记、行或横幅。缩减运动
 模式会禁用呼吸动画，同时保留其橙色填充和本地化的可访问名称。
+任务行和关联会话悬浮卡的运行中圆点在挂载或进入运行状态时，播放两次
+各 1.6 秒的呼吸动画，随后保持常亮，直到状态变化。窗口其余内容空闲时，
+圆点不得持续提交绘制帧。
 
 ### 4. 6 Tailwind CSS 变量存根
 
@@ -928,8 +931,8 @@ UTF-8 写入活动会话的临时 `pasted/` 目录，并在粘贴位置显示一
 | Composer 工具栏 | MainChat `≥450px` | 左右控制组保持一行且不收缩；模式/权限标签保持单行并省略截断 |
 | 输入框草稿高度 | 1–7 行文本 | 自动增长；超出第 7 行的内部滚动 |
 | 聊天消息最大宽度 | 720px 助手/560px 用户板 | 防止眼距过度拉伸；用户轮流保持紧凑 |
-| 窗口最小宽度 | 1040像素 | 由 Electron 强制执行；打开的工作面板会在固定窗口内重新排列聊天，但 MainChat 不会缩小到 450 像素硬下限以下 |
-| 窗户最小高度 | 700像素 | 由 Electron 强制执行 |
+| 窗口最小宽度 | 800像素 | 由 Electron 强制执行，并按当前显示器工作区裁剪（D635）；打开的工作面板会在固定窗口内重新排列聊天，但 MainChat 不会缩小到 450 像素硬下限以下 |
+| 窗口最小高度 | 560像素 | 由 Electron 强制执行，并按当前显示器工作区裁剪（D635） |
 
 开放式工作面板是一个固定宽度的流入柱；它回流 MainChat 并
 从不扩展操作系统窗口 (ADR 0033)。渲染器请求一个原生的
@@ -964,8 +967,8 @@ Linux 保留淡入淡出和滑动退出。
 - 外层外壳在每个平台上都保留原生边缘/角落调整大小。无边框标题栏的
   拖动区域不会替代操作系统的调整大小所有权。300ms 的稳定边界等待窗口
   可避免恢复逻辑与慢速指针手势竞争，原生调整大小/移动事件停止 600ms 后
-  才保存正常基础边界。宽度 < 1040 像素或高度 < 700 像素不受 Electron
-  支持并会被阻止。
+  才保存正常基础边界。Electron 强制 800×560 最小尺寸，并按当前显示器
+  工作区裁剪（D635）；更小的尺寸不受支持。
 
 ## 11. 组件基础
 
@@ -1065,6 +1068,76 @@ Linux 保留淡入淡出和滑动退出。
 | 解雇 | 每个 Toast 上的 X 按钮（`toast.dismiss` i18n 标签） |
 | 运动 | 进入200ms缓出slide-down/fade，退出150ms缓入淡入淡出；减少运动 → 接近零持续时间（不是 `none`，移除监听 `animationend`） |
 | Z 指数 | z-Toast (50) |
+
+### 11.9 SettingsToggle
+
+实现：`components/ui.tsx → SettingsToggle`。
+
+| 属性 | 值 |
+|---|---|
+| 尺寸 | 32×20，滑块 16px |
+| CSS 类 | `.settings-toggle` / `.settings-toggle.on` |
+| 角色 | `role="switch"`，并设置 `aria-checked` |
+| 变体 | 默认、`busy`（`.is-busy`、`aria-busy`、禁用） |
+| 背景 | 开启时使用中性强调色（非绿色）；主题专用覆盖位于 `theme-overrides.css` |
+
+设置页和编辑面板中的布尔开关都必须使用 `SettingsToggle`；不得手写
+`<button role="switch">` 并自行拼接样式类。
+
+### 11.10 SegmentedControl
+
+实现：`components/ui.tsx → SegmentedControl<T>`。
+
+| 属性 | 值 |
+|---|---|
+| CSS 类 | `.settings-segment` / `.settings-segment-item.active` |
+| 角色 | `radiogroup`（默认）、`group` 或 `tablist` |
+| 子项角色 | `radio` / 无 / `tab`，由容器角色决定 |
+| 泛型 | `<T extends string>`，确保值与 `onChange` 的类型安全 |
+| 选项 | `readonly { value: T; label: ReactNode }[]`，标签可使用 JSX（如数量徽章） |
+
+呈现为一排等宽按钮的多选一控件必须使用 `SegmentedControl`；不得手写
+`<div className="settings-segment">` 和按钮循环。
+
+### 11.11 Checkbox
+
+实现：`components/ui.tsx → Checkbox`。
+
+| 属性 | 值 |
+|---|---|
+| CSS 类 | `.ui-checkbox` |
+| 结构 | `<label> → <input type="checkbox"> + <span>{label}</span>` |
+| 属性 | 扩展 `InputHTMLAttributes`（排除 `type`），并提供 `label: ReactNode` |
+
+独立的带标签复选框必须使用 `Checkbox`；不得手写
+`<label><input type="checkbox"/>…</label>`。
+
+### 11.11b CheckboxGroup
+
+实现：`components/ui.tsx → CheckboxGroup<T>`。
+
+| 属性 | 值 |
+|---|---|
+| CSS 类 | 容器使用 `.ui-checkbox-group`，子项使用 `Checkbox` |
+| 泛型 | `<T extends string>`，确保值与 `onChange` 的类型安全 |
+| 属性 | `values: T[]`、`onChange(values: T[])`、`options: { value: T; label: ReactNode }[]`、`label`、`disabled`、`minSelected` |
+| 最少选择数 | `minSelected` 默认 0，防止取消选择后低于该下限 |
+
+当一组选项映射为选中值数组时使用 `CheckboxGroup`（如语音语言）；
+状态形状不同的独立布尔字段使用单独的 `Checkbox`。
+
+### 11.12 SettingsMenuSelect
+
+实现：`components/settings/SettingsMenuSelect.tsx`。
+
+| 属性 | 值 |
+|---|---|
+| 触发器 | 显示当前标签的按钮，末尾有 `IconChevronDown` |
+| 弹层 | `AnchoredMenu`，通过 portal 渲染，可键盘导航并标记当前值 |
+| 属性 | `value`、`options: { id, label, disabled? }[]`、`onChange(id)`、`label`、`disabled`、`busy`、`fullWidth` |
+
+设置中的下拉选项列表必须使用 `SettingsMenuSelect`，不使用浏览器原生
+`Select`（`<select>`）。
 
 ## 12. 状态模式
 

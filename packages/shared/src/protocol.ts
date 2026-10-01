@@ -2,7 +2,7 @@ export const PROTOCOL_VERSION = 11 as const;
 export const SCHEMA_VERSION = 16 as const;
 export const APP_ID = "net.aiuo.pi-desktop";
 export const APP_NAME = "PI-Desktop";
-export const APP_VERSION = "0.15.6";
+export const APP_VERSION = "0.15.11";
 
 export const APP_MENU_COMMANDS = [
   "newTask",
@@ -50,6 +50,12 @@ export type WindowControlAction = (typeof WINDOW_CONTROL_ACTIONS)[number];
 
 export const IPC = {
   invoke: {
+    imageGenerate: "pi-desktop/image/generate",
+    imageConfigure: "pi-desktop/image/configure",
+    imageJobs: "pi-desktop/image/jobs",
+    imageModels: "pi-desktop/image/models",
+    imageRetryDownload: "pi-desktop/image/retryDownload",
+    imageAbort: "pi-desktop/image/abort",
     appGetVersion: "pi-desktop/app/getVersion",
     appOpenFeedback: "pi-desktop/app/openFeedback",
     appHealth: "pi-desktop/app/health",
@@ -80,9 +86,32 @@ export const IPC = {
     speechTranscribe: "pi-desktop/speech/transcribe",
     speechSynthesize: "pi-desktop/speech/synthesize",
     speechGetStatus: "pi-desktop/speech/getStatus",
+    voiceStart: "pi-desktop/voice/start",
+    voiceStop: "pi-desktop/voice/stop",
+    voiceCancel: "pi-desktop/voice/cancel",
+    voiceGetState: "pi-desktop/voice/getState",
+    voiceGetDevices: "pi-desktop/voice/getDevices",
+    voiceGetModels: "pi-desktop/voice/getModels",
+    voiceDownloadModel: "pi-desktop/voice/downloadModel",
+    voiceDeleteModel: "pi-desktop/voice/deleteModel",
+    voiceUpdateSettings: "pi-desktop/voice/updateSettings",
+    voiceCheckPermission: "pi-desktop/voice/checkPermission",
+    voiceRequestPermission: "pi-desktop/voice/requestPermission",
+    liveVoiceStatus: "pi-desktop/voice/live/status",
+    liveVoicePrepare: "pi-desktop/voice/live/prepare",
+    liveVoiceConnect: "pi-desktop/voice/live/connect",
+    liveVoiceSetMuted: "pi-desktop/voice/live/setMuted",
+    liveVoiceReportMedia: "pi-desktop/voice/live/reportMedia",
+    liveVoiceReportPlayback: "pi-desktop/voice/live/reportPlayback",
+    liveVoiceReportDelegation: "pi-desktop/voice/live/reportDelegation",
+    liveVoiceReportControlApplied: "pi-desktop/voice/live/reportControlApplied",
+    liveVoiceEnd: "pi-desktop/voice/live/end",
+    liveVoiceHeartbeat: "pi-desktop/voice/live/heartbeat",
+    liveVoiceResolveWorkSelection: "pi-desktop/voice/live/work/resolveSelection",
     agentCompact: "pi-desktop/agent/compact",
     agentAbort: "pi-desktop/agent/abort",
     agentStop: "pi-desktop/agent/stop",
+    agentStopDelegations: "pi-desktop/agent/stop-delegations",
     agentQueuePush: "pi-desktop/agent/queue/push",
     agentQueueList: "pi-desktop/agent/queue/list",
     agentQueueRemove: "pi-desktop/agent/queue/remove",
@@ -155,7 +184,6 @@ export const IPC = {
     projectSet: "pi-desktop/project/set",
     projectClear: "pi-desktop/project/clear",
     projectRemove: "pi-desktop/project/remove",
-    pullsList: "pi-desktop/pulls/list",
     scheduledList: "pi-desktop/scheduled/list",
     scheduledCreate: "pi-desktop/scheduled/create",
     scheduledUpdate: "pi-desktop/scheduled/update",
@@ -164,6 +192,7 @@ export const IPC = {
     scheduledExecute: "pi-desktop/scheduled/execute",
     scheduledListRuns: "pi-desktop/scheduled/listRuns",
     toolResolvePermission: "pi-desktop/tool/resolvePermission",
+    todosGet: "pi-desktop/todos/get",
     askToolResolve: "pi-desktop/agent/askTool/resolve",
     plansPending: "pi-desktop/plans/pending",
     plansResolve: "pi-desktop/plans/resolve",
@@ -187,6 +216,11 @@ export const IPC = {
      * crosses this channel.
      */
     remoteHostBootstrap: "pi-desktop/remoteHost/bootstrap",
+    mobileSyncStatus: "pi-desktop/mobile-sync/status",
+    mobileSyncCreatePairing: "pi-desktop/mobile-sync/createPairing",
+    mobileSyncCancelPairing: "pi-desktop/mobile-sync/cancelPairing",
+    mobileSyncRevoke: "pi-desktop/mobile-sync/revoke",
+    mobileSyncRefresh: "pi-desktop/mobile-sync/refresh",
     providersList: "pi-desktop/providers/list",
     providersReorder: "pi-desktop/providers/reorder",
     providersCreate: "pi-desktop/providers/create",
@@ -213,12 +247,21 @@ export const IPC = {
     providersLookupModel: "pi-desktop/providers/lookupModel",
     providersRefreshModelCatalog: "pi-desktop/providers/refreshModelCatalog",
     providersModelCatalogStatus: "pi-desktop/providers/modelCatalogStatus",
+    mirrorCodingGetState: "pi-desktop/mirrorcoding/getState",
+    mirrorCodingLogin: "pi-desktop/mirrorcoding/login",
+    mirrorCodingCancelLogin: "pi-desktop/mirrorcoding/cancelLogin",
+    mirrorCodingRefresh: "pi-desktop/mirrorcoding/refresh",
+    mirrorCodingLogout: "pi-desktop/mirrorcoding/logout",
+    mirrorCodingRetryRevocation: "pi-desktop/mirrorcoding/retryRevocation",
+    mirrorCodingCompleteWelcome: "pi-desktop/mirrorcoding/completeWelcome",
     providersOauthVendors: "pi-desktop/providers/oauth/vendors",
     providersOauthStart: "pi-desktop/providers/oauth/start",
     providersOauthRespond: "pi-desktop/providers/oauth/respond",
     providersOauthCancel: "pi-desktop/providers/oauth/cancel",
     providersOauthDelete: "pi-desktop/providers/oauth/delete",
     pluginList: "pi-desktop/plugin/list",
+    /** A renderer slot component asking its own plugin for one JSON answer. */
+    pluginRendererCall: "pi-desktop/plugin/rendererCall",
     /** Plugin-contributed agent extensions (D387/D388, ADR 0214). */
     pluginImportExtension: "pi-desktop/plugin/importExtension",
     extensionsCommandRun: "pi-desktop/extensions/commands/run",
@@ -308,6 +351,7 @@ export const IPC = {
     composerImportFiles: "pi-desktop/composer/importFiles",
     composerPasteFiles: "pi-desktop/composer/pasteFiles",
     clipboardRecordPaste: "pi-desktop/clipboard/recordPaste",
+    clipboardWriteText: "pi-desktop/clipboard/writeText",
     composerCommands: "pi-desktop/composer/commands",
     workspaceDiff: "pi-desktop/workspace/diff",
     workspaceReviewRollback: "pi-desktop/workspace/review/rollback",
@@ -337,6 +381,7 @@ export const IPC = {
     nativeMenuAction: "pi-desktop/menu/nativeAction",
   },
   event: {
+    imageState: "pi-desktop/image/state",
     pluginChanged: "pi-desktop/event/pluginChanged",
     /** Progress of an install or update, while it is still running. */
     pluginInstallProgress: "pi-desktop/plugin/event/installProgress",
@@ -369,10 +414,20 @@ export const IPC = {
     notificationChanged: "pi-desktop/notification/event/changed",
     sessionsChanged: "pi-desktop/session/event/changed",
     notificationActivated: "pi-desktop/notification/event/activated",
+    notificationSound: "pi-desktop/notification/event/sound",
     plansChanged: "pi-desktop/plans/event/changed",
+    todosChanged: "pi-desktop/todos/event/changed",
     providersOauth: "pi-desktop/providers/oauth/event",
+    mirrorCodingChanged: "pi-desktop/mirrorcoding/changed",
     mcpOauth: "pi-desktop/mcp/oauth/event",
     updatesState: "pi-desktop/updates/event/state",
+    mobileSyncChanged: "pi-desktop/mobile-sync/changed",
+    voiceStateChanged: "pi-desktop/voice/event/stateChanged",
+    voiceModelProgress: "pi-desktop/voice/event/modelProgress",
+    liveVoiceChanged: "pi-desktop/voice/live/event/changed",
+    liveVoicePort: "pi-desktop/voice/live/event/port",
+    liveVoiceControl: "pi-desktop/voice/live/event/control",
+    liveVoiceTranscript: "pi-desktop/voice/live/event/transcript",
   },
 } as const;
 

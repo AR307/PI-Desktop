@@ -17,7 +17,7 @@ const provider: RuntimeProviderConfig = {
 };
 
 type Failure = "network" | "rate-limit" | "stream";
-type Step = Failure | "tool" | "success";
+type Step = Failure | "tool" | "success" | "partial-stream" | "thinking-only" | "length" | "empty";
 
 /** Real provider adapter and agent loop; replace only fetch and the host edge. */
 function fixture(steps: Step[]) {
@@ -46,10 +46,11 @@ function fixture(steps: Step[]) {
               },
             ],
           }
-        : { role: "assistant", content: step === "stream" ? "partial" : "Recovered" };
+        : step === "thinking-only" ? { role: "assistant", reasoning_content: "Retained thinking" }
+        : { role: "assistant", content: ["stream", "empty"].includes(step) ? "" : step === "partial-stream" ? "partial" : "Recovered" };
     const chunk = (value: unknown, finish: string | null) =>
       `data: ${JSON.stringify({ id: "completion", object: "chat.completion.chunk", created: 1, model: "fixture-model", choices: [{ index: 0, delta: value, finish_reason: finish }] })}\n\n`;
-    if (step === "stream") {
+    if (step === "stream" || step === "partial-stream") {
       let sent = false;
       return new Response(
         new ReadableStream<Uint8Array>({
@@ -65,7 +66,7 @@ function fixture(steps: Step[]) {
     }
     return new Response(
       chunk(delta, null) +
-        chunk({}, step === "tool" ? "tool_calls" : "stop") +
+        chunk({}, step === "tool" ? "tool_calls" : step === "length" ? "length" : "stop") +
         "data: [DONE]\n\n",
       { headers: { "content-type": "text/event-stream" } },
     );
@@ -208,7 +209,7 @@ describe("provider recovery through real agent loops (#699)", () => {
   });
 
   for (const owner of ["session", "subagent"] as const) {
-    it(`${owner} does not replenish the budget on partial output or a phase change`, async () => {
+    it(`${owner} does not replenish the budget on empty stream activity or a phase change`, async () => {
       vi.useFakeTimers();
       const f = fixture(
         Array.from({ length: 11 }, (_, i): Step => (i % 2 ? "stream" : "network")),
@@ -261,4 +262,36 @@ describe("provider recovery through real agent loops (#699)", () => {
       await f.runtime.dispose();
     }
   });
+});
+
+
+describe("non-destructive completion recovery through real provider adapters", () => {
+  for (const owner of ["session", "subagent"] as const) {
+    for (const [step, code] of [["thinking-only", "MODEL_THINKING_ONLY"], ["length", "MODEL_OUTPUT_TRUNCATED"], ["partial-stream", "STREAM_FAILED"]] as const) {
+      it(owner + " keeps " + step + " without replay", async () => {
+        const f = fixture([step]);
+        try {
+          if (owner === "session") await f.runtime.prompt("Report.");
+          else expect((await f.subagent.run()).status).toBe("failed");
+          expect(f.requests()).toBe(1);
+          const ended = f.events.flatMap(e => e.event.type === "message_end" && e.event.message.role === "assistant" ? [e.event.message] : []);
+          expect(ended.at(-1)).toMatchObject({ status: "error", error: { code }, responseDiagnostics: { end: step === "length" ? "truncated" : step === "partial-stream" ? "interrupted" : "thinking-only" } });
+          expect(ended.at(-1)?.thinking || ended.at(-1)?.content).toBeTruthy();
+          expect(f.reads()).toBe(0);
+        } finally { await f.runtime.dispose(); }
+      });
+    }
+    it(owner + " retries an empty response only once", async () => {
+      vi.useFakeTimers();
+      const f = fixture(["empty", "empty"]);
+      try {
+        if (owner === "session") await settle(f.runtime.prompt("Report."));
+        else expect((await settle(f.subagent.run())).status).toBe("failed");
+        expect(f.requests()).toBe(2);
+        expect(f.events.some(e => e.event.type === "message_end" && e.event.message.error?.code === "EMPTY_MODEL_RESPONSE")).toBe(true);
+        const final = f.events.flatMap(e => e.event.type === "message_end" ? [e.event.message] : []).at(-1);
+        expect(final?.responseDiagnostics?.attempts).toBe(2);
+      } finally { await f.runtime.dispose(); }
+    });
+  }
 });

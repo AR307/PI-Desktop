@@ -42,6 +42,46 @@ export function inheritedSessionModelBinding({
   };
 }
 
+/**
+ * Model a new conversation should open with: the latest in-scope session,
+ * then the app default via `inheritedSessionModelBinding`.
+ */
+export function recentConversationModel(
+  session?: SessionModelRef | null,
+): SessionModelRef {
+  if (!session) return {};
+  return {
+    ...(session.providerId ? { providerId: session.providerId } : {}),
+    ...(session.modelId ? { modelId: session.modelId } : {}),
+  };
+}
+
+/**
+ * Model a new conversation should open with: an explicit composer draft,
+ * else the latest in-scope session, else the app default.
+ */
+export function newConversationModelBinding({
+  draft,
+  latestSession,
+  settings,
+  providers,
+}: {
+  draft?: SessionModelRef | null;
+  latestSession?: SessionModelRef | null;
+  settings?: SessionModelSettings | null;
+  providers: readonly SessionModelProvider[];
+}): SessionModelRef {
+  const recent = recentConversationModel(latestSession);
+  return inheritedSessionModelBinding({
+    draft: {
+      providerId: draft?.providerId ?? recent.providerId,
+      modelId: draft?.modelId ?? recent.modelId,
+    },
+    settings,
+    providers,
+  });
+}
+
 /** Newest transcript turn that already recorded a provider/model. */
 export function lastUsedSessionModel(
   messages: readonly SessionModelRef[],

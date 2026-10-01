@@ -1,0 +1,104 @@
+import type { ModelBinding } from "./models.js";
+import type { ImageGenerationCapability } from "./images.js";
+
+export const MIRRORCODING_AUTH_KIND = "mirrorcoding" as const;
+export const MIRRORCODING_ORIGIN = "https://console.mirrorcoding.xyz" as const;
+
+export type MirrorCodingEndpoint = "openai" | "openai-response" | "anthropic" | "gemini";
+export type MirrorCodingImageEndpoint = "image-generation" | "image-edit";
+export type MirrorCodingFastCapability = { enabled: boolean; supportedEndpointTypes: string[] };
+export type MirrorCodingModelCapability = { modes: string[]; fast?: MirrorCodingFastCapability };
+export type MirrorCodingPublishedRoutes = {
+  modelCapabilities?: Record<string, MirrorCodingModelCapability>;
+  supportedEndpoints?: Record<string, { path: string; method: string }>;
+  candidateGroups?: string[];
+};
+
+export type MirrorCodingImageRoutes = {
+  generation: MirrorCodingImageEndpoint;
+  reference?: MirrorCodingImageEndpoint;
+};
+
+export type MirrorCodingImageCapability = {
+  generationPath?: string;
+  referencePath?: string;
+  sizes?: string[];
+  qualities?: string[];
+  aspectRatios?: string[];
+  maxCount?: number;
+  supportsChat?: boolean;
+};
+
+/** Route and billing information for one authorized account group. */
+export type MirrorCodingGroupRoute = MirrorCodingPublishedRoutes & {
+  id: string;
+  name: string;
+  description: string;
+  ratio: number | null;
+  dynamicBilling: boolean;
+  routes: Record<string, MirrorCodingEndpoint>;
+  imageRoutes?: Record<string, MirrorCodingImageRoutes>;
+  imageCapabilities?: Record<string, MirrorCodingImageCapability>;
+  imageModels?: Record<string, ImageGenerationCapability>;
+};
+
+export type MirrorCodingModel = MirrorCodingModelCapability & {
+  id: string;
+  supportedEndpointTypes: string[];
+  image?: MirrorCodingImageCapability;
+};
+
+export type MirrorCodingGroup = {
+  id: string;
+  name: string;
+  description: string;
+  ratio: number | null;
+  dynamicBilling: boolean;
+  candidateGroups?: string[];
+  models: MirrorCodingModel[];
+};
+
+export type MirrorCodingCatalog = {
+  user: { id: number; displayName: string };
+  groups: MirrorCodingGroup[];
+  supportedEndpoints: Record<string, { path: string; method: string }>;
+};
+
+export type MirrorCodingProvider = MirrorCodingPublishedRoutes & {
+  /** Group rows are retained for historical sessions; account rows are the
+   * model-first provider used for new selections. */
+  scope?: "group" | "account";
+  accountId: number;
+  groupId: string;
+  groupName: string;
+  description: string;
+  ratio: number | null;
+  dynamicBilling: boolean;
+  routes: Record<string, MirrorCodingEndpoint>;
+  imageRoutes?: Record<string, MirrorCodingImageRoutes>;
+  imageCapabilities?: Record<string, MirrorCodingImageCapability>;
+  imageModels?: Record<string, ImageGenerationCapability>;
+  /** All groups available to an account-level provider. */
+  groups?: MirrorCodingGroupRoute[];
+};
+
+export type MirrorCodingProviderGroup = {
+  metadata: MirrorCodingProvider;
+  models: ModelBinding[];
+};
+
+export type MirrorCodingProviderSync = {
+  accountId: number | null;
+  groups: MirrorCodingProviderGroup[];
+};
+
+export type MirrorCodingAccountState = {
+  status: "signed_out" | "authorizing" | "connected" | "reauthorize";
+  account?: MirrorCodingCatalog["user"];
+  authorizationExpiresAt?: number;
+  sync: "idle" | "syncing" | "success" | "error";
+  syncedAt?: number;
+  error?: string;
+  catalog?: MirrorCodingCatalog;
+  pendingRevocation: boolean;
+};

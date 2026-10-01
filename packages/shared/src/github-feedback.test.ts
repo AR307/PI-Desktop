@@ -17,6 +17,10 @@ const sample = {
 };
 
 describe("GitHub feedback issue URL", () => {
+  it("opens issues on the product GitHub repository", () => {
+    expect(GITHUB_REPO).toBe("AR307/PI-Desktop");
+  });
+
   it("maps Electron platforms onto the bug-form OS options", () => {
     expect(osLabelForFeedback("darwin")).toBe("macOS");
     expect(osLabelForFeedback("win32")).toBe("Windows");
@@ -49,7 +53,7 @@ describe("GitHub feedback issue URL", () => {
     ).toThrow(/origin/);
     expect(() =>
       assertFeedbackIssueUrl(
-        "https://github.com/vastsa/PI-Desktop/issues/new?template=feature_request.yml",
+        `https://github.com/${GITHUB_REPO}/issues/new?template=feature_request.yml`,
       ),
     ).toThrow(/template/);
   });

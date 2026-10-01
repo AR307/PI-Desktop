@@ -169,6 +169,7 @@ pub(crate) fn declared_providers(manifest: &PluginManifest) -> Vec<DeclaredPlugi
                                     .filter(|value| !value.is_empty())
                                     .map(str::to_string),
                                 context_window_source: None,
+                                max_tokens_source: None,
                                 context_window: model
                                     .get("contextWindow")
                                     .and_then(Value::as_u64)
@@ -181,12 +182,19 @@ pub(crate) fn declared_providers(manifest: &PluginManifest) -> Vec<DeclaredPlugi
                                     .unwrap_or(0),
                                 thinking_levels: declared_thinking_levels(model),
                                 default_thinking_level: declared_default_thinking_level(model),
+                                thinking_protocol: model
+                                    .get("thinkingProtocol")
+                                    .and_then(Value::as_str)
+                                    .map(str::to_string),
                                 supports_images: model
                                     .get("supportsImages")
                                     .and_then(Value::as_bool),
                                 supports_documents: None,
                                 available_for_subagents: None,
                                 native_web_search: None,
+                                mirror_coding_group_id: None,
+                                temperature: None,
+                                api_style: None,
                             })
                         })
                         .collect::<Vec<_>>()

@@ -8,7 +8,7 @@
  * "error") and the rejected-promise paths.
  */
 
-import { isCertificateVerificationError } from "@pi-desktop/shared";
+import { ErrorCodes, isCertificateVerificationError } from "@pi-desktop/shared";
 import { readLocalRequestErrorDetails } from "./local-request-errors.js";
 
 export type ClassifiedAgentError = {
@@ -31,7 +31,11 @@ const CONTEXT_PATTERN =
   /context[ _-]?length|maximum context|context window|too many tokens|prompt is too long|input token count|exceeds the (?:maximum|model)|token limit/i;
 
 const STREAM_TERMINATION_PATTERN =
-  /\bterminated\b|stream ended without finish_reason|premature(?:ly)?\s+(?:closed|ended)|(?:stream|response).*(?:closed|interrupted)/i;
+  /\bterminated\b|stream ended (?:without|before)|premature(?:ly)?\s+(?:closed|ended)|(?:stream|response).*(?:closed|interrupted)/i;
+
+/** An adapter refusing a request option, e.g. "Custom fetch is not supported
+ * by the Google Generative AI adapter" (issue #1072). */
+const UNSUPPORTED_ADAPTER_OPTION_PATTERN = /is not supported by the .{0,60}adapter/i;
 
 function redactSensitiveErrorText(message: string): string {
   return message
@@ -89,6 +93,9 @@ function hasNetworkCause(err: unknown, message: string): boolean {
 function extractErrorCode(err: unknown): string | number | undefined {
   let current: any = err;
   for (let depth = 0; depth < 4 && current; depth += 1) {
+    if (typeof current.errorCode === "string" && /^[A-Za-z0-9_.:-]{1,64}$/.test(current.errorCode)) {
+      return current.errorCode;
+    }
     if (typeof current.code === "number") {
       return Number.isSafeInteger(current.code) ? current.code : undefined;
     }
@@ -427,6 +434,9 @@ export function classifyAgentError(err: unknown): ClassifiedAgentError {
   ) {
     return result("TURN_ABORTED", false);
   }
+  if (envelope?.errorCode === "PI_FAST_UNAVAILABLE" || /\bpi_fast_unavailable\b/i.test(rawMessage)) return result("PI_FAST_UNAVAILABLE", false);
+  if (/\b(?:invalid_service_tier|model_or_group_unavailable)\b/i.test(rawMessage)) return result("PROVIDER_ERROR", false);
+  if (status === 402) return result("PROVIDER_ERROR", false);
   if (/CONTEXT_COMPACTION_FAILED/i.test(rawMessage)) {
     return result("CONTEXT_COMPACTION_FAILED", false);
   }
@@ -442,6 +452,26 @@ export function classifyAgentError(err: unknown): ClassifiedAgentError {
       !certificateFailure,
       networkDetailFields(network),
     );
+  }
+
+  if (
+    providerCode === ErrorCodes.HOST_OVERLOADED ||
+    /host RPC capacity is exhausted|HOST_OVERLOADED/i.test(rawMessage)
+  ) {
+    return result(ErrorCodes.HOST_OVERLOADED, true, { origin: "host" });
+  }
+  if (
+    providerCode === ErrorCodes.HOST_UNAVAILABLE ||
+    /host RPC unavailable|host-core is unavailable|host RPC timeout/i.test(rawMessage)
+  ) {
+    return result(ErrorCodes.HOST_UNAVAILABLE, true, { origin: "host" });
+  }
+
+  // The adapter itself refuses how the request was built, so re-sending it
+  // produces the identical failure. Probed before the status table so a status
+  // some layer attached to the same message cannot re-arm the retry budget.
+  if (UNSUPPORTED_ADAPTER_OPTION_PATTERN.test(rawMessage)) {
+    return result("PROVIDER_ERROR", false);
   }
 
   if (status !== undefined) {

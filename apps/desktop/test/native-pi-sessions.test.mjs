@@ -210,7 +210,7 @@ function loadSessionIpc(imports) {
   return module.exports;
 }
 
-function forkHarness({ host, sidecar }) {
+function forkHarness({ host, sidecar, activeTurns = new Map() }) {
   const handlers = new Map();
   const hostCalls = [];
   const sidecarCalls = [];
@@ -221,6 +221,7 @@ function forkHarness({ host, sidecar }) {
     "@pi-desktop/shared": sharedForIpc,
     "../importers": { convertSession() {}, scanAllSources() {}, scanModelConfigs() {} },
     "../services/session-collaboration": { readSessionCollaboration() {} },
+    "../services/session-configuration": { configureSession() { assert.fail("read/fork must not configure a session"); } },
     "../services/session-search": { searchSessionsAcrossSources },
   });
   registerSessionIpc({
@@ -228,7 +229,7 @@ function forkHarness({ host, sidecar }) {
     getHost: () => host(hostCalls),
     getSidecar: () => sidecar(sidecarCalls),
     dataDir: "/tmp/pi-desktop-test",
-    activeTurns: new Map(),
+    activeTurns,
     sessionProjects: new Map(),
     persistenceOutbox: {},
     logger: { app() {} },
@@ -400,6 +401,29 @@ test("a duplicate historical completion keeps an unrelated live stream", async (
   assert.deepEqual(replayed.map((row) => row.id), ["old-answer", "new-durable"]);
 });
 
+test("an aborted empty image result stays live so its download can be retried", async () => {
+  const { projectMessageEnd } = await import("../src/lib/session-transcript.ts");
+  const historical = assistantRow("old-answer", "complete", "old reply");
+  const stopped = {
+    ...assistantRow("image-aborted", "aborted", ""),
+    imageGeneration: {
+      kind: "image-generation",
+      prompt: "URL image stopped during download",
+      options: { count: 1 },
+      images: [{ id: "image-aborted-1", downloadUrl: "https://127.0.0.1/image.png", error: "image_download_failed" }],
+      error: "image_aborted",
+    },
+  };
+  const settled = projectMessageEnd([historical], { type: "message_end", message: stopped });
+  assert.deepEqual(settled.map((row) => row.id), ["old-answer", "image-aborted"]);
+  // A text-free failure without an image card still clears its row.
+  const bare = projectMessageEnd([historical], {
+    type: "message_end",
+    message: assistantRow("bare-aborted", "aborted", ""),
+  });
+  assert.deepEqual(bare.map((row) => row.id), ["old-answer"]);
+});
+
 test("a generic Desktop completion never touches parallel delegate streams", async () => {
   const { projectMessageEnd } = await import("../src/lib/session-transcript.ts");
   const delegateA = assistantRow("delegate-a", "streaming", "A");
@@ -427,4 +451,26 @@ test("the native busy message is localized in every locale", async () => {
     const source = await read(`../../../packages/i18n/src/locales/${locale}/index.ts`);
     assert.match(source, /nativeSessionBusy:/, locale);
   }
+});
+
+
+test("busy Desktop fork delegates only anchored snapshots to the authoritative host", async () => {
+  const { handle, hostCalls } = forkHarness({
+    activeTurns: new Map([["parent", {}]]),
+    sidecar: () => null,
+    host: (calls) => ({ call: async (method, input) => {
+      calls.push({ method, input });
+      if (input.throughMessageId === "current") {
+        throw Object.assign(new Error("session is running"), { data: { errorCode: "CONFLICT" } });
+      }
+      return { session: { id: "child" } };
+    } }),
+  });
+  for (const throughMessageId of [undefined, "", "  "]) {
+    await assert.rejects(handle({ sessionId: "parent", throughMessageId }), { errorCode: "AGENT_BUSY" });
+  }
+  assert.equal(hostCalls.length, 0);
+  assert.equal((await handle({ sessionId: "parent", throughMessageId: "old" })).session.id, "child");
+  assert.equal(hostCalls[0].input.throughMessageId, "old");
+  await assert.rejects(handle({ sessionId: "parent", throughMessageId: "current" }), { errorCode: "AGENT_BUSY" });
 });

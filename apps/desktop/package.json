@@ -1,10 +1,10 @@
 {
   "name": "@pi-desktop/desktop",
-  "version": "0.15.6",
+  "version": "0.15.11",
   "desktopName": "pi-desktop.desktop",
   "private": true,
   "description": "PI-Desktop Electron application",
-  "homepage": "https://github.com/vastsa/PI-Desktop",
+  "homepage": "https://github.com/AR307/PI-Desktop",
   "author": {
     "name": "vastsa",
     "email": "hhxk666@gmail.com"
@@ -13,7 +13,7 @@
   "type": "module",
   "scripts": {
     "build:deps": "pnpm --filter '@pi-desktop/desktop^...' build",
-    "predev": "pnpm run build:deps && cargo build --manifest-path ../../Cargo.toml -p host-core",
+    "predev": "pnpm run build:deps && pnpm run bundle:runtime && cargo build --manifest-path ../../Cargo.toml -p host-core",
     "dev": "node ../../scripts/dev-electron.mjs",
     "build": "electron-vite build",
     "preview": "electron-vite preview",
@@ -31,10 +31,13 @@
     "dist:linux": "pnpm run build:deps && pnpm run build:host-release && pnpm run bundle:runtime && electron-vite build && electron-builder --linux --publish never"
   },
   "dependencies": {
+    "@picovoice/pvrecorder-node": "1.2.9",
+    "transcribe-cpp": "0.2.2",
     "electron-updater": "^6.8.9"
   },
   "devDependencies": {
-    "@earendil-works/pi-ai": "0.87.1",
+    "@earendil-works/pi-ai": "0.99.1",
+    "@earendil-works/pi-mcp": "0.99.1",
     "@pi-desktop/agent-host": "workspace:*",
     "@pi-desktop/agent-runtime": "workspace:*",
     "@pi-desktop/host-runtime": "workspace:*",
@@ -43,6 +46,7 @@
     "@pi-desktop/plugin-sdk": "workspace:*",
     "@pi-desktop/racp": "workspace:*",
     "@pi-desktop/shared": "workspace:*",
+    "@pi-desktop/voice-runtime": "workspace:*",
     "@tailwindcss/vite": "^4.3.3",
     "@types/react": "^19.2.18",
     "@types/react-dom": "^19.2.4",
@@ -73,6 +77,8 @@
     "unified": "^11.0.5",
     "vite": "^7.3.6",
     "ws": "8.21.1",
+    "https-proxy-agent": "7.0.6",
+    "socks-proxy-agent": "8.0.5",
     "zustand": "^5.0.15"
   },
   "build": {
@@ -84,7 +90,7 @@
     "publish": [
       {
         "provider": "github",
-        "owner": "vastsa",
+        "owner": "AR307",
         "repo": "PI-Desktop"
       }
     ],
@@ -131,10 +137,6 @@
       {
         "from": "resources/plugins",
         "to": "plugins"
-      },
-      {
-        "from": "resources/models.dev",
-        "to": "models.dev"
       }
     ],
     "mac": {
@@ -154,8 +156,8 @@
       "entitlements": "build/entitlements.mac.plist",
       "entitlementsInherit": "build/entitlements.mac.plist",
       "extendInfo": {
-        "NSLocalNetworkUsageDescription": "PI-Desktop needs local network access so agents can reach OpenAI-compatible providers, Ollama, and other AI endpoints running on your LAN. / PI-Desktop 需要本地网络访问权限，以便助手请求同一局域网中的 OpenAI 兼容服务、Ollama 等本地 AI 端点。",
-        "NSMicrophoneUsageDescription": "PI-Desktop plugins may use the microphone after you grant them audio access. / 在你授权后，PI-Desktop 插件可以使用麦克风。",
+        "NSLocalNetworkUsageDescription": "PI-Desktop needs local network access so agents can reach OpenAI-compatible providers, Ollama, and other AI endpoints running on your LAN. / PI-Desktop \u9700\u8981\u672c\u5730\u7f51\u7edc\u8bbf\u95ee\u6743\u9650\uff0c\u4ee5\u4fbf\u52a9\u624b\u8bf7\u6c42\u540c\u4e00\u5c40\u57df\u7f51\u4e2d\u7684 OpenAI \u517c\u5bb9\u670d\u52a1\u3001Ollama \u7b49\u672c\u5730 AI \u7aef\u70b9\u3002",
+        "NSMicrophoneUsageDescription": "PI-Desktop uses the microphone for Live voice calls and authorized plugin audio access. / PI-Desktop \u4f7f\u7528\u9ea6\u514b\u98ce\u8fdb\u884c\u5b9e\u65f6\u8bed\u97f3\u901a\u8bdd\uff0c\u4ee5\u53ca\u4f60\u5df2\u6388\u6743\u7684\u63d2\u4ef6\u97f3\u9891\u8bbf\u95ee\u3002",
         "NSBonjourServices": [
           "_http._tcp",
           "_https._tcp"
@@ -170,10 +172,6 @@
           "from": "build/tray-icon-mac.png",
           "to": "tray-icon-mac.png"
         }
-      ],
-      "extraDistFiles": [
-        "PI-Desktop-macOS-open.command",
-        "PI-Desktop-macOS-opening-help.txt"
       ]
     },
     "dmg": {
@@ -214,6 +212,12 @@
           "arch": [
             "x64"
           ]
+        },
+        {
+          "target": "portable",
+          "arch": [
+            "x64"
+          ]
         }
       ],
       "icon": "build/icon.ico",
@@ -233,6 +237,9 @@
       "allowToChangeInstallationDirectory": true,
       "shortcutName": "PI-Desktop",
       "artifactName": "PI-Desktop-Setup-${version}.${ext}"
+    },
+    "portable": {
+      "artifactName": "PI-Desktop-Portable-${version}.${ext}"
     },
     "deb": {
       "packageName": "pi-desktop",
@@ -278,6 +285,12 @@
         }
       ]
     },
+    "asarUnpack": [
+      "node_modules/transcribe-cpp/**/*.node",
+      "node_modules/transcribe-cpp/**/bin/**",
+      "node_modules/@picovoice/pvrecorder-node/**/*.node",
+      "node_modules/@picovoice/pvrecorder-node/**/lib/**"
+    ],
     "asar": {
       "smartUnpack": false
     }

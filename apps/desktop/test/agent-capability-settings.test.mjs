@@ -55,7 +55,7 @@ test("skills and MCP filter one list by level instead of stacking two sections",
   }
   assert.doesNotMatch(layout, /AgentCapabilitySection|AgentCapabilityColumn/);
   assert.match(layout, /agent-capability-list/);
-  assert.match(layout, /role="radiogroup"/);
+  assert.match(layout, /<SegmentedControl[\s\S]*?value=\{filter\}/);
   assert.match(layout, /settings\.capabilityFilterAll/);
   // Subagents are global-only, so they get no level filter and no project.
   assert.doesNotMatch(subagents, /AgentProjectPicker|projectPath|CapabilityFilter/);
@@ -116,8 +116,9 @@ test("capability surfaces use the shared settings hierarchy", () => {
 });
 
 test("the workbench reuses the shared segmented control instead of a third copy", () => {
-  assert.match(layout, /"settings-segment", "agent-capability-segment"|settings-segment agent-capability-segment/);
-  assert.match(layout, /"settings-segment-item"/);
+  assert.match(layout, /<SegmentedControl/);
+  assert.match(layout, /className="agent-capability-segment"/);
+  assert.match(layout, /itemClassName="agent-capability-segment-btn"/);
   // providers.css defines the shared segment and imports after settings.css, so
   // a bare local class would silently lose. Every local override must compound.
   for (const decl of [
@@ -286,22 +287,20 @@ test("revealing a skill carries the level so project skills resolve", () => {
   const api = read("../src/lib/api.ts");
   assert.match(api, /revealUserSkill:\s*\(id: string, query\?: Partial<AgentCapabilityQuery>\)/);
   assert.match(api, /IPC\.invoke\.skillReveal, \{ id, \.\.\.query \}/);
-  const handler = electron.slice(
-    electron.indexOf("handle(\n    IPC.invoke.skillReveal"),
-    electron.indexOf("handle(IPC.invoke.skillRemove"),
-  );
+  const handler = skillImport.slice(skillImport.indexOf("IPC.invoke.skillReveal"));
   assert.match(handler, /typeof payload === "string" \? \{ id: payload \} : payload/);
   assert.match(handler, /host\.call<\{ skill: UserSkillRecord \| null \}>\("skills\.read", request\)/);
   assert.match(skills, /api\.revealUserSkill\(skill\.id, levelQuery\(level\)\)/);
 });
 
-test("skill import is one native file and is copied through the host", () => {
+test("skill file import stays single-select while folder import selects many", () => {
   assert.notEqual(skillImport, "", "skill import handler should be present");
   assert.match(skillImport, /properties:\s*\["openFile"\]/);
-  // Scan-and-import (a separate `skillImportScan` handler) opens a directory,
-  // but the single-file skill-import branch must never do that or select many.
-  assert.doesNotMatch(skillImport, /properties:\s*\[[^\]]*multiSelections/);
-  assert.match(skillImport, /host\.call\("skills\.import"/);
+  assert.match(skillImport, /properties:\s*\["openDirectory", "multiSelections"\]/);
+  assert.match(skillImport, /defaultPath: lastDirectory/);
+  assert.match(skillImport, /writeLastSkillImportDirectory\(dataDir, lastImportedPath\)/);
+  assert.match(skillImport, /importSkillFolders<UserSkillRecord>\(\s*picked\.filePaths/);
+  assert.match(skillImport, /currentHost\.call\("skills\.import"/);
   assert.match(read("../../../crates/host-core/src/user_skills.rs"), /fs::copy\(source, target\)/);
 });
 

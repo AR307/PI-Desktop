@@ -2,6 +2,11 @@ import { spawn as nodeSpawn, type ChildProcess } from "node:child_process";
 import { isAbsolute, resolve, sep } from "node:path";
 import type { PluginMcpServerContrib } from "@pi-desktop/plugin-sdk";
 import { minimalChildEnv } from "./child-process-env.ts";
+import {
+  MCP_STDIO_HOST_ENV_KEYS,
+  decodeMcpStderr,
+  resolveMcpStdioLaunch,
+} from "./mcp-stdio-launch.ts";
 import { userLookupPath } from "./user-login-path.ts";
 
 /** MCP revision we advertise during the handshake. */
@@ -48,7 +53,7 @@ export type JsonRpcMessage = {
  * the client speak the same JSON-RPC dialect over a pipe or over HTTP.
  */
 export type McpTransport = {
-  send: (message: JsonRpcMessage) => Promise<void>;
+  send: (message: JsonRpcMessage, timeoutMs?: number, signal?: AbortSignal) => Promise<void>;
   close: () => void;
 };
 
@@ -74,19 +79,35 @@ function mcpError(code: string, message: string): McpError {
  * PATH is the login-shell PATH (ADR 0045 / D600), not the Finder/Dock GUI
  * PATH, so a market-installed `uvx`/`npx` server can spawn (issue #571). The
  * identity variables cross for the same reason the toolchain ones do: the child
- * is third-party code that resolves `~` through `$HOME` (issue #717).
+ * is third-party code that resolves `~` through `$HOME` (issue #717). Windows
+ * also needs `PATHEXT` / `ComSpec` / `FNM_DIR` so official Node and fnm shims
+ * resolve (issue #789).
  */
 export function mcpProcessEnv(
   pluginId: string | undefined,
   values: Record<string, string>,
+  hostEnv: NodeJS.ProcessEnv = process.env,
 ): Record<string, string> {
   const env: Record<string, string> = {
     ...(pluginId ? { PI_PLUGIN_ID: pluginId } : {}),
-    NODE_ENV: process.env.NODE_ENV ?? "production",
-    ...minimalChildEnv(),
+    NODE_ENV: hostEnv.NODE_ENV ?? process.env.NODE_ENV ?? "production",
   };
-  const path = userLookupPath(process.env.PATH ?? "");
-  if (path) env.PATH = path;
+  if (hostEnv === process.env) {
+    Object.assign(env, minimalChildEnv());
+    for (const key of MCP_STDIO_HOST_ENV_KEYS) {
+      if (env[key]) continue;
+      const value = process.env[key];
+      if (value) env[key] = value;
+    }
+    const path = userLookupPath(process.env.PATH ?? "");
+    if (path) env.PATH = path;
+  } else {
+    for (const key of MCP_STDIO_HOST_ENV_KEYS) {
+      const value = hostEnv[key];
+      if (value) env[key] = value;
+    }
+    if (!env.PATH && env.Path) env.PATH = env.Path;
+  }
   return { ...env, ...values };
 }
 
@@ -138,29 +159,61 @@ function createStdioTransport(
   handlers: McpTransportHandlers,
 ): McpTransport {
   const spawnImpl = options.spawnImpl ?? nodeSpawn;
-  const child: ChildProcess = spawnImpl(
-    resolveMcpCommand(options.rootPath, options.command, options.commandPolicy),
-    options.args,
-    {
-      cwd: options.rootPath,
-      env: options.env,
-      stdio: ["pipe", "pipe", "pipe"],
-      // Never route through a shell: arguments stay literal.
-      shell: false,
+  const resolved = resolveMcpCommand(options.rootPath, options.command, options.commandPolicy);
+  const launch = resolveMcpStdioLaunch({
+    command: resolved,
+    args: options.args,
+    env: options.env,
+    hostEnv: {
+      ...process.env,
+      PATH: options.env.PATH ?? process.env.PATH,
     },
-  );
+  });
+  const child: ChildProcess = spawnImpl(launch.command, launch.args, {
+    cwd: options.rootPath,
+    env: launch.env,
+    stdio: ["pipe", "pipe", "pipe"],
+    detached: process.platform !== "win32",
+    // Arguments stay literal. Known launchers rewrite to a PE binary; remaining
+    // Windows `.cmd` shims go through `cmd.exe /d /s /c` with quoted args.
+    shell: false,
+    windowsHide: launch.windowsHide,
+    windowsVerbatimArguments: launch.windowsVerbatimArguments,
+  });
 
   let closed = false;
   let buffer = "";
   let lastStderr = "";
+  let forceKillTimer: ReturnType<typeof setTimeout> | undefined;
 
+  const signalChildTree = (signal: NodeJS.Signals = "SIGTERM") => {
+    if (process.platform !== "win32" && child.pid) {
+      try {
+        process.kill(-child.pid, signal);
+        return;
+      } catch {
+        // The process group may already be gone; fall back to the direct child.
+      }
+    }
+    child.kill(signal);
+  };
+
+  const stopChild = () => {
+    closed = true;
+    child.stdin?.destroy();
+    child.stdout?.destroy();
+    child.stderr?.destroy();
+    signalChildTree();
+    forceKillTimer ??= setTimeout(() => signalChildTree("SIGKILL"), 1_000);
+    forceKillTimer.unref?.();
+  };
   child.stdout?.setEncoding("utf8");
   child.stdout?.on("data", (chunk: string) => {
     buffer += chunk;
     if (buffer.length > MAX_STDIO_LINE_BYTES) {
       buffer = "";
       handlers.onClose("mcp server sent an oversized message");
-      child.kill();
+      stopChild();
       return;
     }
     let index = buffer.indexOf("\n");
@@ -178,9 +231,14 @@ function createStdioTransport(
       index = buffer.indexOf("\n");
     }
   });
-  child.stderr?.setEncoding("utf8");
-  child.stderr?.on("data", (chunk: string) => {
-    lastStderr = String(chunk).trimEnd().slice(-500);
+  child.stderr?.on("data", (chunk: Buffer | string) => {
+    lastStderr = decodeMcpStderr(
+      chunk,
+      process.platform,
+      Boolean(launch.windowsVerbatimArguments),
+    )
+      .trimEnd()
+      .slice(-500);
   });
   child.on("error", (error: Error) => {
     closed = true;
@@ -205,10 +263,7 @@ function createStdioTransport(
       }
       child.stdin.write(`${JSON.stringify(message)}\n`);
     },
-    close: () => {
-      closed = true;
-      child.kill();
-    },
+    close: stopChild,
   };
 }
 
@@ -269,6 +324,61 @@ async function readBoundedHttpBody(response: Response): Promise<string> {
   return new TextDecoder().decode(body);
 }
 
+/**
+ * Dispatch `text/event-stream` messages as they arrive instead of waiting for
+ * the body to end. A streamable-HTTP server is free to hold the response open
+ * long after the JSON-RPC reply has been written, and reading the whole stream
+ * first turned that server-side schedule into a client-side timeout.
+ */
+async function streamSseMessages(
+  response: Response,
+  onMessage: (message: JsonRpcMessage) => void,
+): Promise<void> {
+  const contentLength = Number(response.headers.get("content-length"));
+  if (Number.isFinite(contentLength) && contentLength > MAX_HTTP_RESPONSE_BYTES) {
+    try {
+      await response.body?.cancel();
+    } catch {
+      // The response is already rejected; cancellation is best effort.
+    }
+    throw mcpError("LIMIT_EXCEEDED", "mcp server response is too large");
+  }
+  if (!response.body) return;
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  let bytes = 0;
+  const dispatchCompleteEvents = () => {
+    for (;;) {
+      const boundary = /\r?\n\r?\n/.exec(buffer);
+      if (!boundary) return;
+      const event = buffer.slice(0, boundary.index);
+      buffer = buffer.slice(boundary.index + boundary[0].length);
+      for (const entry of parseSseMessages(event)) onMessage(entry);
+    }
+  };
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      if (!value) continue;
+      bytes += value.byteLength;
+      if (bytes > MAX_HTTP_RESPONSE_BYTES) {
+        await reader.cancel();
+        throw mcpError("LIMIT_EXCEEDED", "mcp server response is too large");
+      }
+      buffer += decoder.decode(value, { stream: true });
+      dispatchCompleteEvents();
+    }
+    buffer += decoder.decode();
+    dispatchCompleteEvents();
+    // A body that ends without its closing blank line still owes us that event.
+    for (const entry of parseSseMessages(buffer)) onMessage(entry);
+  } finally {
+    reader.releaseLock();
+  }
+}
+
 function headersForMcpRequest(
   headers: Record<string, string>,
   initialUrl: string,
@@ -297,11 +407,14 @@ function createHttpTransport(
   const activeControllers = new Set<AbortController>();
 
   return {
-    send: async (message) => {
+    send: async (message, timeoutMs = options.timeoutMs, signal) => {
       if (closed) throw mcpError("UNAVAILABLE", "mcp session is closed");
       const controller = new AbortController();
+      const abort = () => controller.abort();
+      if (signal?.aborted) abort();
+      else signal?.addEventListener("abort", abort, { once: true });
       activeControllers.add(controller);
-      const timer = setTimeout(() => controller.abort(), options.timeoutMs);
+      const timer = setTimeout(() => controller.abort(), timeoutMs);
       let url = options.url;
       try {
         for (let hop = 0; ; hop += 1) {
@@ -371,19 +484,24 @@ function createHttpTransport(
             return;
           }
           const contentType = response.headers.get("content-type") ?? "";
+          if (contentType.includes("text/event-stream")) {
+            // A streamable-HTTP server may hold the SSE stream open long after
+            // the JSON-RPC reply is written — keep-alives, or a session it ends
+            // on its own schedule (gitmcp.io answers in ~2s and closes ~12s
+            // later). Dispatching each event as it lands keeps that wait out of
+            // the caller's timeout budget.
+            await streamSseMessages(response, handlers.onMessage);
+            return;
+          }
           const body = await readBoundedHttpBody(response);
           if (!body.trim()) return;
-          const messages = contentType.includes("text/event-stream")
-            ? parseSseMessages(body)
-            : (() => {
-                const parsed = JSON.parse(body) as JsonRpcMessage | JsonRpcMessage[];
-                return Array.isArray(parsed) ? parsed : [parsed];
-              })();
-          for (const entry of messages) handlers.onMessage(entry);
+          const parsed = JSON.parse(body) as JsonRpcMessage | JsonRpcMessage[];
+          for (const entry of Array.isArray(parsed) ? parsed : [parsed]) handlers.onMessage(entry);
           return;
         }
       } finally {
         clearTimeout(timer);
+        signal?.removeEventListener("abort", abort);
         activeControllers.delete(controller);
       }
     },
@@ -465,14 +583,31 @@ export class McpServerClient {
     return this.connecting;
   }
 
-  async callTool(toolName: string, args: unknown): Promise<unknown> {
-    await this.connect();
+  async callTool(toolName: string, args: unknown, signal?: AbortSignal): Promise<unknown> {
+    if (signal?.aborted) throw mcpError("TOOL_ABORTED", "mcp tool call aborted");
+    const connecting = this.connect();
+    if (signal) {
+      let rejectAbort!: (error: Error) => void;
+      const aborted = new Promise<never>((_, reject) => { rejectAbort = reject; });
+      const abort = () => rejectAbort(mcpError("TOOL_ABORTED", "mcp tool call aborted"));
+      signal.addEventListener("abort", abort, { once: true });
+      if (signal.aborted) abort();
+      try {
+        await Promise.race([connecting, aborted]);
+      } finally {
+        signal.removeEventListener("abort", abort);
+      }
+    } else {
+      await connecting;
+    }
+    if (signal?.aborted) throw mcpError("TOOL_ABORTED", "mcp tool call aborted");
     const started = Date.now();
     try {
       const result = (await this.request(
         "tools/call",
         { name: toolName, arguments: args ?? {} },
         this.opts.callTimeoutMs ?? MCP_CALL_TIMEOUT_MS,
+        signal,
       )) as { content?: unknown; isError?: boolean } | null;
       if (result && typeof result === "object" && result.isError) {
         throw mcpError("TOOL_FAILED", describeMcpContent(result.content) || "mcp tool failed");
@@ -483,6 +618,11 @@ export class McpServerClient {
       this.audit(false, toolName, Date.now() - started, error);
       throw error;
     }
+  }
+
+  /** Probe a live connection without changing its discovered tool catalog. */
+  async ping(timeoutMs = 5_000): Promise<void> {
+    await this.request("ping", {}, timeoutMs);
   }
 
   close(): void {
@@ -639,24 +779,40 @@ export class McpServerClient {
     }
   }
 
-  private request(method: string, params: unknown, timeoutMs: number): Promise<unknown> {
+  private request(method: string, params: unknown, timeoutMs: number, signal?: AbortSignal): Promise<unknown> {
     const transport = this.transport;
     if (!transport) {
       return Promise.reject(mcpError("UNAVAILABLE", "mcp server is not connected"));
     }
+    if (signal?.aborted) return Promise.reject(mcpError("TOOL_ABORTED", "mcp tool call aborted"));
     const id = this.nextId++;
     return new Promise<unknown>((resolvePromise, rejectPromise) => {
+      const removeAbort = () => signal?.removeEventListener("abort", abort);
+      const abort = () => {
+        if (!this.pending.delete(id)) return;
+        clearTimeout(timer);
+        removeAbort();
+        rejectPromise(mcpError("TOOL_ABORTED", "mcp tool call aborted"));
+        void transport.send({ jsonrpc: "2.0", method: "notifications/cancelled", params: { requestId: id, reason: "cancelled" } }).catch(() => undefined);
+      };
       const timer = setTimeout(() => {
         this.pending.delete(id);
+        removeAbort();
         rejectPromise(mcpError("TIMEOUT", `mcp ${method} timed out after ${timeoutMs}ms`));
       }, timeoutMs);
-      this.pending.set(id, { resolve: resolvePromise, reject: rejectPromise, timer });
-      void transport.send({ jsonrpc: "2.0", id, method, params }).catch((error: Error) => {
+      this.pending.set(id, {
+        resolve: (value) => { removeAbort(); resolvePromise(value); },
+        reject: (error) => { removeAbort(); rejectPromise(error); },
+        timer,
+      });
+      signal?.addEventListener("abort", abort, { once: true });
+      if (signal?.aborted) abort();
+      void transport.send({ jsonrpc: "2.0", id, method, params }, timeoutMs, signal).catch((error: Error) => {
         const entry = this.pending.get(id);
         if (!entry) return;
         this.pending.delete(id);
         clearTimeout(entry.timer);
-        rejectPromise(error);
+        entry.reject(error);
       });
     });
   }

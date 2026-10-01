@@ -1,5 +1,5 @@
+import { SUBAGENT_REPORT_SUBJECT } from "@pi-desktop/shared";
 import { mkdir } from "node:fs/promises";
-import { join } from "node:path";
 
 import { AgentHost, type ApprovalPort } from "@pi-desktop/agent-host";
 import {
@@ -14,7 +14,7 @@ import {
   listPendingToolRequests,
 } from "@pi-desktop/host-runtime";
 import { DeviceTokenAuthenticator, RacpServer, bindRacpWebSocket, type RacpHostOperations, type WsBinding } from "@pi-desktop/racp";
-import { APP_VERSION, type AgentEventEnvelope } from "@pi-desktop/shared";
+import { APP_VERSION, type AgentEventEnvelope, type PlanProposal } from "@pi-desktop/shared";
 
 import type { PiHostConfig } from "./config.js";
 import { FileCredentialStore, loadOrCreateHostId } from "./credentials.js";
@@ -83,6 +83,11 @@ export async function startPiHost(config: PiHostConfig, options: { log?: HostLog
       return void result;
     },
     listPendingTools: (sessionId) => listPendingToolRequests(getHost, sessionId),
+    async listPendingContracts(sessionId) {
+      const host = getHost();
+      if (!host) throw new Error("host unavailable");
+      return (await host.call<{ plans: PlanProposal[] }>("plans.pending", { sessionId })).plans;
+    },
   };
   const agentHost = new AgentHost({
     runtime,
@@ -182,7 +187,7 @@ export async function startPiHost(config: PiHostConfig, options: { log?: HostLog
         throw new Error("extension model configuration is not available on a headless host");
       },
       queuePush: async (params) =>
-        agentHost.startTurn({ subject: "extension", roles: ["controller"] }, {
+        agentHost.startTurn({ subject: params.notification === "subagent-report" ? SUBAGENT_REPORT_SUBJECT : "extension", roles: ["controller"] }, {
           sessionId: String(params.sessionId ?? ""),
           admission: "queue",
           input: { text: String(params.content ?? "") },

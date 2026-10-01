@@ -22,17 +22,19 @@ import type {
   RacpRole,
   RacpSession,
   RacpSessionSnapshot,
+  RacpSessionState,
   RacpSessionStatus,
   RacpTurn,
   RacpTurnAdmission,
-  ToolPermissionRequest,
   UiMessage,
+  VoiceOrigin,
 } from "@pi-desktop/shared";
 import {
   RACP_ACTIVE_TURN_STATUSES,
   RACP_DEFAULT_LIMITS,
   RACP_DEFAULT_POLICY,
   applyMessageUpdate,
+  askToolOptionLabel,
   deltaStreamPayloadFits,
   effectiveRemotePermissionMode,
   racpKindForAgentEvent,
@@ -79,9 +81,12 @@ export type AgentHostOptions = {
 
 /** A queued turn together with the prompt it will send. */
 export type QueueEntryView = {
+  principalSubject: string;
   turn: RacpTurn;
   content: string;
   sessionMessageId?: string;
+  userMessageId?: string;
+  voiceOrigin?: VoiceOrigin;
   attachments?: AgentPromptAttachment[];
   /** Set only for promoted entries; entries are already in delivery order. */
   priority?: number;
@@ -90,6 +95,8 @@ export type QueueEntryView = {
 export type StartTurnParams = {
   sessionId: string;
   idempotencyKey?: string;
+  /** Main-private identity captured when authorizing a Live work scope. */
+  expectedWorkspaceIdentity?: string | null;
   admission?: RacpTurnAdmission;
   input: {
     text: string;
@@ -97,11 +104,22 @@ export type StartTurnParams = {
     sessionMessageId?: string;
     /** Client-chosen id for the durable user row (D288). */
     userMessageId?: string;
+    voiceOrigin?: VoiceOrigin;
   };
   context: RacpRequestContext;
 };
 
 export type StartTurnResult = { accepted: true; turn: RacpTurn; cursor: RacpCursor };
+
+export type AgentWorkSnapshot = {
+  sessionId: string;
+  mode: "agent" | "plan" | "goal";
+  state: "idle" | "running" | "waiting-permission" | "waiting-input" | "finalizing";
+  activeTurnId?: string;
+  activeTurnStatus?: RacpTurn["status"];
+  queue: Array<{ queueEntryId: string; position: number }>;
+  revision: number;
+};
 
 export type AttachParams = {
   sessionId: string;
@@ -142,7 +160,13 @@ type SessionState = {
   remoteSubscribers: number;
 };
 
-type IdempotencyEntry = { turnId: string; inputHash: string };
+type IdempotencyEntry = {
+  turnId: string;
+  inputHash: string;
+  sessionId: string;
+  userMessageId?: string;
+  voiceOrigin?: { callId: string; operationId: string };
+};
 
 const MAX_IDEMPOTENCY_ENTRIES = 2000;
 const MAX_TURNS_PER_SESSION = 200;
@@ -172,6 +196,8 @@ export class AgentHost {
   private readonly states = new Map<string, SessionState>();
   private readonly turnIndex = new Map<string, string>();
   private readonly runtimeAliases = new Map<string, string>();
+  /** The dequeued turn whose runtime prompt acknowledgement is still pending. */
+  private readonly startingQueuedTurns = new Map<string, TurnRecord>();
   private readonly idempotency = new Map<string, IdempotencyEntry>();
   private readonly draining = new Set<string>();
   /** A pass that arrived while one was running: the queue must be looked at again. */
@@ -215,6 +241,7 @@ export class AgentHost {
     const meta2 = {
       turnId,
       parentToolCallId: envelope.parentToolCallId,
+      nestedParentToolCallId: envelope.nestedParentToolCallId,
       agentName: envelope.agentName,
     };
 
@@ -335,6 +362,7 @@ export class AgentHost {
         this.emit(state, "turn.activity", { event }, meta2);
         return;
       }
+      case "usage":
       case "turn_start":
       case "turn_end":
         this.emit(state, "turn.activity", { event }, meta2);
@@ -439,8 +467,30 @@ export class AgentHost {
     return this.withAdmission(params.sessionId, () => this.startTurnAdmitted(principal, params));
   }
 
-  private async startTurnAdmitted(principal: Principal, params: StartTurnParams): Promise<StartTurnResult> {
+  /** Append to the shared Host queue even when no turn is currently running. */
+  async enqueueTurn(principal: Principal, params: StartTurnParams): Promise<StartTurnResult> {
+    this.requireRole(principal, "turn/start");
+    const result = await this.withAdmission(params.sessionId, () => this.startTurnAdmitted(principal, params, true));
+    await this.drain(params.sessionId);
+    return {
+      ...result,
+      turn: this.getTurn(result.turn.id),
+      cursor: this.hub.stream(params.sessionId).cursor(),
+    };
+  }
+
+  private async startTurnAdmitted(
+    principal: Principal,
+    params: StartTurnParams,
+    forceQueue = false,
+  ): Promise<StartTurnResult> {
     const summary = await this.requireSession(params.sessionId);
+    if (
+      params.expectedWorkspaceIdentity !== undefined &&
+      summary.workspaceIdentity !== params.expectedWorkspaceIdentity
+    ) {
+      throw racpError("WORKSPACE_CHANGED", "the session workspace changed after this work scope was authorized");
+    }
     const state = this.state(summary.id);
     state.permissionMode = summary.permissionMode;
     const inputHash = hashInput(params.input);
@@ -467,10 +517,10 @@ export class AgentHost {
       pairedDevice: principal.pairedDevice ?? false,
       approverOverride: principal.approverOverride ?? false,
     });
-    const admission: RacpTurnAdmission = params.admission ?? "reject_if_busy";
+    const admission: RacpTurnAdmission = forceQueue ? "queue" : params.admission ?? "reject_if_busy";
     const busy = this.isBusy(state);
     let turn: TurnRecord;
-    if (busy) {
+    if (busy || forceQueue) {
       if (admission === "reject_if_busy") {
         throw racpError("AGENT_BUSY", "the session already has an active turn");
       }
@@ -481,6 +531,7 @@ export class AgentHost {
         content: params.input.text,
         ...(params.input.sessionMessageId ? { sessionMessageId: params.input.sessionMessageId } : {}),
         ...(params.input.userMessageId ? { userMessageId: params.input.userMessageId } : {}),
+        ...(params.input.voiceOrigin ? { voiceOrigin: params.input.voiceOrigin } : {}),
         ...(params.input.attachments ? { attachments: params.input.attachments } : {}),
         effectivePermissionMode,
         ...(idempotencyKey ? { idempotencyKey } : {}),
@@ -503,13 +554,14 @@ export class AgentHost {
         content: params.input.text,
         ...(params.input.sessionMessageId ? { sessionMessageId: params.input.sessionMessageId } : {}),
         ...(params.input.userMessageId ? { userMessageId: params.input.userMessageId } : {}),
+        ...(params.input.voiceOrigin ? { voiceOrigin: params.input.voiceOrigin } : {}),
         ...(params.input.attachments ? { attachments: params.input.attachments } : {}),
         effectivePermissionMode,
         ...(idempotencyKey ? { idempotencyKey } : {}),
         principal,
       });
       turn = this.ensureTurn(state, started.turnId);
-      if (!isActive(turn.status)) turn.status = "running";
+      if (!isTerminal(turn.status) && !isActive(turn.status)) turn.status = "running";
       turn.admission = admission;
       turn.effectivePermissionMode = effectivePermissionMode;
       turn.idempotencyKey = idempotencyKey;
@@ -517,13 +569,95 @@ export class AgentHost {
       state.activeTurnId = turn.id;
       state.status = "running";
     }
-    if (idempotencyKey) this.rememberIdempotency(`${principal.subject}|${idempotencyKey}`, { turnId: turn.id, inputHash });
+    if (idempotencyKey) this.rememberIdempotency(`${principal.subject}|${idempotencyKey}`, {
+      turnId: turn.id,
+      inputHash,
+      sessionId: state.id,
+      ...(params.input.userMessageId ? { userMessageId: params.input.userMessageId } : {}),
+      ...(params.input.voiceOrigin ? { voiceOrigin: params.input.voiceOrigin } : {}),
+    });
     return { accepted: true, turn: this.toRacpTurn(state, turn), cursor: this.hub.stream(state.id).cursor() };
   }
 
   getTurn(turnId: string): RacpTurn {
     const state = this.stateForTurn(turnId);
     return this.toRacpTurn(state, state.turns.get(turnId)!);
+  }
+
+  /** Read-only, session-scoped reconciliation for an already issued request key. */
+  lookupTurnByIdempotency(
+    principal: Principal,
+    request: {
+      sessionId: string;
+      idempotencyKey: string;
+      userMessageId: string;
+      voiceOrigin: { callId: string; operationId: string };
+    },
+  ): RacpTurn | undefined {
+    this.requireRole(principal, "turn/get");
+    const { sessionId, idempotencyKey, userMessageId, voiceOrigin } = request;
+    if (!sessionId.trim() || !idempotencyKey.trim() || !userMessageId.trim()) return undefined;
+    const remembered = this.idempotency.get(`${principal.subject}|${idempotencyKey}`);
+    const rememberedMatches = remembered?.sessionId === sessionId &&
+      remembered.userMessageId === userMessageId &&
+      remembered.voiceOrigin?.callId === voiceOrigin.callId &&
+      remembered.voiceOrigin.operationId === voiceOrigin.operationId;
+    const queued = this.queue.list(sessionId).find((record) =>
+      record.idempotencyKey === idempotencyKey &&
+      record.userMessageId === userMessageId &&
+      record.voiceOrigin?.callId === voiceOrigin.callId &&
+      record.voiceOrigin.operationId === voiceOrigin.operationId,
+    );
+    const turnId = rememberedMatches ? remembered.turnId : queued?.id;
+    if (!turnId) return undefined;
+    const state = this.states.get(sessionId);
+    const turn = state?.turns.get(turnId);
+    if (state && turn?.sessionId === sessionId) return this.toRacpTurn(state, turn);
+    if (queued?.id === turnId) {
+      return {
+        id: queued.id,
+        sessionId: queued.sessionId,
+        status: "queued",
+        admission: "queue",
+        effectivePermissionMode: queued.effectivePermissionMode,
+        ...(queued.idempotencyKey ? { idempotencyKey: queued.idempotencyKey } : {}),
+      };
+    }
+    return undefined;
+  }
+
+  /** Capture the current Host-owned turn identity synchronously at ingress. */
+  observeWorkTarget(sessionId: string): { activeTurnId: string | null } {
+    const state = this.states.get(sessionId);
+    const active = state?.activeTurnId ? state.turns.get(state.activeTurnId) : undefined;
+    return { activeTurnId: active && isActive(active.status) ? active.id : null };
+  }
+
+  /** Read live work state without loading transcript history or message text. */
+  async workSnapshot(sessionId: string): Promise<AgentWorkSnapshot> {
+    const summary = await this.requireSession(sessionId);
+    const state = this.state(summary.id);
+    state.permissionMode = summary.permissionMode;
+    const active = state.activeTurnId ? state.turns.get(state.activeTurnId) : undefined;
+    const queue = this.queue.list(state.id).map((record, index) => ({ queueEntryId: record.id, position: index + 1 }));
+    const pendingApprovals = this.approvals.list(sessionId).length > 0;
+    const pendingInputs = state.pendingInputs.size > 0;
+    const activeStatus = active?.status;
+    const workState: AgentWorkSnapshot["state"] = pendingApprovals || activeStatus === "waiting_approval"
+      ? "waiting-permission"
+      : pendingInputs || activeStatus === "waiting_input"
+        ? "waiting-input"
+        : activeStatus !== undefined && isActive(activeStatus)
+          ? "running"
+          : "idle";
+    return {
+      sessionId: state.id,
+      mode: summary.mode,
+      state: workState,
+      ...(active ? { activeTurnId: active.id, activeTurnStatus: active.status } : {}),
+      queue,
+      revision: state.revision,
+    };
   }
 
   async stopTurn(principal: Principal, turnId: string): Promise<RacpTurn> {
@@ -663,7 +797,7 @@ export class AgentHost {
 
   async history(
     principal: Principal,
-    params: { sessionId: string; beforeItemId?: string; limit?: number },
+    params: { sessionId: string; beforeItemId?: string; limit?: number; contentLimit?: number },
   ): Promise<{ items: RacpItemSummary[]; hasMore: boolean; revision: number }> {
     this.requireRole(principal, "session/history");
     const state = this.state(params.sessionId);
@@ -671,27 +805,51 @@ export class AgentHost {
     const page = await this.sessions.history(params.sessionId, {
       limit,
       ...(params.beforeItemId ? { beforeItemId: params.beforeItemId } : {}),
+      ...(params.contentLimit !== undefined ? { contentLimit: params.contentLimit } : {}),
     });
     return { ...page, revision: state.revision };
   }
 
-  async snapshot(sessionId: string, summary?: SessionSummary): Promise<RacpSessionSnapshot> {
+  /**
+   * Live session state without the transcript page: what a client that already
+   * holds the transcript (event replay or a local cache) needs to refresh, at a
+   * fraction of the snapshot payload.
+   */
+  async sessionState(sessionId: string, summary?: SessionSummary): Promise<RacpSessionState> {
     const resolved = summary ?? (await this.requireSession(sessionId));
     const state = this.state(sessionId);
-    const page = await this.sessions.history(sessionId, { limit: this.snapshotItems });
+    await this.approvals.syncPendingContracts(sessionId, {
+      revision: state.revision,
+      lifetimeMs: this.approvalLifetime(state),
+    });
     const activeTurn = state.activeTurnId ? state.turns.get(state.activeTurnId) : undefined;
     return {
       session: this.toRacpSession(resolved, state),
       ...(activeTurn ? { activeTurn: this.toRacpTurn(state, activeTurn) } : {}),
       queuedTurns: this.queue.list(sessionId).map((record) => this.toRacpTurn(state, this.ensureTurn(state, record.id))),
-      items: page.items,
       activeItems: [...state.activeItems.values()],
       pendingApprovals: this.approvals.list(sessionId),
       pendingInputs: [...state.pendingInputs.values()].map((entry) => entry.request),
-      hasMoreHistory: page.hasMore,
       cursor: this.hub.stream(sessionId).cursor(),
       revision: state.revision,
       generatedAt: new Date(this.clock.now()).toISOString(),
+    };
+  }
+
+  async snapshot(
+    sessionId: string,
+    summary?: SessionSummary,
+    options?: { contentLimit?: number },
+  ): Promise<RacpSessionSnapshot> {
+    const base = await this.sessionState(sessionId, summary);
+    const page = await this.sessions.history(sessionId, {
+      limit: this.snapshotItems,
+      ...(options?.contentLimit !== undefined ? { contentLimit: options.contentLimit } : {}),
+    });
+    return {
+      ...base,
+      items: page.items,
+      hasMoreHistory: page.hasMore,
     };
   }
 
@@ -714,9 +872,12 @@ export class AgentHost {
   queueEntries(sessionId: string): QueueEntryView[] {
     const state = this.state(sessionId);
     return this.queue.list(sessionId).map((record) => ({
+      principalSubject: record.principalSubject,
       turn: this.toRacpTurn(state, this.ensureTurn(state, record.id)),
       content: record.content,
       ...(record.sessionMessageId ? { sessionMessageId: record.sessionMessageId } : {}),
+      ...(record.userMessageId ? { userMessageId: record.userMessageId } : {}),
+      ...(record.voiceOrigin ? { voiceOrigin: record.voiceOrigin } : {}),
       ...(record.attachments ? { attachments: record.attachments } : {}),
       ...(record.priority !== undefined ? { priority: record.priority } : {}),
     }));
@@ -777,7 +938,7 @@ export class AgentHost {
       error?: NonNullable<TurnRecord["error"]>;
       kind: Parameters<EventHub["publish"]>[0]["kind"];
       payload: Record<string, unknown>;
-      meta: { turnId?: string; parentToolCallId?: string; agentName?: string };
+      meta: { turnId?: string; parentToolCallId?: string; nestedParentToolCallId?: string; agentName?: string };
     },
   ): void {
     if (turn) {
@@ -790,7 +951,7 @@ export class AgentHost {
     }
     state.activeItems.clear();
     state.status = "idle";
-    for (const closed of this.approvals.cancelForSession(state.id, state.revision + 1)) {
+    for (const closed of this.approvals.cancelToolsForSession(state.id, state.revision + 1)) {
       this.emit(state, "approval.resolved", closed, outcome.meta);
     }
     for (const [inputId] of state.pendingInputs) {
@@ -825,12 +986,14 @@ export class AgentHost {
         const record = await this.queue.shift(sessionId);
         if (!record) return;
         const turn = this.ensureTurn(state, record.id);
+        this.startingQueuedTurns.set(sessionId, turn);
         try {
           const started = await this.runtime.prompt({
             sessionId,
             content: record.content,
             ...(record.sessionMessageId ? { sessionMessageId: record.sessionMessageId } : {}),
             ...(record.userMessageId ? { userMessageId: record.userMessageId } : {}),
+            ...(record.voiceOrigin ? { voiceOrigin: record.voiceOrigin } : {}),
             ...(record.attachments ? { attachments: record.attachments } : {}),
             effectivePermissionMode: record.effectivePermissionMode,
             ...(record.idempotencyKey ? { idempotencyKey: record.idempotencyKey } : {}),
@@ -863,6 +1026,8 @@ export class AgentHost {
           this.emit(state, "turn.failed", { turn: this.toRacpTurn(state, turn) }, { turnId: turn.id });
           this.renumberQueue(state);
           this.notifyQueue(sessionId);
+        } finally {
+          this.startingQueuedTurns.delete(sessionId);
         }
       }
   }
@@ -919,6 +1084,8 @@ export class AgentHost {
           turnId: runtimeTurnId,
           content: head.content,
           ...(head.sessionMessageId ? { sessionMessageId: head.sessionMessageId } : {}),
+          ...(head.userMessageId ? { userMessageId: head.userMessageId } : {}),
+          ...(head.voiceOrigin ? { voiceOrigin: head.voiceOrigin } : {}),
           ...(head.attachments ? { attachments: head.attachments } : {}),
           principal: { subject: head.principalSubject, roles: ["controller"] },
         }));
@@ -1054,7 +1221,7 @@ export class AgentHost {
     state: SessionState,
     kind: Parameters<EventHub["publish"]>[0]["kind"],
     payload: unknown,
-    meta: { turnId?: string; parentToolCallId?: string; agentName?: string },
+    meta: { turnId?: string; parentToolCallId?: string; nestedParentToolCallId?: string; agentName?: string },
   ): void {
     const durable = racpDurable(kind);
     if (durable) state.revision += 1;
@@ -1065,6 +1232,7 @@ export class AgentHost {
       revision: state.revision,
       kind,
       ...(meta.parentToolCallId ? { parentToolCallId: meta.parentToolCallId } : {}),
+      ...(meta.nestedParentToolCallId ? { nestedParentToolCallId: meta.nestedParentToolCallId } : {}),
       ...(meta.agentName ? { agentName: meta.agentName } : {}),
       payload: this.boundPayload(payload),
     });
@@ -1141,6 +1309,7 @@ export class AgentHost {
       status,
       createdAt: new Date(envelope.ts).toISOString(),
       ...(envelope.parentToolCallId ? { parentToolCallId: envelope.parentToolCallId } : {}),
+      ...(envelope.nestedParentToolCallId ? { nestedParentToolCallId: envelope.nestedParentToolCallId } : {}),
       ...(envelope.agentName ? { agentName: envelope.agentName } : {}),
       content,
     };
@@ -1159,10 +1328,13 @@ export class AgentHost {
       expiresAt: new Date(this.clock.now() + this.approvalLifetime(state)).toISOString(),
       ...(envelope.agentName ? { agentName: envelope.agentName } : {}),
       ...(envelope.parentToolCallId ? { parentToolCallId: envelope.parentToolCallId } : {}),
+      ...(envelope.nestedParentToolCallId ? { nestedParentToolCallId: envelope.nestedParentToolCallId } : {}),
       questions: request.questions.map((question, index) => ({
         id: `${request.requestId}:${index}`,
         question: question.question,
-        options: question.options,
+        // RACP v1 keeps answer choices as labels; the desktop-only description
+        // remains local to the inline asktool card.
+        options: question.options.map(askToolOptionLabel),
         multiSelect: question.multiSelect ?? false,
       })),
     };
@@ -1227,11 +1399,13 @@ export class AgentHost {
   private resolveTurnId(state: SessionState, runtimeTurnId: string): string {
     const alias = this.runtimeAliases.get(runtimeTurnId);
     if (alias) return alias;
-    // A queued turn that started before its prompt() call returned: adopt
-    // the runtime id for the head record so the two never diverge.
-    const head = this.queue.peek(state.id);
-    if (head && state.activeTurnId === undefined && !state.turns.has(runtimeTurnId) && this.draining.has(state.id)) {
-      return head.id;
+    // prompt() can emit events before returning its runtime id. The starting
+    // record has already left the queue; the new head belongs to another turn.
+    const starting = this.startingQueuedTurns.get(state.id);
+    if (starting && !starting.runtimeTurnId && !state.turns.has(runtimeTurnId)) {
+      starting.runtimeTurnId = runtimeTurnId;
+      this.runtimeAliases.set(runtimeTurnId, starting.id);
+      return starting.id;
     }
     return runtimeTurnId;
   }

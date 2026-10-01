@@ -1,0 +1,17 @@
+/* Composer and the queued-turn bar above it. */
+.composer { flex: none; margin: 0 12px 10px; padding: 8px; border-radius: 20px; background: var(--ds-bg-composer); box-shadow: var(--ds-shadow-composer); border: 1px solid var(--ds-border-default); }
+.composer textarea { resize: none; border: 0; background: transparent; padding: 8px 10px; font-size: 14px; line-height: 1.5; min-height: 42px; max-height: 150px; overflow-y: auto; }
+.composer textarea:focus-visible { outline: none; }
+.composer-actions { display: flex; align-items: center; gap: 3px; }
+.composer-mode { flex: 1; font-size: 10px; }
+.send-button { width: 40px; height: 40px; min-height: 40px; padding: 0; border-radius: 14px; }
+.stop-button { background: var(--ds-tile); width: 38px; height: 38px; min-height: 38px; }
+.composer-attachments { display: flex; gap: 6px; overflow: auto; padding: 3px; }
+.composer-attachments > span { display: inline-flex; align-items: center; background: var(--ds-tile); padding-left: 10px; border-radius: 10px; font-size: 11px; white-space: nowrap; }
+.queue-bar { flex: none; margin: 0 12px 6px; border: 1px solid var(--ds-border-default); border-radius: 14px; background: var(--ds-tile); overflow: hidden; animation: rise-in 160ms ease both; }
+.queue-toggle { width: 100%; min-height: 38px; padding: 6px 12px; justify-content: space-between; font-size: 12px; background: transparent; border-radius: 0; }
+.queue-list { list-style: none; margin: 0; padding: 0 6px 6px; display: grid; gap: 2px; }
+.queue-list li { display: flex; align-items: center; gap: 6px; padding: 2px 2px 2px 8px; border-radius: 9px; background: var(--ds-bg-elevated-opaque); }
+.queue-text { flex: 1; min-width: 0; font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.queue-actions { display: inline-flex; }
+.queue-actions .icon-button { width: 38px; height: 38px; }

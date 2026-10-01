@@ -11,7 +11,10 @@ use std::sync::{Mutex, OnceLock};
 
 use crate::transcripts::{self, CompactionRecord, MessageRecord, RevisionRecord};
 
+mod delegation_updates;
 mod fork_files;
+mod usage;
+pub use usage::record_usage;
 
 pub const MODES: [&str; 3] = ["plan", "goal", "agent"];
 
@@ -97,6 +100,10 @@ fn validate_thinking_level(level: &str) -> Result<()> {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SessionSummary {
+    #[serde(default)]
+    pub fast: bool,
+    #[serde(default)]
+    pub ultra: bool,
     pub id: String,
     pub title: String,
     /// Number of messages in the current canonical transcript. This is the
@@ -127,6 +134,10 @@ pub struct MessageUsage {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub reasoning_tokens: Option<i64>,
     pub total_tokens: i64,
+    /// Additive accounting provenance and atomic operation ledger. Preserve these
+    /// JSON fields verbatim, including fields introduced by a newer producer.
+    #[serde(default, flatten)]
+    pub accounting: serde_json::Map<String, Value>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -148,9 +159,18 @@ pub struct UiMessage {
     pub id: String,
     pub role: String,
     pub content: String,
+    /// Original text for a slash template or Skill invocation.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub command: Option<String>,
+    /// Validated Skill tokens in `command`, with UTF-16 offsets for the renderer.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub skill_mentions: Option<Vec<SkillMention>>,
     /// Host-authenticated agent-to-agent origin, never a human authorization.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub session_message: Option<Value>,
+    /// Minimal provenance for an accepted Live Voice work input.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub voice_origin: Option<Value>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub attachments: Option<Vec<MessageAttachment>>,
     /// Accepted input to an existing turn, preserved by Stop after renderer reload.
@@ -206,6 +226,8 @@ pub struct UiMessage {
     /// runtime excludes them from the parent's model context.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub parent_tool_call_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub nested_parent_tool_call_id: Option<String>,
     /// Subagent definition name that produced the row.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub agent_name: Option<String>,
@@ -213,6 +235,22 @@ pub struct UiMessage {
     /// as an additive `hostedSearch` transcript block; no SQL migration.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub hosted_search: Option<Value>,
+    /// Safe response facts and native replay metadata stored in message meta.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub response_diagnostics: Option<Value>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub assistant_replay: Option<Value>,
+    /// Durable image results and pending anonymous downloads.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub image_generation: Option<Value>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SkillMention {
+    pub start: usize,
+    pub end: usize,
+    pub id: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -284,8 +322,17 @@ fn is_default_title(title: &str) -> bool {
 /// the search index row (None for tool rows, matching the FTS triggers).
 pub(crate) fn ui_to_record(message: &UiMessage) -> (MessageRecord, Option<String>) {
     let mut meta_obj = serde_json::Map::new();
+    if let Some(command) = &message.command {
+        meta_obj.insert("command".into(), json!(command));
+    }
+    if let Some(mentions) = &message.skill_mentions {
+        meta_obj.insert("skillMentions".into(), json!(mentions));
+    }
     if let Some(origin) = &message.session_message {
         meta_obj.insert("sessionMessage".into(), origin.clone());
+    }
+    if let Some(origin) = &message.voice_origin {
+        meta_obj.insert("voiceOrigin".into(), origin.clone());
     }
     if let Some(steering) = message.steering {
         meta_obj.insert("steering".into(), json!(steering));
@@ -300,23 +347,19 @@ pub(crate) fn ui_to_record(message: &UiMessage) -> (MessageRecord, Option<String
         meta_obj.insert("providerId".into(), json!(provider_id));
     }
     if let Some(usage) = &message.usage {
-        meta_obj.insert(
-            "usage".into(),
-            json!({
-                "inputTokens": usage.input_tokens,
-                "outputTokens": usage.output_tokens,
-                "cacheReadTokens": usage.cache_read_tokens,
-                "cacheWriteTokens": usage.cache_write_tokens,
-                "reasoningTokens": usage.reasoning_tokens,
-                "totalTokens": usage.total_tokens,
-            }),
-        );
+        meta_obj.insert("usage".into(), json!(usage));
     }
     if let Some(duration) = message.response_duration_ms {
         meta_obj.insert("responseDurationMs".into(), json!(duration));
     }
     if let Some(tokens) = message.response_output_tokens {
         meta_obj.insert("responseOutputTokens".into(), json!(tokens));
+    }
+    if let Some(value) = &message.response_diagnostics {
+        meta_obj.insert("responseDiagnostics".into(), value.clone());
+    }
+    if let Some(value) = &message.assistant_replay {
+        meta_obj.insert("assistantReplay".into(), value.clone());
     }
     if let Some(error) = &message.error {
         meta_obj.insert("error".into(), error.clone());
@@ -333,6 +376,9 @@ pub(crate) fn ui_to_record(message: &UiMessage) -> (MessageRecord, Option<String
     if let Some(parent) = &message.parent_tool_call_id {
         meta_obj.insert("parentToolCallId".into(), json!(parent));
     }
+    if let Some(parent) = &message.nested_parent_tool_call_id {
+        meta_obj.insert("nestedParentToolCallId".into(), json!(parent));
+    }
     if let Some(agent) = &message.agent_name {
         meta_obj.insert("agentName".into(), json!(agent));
     }
@@ -345,6 +391,9 @@ pub(crate) fn ui_to_record(message: &UiMessage) -> (MessageRecord, Option<String
     let mut blocks = Vec::with_capacity(2 + message.attachments.as_ref().map_or(0, Vec::len));
     if let Some(thinking) = &message.thinking {
         blocks.push(json!({ "type": "thinking", "text": thinking }));
+    }
+    if let Some(images) = &message.image_generation {
+        blocks.push(json!({ "type": "imageGeneration", "result": images }));
     }
     if let Some(hosted_search) = &message.hosted_search {
         let mut block = serde_json::Map::new();
@@ -431,7 +480,15 @@ pub(crate) fn record_to_ui(record: MessageRecord) -> UiMessage {
         _ => Vec::new(),
     };
     let meta = record.meta.unwrap_or(Value::Null);
+    let command = meta
+        .get("command")
+        .and_then(Value::as_str)
+        .map(str::to_string);
+    let skill_mentions = meta
+        .get("skillMentions")
+        .and_then(|value| serde_json::from_value(value.clone()).ok());
     let session_message = meta.get("sessionMessage").cloned();
+    let voice_origin = meta.get("voiceOrigin").cloned();
     let steering = meta.get("steering").and_then(Value::as_bool);
     let status = meta
         .get("status")
@@ -459,8 +516,26 @@ pub(crate) fn record_to_ui(record: MessageRecord) -> UiMessage {
             cache_write_tokens: value.get("cacheWriteTokens").and_then(|v| v.as_i64()),
             reasoning_tokens: value.get("reasoningTokens").and_then(|v| v.as_i64()),
             total_tokens,
+            accounting: value
+                .as_object()?
+                .iter()
+                .filter(|(key, _)| {
+                    !matches!(
+                        key.as_str(),
+                        "inputTokens"
+                            | "outputTokens"
+                            | "cacheReadTokens"
+                            | "cacheWriteTokens"
+                            | "reasoningTokens"
+                            | "totalTokens"
+                    )
+                })
+                .map(|(key, value)| (key.clone(), value.clone()))
+                .collect(),
         })
     });
+    let response_diagnostics = meta.get("responseDiagnostics").cloned();
+    let assistant_replay = meta.get("assistantReplay").cloned();
     let error = meta.get("error").cloned();
     let response_duration_ms = meta.get("responseDurationMs").and_then(|v| v.as_i64());
     let response_output_tokens = meta.get("responseOutputTokens").and_then(|v| v.as_i64());
@@ -474,6 +549,10 @@ pub(crate) fn record_to_ui(record: MessageRecord) -> UiMessage {
         .get("parentToolCallId")
         .and_then(|v| v.as_str())
         .map(|s| s.to_string());
+    let nested_parent_tool_call_id = meta
+        .get("nestedParentToolCallId")
+        .and_then(Value::as_str)
+        .map(str::to_string);
     let agent_name = meta
         .get("agentName")
         .and_then(|v| v.as_str())
@@ -487,6 +566,11 @@ pub(crate) fn record_to_ui(record: MessageRecord) -> UiMessage {
         })
         .collect::<Vec<_>>();
     let thinking = (!thinking.is_empty()).then(|| thinking.concat());
+    let image_generation = blocks
+        .iter()
+        .find(|b| b.get("type").and_then(Value::as_str) == Some("imageGeneration"))
+        .and_then(|b| b.get("result"))
+        .cloned();
     let hosted_search = blocks
         .iter()
         .find(|b| b.get("type").and_then(|t| t.as_str()) == Some("hostedSearch"))
@@ -533,7 +617,10 @@ pub(crate) fn record_to_ui(record: MessageRecord) -> UiMessage {
             id: record.id,
             role: record.role,
             content: text,
+            command: command.clone(),
+            skill_mentions: skill_mentions.clone(),
             session_message,
+            voice_origin: voice_origin.clone(),
             attachments: None,
             steering,
             created_at: record.created_at,
@@ -566,8 +653,12 @@ pub(crate) fn record_to_ui(record: MessageRecord) -> UiMessage {
             tool_duration_ms: block.get("durationMs").and_then(|v| v.as_i64()),
             is_error,
             parent_tool_call_id,
+            nested_parent_tool_call_id,
             agent_name,
             hosted_search: hosted_search.clone(),
+            response_diagnostics: response_diagnostics.clone(),
+            assistant_replay: assistant_replay.clone(),
+            image_generation: image_generation.clone(),
         }
     } else {
         let content = blocks
@@ -582,7 +673,10 @@ pub(crate) fn record_to_ui(record: MessageRecord) -> UiMessage {
             id: record.id,
             role: record.role,
             content,
+            command,
+            skill_mentions,
             session_message,
+            voice_origin,
             attachments,
             steering,
             created_at: record.created_at,
@@ -606,8 +700,12 @@ pub(crate) fn record_to_ui(record: MessageRecord) -> UiMessage {
             tool_duration_ms: None,
             is_error,
             parent_tool_call_id,
+            nested_parent_tool_call_id,
             agent_name,
             hosted_search,
+            response_diagnostics,
+            assistant_replay,
+            image_generation,
         }
     }
 }
@@ -1112,12 +1210,16 @@ fn session_created_at(db: &Database, session_id: &str) -> Result<String> {
 
 const SUMMARY_SELECT: &str =
     "SELECT s.id, s.title, s.last_seq, p.path, s.model_id, s.provider_id, s.mode,
-            s.thinking_level, s.permission_mode, s.updated_at, s.created_at
+            s.thinking_level, s.permission_mode, s.updated_at, s.created_at,
+            COALESCE((SELECT value_json = 'true' FROM kv WHERE ns = 'app' AND key = 'session-fast:' || s.id), 0) AS fast,
+            COALESCE((SELECT value_json = 'true' FROM kv WHERE ns = 'app' AND key = 'session-ultra:' || s.id), 0) AS ultra
      FROM sessions s LEFT JOIN projects p ON p.id = s.project_id
      WHERE s.deleted_at IS NULL";
 
 pub(crate) fn summary_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<SessionSummary> {
     Ok(SessionSummary {
+        fast: row.get("fast")?,
+        ultra: row.get("ultra")?,
         id: row.get(0)?,
         title: row.get(1)?,
         message_count: row.get(2)?,
@@ -1130,6 +1232,14 @@ pub(crate) fn summary_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Sess
         updated_at: ms_to_ts(row.get(9)?),
         created_at: ms_to_ts(row.get(10)?),
     })
+}
+
+pub fn get_session_summary(db: &Database, id: &str) -> Result<Option<SessionSummary>> {
+    Ok(db
+        .conn()
+        .prepare_cached(&format!("{SUMMARY_SELECT} AND s.id = ?1"))?
+        .query_row(params![id], summary_from_row)
+        .optional()?)
 }
 
 // ---- sessions ---------------------------------------------------------------
@@ -1283,6 +1393,8 @@ pub fn create_session_with_options(
             now
         ])?;
     Ok(SessionSummary {
+        fast: false,
+        ultra: false,
         id,
         title,
         message_count: 0,
@@ -1495,8 +1607,8 @@ pub enum ForkSessionResult {
 /// Whether the session currently owns a running turn.
 ///
 /// A running turn owns its project's instructions, tools, and working
-/// directory, so an operation that crosses that boundary (fork, move, or the
-/// bulk delete of a project) is refused for as long as the turn lasts.
+/// directory, so moving or deleting that project is refused while it runs.
+/// A fork may copy a completed prefix without touching that live ownership.
 pub fn session_has_running_turn(db: &Database, id: &str) -> Result<bool> {
     let running: bool = db.conn().query_row(
         "SELECT EXISTS(
@@ -1521,21 +1633,61 @@ pub fn fork_session_through(
     let Some(source) = get_session(db, source_id)? else {
         return Ok(ForkSessionResult::NotFound);
     };
-    if session_has_running_turn(db, source_id)? {
+    let running = session_has_running_turn(db, source_id)?;
+    let anchor = through_message_id
+        .map(str::trim)
+        .filter(|id| !id.is_empty());
+    if running && anchor.is_none() {
         return Ok(ForkSessionResult::Busy);
     }
     let mut source_records =
         dedupe_records(transcripts::read_transcript(db.data_dir(), source_id)?);
-    if let Some(message_id) = through_message_id
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-    {
+    if let Some(message_id) = anchor {
         let Some(position) = source_records
             .iter()
             .position(|record| record.id == message_id)
         else {
             return Ok(ForkSessionResult::NotFound);
         };
+        if running {
+            let record = &source_records[position];
+            // An assistant message can be complete while its tool loop is still
+            // running. Reject any prefix containing rows owned by a live turn,
+            // not merely a streaming anchor. The RPC holds the host state lock
+            // across this check and publication, including transcript appends.
+            let settled_prefix: bool = db.conn().query_row(
+                "SELECT EXISTS (
+                    SELECT 1 FROM messages anchor
+                    WHERE anchor.session_id = ?1 AND anchor.id = ?2
+                    AND NOT EXISTS (
+                        SELECT 1 FROM messages m JOIN turns t ON t.id = m.turn_id
+                        WHERE m.session_id = ?1 AND t.status = 'running'
+                          AND m.seq <= anchor.seq
+                    )
+                 )",
+                params![source_id, message_id],
+                |row| row.get(0),
+            )?;
+            if record.role != "assistant"
+                || record.is_error
+                || !matches!(
+                    record
+                        .meta
+                        .as_ref()
+                        .and_then(|meta| meta.get("status"))
+                        .and_then(Value::as_str),
+                    None | Some("complete")
+                )
+                || record
+                    .meta
+                    .as_ref()
+                    .and_then(|meta| meta.get("error"))
+                    .is_some_and(|error| !error.is_null())
+                || !settled_prefix
+            {
+                return Ok(ForkSessionResult::Busy);
+            }
+        }
         source_records.truncate(position + 1);
     }
     let source_compactions = transcripts::read_compactions(db.data_dir(), source_id)?;
@@ -1603,6 +1755,8 @@ pub fn fork_session_through(
     files.commit();
 
     let summary = SessionSummary {
+        fast: false,
+        ultra: false,
         id,
         title,
         message_count: records.len() as i64,
@@ -1639,7 +1793,7 @@ pub fn configure_session(
     provider_id: Option<&str>,
     model_id: Option<&str>,
 ) -> Result<Option<SessionSummary>> {
-    configure_session_with_thinking(db, id, mode, provider_id, model_id, None, None)
+    configure_session_with_thinking(db, id, mode, provider_id, model_id, None, None, None, None)
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -1651,6 +1805,8 @@ pub fn configure_session_with_thinking(
     model_id: Option<&str>,
     thinking_level: Option<&str>,
     permission_mode: Option<&str>,
+    fast: Option<bool>,
+    ultra: Option<bool>,
 ) -> Result<Option<SessionSummary>> {
     if !(is_valid_mode(mode) || mode == "chat") {
         return Err(anyhow!("mode must be plan or agent"));
@@ -1671,8 +1827,23 @@ pub fn configure_session_with_thinking(
         thinking_level,
         permission_mode,
     )?;
-    let changed = db
-        .conn()
+    let Some(current) = get_session_summary(db, id)? else {
+        return Ok(None);
+    };
+    let next_provider_id = provider_id.or(current.provider_id.as_deref());
+    let next_model_id = model_id.or(current.model_id.as_deref());
+    let same_selection = next_provider_id == current.provider_id.as_deref()
+        && next_model_id == current.model_id.as_deref();
+    let selected_ultra = ultra.unwrap_or(current.ultra && same_selection);
+    let selected_fast = fast::resolve(
+        db,
+        next_provider_id,
+        next_model_id,
+        fast,
+        current.fast && same_selection,
+    )?;
+    let tx = db.conn().unchecked_transaction()?;
+    let changed = tx
         .prepare_cached(
             "UPDATE sessions
              SET mode = ?2, provider_id = COALESCE(?3, provider_id),
@@ -1693,14 +1864,29 @@ pub fn configure_session_with_thinking(
     if changed == 0 {
         return Ok(None);
     }
+    db.set_setting(
+        &format!("session-fast:{id}"),
+        &serde_json::json!(selected_fast),
+    )?;
+    db.set_setting(
+        &format!("session-ultra:{id}"),
+        &serde_json::json!(selected_ultra),
+    )?;
+    tx.commit()?;
     Ok(get_session(db, id)?.map(|detail| detail.summary))
 }
 
 pub fn delete_session(db: &Database, id: &str) -> Result<bool> {
+    let tx = db.conn().unchecked_transaction()?;
+    tx.execute(
+        "DELETE FROM kv WHERE ns = 'app' AND key IN (?1, ?2)",
+        [format!("session-fast:{id}"), format!("session-ultra:{id}")],
+    )?;
     let n = db
         .conn()
         .prepare_cached("DELETE FROM sessions WHERE id = ?1")?
         .execute(params![id])?;
+    tx.commit()?;
     if n > 0 {
         // Here rather than in the RPC handler so every deletion path (UI,
         // failed scheduled-run cleanup) also drops the transcript files.
@@ -1813,6 +1999,7 @@ pub fn append_message(
                 params![session_id, record.id, text, record.is_error],
             )?;
         } else {
+            delegation_updates::refresh_task(db, session_id, &message, &record, text.as_deref())?;
             return Ok(());
         }
     } else {
@@ -3378,6 +3565,21 @@ pub fn end_turn_settling(
         "completed" | "aborted" | "error" => status,
         _ => "completed",
     };
+    let existing_usage: Option<String> = db
+        .conn()
+        .query_row(
+            "SELECT usage_json FROM turns WHERE id = ?1",
+            params![turn_id],
+            |row| row.get(0),
+        )
+        .optional()?
+        .flatten();
+    let existing_usage = existing_usage
+        .as_deref()
+        .map(serde_json::from_str::<Value>)
+        .transpose()?;
+    let merged_usage = usage.map(|next| usage::merge_usage(existing_usage.as_ref(), next));
+    let usage = merged_usage.as_ref().or(existing_usage.as_ref());
     let input_tokens = usage
         .and_then(|u| u.get("inputTokens"))
         .and_then(|v| v.as_i64());
@@ -3407,6 +3609,19 @@ pub fn end_turn_settling(
             usage.map(|u| u.to_string()),
             turn_id,
         ])?;
+    // A replay after startup recovery may complete accounting for a terminal
+    // turn, but must never change its settled status or emit another notification.
+    if n == 0 && usage.is_some_and(|value| value.get("operations").is_some()) {
+        tx.execute(
+            "UPDATE turns SET input_tokens = ?1, output_tokens = ?2, usage_json = ?3 WHERE id = ?4",
+            params![
+                input_tokens,
+                output_tokens,
+                usage.map(Value::to_string),
+                turn_id
+            ],
+        )?;
+    }
     let notification = if n > 0 && create_notification {
         notifications::insert_for_terminal_turn(&tx, turn_id, status, error_code)?
     } else {
@@ -3783,7 +3998,10 @@ mod tests {
             id: id.into(),
             role: "user".into(),
             content: content.into(),
+            command: None,
+            skill_mentions: None,
             attachments: None,
+            voice_origin: None,
             steering: None,
             created_at: ts.into(),
             thinking: None,
@@ -3806,7 +4024,11 @@ mod tests {
             tool_duration_ms: None,
             is_error: None,
             parent_tool_call_id: None,
+            nested_parent_tool_call_id: None,
             agent_name: None,
+            image_generation: None,
+            response_diagnostics: None,
+            assistant_replay: None,
             hosted_search: None,
             session_message: None,
         }
@@ -4146,6 +4368,8 @@ mod tests {
             Some("model-1"),
             Some("high"),
             None,
+            None,
+            None,
         )
         .unwrap()
         .unwrap();
@@ -4169,6 +4393,8 @@ mod tests {
             None,
             Some("turbo"),
             None,
+            None,
+            None
         )
         .is_err());
         let omitted = configure_session_with_thinking(
@@ -4178,6 +4404,8 @@ mod tests {
             None,
             None,
             Some("omit"),
+            None,
+            None,
             None,
         )
         .unwrap()
@@ -4287,6 +4515,8 @@ mod tests {
     fn import_session_is_idempotent_and_preserves_timestamps() {
         let db = test_db();
         let summary = SessionSummary {
+            fast: false,
+            ultra: false,
             id: "import-claude-code-abc".into(),
             title: "Imported".into(),
             message_count: 1,
@@ -4337,6 +4567,8 @@ mod tests {
     fn import_materializes_unique_projects_but_keeps_pathless_sessions_temporary() {
         let db = test_db();
         let base = SessionSummary {
+            fast: false,
+            ultra: false,
             id: "import-codex-one".into(),
             title: "Imported".into(),
             message_count: 0,
@@ -4427,7 +4659,10 @@ mod tests {
             id: "m2".into(),
             role: "tool".into(),
             content: "ok".into(),
+            command: None,
+            skill_mentions: None,
             attachments: None,
+            voice_origin: None,
             steering: None,
             created_at: "2025-05-01T00:00:02Z".into(),
             thinking: None,
@@ -4450,7 +4685,11 @@ mod tests {
             tool_duration_ms: Some(1_000),
             is_error: None,
             parent_tool_call_id: None,
+            nested_parent_tool_call_id: None,
             agent_name: None,
+            image_generation: None,
+            response_diagnostics: None,
+            assistant_replay: None,
             hosted_search: None,
             session_message: None,
         };
@@ -4849,6 +5088,79 @@ mod tests {
     }
 
     #[test]
+    fn nested_lineage_roundtrips_independently_of_legacy_task_parent() {
+        let db = test_db();
+        let session = create_session(&db, None, None, None, None, None).unwrap();
+        for (id, task, nested) in [
+            ("legacy", Some("task-1"), None),
+            ("nested-root", None, Some("code-root")),
+            ("nested-delegate", Some("task-1"), Some("code-child")),
+        ] {
+            let mut message = user_msg(id, "result", "2026-09-30T00:00:00Z");
+            message.role = "assistant".into();
+            message.parent_tool_call_id = task.map(str::to_owned);
+            message.nested_parent_tool_call_id = nested.map(str::to_owned);
+            append_message(&db, &session.id, &message, None).unwrap();
+        }
+        let detail = get_session(&db, &session.id).unwrap().unwrap();
+        assert_eq!(
+            detail.messages[0].parent_tool_call_id.as_deref(),
+            Some("task-1")
+        );
+        assert_eq!(detail.messages[0].nested_parent_tool_call_id, None);
+        assert_eq!(detail.messages[1].parent_tool_call_id, None);
+        assert_eq!(
+            detail.messages[1].nested_parent_tool_call_id.as_deref(),
+            Some("code-root")
+        );
+        assert_eq!(
+            detail.messages[2].parent_tool_call_id.as_deref(),
+            Some("task-1")
+        );
+        assert_eq!(
+            detail.messages[2].nested_parent_tool_call_id.as_deref(),
+            Some("code-child")
+        );
+    }
+
+    #[test]
+    fn usage_accounting_roundtrips_without_rewriting_legacy_tokens() {
+        let db = test_db();
+        let session = create_session(&db, None, None, None, None, None).unwrap();
+        let fixtures = [
+            json!({"inputTokens": 12, "outputTokens": 3, "totalTokens": 15}),
+            json!({
+                "inputTokens": 12, "outputTokens": 3, "totalTokens": 15,
+                "operationId": "request-1", "usageOrigin": "pi",
+                "providerId": "physical-account", "modelId": "physical-model",
+                "costStatus": "reported", "aggregation": "operation",
+                "cost": {"input": 0.12, "output": 0.03, "cacheRead": 0, "cacheWrite": 0, "total": 0.15}
+            }),
+            json!({
+                "inputTokens": 12, "outputTokens": 3, "totalTokens": 15,
+                "costStatus": "unknown", "aggregation": "aggregate",
+                "operations": [
+                    {"operationId": "child-1", "usageOrigin": "pi", "inputTokens": 10, "outputTokens": 2, "totalTokens": 12, "costStatus": "unknown"},
+                    {"operationId": "classifier-1", "usageOrigin": "pi", "inputTokens": 2, "outputTokens": 1, "totalTokens": 3, "costStatus": "estimated", "cost": {"input": 0.2, "output": 0.1, "cacheRead": 0, "cacheWrite": 0, "total": 0.3}}
+                ]
+            }),
+        ];
+        for (index, usage) in fixtures.iter().enumerate() {
+            let mut message = user_msg(&format!("usage-{index}"), "answer", "2026-09-30T00:00:00Z");
+            message.role = "assistant".into();
+            message.usage = Some(serde_json::from_value(usage.clone()).unwrap());
+            append_message(&db, &session.id, &message, None).unwrap();
+            // Replayed message_end replaces a row; it must not duplicate usage.
+            append_message(&db, &session.id, &message, None).unwrap();
+        }
+        let detail = get_session(&db, &session.id).unwrap().unwrap();
+        assert_eq!(detail.messages.len(), fixtures.len());
+        for (message, expected) in detail.messages.iter().zip(fixtures) {
+            assert_eq!(json!(message.usage), expected);
+        }
+    }
+
+    #[test]
     fn assistant_thinking_roundtrips_as_canonical_blocks() {
         let db = test_db();
         let session = create_session(&db, None, None, None, None, None).unwrap();
@@ -4856,7 +5168,10 @@ mod tests {
             id: "assistant-1".into(),
             role: "assistant".into(),
             content: "final answer".into(),
+            command: None,
+            skill_mentions: None,
             attachments: None,
+            voice_origin: None,
             steering: None,
             created_at: "2025-05-01T00:00:01Z".into(),
             thinking: Some("first plan\nsecond plan".into()),
@@ -4870,6 +5185,7 @@ mod tests {
                 cache_write_tokens: None,
                 reasoning_tokens: Some(5),
                 total_tokens: 48,
+                accounting: serde_json::Map::new(),
             }),
             response_duration_ms: Some(2_000),
             response_output_tokens: Some(34),
@@ -4886,7 +5202,11 @@ mod tests {
             tool_duration_ms: None,
             is_error: None,
             parent_tool_call_id: None,
+            nested_parent_tool_call_id: None,
             agent_name: None,
+            image_generation: None,
+            response_diagnostics: None,
+            assistant_replay: None,
             hosted_search: None,
             session_message: None,
         };
@@ -4932,6 +5252,25 @@ mod tests {
     }
 
     #[test]
+    fn assistant_partial_response_metadata_roundtrips_without_a_schema_change() {
+        let mut message = user_msg("partial", "Retained answer", "2026-09-29T00:00:00Z");
+        message.role = "assistant".into();
+        message.status = Some("error".into());
+        message.error = Some(json!({ "code": "MODEL_OUTPUT_TRUNCATED" }));
+        message.response_diagnostics =
+            Some(json!({ "end": "truncated", "rawStopReason": "max_tokens" }));
+        message.assistant_replay = Some(
+            json!({ "api": "anthropic-messages", "provider": "qa", "model": "claude-qa", "blocks": [{ "type": "thinking", "thinking": "Retained thinking", "thinkingSignature": "fixture-signature" }, { "type": "text", "text": "Retained answer" }] }),
+        );
+        let (record, _) = ui_to_record(&message);
+        let restored = record_to_ui(record);
+        assert_eq!(restored.response_diagnostics, message.response_diagnostics);
+        assert_eq!(restored.assistant_replay, message.assistant_replay);
+        assert_eq!(restored.content, message.content);
+        assert_eq!(restored.status, message.status);
+    }
+
+    #[test]
     fn assistant_hosted_search_roundtrips_as_canonical_blocks() {
         let db = test_db();
         let session = create_session(&db, None, None, None, None, None).unwrap();
@@ -4939,7 +5278,10 @@ mod tests {
             id: "assistant-search-1".into(),
             role: "assistant".into(),
             content: "answer with sources".into(),
+            command: None,
+            skill_mentions: None,
             attachments: None,
+            voice_origin: None,
             steering: None,
             created_at: "2025-05-01T00:00:01Z".into(),
             thinking: None,
@@ -4962,7 +5304,11 @@ mod tests {
             tool_duration_ms: None,
             is_error: None,
             parent_tool_call_id: None,
+            nested_parent_tool_call_id: None,
             agent_name: None,
+            image_generation: None,
+            response_diagnostics: None,
+            assistant_replay: None,
             hosted_search: Some(json!({
                 "status": "completed",
                 "rounds": [
@@ -5076,6 +5422,8 @@ mod tests {
     fn import_and_replace_preserve_thinking() {
         let db = test_db();
         let summary = SessionSummary {
+            fast: false,
+            ultra: false,
             id: "thinking-import".into(),
             title: "Thinking".into(),
             message_count: 0,
@@ -5378,7 +5726,7 @@ mod tests {
             panic!("expected child")
         };
         let child_scratch = crate::scratch::session_dir(db.data_dir(), &child.summary.id).unwrap();
-        let child_file = child_scratch.join("pasted/first note.txt");
+        let child_file = child_scratch.join("pasted").join("first note.txt");
         assert_eq!(
             std::fs::read_to_string(&child_file).unwrap(),
             "original reference bytes"
@@ -5414,7 +5762,8 @@ mod tests {
         };
         let grandchild_file = crate::scratch::session_dir(db.data_dir(), &grandchild.summary.id)
             .unwrap()
-            .join("pasted/first note.txt");
+            .join("pasted")
+            .join("first note.txt");
         assert_eq!(
             std::fs::read_to_string(&grandchild_file).unwrap(),
             "original reference bytes"
@@ -5448,6 +5797,8 @@ mod tests {
             Some("model-1"),
             Some("high"),
             Some("auto"),
+            None,
+            None,
         )
         .unwrap();
 
@@ -5523,6 +5874,8 @@ mod tests {
             Some("model-2"),
             Some("off"),
             Some("ask"),
+            None,
+            None,
         )
         .unwrap();
         let source_final = get_session(&db, &source.id).unwrap().unwrap();
@@ -5564,6 +5917,107 @@ mod tests {
                 .len(),
             3
         );
+    }
+
+    #[test]
+    fn completed_reply_fork_during_later_turn_preserves_the_running_source() {
+        let db = test_db();
+        let source = create_session(&db, Some("Source".into()), None, None, None, None).unwrap();
+        let first = begin_turn(&db, &source.id, None, None).unwrap();
+        let mut reply = user_msg("reply", "finished reply", "2025-05-01T00:00:01Z");
+        reply.role = "assistant".into();
+        append_message(
+            &db,
+            &source.id,
+            &user_msg("first", "first prompt", "2025-05-01T00:00:00Z"),
+            Some(&first),
+        )
+        .unwrap();
+        append_message(&db, &source.id, &reply, Some(&first)).unwrap();
+        end_turn(&db, &first, "completed", None, None, false).unwrap();
+        let running = begin_turn(&db, &source.id, None, None).unwrap();
+        // Admission can precede persistence of the next user row.
+        let ForkSessionResult::Created(early) =
+            fork_session_through(&db, &source.id, None, Some("reply")).unwrap()
+        else {
+            panic!("completed history should fork during a later turn");
+        };
+        assert_eq!(early.messages.len(), 2);
+        append_message(
+            &db,
+            &source.id,
+            &user_msg("second", "second prompt", "2025-05-01T00:00:02Z"),
+            Some(&running),
+        )
+        .unwrap();
+        let mut current = reply.clone();
+        current.id = "current".into();
+        current.content = "intermediate completed response in a running tool loop".into();
+        append_message(&db, &source.id, &current, Some(&running)).unwrap();
+        let before = get_session(&db, &source.id).unwrap().unwrap();
+        let ForkSessionResult::Created(child) =
+            fork_session_through(&db, &source.id, None, Some("reply")).unwrap()
+        else {
+            panic!("completed history should fork while the source streams");
+        };
+        assert_eq!(child.messages.len(), 2);
+        assert_eq!(child.messages[1].content, "finished reply");
+        assert_ne!(child.messages[1].id, "reply");
+        assert!(session_has_running_turn(&db, &source.id).unwrap());
+        assert!(!session_has_running_turn(&db, &child.summary.id).unwrap());
+        assert_eq!(
+            get_session(&db, &source.id)
+                .unwrap()
+                .unwrap()
+                .messages
+                .len(),
+            before.messages.len()
+        );
+        for anchor in [
+            None,
+            Some(""),
+            Some("first"),
+            Some("second"),
+            Some("current"),
+        ] {
+            assert!(matches!(
+                fork_session_through(&db, &source.id, None, anchor).unwrap(),
+                ForkSessionResult::Busy
+            ));
+        }
+        assert!(matches!(
+            fork_session_through(&db, &source.id, None, Some("missing")).unwrap(),
+            ForkSessionResult::NotFound
+        ));
+        // The original turn can still finish after the child was published.
+        current.id = "final".into();
+        current.content = "source finished independently".into();
+        append_message(&db, &source.id, &current, Some(&running)).unwrap();
+        end_turn(&db, &running, "completed", None, None, false).unwrap();
+        assert_eq!(
+            get_session(&db, &source.id)
+                .unwrap()
+                .unwrap()
+                .messages
+                .len(),
+            5
+        );
+        assert_eq!(
+            get_session(&db, &child.summary.id)
+                .unwrap()
+                .unwrap()
+                .messages
+                .len(),
+            2
+        );
+        // A child has no copied turn ids, but its completed history remains forkable.
+        let child_turn = begin_turn(&db, &child.summary.id, None, None).unwrap();
+        assert!(matches!(
+            fork_session_through(&db, &child.summary.id, None, Some(&child.messages[1].id))
+                .unwrap(),
+            ForkSessionResult::Created(_)
+        ));
+        end_turn(&db, &child_turn, "aborted", None, None, false).unwrap();
     }
 
     #[test]
@@ -7027,3 +7481,5 @@ mod tests {
         );
     }
 }
+mod fast;
+mod ultra;

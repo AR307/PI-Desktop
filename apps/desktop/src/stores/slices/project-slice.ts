@@ -1,8 +1,5 @@
 import i18n from "i18next";
-import type {
-  ProjectWorkspace,
-  SessionSummary,
-} from "@pi-desktop/shared";
+import type { ProjectWorkspace } from "@pi-desktop/shared";
 import { api } from "../../lib/api";
 import {
   rememberProject,
@@ -30,9 +27,6 @@ import {
   sortSessions,
   normalizeProjectName,
   type ProjectMeta,
-  type ProjectSort,
-  type SessionMeta,
-  type SessionSort,
 } from "../../lib/sidebar-preferences";
 import {
   normalizeProjectPath,
@@ -137,7 +131,6 @@ function clearLocalSessionState(
   id: string,
 ): void {
   manualSessionTitles.delete(id);
-  runtime.pendingSessionConfigurations.delete(id);
   runtime.sessionTranscriptCache.delete(id);
   runtime.sessionHistoryCache.delete(id);
   runtime.liveSessionTranscripts.delete(id);
@@ -150,6 +143,10 @@ function clearLocalSessionState(
     delete runningSessions[id];
     const agentStatuses = { ...state.agentStatuses };
     delete agentStatuses[id];
+    const backgroundDelegations = withoutRecordKey(
+      state.backgroundDelegations,
+      id,
+    );
     const sessionOutcomes = { ...state.sessionOutcomes };
     delete sessionOutcomes[id];
     const queuedPrompts = withoutRecordKey(state.queuedPrompts, id);
@@ -176,6 +173,7 @@ function clearLocalSessionState(
       sessions,
       runningSessions,
       agentStatuses,
+      backgroundDelegations,
       sessionOutcomes,
       queuedPrompts,
       workPanelContexts,
@@ -559,6 +557,8 @@ export function createProjectSlice({
     deleteSession: async (id) => {
       if (!id) return;
       await api.deleteSession(id);
+      void api.pluginViewClose("pi.browser", "browser", { sessionId: id })
+        .catch((error) => get().showToast(String(error), { variant: "error" }));
       clearLocalSessionState(
         { get, set, runtime, manualSessionTitles, withoutRecordKey },
         id,

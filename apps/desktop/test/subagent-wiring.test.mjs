@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 
+const modelSources = await readMainModule("runtime/subagent-model-sources.ts");
 const sessionLaunchSource = await readMainModule("runtime/session-launch.ts");
 const providerCatalogSource = await readMainModule("runtime/provider-catalog.ts");
 const desktopSidecarSource = await readMainModule("runtime/sidecar.ts");
@@ -29,6 +30,16 @@ const hostProcessSource = await readFile(
   "utf8",
 );
 
+test("MirrorCoding chat models enter the delegation catalog through the local relay", () => {
+  assert.match(sessionLaunchSource, /mirrorCodingBindingFor\(/);
+  assert.match(modelSources, /scope !== "account"/);
+  assert.match(modelSources, /mirrorCodingChat/);
+  assert.match(modelSources, /mirrorCodingChatAvailable/);
+  assert.match(modelSources, /scope === "account"/);
+  assert.match(modelSources, /availableForSubagents/);
+  assert.match(modelSources, /mirrorCodingChatAvailable/);
+});
+
 test("every launch resolves the subagent catalog and its pinned models", () => {
   assert.match(sessionLaunchSource, /loadSubagentDefinitions,/);
   assert.match(sessionLaunchSource, /resolveSubagentProviders,/);
@@ -50,7 +61,7 @@ test("subagent models use the exact stored binding for thinking capability", () 
   assert.match(providerCatalogSource, /const effectiveSubagentModelConfig = \(/);
   assert.match(
     providerCatalogSource,
-    /const effectiveSubagentModelConfig = \([\s\S]*?bindingForModel\(provider, modelId\)[\s\S]*?modelConfigWithBinding\(/,
+    /const effectiveSubagentModelConfig = \([\s\S]*?modelsDevCatalog\.configureAccount\(provider\)[\s\S]*?modelsDevCatalog\.modelConfigFor\(/,
   );
   // The helper is used for definition pins, the pre-resolved delegation
   // catalog, and the on-demand Task.model path.
@@ -77,8 +88,8 @@ test("the sidecar forwards subagent bindings and the independent override opt-in
   assert.equal(sidecarSource.match(/^\s+subagentModelKeys,$/gm)?.length, 2);
 });
 test("on-demand Task.model lookup uses unique provider matching (#286)", () => {
-  assert.match(desktopSidecarSource, /findSubagentProviderSource\(/);
-  assert.match(desktopSidecarSource, /subagentProviderLookupError\(/);
+  assert.match(modelSources, /findSubagentProviderSource\(/);
+  assert.match(modelSources, /subagentProviderLookupError\(/);
   assert.doesNotMatch(
     desktopSidecarSource,
     /filter\(\(p\) => \(p\.vendorKey[\s\S]*?\[0\]/,
@@ -91,8 +102,8 @@ test("persisted subagent rows keep their attribution", () => {
     /function subagentTagged\(message: UiMessage, envelope: AgentEventEnvelope\)/,
   );
   assert.match(eventPersistenceSource, /message: subagentTagged\(event\.message, envelope\),/);
-  assert.match(eventPersistenceSource, /started\?\.parentToolCallId/);
-  assert.match(eventPersistenceSource, /started\?\.agentName/);
+  assert.match(eventPersistenceSource, /tagMessageToolLineage\(message, envelope\)/);
+  assert.match(eventPersistenceSource, /toolCallLineage\(started \?\? \{\}, envelope\)/);
   // host-core round-trips both through the message `meta` object.
   assert.match(hostSessionsSource, /pub parent_tool_call_id: Option<String>/);
   assert.match(hostSessionsSource, /meta_obj\.insert\("parentToolCallId"\.into\(\)/);

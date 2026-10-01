@@ -1,4 +1,10 @@
 import type { AgentEvent, MessageAttachment, UiMessage } from "@pi-desktop/shared";
+import {
+  getSessionMessageSnapshot,
+  registerSessionMessageAppend,
+  registerSessionMessageReplacement,
+  registerSessionMessageRewrite,
+} from "./session-transcript-updates";
 
 type OptimisticFileReference = {
   path: string;
@@ -64,7 +70,9 @@ export function projectMessageEnd(
         message.id === replacesMessageId && message.role === "assistant",
     );
     if (index >= 0) {
-      next = [...messages.slice(0, index), ...messages.slice(index + 1)];
+      next = registerSessionMessageRewrite(messages, [
+        ...messages.slice(0, index), ...messages.slice(index + 1),
+      ]);
     }
   }
   const failed =
@@ -72,7 +80,10 @@ export function projectMessageEnd(
   const empty =
     !(event.message.content || "").trim() &&
     !(event.message.thinking || "").trim();
-  return failed && empty && !event.message.error
+  // An image result is renderable content even when the row has no text: a
+  // cancelled generation keeps its card so a pending download stays
+  // retryable, matching the persisted-transcript projection.
+  return failed && empty && !event.message.error && !event.message.imageGeneration
     ? removeLiveSessionMessage(next, event.message.id)
     : upsertLiveSessionMessage(next, event.message);
 }
@@ -85,6 +96,7 @@ export function projectMessageEnd(
  * position, but use the last value, matching host-core's keep-last policy.
  */
 export function dedupeSessionMessages(messages: UiMessage[]): UiMessage[] {
+  if (getSessionMessageSnapshot(messages).unique) return messages;
   const positions = new Map<string, number>();
   let next: UiMessage[] | undefined;
   for (const [index, message] of messages.entries()) {
@@ -101,7 +113,7 @@ export function dedupeSessionMessages(messages: UiMessage[]): UiMessage[] {
     if (!next) next = messages.slice(0, index);
     next[previous] = message;
   }
-  return next ?? messages;
+  return next ? registerSessionMessageRewrite(messages, next) : messages;
 }
 
 /**
@@ -113,12 +125,12 @@ export function upsertLiveSessionMessage(
   message: UiMessage,
 ): UiMessage[] {
   const normalized = dedupeSessionMessages(messages);
-  const index = normalized.findIndex((candidate) => candidate.id === message.id);
-  if (index < 0) return [...normalized, message];
+  const index = getSessionMessageSnapshot(normalized).positions.get(message.id);
+  if (index === undefined) return registerSessionMessageAppend(normalized, [...normalized, message]);
   if (normalized[index] === message) return normalized;
   const next = normalized.slice();
   next[index] = message;
-  return next;
+  return registerSessionMessageReplacement(normalized, next, index);
 }
 
 /** Replace only the acknowledged submission identity, never an equal-text row. */
@@ -132,7 +144,8 @@ export function reconcilePersistedUserMessage(
     !messages.some((row) => row.id === optimisticMessageId && row.role === "user")
   ) return messages;
   return upsertLiveSessionMessage(
-    messages.map((row) => row.id === optimisticMessageId ? message : row),
+    registerSessionMessageRewrite(messages,
+      messages.map((row) => row.id === optimisticMessageId ? message : row)),
     message,
   );
 }
@@ -146,9 +159,11 @@ export function removeLiveSessionMessage(
   messageId: string,
 ): UiMessage[] {
   const normalized = dedupeSessionMessages(messages);
-  const index = normalized.findIndex((message) => message.id === messageId);
-  if (index < 0) return normalized;
-  return [...normalized.slice(0, index), ...normalized.slice(index + 1)];
+  const index = getSessionMessageSnapshot(normalized).positions.get(messageId);
+  if (index === undefined) return normalized;
+  return registerSessionMessageRewrite(normalized, [
+    ...normalized.slice(0, index), ...normalized.slice(index + 1),
+  ]);
 }
 
 /**

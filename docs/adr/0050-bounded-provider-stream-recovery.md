@@ -1,5 +1,8 @@
 # ADR 0050: Bounded provider stream recovery and diagnostics
 
+> 2026-09-29 amendment: ADR [response-completion-recovery](response-completion-recovery.md) supersedes post-content automatic replay and thinking-only retry. Pre-content transient budgets remain unchanged.
+
+
 - Status: Accepted (amended by D259 and D378, see below)
 - Date: 2026-08-04
 

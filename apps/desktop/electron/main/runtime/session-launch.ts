@@ -1,3 +1,5 @@
+import { subagentModelSources } from "./subagent-model-sources";
+import { highestThinkingLevel } from "@pi-desktop/shared";
 import { join } from "node:path";
 import {
   ErrorCodes as SharedErrorCodes,
@@ -6,7 +8,6 @@ import {
   imageGenerationBindings,
   isImageGenerationModel,
   normalizeMode,
-  resolveBindingContextWindow,
   trustedExtensionAgentKeyFromProviderId,
   type CommandShellCatalog,
   type McpServerRecord,
@@ -20,7 +21,6 @@ import {
 import {
   capabilitiesFromModelConfig,
   clampThinkingLevel,
-  genericModelConfig,
   loadCustomSystemPrompt,
   loadInstructionChain,
   loadSubagentDefinitions,
@@ -29,19 +29,20 @@ import {
   resolveSubagentProviders,
   visionFromModelConfig,
   type UserSubagentDocument,
+  type RuntimeProviderConfig,
 } from "@pi-desktop/agent-runtime";
 import { builtinSkills } from "../builtin-skills";
 import { OAUTH_AUTH_KIND, type VendorOAuth } from "../oauth";
 import {
-  modelConfigFromModelsDev,
+  catalogModelConfigFor,
   type ModelsDevCatalog,
 } from "../models-dev-catalog";
-import type { HostProcess } from "../host-process";
 import type { Logger } from "../logger";
 import type { PluginRuntime } from "../plugin-runtime";
 import type { UserMcpRuntime } from "../user-mcp";
 import type { RuntimeState } from "./context";
 import type { RuntimeProvider } from "./provider-catalog";
+import type { LoadedSkillDocument } from "../skill-document";
 
 const ErrorCodes = {
   ...SharedErrorCodes,
@@ -69,12 +70,8 @@ export type SessionLaunchRuntimeDependencies = {
     provider: Pick<RuntimeProvider, "models">,
     modelId: string,
   ) => ModelBinding | undefined;
-  modelsDevModelFor: (
-    provider: RuntimeProvider,
-    modelId: string,
-  ) => ReturnType<ModelsDevCatalog["findModel"]>;
   effectiveSubagentModelConfig: (
-    provider: Pick<RuntimeProvider, "models">,
+    provider: RuntimeProvider,
     modelId: string,
     catalogModelConfig: Parameters<typeof modelConfigWithBinding>[0],
   ) => {
@@ -82,6 +79,11 @@ export type SessionLaunchRuntimeDependencies = {
     capabilities: ReturnType<typeof capabilitiesFromModelConfig>;
   };
   normalizeThinkingLevel: (value: unknown) => SessionThinkingLevel;
+  mirrorCodingBindingFor?: (
+    providerId: string,
+    modelId: string,
+    sessionId: string,
+  ) => Promise<RuntimeProviderConfig>;
 };
 
 export function createSessionLaunchRuntime({
@@ -96,9 +98,9 @@ export function createSessionLaunchRuntime({
   getWorkspacePath,
   pluginActiveInProject,
   bindingForModel,
-  modelsDevModelFor,
   effectiveSubagentModelConfig,
   normalizeThinkingLevel,
+  mirrorCodingBindingFor,
 }: SessionLaunchRuntimeDependencies) {
   const isHostUnavailable = (error: unknown): boolean =>
     (error as { errorCode?: string } | null | undefined)?.errorCode ===
@@ -226,7 +228,7 @@ export function createSessionLaunchRuntime({
   async function loadUserSkillBody(
     id: string,
     projectPath: string | null,
-  ): Promise<{ id: string; name: string; body: string } | null> {
+  ): Promise<LoadedSkillDocument | null> {
     if (!runtimeState.host || id.includes("/")) return null;
     const result = await runtimeState.host!.call<{
       skill: UserSkillRecord | null;
@@ -237,7 +239,7 @@ export function createSessionLaunchRuntime({
     if (!isActiveInProject(skill, projectPath)) {
       throw new Error(`skill "${id}" is not enabled for this project`);
     }
-    return { id: skill.id, name: skill.name, body: result.body };
+    return { id: skill.id, name: skill.name, body: result.body, location: skill.path };
   }
 
   async function resolveEffectiveCommandShell(): Promise<CommandShellCatalog> {
@@ -263,7 +265,8 @@ export function createSessionLaunchRuntime({
     settings: any,
     overrides: {
       mode?: Mode;
-      turnId?: string;
+      fast?: boolean;
+      ultra?: boolean;
       providerId?: string;
       modelId?: string;
       thinkingLevel?: SessionThinkingLevel;
@@ -274,9 +277,13 @@ export function createSessionLaunchRuntime({
     const commandShell = (await resolveEffectiveCommandShell()).effective!;
     const providers = await runtimeState.host!.call<{ providers: RuntimeProvider[] }>(
       "providers.list",
-      { includeDisabled: false },
+      { includeDisabled: true },
     );
+    for (const row of providers.providers) modelsDevCatalog.configureAccount(row);
     const requestedProviderId = overrides.providerId ?? session.providerId;
+    const savedProvider = providers.providers.find((item) => item.id === requestedProviderId);
+    if (savedProvider?.authKind === "mirrorcoding" && !savedProvider.enabled) throw new Error("model_or_group_unavailable");
+    providers.providers = providers.providers.filter((item) => item.enabled !== false);
     const extensionAgentKey = requestedProviderId
       ? trustedExtensionAgentKeyFromProviderId(requestedProviderId)
       : undefined;
@@ -288,10 +295,12 @@ export function createSessionLaunchRuntime({
           authKind: "none",
           extensionAgentKey,
         }
-      : providers.providers.find((item) => item.id === requestedProviderId) ||
+      : requestedProviderId
+        ? providers.providers.find((item) => item.id === requestedProviderId && item.enabled !== false)!
+        :
         providers.providers.find((item) => item.id === settings.defaultProviderId) ||
         providers.providers.find(
-          (item) => item.hasSecret || item.hasOauth || item.authKind === "none",
+          (item) => item.hasSecret || item.hasOauth || item.authKind === "none" || item.authKind === "mirrorcoding",
         ) ||
         providers.providers[0];
     if (!provider) {
@@ -299,16 +308,18 @@ export function createSessionLaunchRuntime({
         errorCode: ErrorCodes.MODEL_NOT_CONFIGURED,
       });
     }
+    modelsDevCatalog.configureAccount(provider);
     // Plugin-owned agents resolve credentials and transport inside the trusted
     // extension; the host never reads or injects a secret for them.
     const isExtensionAgent = Boolean(extensionAgentKey);
     const isVendorAccount = !isExtensionAgent && provider.authKind === OAUTH_AUTH_KIND;
-    const secret = isExtensionAgent || isVendorAccount
+    const isMirrorCodingAccount = !isExtensionAgent && provider.authKind === "mirrorcoding";
+    const secret = isExtensionAgent || isVendorAccount || isMirrorCodingAccount
       ? { value: undefined }
       : await runtimeState.host!.call<{ value?: string }>("providers.getSecret", {
           id: provider.id,
         });
-    if (!secret.value && !isExtensionAgent && !isVendorAccount && provider.authKind !== "none") {
+    if (!secret.value && !isExtensionAgent && !isVendorAccount && !isMirrorCodingAccount && provider.authKind !== "none") {
       throw Object.assign(new Error("Provider API key missing"), {
         errorCode: ErrorCodes.PROVIDER_SECRET_MISSING,
       });
@@ -328,12 +339,20 @@ export function createSessionLaunchRuntime({
         errorCode: ErrorCodes.MODEL_NOT_CONFIGURED,
       });
     }
-    if (isImageGenerationModel(
+    if (!isMirrorCodingAccount && isImageGenerationModel(
       imageGenerationBindings(settings.imageGenerationModels, settings.imageGeneration),
       provider.id,
       modelId,
     )) {
       throw Object.assign(new Error("The image model cannot be used for conversation; select a chat model"), {
+        errorCode: ErrorCodes.MODEL_NOT_CONFIGURED,
+      });
+    }
+    const mirrorCodingBinding = isMirrorCodingAccount
+      ? await mirrorCodingBindingFor?.(provider.id, modelId, sessionId)
+      : undefined;
+    if (isMirrorCodingAccount && !mirrorCodingBinding) {
+      throw Object.assign(new Error("MirrorCoding account is not ready"), {
         errorCode: ErrorCodes.MODEL_NOT_CONFIGURED,
       });
     }
@@ -351,26 +370,31 @@ export function createSessionLaunchRuntime({
         { errorCode: ErrorCodes.MODEL_NOT_CONFIGURED },
       );
     }
-    const storedModel = bindingForModel(provider, modelId);
-    const apiStyle = vendorBinding?.apiStyle ?? provider.apiStyle;
-    const baseUrl = vendorBinding?.baseUrl ?? provider.baseUrl;
-    const modelsDevModel = modelsDevModelFor(provider, modelId);
-    const catalogModelConfig = vendorBinding?.modelConfig ??
-      (modelsDevModel
-        ? modelConfigFromModelsDev(modelsDevModel, baseUrl)
-        : genericModelConfig(modelId, baseUrl ?? ""));
-    const resolvedLimits = resolveBindingContextWindow(catalogModelConfig, storedModel);
-    const modelConfig = modelConfigWithBinding(
-      resolvedLimits.catalogConfig,
-      resolvedLimits.binding,
-    );
+    // MirrorCoding model settings are owned by the account-level projection;
+    // group rows only select the historical route and must not override them.
+    const storedModel = isMirrorCodingAccount
+      ? (providers.providers.find((candidate) => candidate.mirrorCoding?.scope === "account" && candidate.mirrorCoding.accountId === provider.mirrorCoding?.accountId)?.models?.find((entry) => entry.id === modelId) ?? undefined)
+      : bindingForModel(provider, modelId);
+    const apiStyle = mirrorCodingBinding?.apiStyle ?? vendorBinding?.apiStyle ?? provider.apiStyle;
+    const baseUrl = mirrorCodingBinding?.baseUrl ?? vendorBinding?.baseUrl ?? provider.baseUrl;
+    const catalogModelConfig = mirrorCodingBinding?.modelConfig ?? vendorBinding?.modelConfig ??
+      catalogModelConfigFor(modelsDevCatalog, {
+        providerId: provider.id,
+        vendorKey: provider.vendorKey,
+        baseUrl,
+        apiStyle,
+        modelId,
+      });
+    const modelConfig = catalogModelConfig;
     const thinkingCapabilities = capabilitiesFromModelConfig(modelConfig);
-    const thinkingLevel = clampThinkingLevel(
+    const ultra = overrides.ultra === true;
+    const thinkingLevel = ultra ? highestThinkingLevel(thinkingCapabilities) : clampThinkingLevel(
       thinkingCapabilities,
       normalizeThinkingLevel(
         overrides.thinkingLevel ??
-          (provider.id === requestedProviderId ? session.thinkingLevel : undefined) ??
-          storedModel?.defaultThinkingLevel,
+        (provider.id === requestedProviderId ? session.thinkingLevel : undefined) ??
+        mirrorCodingBinding?.defaultThinkingLevel ??
+        storedModel?.defaultThinkingLevel,
       ),
     );
     const projectPath =
@@ -485,14 +509,13 @@ export function createSessionLaunchRuntime({
       resolveVendorBinding: (pinned, pinnedModelId) =>
         vendorOAuth.bindingFor(pinned.id, pinnedModelId),
       resolveModel: async (pinned, pinnedModelId) => {
-        const model = modelsDevCatalog.findModel({
+        const catalogModelConfig = catalogModelConfigFor(modelsDevCatalog, {
+          providerId: pinned.id,
           vendorKey: pinned.vendorKey,
           baseUrl: pinned.baseUrl,
+          apiStyle: pinned.apiStyle,
           modelId: pinnedModelId,
         });
-        const catalogModelConfig = model
-          ? modelConfigFromModelsDev(model, pinned.baseUrl)
-          : genericModelConfig(pinnedModelId, pinned.baseUrl ?? "");
         const configuredProvider = providers.providers.find(
           (candidate) => candidate.id === pinned.id,
         );
@@ -508,80 +531,92 @@ export function createSessionLaunchRuntime({
             };
       },
     });
-    // Delegation model catalog: every model binding flagged
-    // `availableForSubagents` is pre-resolved so the system prompt can list
-    // them and the parent agent can pass them to `Task.model` without an
-    // extra RPC round-trip. Statically pinned entries from definitions take
-    // precedence — they were resolved above with stricter diagnostics.
+    // Pre-resolve each opted-in model/channel under its exact provider/model
+    // key. Account rows own MC opt-in; group rows select the actual route.
+    // Statically pinned definition entries keep their existing bindings.
     const subagentModelKeys: string[] = [];
-    for (const row of providers.providers) {
-      if (!row.enabled) continue;
-      for (const binding of row.models ?? []) {
-        if (!binding.availableForSubagents) continue;
-        let key = `${row.vendorKey ?? row.name}/${binding.id}`;
-        // Two provider rows can share a vendor alias. Opting in one row must
-        // not authorize the credential-bearing pin resolved from another row.
-        if (subagentBindings.providers[key]?.id && subagentBindings.providers[key].id !== row.id) {
-          key = `${row.id}/${binding.id}`;
-        }
-        if (subagentBindings.providers[key]) {
+    for (const { provider: row, model: binding, key } of subagentModelSources(providers.providers)) {
+      const isMirrorCodingRow = row.authKind === "mirrorcoding";
+      if (subagentBindings.providers[key]) {
+        subagentModelKeys.push(key);
+        continue; // already resolved, and independently opted in
+      }
+      if (isMirrorCodingRow) {
+        // MirrorCoding credentials never leave main: the delegation catalog
+        // carries a local relay binding instead of a raw secret, exactly
+        // like the session's own MirrorCoding launch path.
+        if (!mirrorCodingBindingFor) continue;
+        try {
+          subagentBindings.providers[key] = await mirrorCodingBindingFor(
+            row.id,
+            binding.id,
+            sessionId,
+          );
           subagentModelKeys.push(key);
-          continue; // already resolved, and independently opted in
+        } catch {
+          // Account disconnected or the route is gone; the model simply
+          // stays out of this launch's delegation catalog.
         }
-        const isVendorAccount = row.authKind === OAUTH_AUTH_KIND;
-        let apiKey = "";
-        if (!isVendorAccount && row.authKind !== "none") {
-          try {
-            apiKey =
-              (
-                await runtimeState.host!.call<{ value?: string }>("providers.getSecret", {
-                  id: row.id,
-                })
-              ).value ?? "";
-          } catch {
-            continue; // skip if secret unavailable
-          }
-          if (!apiKey) continue;
+        continue;
+      }
+      const isVendorAccount = row.authKind === OAUTH_AUTH_KIND;
+      let apiKey = "";
+      if (!isVendorAccount && row.authKind !== "none") {
+        try {
+          apiKey =
+            (
+              await runtimeState.host!.call<{ value?: string }>("providers.getSecret", {
+                id: row.id,
+              })
+            ).value ?? "";
+        } catch {
+          continue; // skip if secret unavailable
         }
-        let catalogModelConfig: Parameters<typeof modelConfigWithBinding>[0];
-        if (isVendorAccount) {
-          const vb = await vendorOAuth.bindingFor(row.id, binding.id);
-          if (!vb) continue;
-          catalogModelConfig =
-            vb.modelConfig ?? genericModelConfig(binding.id, vb.baseUrl ?? row.baseUrl ?? "");
-        } else {
-          const model = modelsDevCatalog.findModel({
+        if (!apiKey) continue;
+      }
+      let catalogModelConfig: Parameters<typeof modelConfigWithBinding>[0];
+      if (isVendorAccount) {
+        const vb = await vendorOAuth.bindingFor(row.id, binding.id);
+        if (!vb) continue;
+        catalogModelConfig =
+          vb.modelConfig ?? catalogModelConfigFor(modelsDevCatalog, {
+            providerId: row.id,
             vendorKey: row.vendorKey,
-            baseUrl: row.baseUrl,
+            baseUrl: vb.baseUrl ?? row.baseUrl,
+            apiStyle: vb.apiStyle ?? row.apiStyle,
             modelId: binding.id,
           });
-          catalogModelConfig = model
-            ? modelConfigFromModelsDev(model, row.baseUrl)
-            : genericModelConfig(binding.id, row.baseUrl ?? "");
-        }
-        const effective = effectiveSubagentModelConfig(
-          row,
-          binding.id,
-          catalogModelConfig,
-        );
-        const mc = effective.modelConfig;
-        const caps = effective.capabilities;
-        subagentBindings.providers[key] = {
-          id: row.id,
-          name: row.name,
-          ...(row.vendorKey ? { vendorKey: row.vendorKey } : {}),
-          ...(row.baseUrl ? { baseUrl: row.baseUrl } : {}),
+      } else {
+        catalogModelConfig = catalogModelConfigFor(modelsDevCatalog, {
+          providerId: row.id,
+          vendorKey: row.vendorKey,
+          baseUrl: row.baseUrl,
+          apiStyle: row.apiStyle,
           modelId: binding.id,
-          apiKey,
-          ...(row.authKind ? { authKind: row.authKind } : {}),
-          ...(row.apiStyle ? { apiStyle: row.apiStyle } : {}),
-          ...optionalProviderHeaders(row.headers),
-          supportsReasoning: caps.supportsReasoning,
-          supportedThinkingLevels: [...caps.supportedThinkingLevels],
-          ...(mc ? { modelConfig: mc } : {}),
-        };
-        subagentModelKeys.push(key);
+        });
       }
+      const effective = effectiveSubagentModelConfig(
+        row,
+        binding.id,
+        catalogModelConfig,
+      );
+      const mc = effective.modelConfig;
+      const caps = effective.capabilities;
+      subagentBindings.providers[key] = {
+        id: row.id,
+        name: row.name,
+        ...(row.vendorKey ? { vendorKey: row.vendorKey } : {}),
+        ...(row.baseUrl ? { baseUrl: row.baseUrl } : {}),
+        modelId: binding.id,
+        apiKey,
+        ...(row.authKind ? { authKind: row.authKind } : {}),
+        ...(row.apiStyle ? { apiStyle: row.apiStyle } : {}),
+        ...optionalProviderHeaders(row.headers),
+        supportsReasoning: caps.supportsReasoning,
+        supportedThinkingLevels: [...caps.supportedThinkingLevels],
+        ...(mc ? { modelConfig: mc } : {}),
+      };
+      subagentModelKeys.push(key);
     }
 
     const subagentDiagnostics = [
@@ -611,17 +646,21 @@ export function createSessionLaunchRuntime({
             : [],
         ),
     );
+    if (ultra && (!subagentCatalog.definitions.length || modelConfig?.toolCall === false)) {
+      throw new Error("PI_ULTRA_UNAVAILABLE: Enable subagents and select a tool-capable chat model.");
+    }
+    const mode = normalizeMode(overrides.mode ?? session.mode ?? settings.defaultMode ?? "agent");
+    // Only user/approved-plan launches opt in. Auxiliary calls never inherit Fast.
+    const fast = isMirrorCodingAccount && overrides.fast === true;
     return {
       providerId: provider.id,
       modelId,
       projectPath,
       sidecarParams: {
         sessionId,
-        mode: normalizeMode(
-          overrides.mode ?? session.mode ?? settings.defaultMode ?? "agent",
-        ),
-        ...(overrides.turnId ? { turnId: overrides.turnId } : {}),
+        mode,
         thinkingLevel,
+        ultra,
         infiniteProviderRetry: settings.infiniteProviderRetry === true,
         commandShell,
         scratchDir: join(dataDir, "scratch", sessionId),
@@ -636,11 +675,18 @@ export function createSessionLaunchRuntime({
           vendorKey: provider.vendorKey,
           baseUrl,
           modelId,
-          apiKey: secret.value || "",
+          apiKey: mirrorCodingBinding?.apiKey || secret.value || "",
           authKind: provider.authKind,
+          ...(isMirrorCodingAccount ? { fastAvailable: mirrorCodingBinding?.fastAvailable === true, fast } : {}),
+          ...(mirrorCodingBinding?.mirrorCodingGroupId !== undefined ? { mirrorCodingGroupId: mirrorCodingBinding.mirrorCodingGroupId } : {}),
           extensionAgentKey: provider.extensionAgentKey,
           apiStyle,
+          ...(mirrorCodingBinding?.temperature !== undefined ? { temperature: mirrorCodingBinding.temperature } : {}),
+          ...(mirrorCodingBinding?.defaultThinkingLevel !== undefined
+            ? { defaultThinkingLevel: mirrorCodingBinding.defaultThinkingLevel }
+            : {}),
           ...optionalProviderHeaders(provider.headers),
+          ...(mirrorCodingBinding?.headers ?? {}),
           supportsReasoning: thinkingCapabilities.supportsReasoning,
           supportsVision: visionFromModelConfig(modelConfig),
           supportedThinkingLevels: [...thinkingCapabilities.supportedThinkingLevels],

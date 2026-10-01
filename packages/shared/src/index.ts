@@ -1,6 +1,7 @@
 export * from "./activation.js";
 export * from "./protocol.js";
 export * from "./errors.js";
+export * from "./response-recovery.js";
 export * from "./rpc-error.js";
 export * from "./certificate-errors.js";
 export * from "./types.js";
@@ -46,6 +47,7 @@ export * from "./ndjson.js";
 export * from "./subagent-definition.js";
 export * from "./subagent-presets.js";
 export * from "./provider-presets.js";
+export * from "./provider-endpoint.js";
 export * from "./model-catalog.js";
 export * from "./github-feedback.js";
 export * from "./network-proxy.js";
@@ -56,6 +58,7 @@ export * from "./image-generation.js";
 export * from "./font-size.js";
 export * from "./chat-content-width.js";
 export * from "./racp.js";
+export * from "./racp-error.js";
 export * from "./trusted-extensions.js";
 export * from "./provider-retry.js";
 export * from "./message-stream.js";
@@ -68,3 +71,13 @@ export * from "./prompt-enhancement.js";
 export * from "./native-web-search.js";
 export * from "./native-web-search-transport.js";
 export * from "./header-value.js";
+export * from "./mirrorcoding-fast.js";
+
+export * from "./session-todos.js";
+export * from "./tool-call-lineage.js";
+export * from "./event-usage.js";
+
+export * from "./ultra.js";
+
+export * from "./delegation-notification.js";
+export * from "./subagent-return.js";

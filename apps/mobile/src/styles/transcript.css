@@ -1,0 +1,59 @@
+/* Conversation transcript: messages, tool/diff/delegation cards, attachments. */
+.conversation { flex: 1; min-height: 0; display: flex; flex-direction: column; position: relative; }
+.conversation-controls { display: flex; gap: 7px; overflow: auto; padding: 2px 14px 7px; scrollbar-width: none; }
+.conversation-controls::-webkit-scrollbar { display: none; }
+.config-chip { min-height: 34px; border: 1px solid var(--ds-border-default); border-radius: 10px; padding: 6px 10px; background: var(--ds-tile); font-size: 12px; white-space: nowrap; }
+.config-chip.model-chip { flex: 1; justify-content: space-between; min-width: 0; }
+.config-chip.model-chip span { overflow: hidden; text-overflow: ellipsis; }
+.transcript { flex: 1; min-height: 0; overflow: auto; padding: 12px 20px 24px; scroll-behavior: auto; }
+.history-sentinel { height: 1px; }
+/* Offscreen messages skip layout and paint; the placeholder size keeps the
+   scrollbar honest for long transcripts. */
+.message { margin: 20px 0 28px; min-width: 0; content-visibility: auto; contain-intrinsic-size: auto 120px; }
+.message-user { border-radius: 18px; background: var(--ds-tile); padding: 14px 16px; margin-left: 22px; }
+.message-label { font-size: 12px; font-weight: 600; color: var(--ds-text-muted); margin-bottom: 8px; display: flex; gap: 6px; align-items: center; }
+.streaming-caret { display: inline-block; width: 7px; height: 13px; border-radius: 2px; background: var(--ds-accent); animation: caret-blink 1s steps(2, start) infinite; }
+@keyframes caret-blink { 50% { opacity: 0; } }
+.markdown { font-size: 14px; line-height: 1.7; overflow-wrap: anywhere; }
+.markdown p { margin: 8px 0; }
+.markdown p:first-child { margin-top: 0; }
+.markdown p:last-child { margin-bottom: 0; }
+.markdown table { display: block; max-width: 100%; overflow: auto; border-collapse: collapse; }
+.markdown th, .markdown td { padding: 7px 10px; border: 1px solid var(--ds-border-strong); }
+.markdown blockquote { margin: 8px 0; padding-left: 14px; border-left: 2px solid var(--ds-border-strong); color: var(--ds-text-muted); }
+.thinking { color: var(--ds-text-muted); font-size: 12px; margin: 8px 0 16px; }
+.tool-card { background: var(--ds-tile); padding: 4px 12px; border-radius: 12px; }
+.tool-card summary { display: flex; justify-content: space-between; gap: 8px; font-size: 13px; }
+.tool-card summary span { display: flex; gap: 6px; align-items: center; }
+.tool-diff { margin: 8px 0; }
+.tool-diff-path { font-size: 11px; color: var(--ds-text-muted); margin-bottom: 4px; overflow-wrap: anywhere; }
+.tool-diff pre { margin: 0; }
+.diff-line { display: block; }
+.diff-added { background: color-mix(in srgb, var(--ds-success) 14%, transparent); }
+.diff-removed { background: color-mix(in srgb, var(--ds-error) 12%, transparent); }
+.load-full { min-height: 34px; padding: 5px 10px; margin: 4px 0 8px; font-size: 12px; background: transparent; border: 1px solid var(--ds-border-default); border-radius: 9px; color: var(--ds-text-muted); }
+.delegation-card { border: 1px solid var(--ds-border-default); border-radius: 14px; padding: 2px 12px; margin: 18px 0; }
+.delegation-card summary { display: flex; justify-content: space-between; align-items: center; gap: 8px; font-size: 13px; }
+.delegation-title { display: flex; gap: 7px; align-items: center; font-weight: 600; }
+.delegation-body { border-left: 2px solid var(--ds-border-default); padding-left: 12px; margin: 4px 0 10px; }
+.delegation-body .message { margin: 14px 0 18px; }
+.compaction-divider { display: flex; align-items: center; justify-content: center; gap: 6px; color: var(--ds-text-muted); font-size: 11px; margin: 18px 0; }
+.compaction-divider::before, .compaction-divider::after { content: ""; flex: 1; border-top: 1px dashed var(--ds-border-strong); }
+.action-card { background: var(--ds-tile); padding: 16px; border-radius: 16px; margin: 18px 0; }
+.action-card fieldset { border: 0; padding: 12px 0; margin: 0; min-width: 0; }
+.action-card legend { font-size: 14px; line-height: 1.5; }
+.option { display: flex; align-items: center; gap: 10px; min-height: 44px; }
+.option input { width: 18px; height: 18px; min-height: 0; accent-color: var(--ds-accent); }
+.attachment-card { background: var(--ds-tile); border-radius: 12px; margin: 12px 0; overflow: hidden; }
+.attachment-card img { width: 100%; max-height: 380px; object-fit: contain; display: block; }
+.image-preview-button { padding: 0; width: 100%; background: transparent; }
+.image-preview img { max-height: 70dvh; margin-top: 14px; }
+.attachment-preview { justify-content: flex-start; width: 100%; min-height: 80px; text-align: left; font-size: 12px; overflow-wrap: anywhere; }
+.attachment-actions { display: flex; padding: 3px; flex-wrap: wrap; }
+.attachment-actions button { font-size: 11px; background: transparent; flex: 1; padding: 8px; }
+.image-result .muted { font-size: 11px; }
+.load-older { display: flex; margin: 0 auto; font-size: 12px; background: transparent; }
+.back-latest { position: absolute; z-index: 2; bottom: 92px; left: 50%; transform: translateX(-50%); min-height: 32px; padding: 6px 12px; border: 1px solid var(--ds-border-default); border-radius: 999px; background: var(--ds-bg-elevated-opaque); box-shadow: var(--ds-shadow-dialog); font-size: 11px; animation: rise-in 160ms ease both; }
+.transcript-skeleton { display: grid; gap: 18px; padding: 18px 0; }
+.skeleton-bubble { height: 64px; width: 78%; }
+.skeleton-bubble.wide { width: 92%; margin-left: auto; height: 44px; }

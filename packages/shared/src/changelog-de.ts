@@ -2,6 +2,33 @@ import type { ChangelogEntry } from "./changelog.js";
 
 export const deEntries: ChangelogEntry[] = [
   {
+    "version": "0.15.11",
+    "date": "2026-10-01",
+    "highlights": [
+      "Ultra kombiniert modellspezifisches Reasoning, asynchrone Übergaben und fortsetzbare Unteragenten mit eigener Modellwahl.",
+      "Dauerhafte ReturnToParent-Karten zeigen Ergebnisse und korrekten Status; Unteragenten lassen sich einzeln oder gemeinsam stoppen.",
+      "MirrorCoding-Kataloge, native Protokolle und Fast pro Sitzung sind abgestimmt; Teilantworten bleiben für die Fortsetzung erhalten.",
+      "Android erhält Modell- und Modussteuerung, synchronisiertes Fast und Ultra, Bilderzeugung und Ergebniskarten."
+    ]
+  },
+
+  {
+    "version": "0.15.10",
+    "date": "2026-09-28",
+    "highlights": [
+      "Marketplace-Plugins werden jetzt in zufälliger statt alphabetischer Reihenfolge angezeigt.",
+    ],
+  },
+
+  {
+    "version": "0.15.9",
+    "date": "2026-09-27",
+    "highlights": [
+      "Entfernt veraltete Hilfsdateien für den ersten Start aus macOS-DMG- und ZIP-Paketen.",
+    ],
+  },
+
+  {
     "version": "0.15.6",
     "date": "2026-09-23",
     "highlights": [

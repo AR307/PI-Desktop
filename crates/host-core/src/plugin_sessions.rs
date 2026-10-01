@@ -231,7 +231,10 @@ fn parse_message(
         id: Uuid::new_v4().to_string(),
         role: role.to_string(),
         content: input.content.clone(),
+        command: None,
+        skill_mentions: None,
         attachments: None,
+        voice_origin: None,
         steering: None,
         created_at,
         thinking: None,
@@ -254,8 +257,12 @@ fn parse_message(
         tool_duration_ms: None,
         is_error: None,
         parent_tool_call_id: None,
+        nested_parent_tool_call_id: None,
         agent_name: None,
+        response_diagnostics: None,
+        assistant_replay: None,
         hosted_search: None,
+        image_generation: None,
         session_message: None,
     })
 }

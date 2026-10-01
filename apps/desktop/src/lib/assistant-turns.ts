@@ -4,7 +4,7 @@ import type {
   MessageUsage,
   UiMessage,
 } from "@pi-desktop/shared";
-import { hostedSearchRounds } from "@pi-desktop/shared";
+import { addUsage, hostedSearchRounds, isReturnToParent } from "@pi-desktop/shared";
 import { isDelegationStartTool } from "./tool-display";
 
 export type AssistantActivityItem =
@@ -42,6 +42,12 @@ export type SubagentRun = {
   items: SubagentRunItem[];
 };
 
+/** Completion receipts remain visible outside the turn process disclosure. */
+export function isSubagentReturnPart(part: AssistantTurnPart): boolean {
+  return part.kind === "activity" && part.items.length > 0 &&
+    part.items.every(item => item.kind === "tool" && isReturnToParent(item.message));
+}
+
 export type AssistantTurnPart =
   | { kind: "message"; message: UiMessage }
   | {
@@ -73,7 +79,8 @@ function isVisibleMessage(message: UiMessage): boolean {
     !(message.content || "").trim() &&
     !messageThinking(message) &&
     !message.hostedSearch &&
-    !message.error
+    !message.error &&
+    !message.imageGeneration
   );
 }
 
@@ -107,20 +114,25 @@ function collectSubagentRuns(
     // showing: the text is the only place its narration and report exist.
     const thinking = messageThinking(message);
     if (thinking) run.items.push({ kind: "thinking", message });
-    if ((message.content || "").trim() || message.error) {
+    if ((message.content || "").trim() || message.error || message.imageGeneration) {
       run.items.push({ kind: "answer", message });
     }
   }
   return runs;
 }
 
-// Map each Task call to the last call of its chain (ADR 0279): a resumed
-// delegation is one delegate session continued by a later Task call, so the
-// chain's rows all belong on the latest card, where they read as one
-// continuing conversation rather than a card per call.
-function chainLatestCalls(
-  messages: readonly UiMessage[],
-): (toolCallId: string) => string {
+/**
+ * The delegation-chain structure of one transcript (ADR 0279).
+ *
+ * `callByDelegationId` maps each Task result's `delegationId` to the call that
+ * returned it; `childOf` links a resumed call to the call it resumed. Shared
+ * by the delegation card grouping and the subagent transcript tab so both read
+ * the same chain semantics from one place.
+ */
+export function delegationChainMaps(messages: readonly UiMessage[]): {
+  callByDelegationId: Map<string, string>;
+  childOf: Map<string, string>;
+} {
   const callByDelegationId = new Map<string, string>();
   const childOf = new Map<string, string>();
   for (const message of messages) {
@@ -152,6 +164,17 @@ function chainLatestCalls(
         : undefined;
     if (prior) childOf.set(prior, toolCallId);
   }
+  return { callByDelegationId, childOf };
+}
+
+// Map each Task call to the last call of its chain (ADR 0279): a resumed
+// delegation is one delegate session continued by a later Task call, so the
+// chain's rows all belong on the latest card, where they read as one
+// continuing conversation rather than a card per call.
+function chainLatestCalls(
+  messages: readonly UiMessage[],
+): (toolCallId: string) => string {
+  const { childOf } = delegationChainMaps(messages);
   const latest = new Map<string, string>();
   return (toolCallId: string): string => {
     const cached = latest.get(toolCallId);
@@ -220,7 +243,8 @@ export function buildTranscriptEntries(
     if (
       last?.kind === "activity" &&
       last.items.length > 0 &&
-      isDelegationStartActivity(last.items[0]) === isDelegationStartActivity(item)
+      isDelegationStartActivity(last.items[0]) === isDelegationStartActivity(item) &&
+      isReturnToParent(last.items[0].message) === isReturnToParent(item.message)
     ) {
       last.items.push(item);
       return;
@@ -253,7 +277,7 @@ export function buildTranscriptEntries(
     for (const round of hostedSearchRounds(message.hostedSearch)) {
       pushActivity({ kind: "hostedSearch", message, round });
     }
-    if ((message.content || "").trim() || !thinking || message.error) {
+    if ((message.content || "").trim() || !thinking || message.error || message.imageGeneration) {
       current.parts.push({ kind: "message", message });
       if (!current.anchorId && (message.content || "").trim()) {
         current.anchorId = message.id;
@@ -532,22 +556,5 @@ export function assistantTurnUsage(
   );
   if (usages.length === 0) return undefined;
 
-  const sum = (field: keyof MessageUsage) =>
-    usages.reduce((total, usage) => total + (usage[field] ?? 0), 0);
-  const optionalSum = (
-    field: "cacheReadTokens" | "cacheWriteTokens" | "reasoningTokens",
-  ) =>
-    usages.some((usage) => usage[field] !== undefined) ? sum(field) : undefined;
-  const cacheReadTokens = optionalSum("cacheReadTokens");
-  const cacheWriteTokens = optionalSum("cacheWriteTokens");
-  const reasoningTokens = optionalSum("reasoningTokens");
-
-  return {
-    inputTokens: sum("inputTokens"),
-    outputTokens: sum("outputTokens"),
-    totalTokens: sum("totalTokens"),
-    ...(cacheReadTokens !== undefined ? { cacheReadTokens } : {}),
-    ...(cacheWriteTokens !== undefined ? { cacheWriteTokens } : {}),
-    ...(reasoningTokens !== undefined ? { reasoningTokens } : {}),
-  };
+  return usages.reduce<MessageUsage | undefined>((total, usage) => addUsage(total, usage), undefined);
 }

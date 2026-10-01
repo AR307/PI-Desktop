@@ -12,13 +12,14 @@ import { readSettingsSourceSync } from "./helpers/source-contracts.mjs";
 import { loadStylesSync } from "./helpers/styles.mjs";
 import assert from "node:assert/strict";
 import test from "node:test";
+import { sep } from "node:path";
 
 const settings = readSettingsSourceSync();
 const styles = loadStylesSync();
 
 const start = settings.indexOf(" * Settings ▸ Import.");
 assert.ok(start > 0, "import page module missing from the settings domain");
-const end = settings.indexOf("\n/* features/settings/", start);
+const end = settings.indexOf(String.fromCharCode(10) + "/* features" + sep + "settings" + sep, start);
 const page = settings.slice(start, end === -1 ? undefined : end);
 
 function cssRule(selector) {
@@ -30,7 +31,8 @@ function cssRule(selector) {
 test("import is one workbench per kind instead of four stacked scan cards", () => {
   // One tab strip owns the four kinds; each kind gets one panel behind it.
   assert.match(page, /role="tablist"/);
-  assert.match(page, /aria-controls={`import-panel-\$\{entry\.id\}`}/);
+  assert.match(page, /id: `import-tab-\$\{entry\.id\}`/);
+  assert.match(page, /controls: `import-panel-\$\{entry\.id\}`/);
   assert.match(page, /aria-labelledby={`import-tab-\$\{entry\.id\}`}/);
 
   // One toolbar and one idle state per kind — not per section or per step.

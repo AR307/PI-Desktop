@@ -14,8 +14,18 @@ import {
   type ShortcutPlatform,
 } from "@pi-desktop/shared";
 import { api } from "../../lib/api";
+import { useBlockingOverlay } from "../../lib/blocking-overlay";
 import { useAppStore } from "../../stores/app-store";
-import { Button, HelpIcon, TooltipButton, cx, Input, Textarea } from "../ui";
+import {
+  Button,
+  HelpIcon,
+  Input,
+  SettingsToggle,
+  Textarea,
+  TooltipButton,
+  cx,
+  portalOverlay,
+} from "../ui";
 import { IconKeyboard, IconSettings, IconX } from "../icons";
 import { SettingsMenuSelect } from "../settings/SettingsMenuSelect";
 
@@ -58,6 +68,9 @@ function serializeJson(value: unknown): string {
 }
 
 export function PluginSettingsSheet({ plugin, platform, onClose, onSaved }: Props) {
+  // Native plugin views composite above the renderer; hide them while this
+  // host sheet is open so the right edge of the dialog stays clickable.
+  useBlockingOverlay();
   const { t } = useTranslation();
   const appKeybindings = useAppStore((state) => state.settings?.keybindings);
   const settings = plugin.settings ?? [];
@@ -145,7 +158,7 @@ export function PluginSettingsSheet({ plugin, platform, onClose, onSaved }: Prop
     setRecordingKey(null);
   };
 
-  return (
+  return portalOverlay(
     <div className="plugins-modal-backdrop" role="presentation">
       <div
         className="plugins-modal plugins-settings-modal"
@@ -203,16 +216,11 @@ export function PluginSettingsSheet({ plugin, platform, onClose, onSaved }: Prop
                       onChange={(event) => setValue(setting.key, event.target.value === "" ? 0 : Number(event.target.value))}
                     />
                   ) : setting.type === "boolean" ? (
-                    <button
-                      type="button"
-                      className={cx("settings-toggle", value === true && "on")}
-                      role="switch"
-                      aria-checked={value === true}
-                      aria-label={setting.title}
-                      onClick={() => setValue(setting.key, value !== true)}
-                    >
-                      <span className="settings-toggle-thumb" />
-                    </button>
+                    <SettingsToggle
+                      checked={value === true}
+                      label={setting.title}
+                      onChange={() => setValue(setting.key, value !== true)}
+                    />
                   ) : setting.type === "select" ? (
                     <SettingsMenuSelect
                       label={setting.title}
@@ -260,6 +268,6 @@ export function PluginSettingsSheet({ plugin, platform, onClose, onSaved }: Prop
           </Button>
         </div>
       </div>
-    </div>
+    </div>,
   );
 }

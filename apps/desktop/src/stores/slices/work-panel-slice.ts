@@ -2,6 +2,7 @@ import { api } from "../../lib/api";
 import {
   activateWorkPanelTabState,
   browserPluginTab,
+  browserTabLabel,
   closeWorkPanelTabState,
   emptyWorkPanelContext,
   fileWorkPanelTab,
@@ -10,9 +11,9 @@ import {
   reorderWorkPanelTabsState,
   replaceWorkPanelTabState,
   sanitizeWorkPanelTabsState,
+  subagentWorkPanelTab,
   switchWorkPanelContextState,
   type WorkPanelContext,
-  type WorkPanelTab,
 } from "../../lib/work-panel-tabs";
 import {
   WORK_PANEL_COMPACT_MIN_WIDTH,
@@ -97,8 +98,7 @@ export function createWorkPanelSlice({
   isSessionSelectionPending,
 }: WorkPanelSliceDependencies): Pick<
   AppState,
-  "toggleSubagentPanel"
-  | "closeSubagentPanel"
+  "openSubagentTab"
   | "openWorkPanel"
   | "toggleWorkPanel"
   | "openWorkPanelTab"
@@ -113,25 +113,16 @@ export function createWorkPanelSlice({
   | "setWorkPanelWidth"
   | "openFileInWorkPanel"
   | "openUrlInWorkPanel"
+  | "updateBrowserWorkPanelTab"
 > {
   let workPanelFileRequestSeq = 0;
 
   return {
-  toggleSubagentPanel: (delegationId) => {
-    const state = get();
-    const sessionId = state.activeSessionId;
+  openSubagentTab: (delegationId, agentName) => {
     const id = delegationId.trim();
-    if (!sessionId || !id) return;
-    if (
-      state.subagentPanel?.sessionId === sessionId &&
-      state.subagentPanel.delegationId === id
-    ) {
-      set({ subagentPanel: null });
-      return;
-    }
-    set({ subagentPanel: { sessionId, delegationId: id } });
+    if (!id) return;
+    get().openWorkPanelTab(subagentWorkPanelTab(id, agentName || undefined));
   },
-  closeSubagentPanel: () => set({ subagentPanel: null }),
 
   openWorkPanel: () => {
     const state = get();
@@ -149,11 +140,6 @@ export function createWorkPanelSlice({
 
   toggleWorkPanel: () => {
     const state = get();
-    if (state.subagentPanel) {
-      state.closeSubagentPanel();
-      if (get().workPanelOpen) get().collapseWorkPanel();
-      return;
-    }
     if (state.workPanelOpen) {
       state.collapseWorkPanel();
       return;
@@ -323,6 +309,11 @@ export function createWorkPanelSlice({
     });
   },
   closeWorkPanelTab: (tabId) => {
+    const current = get();
+    if (current.activeSessionId && current.workPanelTabs.some((tab) => tab.id === tabId && tab.resource === "pi.browser/browser")) {
+      void api.pluginViewClose("pi.browser", "browser", { sessionId: current.activeSessionId, tabId })
+        .catch((error) => get().showToast(String(error), { variant: "error" }));
+    }
     set((state) => {
       const sessionId = state.activeSessionId;
       if (!sessionId) return {};
@@ -390,6 +381,20 @@ export function createWorkPanelSlice({
 
   openFileInWorkPanel: (path, mimeType) => {
     get().openWorkPanelTab(fileWorkPanelTab(path, mimeType));
+  },
+  updateBrowserWorkPanelTab: (event) => {
+    const sessionId = event.sessionId;
+    if (!sessionId || !event.tabId || !event.url) return;
+    set((state) => {
+      const visible = state.activeSessionId === sessionId && !isSessionSelectionPending(sessionId);
+      const context = visible ? currentWorkPanelContext(state) : state.workPanelContexts[sessionId];
+      if (!context || !context.tabs.some((tab) => tab.id === event.tabId && tab.resource === "pi.browser/browser")) return {};
+      const tabs = context.tabs.map((tab) => tab.id === event.tabId
+        ? { ...tab, location: event.url, label: !event.isLoading && !event.loadError && event.title ? event.title : browserTabLabel(event.url) }
+        : tab);
+      return { ...(visible ? { workPanelTabs: tabs } : {}),
+        workPanelContexts: { ...state.workPanelContexts, [sessionId]: { ...context, tabs } } };
+    });
   },
   openUrlInWorkPanel: (url) => {
     const hasBrowser = get().pluginViews.some(

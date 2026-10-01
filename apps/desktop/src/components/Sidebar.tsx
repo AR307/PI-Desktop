@@ -17,6 +17,7 @@ import { TooltipButton, cx } from "./ui";
 const MAX_VISIBLE_SESSIONS = 10;
 import { portalToBody } from "../lib/portal-visibility";
 import { useTranslation } from "react-i18next";
+import { Smartphone } from "lucide-react";
 import { api } from "../lib/api";
 import { SessionHoverCard } from "../features/sessions/SessionHoverCard";
 import { useSessionHoverCard } from "../features/sessions/useSessionHoverCard";
@@ -66,6 +67,7 @@ import { useArmedDelete } from "../hooks/use-armed-delete";
 import { ProjectDeleteDialog } from "./ProjectDeleteDialog";
 import { SessionRenameDialog } from "./SessionRenameDialog";
 import { useUpdateState } from "../hooks/use-update-state";
+import { MobilePairingDialog, type MobilePairingTarget } from "../features/mobile-sync/MobilePairingDialog";
 import {
   IconArchive,
   IconArchiveRestore,
@@ -235,6 +237,7 @@ export function Sidebar({
   const sessionView = useAppStore((s) => s.sessionView);
   const projectSort = useAppStore((s) => s.projectSort);
   const runningSessions = useAppStore((s) => s.runningSessions);
+  const backgroundDelegations = useAppStore((s) => s.backgroundDelegations);
   const sessionOutcomes = useAppStore((s) => s.sessionOutcomes);
   const pendingPermissions = useAppStore((s) => s.pendingPermissions);
   const setPage = useAppStore((s) => s.setPage);
@@ -276,11 +279,15 @@ export function Sidebar({
   const [sortOpen, setSortOpen] = useState(false);
   const [sessionMenu, setSessionMenu] = useState<string | null>(null);
   const [renameFor, setRenameFor] = useState<SessionSummary | null>(null);
+  const [mobilePairingTarget, setMobilePairingTarget] = useState<MobilePairingTarget>();
   const [editProjectFor, setEditProjectFor] = useState<ProjectEntry | null>(null);
   const [deleteProjectFor, setDeleteProjectFor] = useState<ProjectEntry | null>(null);
   // Which row menu item is armed for its second, confirming click.
   const { armed: armedDelete, setArmed: setArmedDelete } = useArmedDelete();
   const [projectMenu, setProjectMenu] = useState<string | null>(null);
+  // Multi-select: Shift/Cmd+click session rows for batch operations.
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const lastClickedIdRef = useRef<string | null>(null);
   const [sectionMenu, setSectionMenu] = useState<"sessions" | "projects" | null>(null);
   const [menuPosition, setMenuPosition] = useState<{
     top: number;
@@ -450,6 +457,20 @@ export function Sidebar({
       window.removeEventListener("blur", onWindowBlur);
     };
   }, []);
+
+  // Escape clears multi-select (only when no menu is open — menus consume
+  // their own Escape first, so clearing happens on the next press).
+  useEffect(() => {
+    if (selectedIds.size === 0) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      // Let menu/sort close handlers consume Escape first.
+      if (sessionMenu || projectMenu || sectionMenu || sortOpen) return;
+      setSelectedIds(new Set());
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [selectedIds.size, sessionMenu, projectMenu, sectionMenu, sortOpen]);
 
   const showArchived = sessionView.archived;
   const sessionSort = sessionView.sort;
@@ -965,28 +986,120 @@ export function Sidebar({
     () => temporarySessions.filter((session) => !pinnedSessionIds.has(session.id)),
     [temporarySessions, pinnedSessionIds],
   );
-  const renderSessionStatus = (status: SidebarSessionStatus) => {
+  // Flat ordered list of every visible session id — used for Shift+click range selection.
+  const flatSessionOrder = useMemo(() => {
+    const ids: string[] = [];
+    // Pinned first (same order as rendered)
+    for (const s of pinnedSessions) ids.push(s.id);
+    // Then project sessions
+    for (const entry of projectEntries) {
+      for (const s of entry.sessions) {
+        if (!pinnedSessionIds.has(s.id)) ids.push(s.id);
+      }
+    }
+    // Then temporary (standalone) sessions
+    for (const s of temporarySessionHistory) ids.push(s.id);
+    return ids;
+  }, [pinnedSessions, projectEntries, pinnedSessionIds, temporarySessionHistory]);
+
+  /** Handle multi-select click on a session row. Returns true if the click was consumed by multi-select. */
+  const handleMultiSelectClick = (event: React.MouseEvent, sessionId: string): boolean => {
+    const isMeta = event.metaKey || event.ctrlKey;
+    const isShift = event.shiftKey;
+    if (!isMeta && !isShift) {
+      // Plain click: clear selection, let normal handler run.
+      if (selectedIds.size > 0) setSelectedIds(new Set());
+      lastClickedIdRef.current = sessionId;
+      return false;
+    }
+    event.preventDefault();
+    event.stopPropagation();
+    if (isMeta && !isShift) {
+      // Toggle individual item
+      setSelectedIds((prev) => {
+        const next = new Set(prev);
+        if (next.has(sessionId)) next.delete(sessionId);
+        else next.add(sessionId);
+        return next;
+      });
+      lastClickedIdRef.current = sessionId;
+      return true;
+    }
+    if (isShift) {
+      // Range select from lastClickedId to current
+      const anchor = lastClickedIdRef.current;
+      if (!anchor) {
+        setSelectedIds(new Set([sessionId]));
+        lastClickedIdRef.current = sessionId;
+        return true;
+      }
+      const startIdx = flatSessionOrder.indexOf(anchor);
+      const endIdx = flatSessionOrder.indexOf(sessionId);
+      if (startIdx === -1 || endIdx === -1) {
+        setSelectedIds(new Set([sessionId]));
+        lastClickedIdRef.current = sessionId;
+        return true;
+      }
+      const lo = Math.min(startIdx, endIdx);
+      const hi = Math.max(startIdx, endIdx);
+      const range = flatSessionOrder.slice(lo, hi + 1);
+      setSelectedIds((prev) => {
+        const next = new Set(prev);
+        for (const id of range) next.add(id);
+        return next;
+      });
+      // Don't update lastClickedIdRef on shift-click so further shifts extend from same anchor
+      return true;
+    }
+    return false;
+  };
+
+  // Clear multi-select when sessions list changes (e.g. after batch delete)
+  const sessionIdSet = useMemo(() => new Set(sessions.map((s) => s.id)), [sessions]);
+  useEffect(() => {
+    if (selectedIds.size === 0) return;
+    // Remove any selected ids that no longer exist
+    let changed = false;
+    const next = new Set<string>();
+    for (const id of selectedIds) {
+      if (sessionIdSet.has(id)) next.add(id);
+      else changed = true;
+    }
+    if (changed) setSelectedIds(next);
+  }, [sessionIdSet]); // intentionally not including selectedIds to avoid loop
+
+  const renderSessionStatus = (
+    status: SidebarSessionStatus,
+    backgroundCount = 0,
+  ) => {
     const labelKey =
       status === "running"
         ? "nav.sessionRunning"
-        : status === "selected"
-          ? "nav.sessionSelected"
-          : status === "completed"
-            ? "nav.sessionCompleted"
-            : status === "failed"
-              ? "nav.sessionFailed"
-              : "nav.sessionPermission";
+        : status === "subagents"
+          ? "chat.backgroundSubagents"
+          : status === "selected"
+            ? "nav.sessionSelected"
+            : status === "completed"
+              ? "nav.sessionCompleted"
+              : status === "failed"
+                ? "nav.sessionFailed"
+                : "nav.sessionPermission";
     const fallback =
       status === "running"
         ? "In progress"
-        : status === "selected"
-          ? "Selected"
-          : status === "completed"
-            ? "Completed"
-            : status === "failed"
-              ? "Failed"
-              : "Permission required";
-    const label = t(labelKey, { defaultValue: fallback });
+        : status === "subagents"
+          ? "Subagents running in background"
+          : status === "selected"
+            ? "Selected"
+            : status === "completed"
+              ? "Completed"
+              : status === "failed"
+                ? "Failed"
+                : "Permission required";
+    const label =
+      status === "subagents"
+        ? t(labelKey, { defaultValue: fallback, count: backgroundCount })
+        : t(labelKey, { defaultValue: fallback });
     return (
       <span className={`thread-item-status ${status}`} aria-label={label} title={label}>
         {status === "completed" ? <IconCheck size={10} aria-hidden /> : null}
@@ -1209,6 +1322,68 @@ export function Sidebar({
     void deleteSession(session);
   };
 
+  /** Batch delete: delete all selected sessions sequentially. */
+  const batchDeleteSessions = async () => {
+    const ids = [...selectedIds];
+    if (ids.length === 0) return;
+    closeMenus();
+    const toDelete = sessions.filter(
+      (s) => ids.includes(s.id) && s.source !== "pi-native",
+    );
+    for (const session of toDelete) {
+      try {
+        await deleteSessionAction(session.id);
+      } catch (error) {
+        reportError(error);
+      }
+    }
+    // If we deleted the active session, create or select a fallback
+    if (ids.includes(activeSessionId ?? "")) {
+      const remaining = sessions.find(
+        (s) => !ids.includes(s.id) && !sessionArchived(s, sessionMeta[s.id]),
+      );
+      try {
+        if (remaining) await selectSession(remaining.id);
+        else await newSession({ projectPath: null });
+      } catch (error) {
+        reportError(error);
+      }
+    }
+    setSelectedIds(new Set());
+  };
+
+  /** Batch archive: archive all selected sessions. */
+  const batchArchiveSessions = async () => {
+    const ids = [...selectedIds];
+    if (ids.length === 0) return;
+    closeMenus();
+    for (const id of ids) {
+      const session = sessions.find((s) => s.id === id);
+      if (!session) continue;
+      const alreadyArchived = sessionArchived(session, sessionMeta[session.id]);
+      if (alreadyArchived) continue;
+      archiveSessionAction(id);
+    }
+    // If we archived the active session (and it wasn't already archived), select a fallback
+    const activeWasArchived = (() => {
+      if (!activeSessionId || !ids.includes(activeSessionId)) return false;
+      const s = sessions.find((s) => s.id === activeSessionId);
+      return s ? !sessionArchived(s, sessionMeta[s.id]) : false;
+    })();
+    if (activeWasArchived) {
+      const remaining = sessions.find(
+        (s) => !ids.includes(s.id) && !sessionArchived(s, sessionMeta[s.id]),
+      );
+      try {
+        if (remaining) await selectSession(remaining.id);
+        else await newSession({ projectPath: null });
+      } catch (error) {
+        reportError(error);
+      }
+    }
+    setSelectedIds(new Set());
+  };
+
   /** Menu items of different surfaces never share an armed key. */
   const projectDeleteKey = (entry: ProjectEntry) => `project:${entry.key}`;
 
@@ -1267,7 +1442,7 @@ export function Sidebar({
 
   const copyConversationId = async (session: SessionSummary) => {
     try {
-      await navigator.clipboard.writeText(session.id);
+      await api.writeClipboardText(session.id);
       showToast(t("chat.copied"));
     } catch (error) {
       reportError(error);
@@ -1527,16 +1702,18 @@ export function Sidebar({
     const archived = sessionArchived(session, meta);
     const running = Boolean(runningSessions[session.id]);
     const hasPendingPermission = (pendingPermissions[session.id]?.length ?? 0) > 0;
+    const backgroundCount = backgroundDelegations[session.id] ?? 0;
     const status = sidebarSessionStatus({
       running,
       selected: active,
       outcome: sessionOutcomes[session.id],
       hasPendingPermission,
+      backgroundDelegations: backgroundCount,
     });
     return (
       <div
         key={session.id}
-        className={`thread-item ${active ? "active" : ""} ${archived ? "archived" : ""} ${draggingSessionId === session.id ? "is-dragging" : ""}`}
+        className={`thread-item ${active ? "active" : ""} ${archived ? "archived" : ""} ${draggingSessionId === session.id ? "is-dragging" : ""} ${selectedIds.has(session.id) ? "selected" : ""}`}
         data-sidebar-session-row={session.id}
         draggable={!running}
         onDragStart={(event) => {
@@ -1548,12 +1725,9 @@ export function Sidebar({
         }}
         onDragEnd={endSessionDrag}
         onClick={(event) => {
-          // The row's own controls are the only click targets spelled out in
-          // markup; a click on the row container or its gap to the actions
-          // column - including where a hidden overflow control would sit -
-          // still opens the conversation instead of dying on the wrapper.
           const target = event.target as HTMLElement | null;
           if (target?.closest("button, [data-action]")) return;
+          if (handleMultiSelectClick(event, session.id)) return;
           cancelSessionPrefetch();
           hideSessionHoverCard();
           void (temporary
@@ -1563,6 +1737,11 @@ export function Sidebar({
         onContextMenu={(event) => {
           event.preventDefault();
           event.stopPropagation();
+          // If right-clicking a non-selected row while multi-select is active,
+          // add it to the selection instead of replacing.
+          if (selectedIds.size > 0 && !selectedIds.has(session.id)) {
+            setSelectedIds((prev) => new Set([...prev, session.id]));
+          }
           placeMenuAtPoint(event.clientX, event.clientY);
           openSessionRowMenu(
             session.id,
@@ -1572,7 +1751,7 @@ export function Sidebar({
           );
         }}
       >
-        {status ? renderSessionStatus(status) : null}
+        {status ? renderSessionStatus(status, backgroundCount) : null}
         <button
           type="button"
           className="thread-item-main"
@@ -1587,7 +1766,8 @@ export function Sidebar({
             showSessionHoverCard(session, event.currentTarget, temporary)
           }
           onBlur={scheduleSessionHoverCardHide}
-          onClick={() => {
+          onClick={(event) => {
+            if (handleMultiSelectClick(event, session.id)) return;
             cancelSessionPrefetch();
             hideSessionHoverCard();
             void (temporary
@@ -1923,10 +2103,47 @@ export function Sidebar({
         }}
       >
         {session ? (
-          <>
-            {session.source !== "pi-native" ? (
+          selectedIds.size > 1 && selectedIds.has(session.id) ? (
+            <>
               <button
                 ref={menuFirstItemRef}
+                type="button"
+                role="menuitem"
+                data-action="batch-archive"
+                onClick={() => void batchArchiveSessions()}
+              >
+                <IconArchive size={14} />
+                {t("nav.batchArchive", { defaultValue: "Archive {{count}} sessions", count: selectedIds.size })}
+              </button>
+              <button
+                type="button"
+                role="menuitem"
+                className={cx("danger", armedDelete === "batch" && "is-armed")}
+                data-action="batch-delete"
+                data-armed={armedDelete === "batch" ? "true" : undefined}
+                onClick={() => {
+                  if (armedDelete !== "batch") {
+                    setArmedDelete("batch");
+                    return;
+                  }
+                  setArmedDelete(null);
+                  void batchDeleteSessions();
+                }}
+              >
+                <IconTrash size={14} />
+                {armedDelete === "batch"
+                  ? t("nav.batchDeleteConfirm", { defaultValue: "Delete {{count}} sessions?", count: selectedIds.size })
+                  : t("nav.batchDelete", { defaultValue: "Delete {{count}} sessions", count: selectedIds.size })}
+              </button>
+            </>
+          ) : (
+          <>
+            <button ref={menuFirstItemRef} type="button" role="menuitem" data-action="sync-session-mobile" onClick={() => {
+              closeMenus(false);
+              setMobilePairingTarget({ scope: { kind: "session", sessionId: session.id }, label: session.title });
+            }}><Smartphone size={14} aria-hidden />{t("mobileSync.title")}</button>
+            {session.source !== "pi-native" ? (
+              <button
                 type="button"
                 role="menuitem"
                 data-action="rename-session"
@@ -1977,17 +2194,17 @@ export function Sidebar({
                 {t("nav.createBranch")}
               </button>
             ) : null}
+            <button
+              type="button"
+              role="menuitem"
+              data-action="copy-conversation-id"
+              onClick={() => void copyConversationId(session)}
+            >
+              <IconCopy size={14} />
+              {t("nav.copyConversationId")}
+            </button>
             {settings?.developerMode === true ? (
               <>
-                <button
-                  type="button"
-                  role="menuitem"
-                  data-action="copy-conversation-id"
-                  onClick={() => void copyConversationId(session)}
-                >
-                  <IconCopy size={14} />
-                  {t("nav.copyConversationId")}
-                </button>
                 <button
                   type="button"
                   role="menuitem"
@@ -2015,11 +2232,15 @@ export function Sidebar({
               </button>
             ) : null}
           </>
+          )
         ) : null}
         {entry ? (
           <>
+            <button ref={menuFirstItemRef} type="button" role="menuitem" data-action="sync-project-mobile" onClick={() => {
+              closeMenus(false);
+              setMobilePairingTarget({ scope: { kind: "project", projectPath: entry.path }, label: entry.name });
+            }}><Smartphone size={14} aria-hidden />{t("mobileSync.title")}</button>
             <button
-              ref={menuFirstItemRef}
               type="button"
               role="menuitem"
               data-action="open-project-folder"
@@ -2354,6 +2575,7 @@ export function Sidebar({
         </div>
       </div>
       {renderFloatingMenu()}
+      {mobilePairingTarget && <MobilePairingDialog target={mobilePairingTarget} onClose={() => setMobilePairingTarget(undefined)} />}
       {sessionHoverCard ? (
         <SessionHoverCard
           key={sessionHoverCard.session.id}

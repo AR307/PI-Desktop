@@ -179,7 +179,7 @@
 .asktool-option {
   display: flex;
   width: 100%;
-  align-items: center;
+  align-items: flex-start;
   gap: 8px;
   min-height: 30px;
   padding: 4px 8px;
@@ -191,6 +191,106 @@
   font-size: var(--text-md);
   text-align: start;
   transition: background-color var(--motion-duration-fast) var(--motion-ease-out);
+}
+
+.asktool-option-copy {
+  display: grid;
+  min-width: 0;
+  gap: 2px;
+}
+
+.asktool-rich-paragraph,
+.asktool-rich-heading,
+.asktool-rich-list,
+.asktool-rich-list-item,
+.asktool-rich-quote,
+.asktool-rich-pre,
+.asktool-rich-table,
+.asktool-rich-table-row,
+.asktool-rich-table-cell {
+  display: block;
+  margin: 0;
+}
+
+.asktool-rich-heading {
+  font-weight: var(--font-weight-semibold);
+}
+
+.asktool-rich-list {
+  padding-inline-start: 4px;
+}
+
+.asktool-rich-list-ordered {
+  counter-reset: asktool-option-item;
+}
+
+.asktool-rich-list-item + .asktool-rich-list-item {
+  margin-top: 2px;
+}
+
+.asktool-rich-list-ordered > .asktool-rich-list-item {
+  counter-increment: asktool-option-item;
+}
+
+.asktool-rich-list-ordered > .asktool-rich-list-item > .asktool-rich-list-marker::before {
+  content: counter(asktool-option-item) ". ";
+}
+
+.asktool-rich-list-unordered > .asktool-rich-list-item > .asktool-rich-list-marker {
+  margin-inline-end: 5px;
+  color: var(--ds-text-muted);
+}
+
+.asktool-rich-quote {
+  padding-inline-start: 6px;
+  color: var(--ds-text-muted);
+}
+
+.asktool-rich-pre {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.asktool-rich-task-marker,
+.asktool-rich-image-alt {
+  color: var(--ds-text-muted);
+}
+
+.asktool-rich-image-alt {
+  font-style: italic;
+}
+
+.asktool-rich-rule {
+  display: block;
+  height: 1px;
+  margin: 4px 0;
+  background: var(--ds-text-faint);
+}
+
+.asktool-rich-table-row {
+  display: flex;
+  gap: 6px;
+}
+
+.asktool-rich-table-cell {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.asktool-rich-code {
+  border-radius: var(--radius-2xs);
+  background: var(--ds-tile-deep);
+  padding: 1px 3px;
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  overflow-wrap: anywhere;
+}
+
+.asktool-option-description {
+  color: var(--ds-text-muted);
+  font-size: var(--text-xs);
+  line-height: var(--leading-normal);
+  overflow-wrap: anywhere;
 }
 
 .asktool-option:hover,
@@ -210,6 +310,7 @@
   color: var(--ds-accent);
   font-size: var(--text-xs);
   line-height: var(--leading-none);
+  margin-top: 2px;
 }
 
 .asktool-option[role="radio"] .asktool-option-mark {
@@ -1004,6 +1105,16 @@
 .message-row:focus-within .message-actions,
 .message-actions:focus-within {
   opacity: 1;
+}
+
+.message-timestamp {
+  font-size: var(--text-xs);
+  color: var(--ds-text-muted);
+  line-height: var(--leading-compact);
+  white-space: nowrap;
+  user-select: none;
+  padding: 0 4px;
+  align-self: center;
 }
 
 .icon-btn:active:not(:disabled),
@@ -1959,8 +2070,10 @@
   color: var(--ds-text-muted);
   font-family: var(--font-mono);
   font-size: var(--text-xs);
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  line-height: var(--leading-normal);
+  overflow-wrap: anywhere;
+  text-overflow: clip;
+  white-space: normal;
 }
 
 .tool-activity-group.has-subagents .tool-activity-preview {
@@ -2188,19 +2301,25 @@
 .subagent-topology-node-title-row {
   display: flex;
   min-width: 0;
+  flex-wrap: wrap;
   align-items: baseline;
-  gap: 8px;
+  gap: 3px 8px;
 }
 
 .subagent-topology-node-title {
   min-width: 0;
-  flex: 1;
+  flex: 1 1 12ch;
   overflow: hidden;
   color: var(--ds-text-primary);
+  display: -webkit-box;
   font-size: var(--text-sm-plus);
   font-weight: var(--font-weight-semibold);
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow-wrap: anywhere;
+  text-overflow: clip;
+  white-space: normal;
+  word-break: break-word;
 }
 
 .subagent-topology-node-model {
@@ -2222,13 +2341,19 @@
   white-space: nowrap;
 }
 
-.subagent-topology-node-summary,
-.subagent-topology-node-steps {
+.subagent-topology-node-summary {
+  display: -webkit-box;
+  min-width: 0;
   overflow: hidden;
   color: var(--ds-text-muted);
   font-size: var(--text-xs);
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  line-height: var(--leading-normal);
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow-wrap: anywhere;
+  text-overflow: clip;
+  white-space: normal;
+  word-break: break-word;
 }
 
 .subagent-topology-node-summary {
@@ -2236,9 +2361,14 @@
 }
 
 .subagent-topology-node-steps {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  white-space: normal;
+  word-break: break-word;
   margin-top: 3px;
   font-family: var(--font-mono);
   font-size: var(--text-2xs);
+  line-height: var(--leading-normal);
 }
 
 .subagent-topology-node > .tool-row-body,
@@ -3170,3 +3300,7 @@
     opacity: 0.7;
   }
 }
+
+.subagent-group-actions, .subagent-card-actions { display: flex; align-items: center; min-width: 0; }
+.subagent-group-actions > .tool-activity-header, .subagent-card-actions > .subagent-topology-node-header { flex: 1; min-width: 0; }
+.subagent-stop-button { flex: 0 0 auto; margin-inline-end: 8px; width: 24px; height: 24px; padding: 4px; }
