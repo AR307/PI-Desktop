@@ -996,3 +996,5 @@ user preview restart, push or release. See the subagent E2E README for boundarie
 - Release preflight resolves inherited ADR id/index drift and supplies the four missing Chinese domain-spec mirrors; no runtime behavior changes.
 
 - Updates stale clipboard, ReturnToParent disclosure and sidecar cancellation source contracts; corrects the import-page test boundary on Windows. Release checks retain their intended assertions.
+
+- Release acceptance: 15 real Electron subagent checks and 89 desktop/mobile-browser checks passed; all three packaged Windows app variants boot. Android release APK is signed and non-debuggable, while native QA remains blocked by the existing emulator/ADB fault. User authorized immediate publication with that boundary documented.
