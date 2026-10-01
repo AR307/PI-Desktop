@@ -95,6 +95,7 @@ type RuntimeParams = {
   /** Durable host turn ID for the prompt currently being executed. */
   turnId?: string;
   thinkingLevel?: SessionThinkingLevel;
+  ultra?: boolean;
   infiniteProviderRetry?: boolean;
   provider: RuntimeProviderConfig;
   commandShell: CommandShellOption;
@@ -209,7 +210,7 @@ async function runtimeFor(
       errorCode: "AGENT_BUSY",
     });
   }
-  const reusable = existing?.matches({
+  const nextConfiguration = {
     mode,
     provider,
     thinkingLevel,
@@ -224,17 +225,19 @@ async function runtimeFor(
     projectMemory: params.projectMemory,
     projectPath: params.projectPath,
     commandShell: params.commandShell,
-  })
-    ? existing
-    : undefined;
+  };
+  const reusable = existing?.matches(nextConfiguration) || existing?.canRebindTurn(nextConfiguration)
+    ? existing : undefined;
   if (existing && !reusable) {
     await existing.dispose();
     runtimes.delete(sessionId);
   }
   if (reusable) {
+    if (!reusable.matches(nextConfiguration)) reusable.rebindTurn(nextConfiguration);
     reusable.setCompactionSettings(params.compactionSettings);
     reusable.setInfiniteProviderRetry(params.infiniteProviderRetry === true);
     reusable.setMode(mode);
+    reusable.setTurnReasoning(thinkingLevel, params.ultra === true);
     return reusable;
   }
 
@@ -282,6 +285,7 @@ async function runtimeFor(
     provider,
     commandShell: params.commandShell,
     thinkingLevel,
+    ultra: params.ultra === true,
     infiniteProviderRetry: params.infiniteProviderRetry === true,
     history,
     compaction,

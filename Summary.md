@@ -13,6 +13,9 @@
   strategy; Rust session KV owns selection; existing clients own presentation.
 - Local validation and its production boundary: docs/ultra-validation.md.
   No MC server changes, push or release.
+- Runtime phase: use one delegation policy source, resolve explicit child
+  reasoning before launch, retain authorized resume bindings, and rebind only
+  an idle parent so live workers are not cancelled by its next-turn selection.
 
 ## 2026-09-25 - Relay binding carrier fallback
 

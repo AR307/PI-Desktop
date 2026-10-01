@@ -451,7 +451,9 @@ describe("DesktopAgentRuntime configuration matching", () => {
         provider: { ...provider, modelId: "another-model" },
       }),
     ).toBe(false);
-    expect(runtimeMatches(runtime, { thinkingLevel: "high" })).toBe(false);
+    expect(runtimeMatches(runtime, { thinkingLevel: "high" })).toBe(true);
+    runtime.setTurnReasoning("high", true);
+    expect(runtimeMatches(runtime, { thinkingLevel: "high" })).toBe(true);
 
     await runtime.dispose();
   });
@@ -6711,6 +6713,44 @@ describe("DesktopAgentRuntime subagents", () => {
       (tool: any) => tool.name === "Task",
     );
   }
+
+  it("resolves Ultra per child and rejects unsupported explicit reasoning before launch", async () => {
+    const child: RuntimeProviderConfig = { ...provider, id: "remote", modelId: "child", supportedThinkingLevels: ["off", "low", "high", "max"], mirrorCodingGroupId: "group-b" };
+    const runtime = createRuntime({ subagents: [explorer], subagentProviders: { "remote/child": child }, subagentModelKeys: ["remote/child"] });
+    runtime.setTurnReasoning("low", true);
+    subagentRuns.calls.length = 0; subagentRuns.result = undefined; subagentRuns.deferred = true;
+    try {
+      const inherited = await taskTool(runtime).execute("ultra-a", { agent: "explorer", task: "Inspect module A" });
+      const overridden = await taskTool(runtime).execute("ultra-b", { agent: "explorer", model: "remote/child", task: "Inspect module B" });
+      const explicit = await taskTool(runtime).execute("ultra-low", { agent: "explorer", model: "remote/child", task: "Inspect module C", thinkingLevel: "low" });
+      expect(inherited.details.thinkingLevel).toBe("high");
+      expect(overridden.details).toMatchObject({ thinkingLevel: "max", groupId: "group-b", modelKey: "remote/child", fast: false });
+      expect(explicit.details.thinkingLevel).toBe("low");
+      const rejected = await taskTool(runtime).execute("ultra-invalid", { agent: "explorer", task: "Inspect D", thinkingLevel: "ultra" });
+      expect(rejected.content[0].text).toContain("SUBAGENT_THINKING_UNAVAILABLE");
+      expect(subagentRuns.calls).toHaveLength(3);
+    } finally { await runtime.dispose(); subagentRuns.deferred = false; }
+  });
+
+  it("rebinds the next parent turn without cancelling or retargeting a running worker", async () => {
+    const runtime = createRuntime({ subagents: [explorer] });
+    runtime.setTurnReasoning("low", true);
+    subagentRuns.calls.length = 0; subagentRuns.result = undefined; subagentRuns.deferred = true;
+    try {
+      await taskTool(runtime).execute("worker-before-switch", { agent: "explorer", task: "Inspect A" });
+      const worker = subagentRuns.calls.at(-1) as { provider: RuntimeProviderConfig; thinkingLevel: string; signal: AbortSignal };
+      const config: RuntimeMatchConfig = { mode: "agent", provider: { ...provider, id: "other", modelId: "other-model" }, thinkingLevel: "low", commandShell, subagents: [explorer] };
+      expect(runtime.canRebindTurn(config)).toBe(true);
+      runtime.rebindTurn(config);
+      runtime.setTurnReasoning("low", false);
+      expect(worker.signal.aborted).toBe(false);
+      expect(worker.provider.modelId).toBe("local-model");
+      expect(worker.thinkingLevel).toBe("high");
+      expect(runtime.getStatus().backgroundDelegations).toBe(1);
+      const next = await taskTool(runtime).execute("worker-after-switch", { agent: "explorer", task: "Inspect B" });
+      expect(next.details).toMatchObject({ modelId: "other-model", thinkingLevel: "low" });
+    } finally { await runtime.dispose(); subagentRuns.deferred = false; }
+  });
 
   it("isolates explicitly requested Fast from parent and parallel siblings", async () => {
     const parent = { ...provider, authKind: "mirrorcoding", fast: true, fastAvailable: true };

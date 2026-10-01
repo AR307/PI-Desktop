@@ -104,6 +104,7 @@ export class DelegationChainRegistry {
     objective: string;
     latestModelId?: string;
     latestFast?: boolean;
+    latestThinkingLevel?: import("@pi-desktop/shared").SessionThinkingLevel;
     /** `providerId/modelId` key that resolved, so a resume can re-resolve it. */
     latestModelKey?: string;
     resumedFrom?: DelegationChain;
@@ -119,6 +120,7 @@ export class DelegationChainRegistry {
           latestDelegationId: options.delegationId,
           latestObjective: options.objective || existing.latestObjective,
           latestModelId: options.latestModelId ?? existing.latestModelId,
+          latestThinkingLevel: options.latestThinkingLevel ?? existing.latestThinkingLevel,
           latestFast: options.latestFast ?? existing.latestFast ?? false,
           latestModelKey: options.latestModelKey ?? existing.latestModelKey,
           latestStatus: "running",
@@ -135,6 +137,7 @@ export class DelegationChainRegistry {
           latestDelegationId: options.delegationId,
           latestObjective: options.objective,
           latestModelId: options.latestModelId,
+          latestThinkingLevel: options.latestThinkingLevel,
           latestFast: options.latestFast ?? false,
           latestModelKey: options.latestModelKey,
           latestStatus: "running",
@@ -166,7 +169,7 @@ export class DelegationChainRegistry {
   /** Record the binding the running delegate switched to (fallback models). */
   retarget(
     delegateSessionId: string,
-    binding: { modelKey?: string; modelId: string },
+    binding: { modelKey?: string; modelId: string; thinkingLevel?: import("@pi-desktop/shared").SessionThinkingLevel },
   ): void {
     const chain = this.chains.get(delegateSessionId);
     if (!chain) return;
@@ -174,6 +177,7 @@ export class DelegationChainRegistry {
       ...chain,
       ...(binding.modelKey ? { latestModelKey: binding.modelKey } : {}),
       latestModelId: binding.modelId,
+      latestThinkingLevel: binding.thinkingLevel ?? chain.latestThinkingLevel,
       lastActivityAt: Date.now(),
     });
   }

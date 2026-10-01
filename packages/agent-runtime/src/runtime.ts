@@ -1,3 +1,5 @@
+import { highestThinkingLevel } from "@pi-desktop/shared";
+import { delegationGuidance, delegationSystemPrompt, resolveDelegationThinking } from "./ultra-policy.js";
 import { assertMirrorCodingFast, withMirrorCodingFast } from "./mirrorcoding-fast.js";
 import { assistantReplay, canRestorePartialResponse, responseContentFacts, responseDiagnostics, responseOutcome, responseOutcomeError, restoredAssistantBlocks } from "./response-outcome.js";
 import { upstreamRequestDiagnostics, type RequestDiagnostics } from "./request-diagnostics.js";
@@ -471,6 +473,8 @@ export type DelegationRecord = {
   taskTurnId?: string;
   agentName: string;
   modelId: string;
+  modelKey?: string;
+  groupId?: string;
   thinkingLevel: SubagentThinkingLevel;
   fast?: boolean;
   status: DelegationStatus;
@@ -510,6 +514,8 @@ function delegationSummary(record: DelegationRecord): Record<string, unknown> {
     delegationId: record.delegationId,
     agent: record.agentName,
     modelId: record.modelId,
+    modelKey: record.modelKey,
+    groupId: record.groupId,
     thinkingLevel: record.thinkingLevel,
     fast: record.fast === true,
     status: record.status,
@@ -927,6 +933,7 @@ export type AgentRuntimeOptions = {
   turnId?: string;
   provider: RuntimeProviderConfig;
   thinkingLevel: SessionThinkingLevel;
+  ultra?: boolean;
   /** Persisted opt-in for retrying transient provider failures until success. */
   infiniteProviderRetry?: boolean;
   systemPrompt?: string;
@@ -983,6 +990,7 @@ export type RuntimeMatchConfig = {
   mode: Mode;
   provider: RuntimeProviderConfig;
   thinkingLevel: SessionThinkingLevel;
+  ultra?: boolean;
   pluginTools?: PluginToolDef[];
   pluginSkills?: PluginSkillDef[];
   trustedExtensions?: TrustedExtensionSpec[];
@@ -1605,6 +1613,7 @@ export class DesktopAgentRuntime {
   private mode: Mode;
   private provider: RuntimeProviderConfig;
   private thinkingLevel: SessionThinkingLevel;
+  private ultra = false;
   private host: RuntimeHost;
   private onEvent: (envelope: AgentEventEnvelope) => void;
   private streamSink: StreamCoalescer;
@@ -1823,7 +1832,8 @@ export class DesktopAgentRuntime {
     this.mode = opts.mode;
     this.planningState = proposalKindForMode(this.mode) ? "planning" : "inactive";
     this.provider = opts.provider;
-    this.thinkingLevel = clampThinkingLevel(opts.provider, opts.thinkingLevel);
+    this.ultra = opts.ultra === true;
+    this.thinkingLevel = this.ultra ? highestThinkingLevel(opts.provider) : clampThinkingLevel(opts.provider, opts.thinkingLevel);
     this.infiniteProviderRetry = opts.infiniteProviderRetry === true;
     this.host = opts.host;
     this.hostCloseUnsubscribe = this.host.onClose?.(() => {
@@ -1859,7 +1869,6 @@ export class DesktopAgentRuntime {
     const tools = this.activeTools();
     const models = createProviderModels(this.provider, model);
     this.models = models;
-    const runtimeApiKey = providerRequestKey(this.provider);
 
     this.transcriptHistory = [...(opts.history ?? [])];
     this.fullEntries = this.historyToEntries(this.transcriptHistory);
@@ -1876,20 +1885,7 @@ export class DesktopAgentRuntime {
       "Complete the requested work and relevant checks without expanding scope. Preserve unrelated user changes. Resolve recoverable blockers yourself.",
       // Visibility rules.
       "Before each tool batch, briefly state its purpose. Keep the user informed during long work. The final response must state the outcome, verification, and remaining blockers. Never claim actions or checks you did not perform.",
-      // Delegation steering (ADR 0089).
-      ...(this.subagents.length
-        ? [
-            `## Delegation
-Do the work yourself by default. Delegate only bounded, independent tasks with a clear benefit over direct execution.
-No recursive delegation, duplicate work, or agent debates.
-Allow at most one optional review pass unless the user requests more. Fix and retest concrete, in-scope defects without restarting broad reviews.
-Do not invent objections or turn speculative risks into blockers. Stop when the requested work is complete and relevant checks pass, or report a genuine blocker.
-You may end your turn while delegates run: they keep working in the background and their reports are delivered automatically — at your turn's boundary, or by waking the session when it is idle. Use TaskWait only when the next step needs a report.`,
-            ...(this.subagentModelSummary()
-              ? [this.subagentModelSummary()!]
-              : []),
-          ]
-        : []),
+      // Delegation guidance is composed per turn so Ultra changes stay coherent.
       // Editing workflow.
       `Editing workflow: inside the advertised workspace, use Edit for small, uniquely anchored changes and Write for new files or intentional whole-file rewrites. Never modify the same path concurrently. Do not use shell apply_patch, git apply, patch, or hand-edited unified-diff files. On failure, diagnose the cause, refresh content or anchors with Read or a complete tool-provided reveal when needed, and correct the payload before retrying. After three failed edit attempts on the same path in one user turn, stop editing that path, report the exact error, and continue unblocked work. For an authorized worktree outside the advertised workspace, use a guarded, deterministic Bash edit that aborts on unexpected content, then verify the diff.`,
       // Shell dialect and scratch variable are selected by host-core.
@@ -2050,7 +2046,7 @@ You may end your turn while delegates run: they keep working in the background a
       },
       // A vendor account has no long-lived key. Leaving it unset keeps pi-ai
       // from overriding the auth the provider just resolved for this request.
-      getApiKey: async () => runtimeApiKey || undefined,
+      getApiKey: async () => providerRequestKey(this.provider) || undefined,
       // The provider's rule that a tool-call id is unique is enforced here, on
       // the last view before the wire: the request is the only place it can be
       // guaranteed for both a rebuilt context and one that grew in this process.
@@ -2138,8 +2134,39 @@ You may end your turn while delegates run: they keep working in the background a
     this.setPlanningState(planningState, details);
   }
 
+  /** Idle parent boundary only: running workers retain their launch snapshots. */
+  setTurnReasoning(level: SessionThinkingLevel, ultra: boolean): void {
+    if (this.getStatus().isRunning) throw new Error("AGENT_BUSY");
+    this.ultra = ultra;
+    this.thinkingLevel = ultra ? highestThinkingLevel(this.provider) : clampThinkingLevel(this.provider, level);
+    this.agent.state.thinkingLevel = agentThinkingLevel(this.thinkingLevel);
+    this.rebuildToolCatalog();
+    this.setAgentTools(this.activeTools());
+    this.setAgentSystemPrompt(this.composeSystemPrompt());
+  }
+
   getMode(): Mode {
     return this.mode;
+  }
+
+  /** Rebind only the idle parent's model; existing workers own their launch bindings. */
+  canRebindTurn(config: RuntimeMatchConfig): boolean {
+    return !this.provider.extensionAgentKey && !config.provider.extensionAgentKey &&
+      this.matches({ ...config, provider: this.provider, subagentProviders: this.subagentProviders });
+  }
+
+  rebindTurn(config: RuntimeMatchConfig): void {
+    if (this.getStatus().isRunning || !this.canRebindTurn(config)) throw new Error("AGENT_BUSY");
+    const model = buildProviderModel(config.provider);
+    const models = createProviderModels(config.provider, model);
+    this.provider = config.provider;
+    this.model = model;
+    this.models = models;
+    this.subagentProviders = config.subagentProviders ?? {};
+    this.subagentOverrideProviders = {};
+    this.agent.state.model = model;
+    this.providerTransportHealth.reset();
+    this.setAgentMessages(this.liveSessionContext().messages);
   }
 
   private agentUsesTranscriptSystemMessages(): boolean {
@@ -2198,6 +2225,7 @@ You may end your turn while delegates run: they keep working in the background a
       this.mode,
       [
         this.baseSystemPrompt,
+        ...(this.subagents.length ? [delegationSystemPrompt(this.ultra && this.mode === "agent"), this.subagentModelSummary() ?? ""] : []),
         ...(this.customSystemPrompt?.append ? [this.customSystemPrompt.append] : []),
         ...(optionalToolsPrompt ? [optionalToolsPrompt] : []),
         ...(projectPrompt ? [projectPrompt] : []),
@@ -2452,8 +2480,6 @@ You may end your turn while delegates run: they keep working in the background a
       !this.disposed &&
       providerMatches &&
       this.mode === config.mode &&
-      this.thinkingLevel ===
-        clampThinkingLevel(config.provider, config.thinkingLevel) &&
       current === next &&
       safeJson(this.commandShell) === safeJson(config.commandShell) &&
       safeJson(this.baseProjectInstructions ?? null) ===
@@ -3958,7 +3984,9 @@ You may end your turn while delegates run: they keep working in the background a
     }
     lines.push(
       "",
-      "Pick cheaper/faster models for simple searches and read-only reviews. Reserve expensive reasoning models for complex multi-step analysis.",
+      this.ultra
+        ? "Default to the parent model and group by omitting Task.model unless the user pinned a definition model. Choose a listed authorized override when it materially helps the task."
+        : "Pick cheaper/faster models for simple searches and read-only reviews. Reserve expensive reasoning models for complex multi-step analysis.",
     );
     return lines.join("\n");
   }
@@ -4115,7 +4143,8 @@ You may end your turn while delegates run: they keep working in the background a
     const matches = (candidate: RuntimeProviderConfig | undefined) =>
       candidate?.modelId.trim().toLowerCase() === modelId;
     if (chain.latestModelKey) {
-      const keyed = binding(chain.latestModelKey) ??
+      const current = `${this.provider.id}/${this.provider.modelId}` === chain.latestModelKey ? this.provider : undefined;
+      const keyed = current ?? binding(chain.latestModelKey) ??
         await this.resolveSubagentModel(chain.latestModelKey);
       // A known binding must not silently become a different account with the
       // same model id after its grant disappears.
@@ -4132,15 +4161,17 @@ You may end your turn while delegates run: they keep working in the background a
   private delegationModelKeyFor(
     provider: RuntimeProviderConfig,
   ): string | undefined {
+    const sameBinding = (candidate: RuntimeProviderConfig) => candidate.id === provider.id &&
+      candidate.modelId === provider.modelId && candidate.mirrorCodingGroupId === provider.mirrorCodingGroupId;
     for (const [key, candidate] of Object.entries(this.subagentProviders)) {
-      if (candidate === provider) return key;
+      if (sameBinding(candidate)) return key;
     }
     for (const [key, candidate] of Object.entries(
       this.subagentOverrideProviders,
     )) {
-      if (candidate === provider) return key;
+      if (sameBinding(candidate)) return key;
     }
-    return undefined;
+    return `${provider.id}/${provider.modelId}`;
   }
 
   /**
@@ -4192,7 +4223,8 @@ You may end your turn while delegates run: they keep working in the background a
       name: SUBAGENT_TOOL_NAME,
       label: "Task",
       description: [
-        "Start one subagent in the background and return immediately; you keep working while it runs, then converge with TaskWait when you need its report.\n\nPrefer doing the work yourself. Only delegate when it saves significant context or enables genuine parallelism — not for tasks you can finish in a few tool calls.",
+        delegationGuidance(this.ultra && this.mode === "agent"),
+        "Start one subagent in the background and return immediately; keep working while it runs, then converge with TaskWait when you need its report.",
         "Use it only when the work is genuinely separable and substantial: parallel exploration of independent directions that each need many tool calls (one Task per direction in the same assistant message), a large multi-file implementation with a complete spec (fixer), an adversarial read-only review of a non-trivial change you already finished (code-reviewer), or a wide search whose raw output would fill this context (explorer, test-runner). A single file lookup or a small edit does not warrant delegation.",
         "Do not delegate what you can finish in a couple of tool calls, and do not delegate anything that needs the user — a subagent cannot ask a question or propose a plan on your behalf.",
         ...(this.availableSubagentModelKeys().length
@@ -4227,6 +4259,7 @@ You may end your turn while delegates run: they keep working in the background a
               "Override the delegate's model for this run, e.g. 'anthropic/claude-sonnet-4-20250514'. Omit to use the subagent's default. Repeating the definition's own Default model key is the same as omitting this parameter. Only choose a different override from the available delegation model catalog. Forbidden when `resume` is set.",
           }),
         ),
+        thinkingLevel: Type.Optional(Type.String({ description: "Native thinking level explicitly requested by the user. Ultra defaults each new worker to its own model highest supported level. Resume omission keeps that worker previous level. Never pass ultra." })),
         fast: Type.Optional(Type.Boolean({
           description: "Request MC Fast for this delegation. New runs default to false and never inherit parent Fast. Resume omission retains this delegate’s previous value. Only use true when the resolved model/group advertises Fast.",
         })),
@@ -4396,13 +4429,12 @@ You may end your turn while delegates run: they keep working in the background a
         }
         const delegationId = randomUUID();
         const controller = new AbortController();
-        const thinkingLevel: SubagentThinkingLevel =
-          definition.thinkingLevel === "omit"
-            ? "omit"
-            : clampThinkingLevel(
-                provider,
-                definition.thinkingLevel ?? this.thinkingLevel,
-              );
+        let thinkingLevel: SubagentThinkingLevel;
+        try {
+          thinkingLevel = resolveDelegationThinking({ provider, definition, requested: isRecord(params) ? params.thinkingLevel : undefined, resumed: resumedChain?.latestThinkingLevel, parent: this.thinkingLevel, ultra: this.ultra });
+        } catch (error) {
+          return this.subagentToolError(toolCallId, error instanceof Error ? error.message : String(error));
+        }
         // Only TaskStop and dispose abort a delegate (D628): user Stop and a
         // parent fatal error end the parent turn alone, and the run detaches.
         // The Task tool call returns immediately; tying the background run to
@@ -4426,6 +4458,7 @@ You may end your turn while delegates run: they keep working in the background a
           objective,
           latestModelId: provider.modelId,
           latestFast: fast,
+          latestThinkingLevel: thinkingLevel,
           ...(providerKey ? { latestModelKey: providerKey } : {}),
           resumedFrom: resumedChain,
         });
@@ -4434,6 +4467,8 @@ You may end your turn while delegates run: they keep working in the background a
           taskTurnId: this.turnId,
           agentName: definition.name,
           modelId: provider.modelId,
+          modelKey: providerKey,
+          groupId: provider.mirrorCodingGroupId,
           thinkingLevel,
           status: "running",
           fast,
@@ -4473,10 +4508,13 @@ You may end your turn while delegates run: they keep working in the background a
             inheritedThinkingLevel: this.thinkingLevel,
             onModelChange: (next, level) => {
               record.modelId = next.modelId;
+              record.modelKey = this.delegationModelKeyFor(next);
+              record.groupId = next.mirrorCodingGroupId;
               record.thinkingLevel = level;
               this.delegationChains.retarget(record.delegateSessionId, {
                 modelKey: this.delegationModelKeyFor(next),
                 modelId: next.modelId,
+                thinkingLevel: level,
               });
               this.publishDelegationSettlement(record);
             },
@@ -4563,6 +4601,8 @@ You may end your turn while delegates run: they keep working in the background a
             status: "running",
             startedAt,
             modelId: provider.modelId,
+            modelKey: providerKey,
+            groupId: provider.mirrorCodingGroupId,
             thinkingLevel,
             fast,
             ...(resumedChain ? { resumedFrom: resume } : {}),
@@ -5122,8 +5162,10 @@ You may end your turn while delegates run: they keep working in the background a
           agent: record.agentName,
           status: record.status,
           modelId: record.modelId,
+          modelKey: record.modelKey,
+          groupId: record.groupId,
           thinkingLevel: record.thinkingLevel,
-    fast: record.fast === true,
+          fast: record.fast === true,
           startedAt: record.startedAt,
           ...(record.completedAt ? { completedAt: record.completedAt } : {}),
           ...(record.result?.error ? { error: record.result.error } : {}),
