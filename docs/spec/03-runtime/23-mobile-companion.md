@@ -124,6 +124,11 @@ acceptance is distinct from MC-team service acceptance and production deployment
 
 ## Session Fast (2026-09-30)
 
+The same configuration also carries session-local `ultra` independently of
+Fast. Current snapshots show effective native reasoning; next/chat selections
+retain the preference. Child cards show accepted model/group/native level, and
+changing model/group resets Ultra. See [Ultra collaboration](ultra-collaboration.md).
+
 The existing model sheet stages Fast with model/group/reasoning and applies one
 session/configure write. Catalog choices expose fastAvailable and an unavailable
 reason. Session configuration includes Fast in current, next and remembered chat

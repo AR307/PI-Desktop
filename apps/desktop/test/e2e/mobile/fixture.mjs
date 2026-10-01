@@ -71,7 +71,24 @@ export async function mobileFixture({ port = 0, messageHandler } = {}) {
           const held = { finish: () => finish("Mobile task completed."), res };
           heldChats.add(held); res.once("close", () => { if (heldChats.delete(held)) control.abortedChats++; }); return;
         }
+        const parentTask = body.tools?.some(item => item.function.name === "Task");
+        if (!toolResults.length && prompt.includes("mobile-ultra-parallel") && parentTask) {
+          const tasks = [
+            { agent: "explorer", task: "ULTRA_WORKER_PARENT: inspect your assigned independent module and report." },
+            { agent: "explorer", task: "ULTRA_WORKER_OTHER: inspect the second independent module and report.", model: control.subagentModel },
+          ];
+          res.write(chunk({ tool_calls: tasks.map((args, index) => ({ index, id: "ultra-" + randomUUID(), type: "function", function: { name: "Task", arguments: JSON.stringify(args) } })) }));
+          res.write(chunk({}, "tool_calls")); res.end("data: [DONE]\n\n"); return;
+        }
+        if (!parentTask && prompt.includes("ULTRA_WORKER_")) {
+          control.ultraWorkers = (control.ultraWorkers ?? 0) + 1;
+          const held = { finish: () => finish("Ultra worker report complete."), res };
+          heldChats.add(held); res.once("close", () => heldChats.delete(held)); return;
+        }
         let tool, args;
+        if (!toolResults.length && prompt.includes("mobile-ultra-resume") && parentTask) {
+          tool = "Task"; args = { agent: "explorer", task: "Continue the earlier module inspection.", resume: control.ultraResume };
+        }
         if (!toolResults.length && /mobile-(fast|ordinary)-child/.test(prompt) && body.tools?.some(item => item.function.name === "Task")) {
           tool = "Task"; args = { agent: "explorer", task: "Controlled child Fast tool continuation", model: control.subagentModel, ...(prompt.includes("mobile-fast-child") ? { fast: true } : {}) };
         }

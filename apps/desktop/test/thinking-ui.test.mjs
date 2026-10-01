@@ -75,9 +75,9 @@ test("composer exposes the runtime thinking level order and provider filtering",
   assert.match(composerSource, /supportsReasoning/);
   assert.match(composerSource, /thinkingLevelForProvider/);
   assert.match(composerSource, /thinkingLevel:\s*level/);
-  // The slider commits a drag, while the reasoning entry still opens the
-  // classic radio list for keyboard selection.
-  assert.match(composerSource, /composer-thinking-list/);
+  // Native range keyboard and pointer interaction share one slider.
+  assert.match(composerSource, /composer-thinking-slider/);
+  assert.doesNotMatch(composerModelPickerSource, /composer-thinking-list/);
   assert.doesNotMatch(stylesSource, /\.composer-thinking-levels/);
   assert.doesNotMatch(stylesSource, /\.composer-thinking-level\b/);
   assert.match(
@@ -90,8 +90,8 @@ test("composer exposes the runtime thinking level order and provider filtering",
 
 test("thinking levels use their canonical English values without i18n", () => {
   assert.match(composerSource, /const thinkingLabel = thinkingLevel;/);
-  // The slider's ticks print the canonical level values themselves.
-  assert.match(composerSource, /onClick=\{\(\) => select\(stop\)\}>\{candidate\}<\/button>/);
+  // Ultra is a local policy label; all other ticks keep native level values.
+  assert.match(composerSource, /candidate === "ultra" \? "Ultra" : candidate/);
   assert.doesNotMatch(composerSource, /THINKING_LEVEL_(LABELS|I18N_KEYS)/);
   assert.doesNotMatch(composerSource, /chat\.effort(?:Off|Minimal|Low|Mid|High|Xhigh|Max)/);
   assert.doesNotMatch(transcriptSource, /thinkingLevel\./);

@@ -1,3 +1,14 @@
+## Unreleased - Ultra collaboration
+
+- Add Ultra at the end of desktop reasoning controls and in the Android model
+  sheet. Save it per session, reset it on model/group changes, and keep Fast
+  independent. Running tasks retain their launch configuration.
+- Resolve native reasoning independently for the parent and each delegate.
+  Reuse background Task workers with proactive parallel-work guidance and an
+  explicit native `Task.thinkingLevel` override. Never send `ultra` upstream.
+- Preserve active workers during idle parent model changes and retain each
+  completed worker's model, group and reasoning in history and resume.
+
 ## v0.15.10 - Upstream synchronization
 
 This candidate integrates upstream main through `d96382d74`, including changes

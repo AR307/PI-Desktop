@@ -18,6 +18,8 @@ Each ADR includes:
 
 ## Index
 
+- [Ultra session orchestration](ultra-session-orchestration.md)
+
 - [Scoped MC relay for the Android companion](mobile-companion-relay.md)
 - [Mobile transcript cache and delta sync](mobile-transcript-cache-and-delta-sync.md)
 

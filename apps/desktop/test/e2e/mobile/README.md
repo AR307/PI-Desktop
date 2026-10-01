@@ -1,5 +1,12 @@
 # Mobile companion controlled acceptance
 
+`ultra-flow.mjs` extends the desktop/mobile suite with keyboard Ultra selection,
+dual-client synchronization, concurrent same/cross-model workers, native wire
+reasoning, durable completion, next-turn isolation, parent model changes and
+exact worker resume. `android.mjs` also selects Ultra in the native WebView and
+checks request parameters and restart restoration. Controlled replies do not
+measure a real model's autonomous planning quality.
+
 These suites run the actual Electron desktop with an isolated profile, Rust host
 and Node agent runtime. `fixture.mjs` supplies a local MC HTTP/WebSocket boundary
 and controlled chat/image upstreams. No production account or paid provider is

@@ -27,6 +27,22 @@ development configuration, not a user-facing server field.
 
 ## Common HTTP contract
 
+### Ultra client configuration (2026-10-01)
+
+`session/configure` may carry `ultra: boolean`. Session state and configuration
+events carry the saved next-turn value separately from the active turn's native
+`thinkingLevel`. Delegation details include accepted `modelKey`, `groupId` and
+`thinkingLevel`. MC forwards these existing RACP payloads unchanged; no new
+endpoint, server setting, model parameter or permission is required. Ultra is
+PI-local orchestration, not a value for the provider reasoning field.
+
+Joint acceptance: toggle Ultra from either client, change a group (Ultra turns
+off), and change next-turn configuration while a background worker runs. Both
+clients must receive the saved configuration and the worker's unchanged actual
+model/group/native level. Revoked grants still block every operation.
+
+### Request format
+
 Requests and responses use JSON, UTF-8, camelCase fields, and ISO-8601 UTC times.
 Authentication uses `Authorization: Bearer <accessToken>`; never put account
 tokens in URLs. All responses disable caching. Do not log credentials, pairing

@@ -29,7 +29,8 @@ test("Composer uses one model popover with a root and one in-place submenu", () 
 test("model selection returns to the root without closing", () => {
   assert.match(composerSource, /await configureActiveSession\(\{[\s\S]*?thinkingLevel: nextThinkingLevel/);
   assert.match(composerSource, /setQuery\(""\);[\s\S]*?setView\("root"\)/);
-  assert.match(composerSource, /const thinkingMenuLevels = sessionThinkingMenuLevels\(availableThinkingLevels\)/);
+  assert.match(modelMenuSource, /sessionThinkingMenuLevels\(availableThinkingLevels\)/);
+  assert.match(modelMenuSource, /ultraAvailable \? \["ultra" as const\]/);
 });
 test("switching models adopts the target default without resetting same-model overrides", () => {
   assert.match(modelMenuSource, /const selectedSameModel =\s*activeSessionId &&\s*candidate\.id === provider\?\.id &&\s*sameComposerModelId\(modelId \?\? "", nextModelId\);/);

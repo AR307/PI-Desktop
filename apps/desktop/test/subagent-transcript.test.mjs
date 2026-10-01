@@ -177,7 +177,7 @@ test("a Task node and detail header show the effective thinking level", () => {
   );
   assert.match(
     runtimeSource,
-    /modelId: record\.modelId,\s*\n\s*thinkingLevel: record\.thinkingLevel,/,
+    /modelId: record\.modelId,[\s\S]*?modelKey: record\.modelKey,[\s\S]*?groupId: record\.groupId,[\s\S]*?thinkingLevel: record\.thinkingLevel,/,
   );
   assert.match(transcriptSource, /function delegateThinkingLevel\(message: UiMessage\)/);
   assert.match(transcriptSource, /value === "off"/);
@@ -185,7 +185,7 @@ test("a Task node and detail header show the effective thinking level", () => {
   assert.doesNotMatch(transcriptSource, /thinkingLevel\./);
   assert.match(
     transcriptSource,
-    /const modelLabel = \[modelId, thinkingLabel\]\.filter\(Boolean\)\.join\(" "\);/,
+    /const modelLabel = \[modelId, variant === "topology" \? delegateGroupId\(message\) : "", thinkingLabel\]\.filter\(Boolean\)\.join\(" · "\);/,
   );
   assert.match(
     transcriptSource,

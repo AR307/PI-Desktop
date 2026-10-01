@@ -125,15 +125,18 @@ try {
   await phone.locator(".composer textarea").waitFor();
   await screenshot("android-paired-light-en");
   await phone.locator(".conversation-controls .model-chip").click();
+  await phone.getByLabel("Thinking level", { exact: true }).selectOption("ultra");
   await phone.getByRole("switch", { name: "Fast", exact: true }).check();
   await phone.locator(".fast-config").scrollIntoViewIfNeeded();
   await screenshot("android-fast-panel");
+  await screenshot("android-ultra-panel");
   await phone.getByRole("button", { name: "Apply", exact: true }).click();
   await phone.locator(".surface").waitFor({ state: "hidden" });
   await send("Continuation sent from the actual Android APK");
   await until(async () => (await invoke("session/get", { id: session.id })).session.messages.some((message) => message.role === "assistant"), "native continuation");
   await until(async () => !(await view()).busy && !(await view()).snapshot?.activeTurn, "native turn complete");
   check("Android sends through MC relay to desktop and receives reply");
+  check("Android Ultra persists and sends only native reasoning", (await invoke("session/get", { id: session.id })).session.ultra === true && fixture.chats.some(body => body.reasoning_effort === "high") && fixture.chats.every(body => body.reasoning_effort !== "ultra"));
   check("Android Fast setting persists and reaches actual request", (await invoke("session/get", { id: session.id })).session.fast === true && fixture.chats.some((body) => body.service_tier === "fast"));
   // A trusted pointer click focuses the actual WebView input and opens the IME.
   await phone.locator(".composer textarea").click();
@@ -197,6 +200,8 @@ try {
   await phone.locator(".grant-open").first().click();
   await phone.getByText("Continuation sent from the actual Android APK", { exact: true }).waitFor();
   check("Android restart reloads durable desktop history");
+  await until(async () => (await view()).snapshot?.session.id === session.id, "restored authoritative session snapshot");
+  check("Android restart restores remembered chat Ultra", (await view()).snapshot.session.configuration.chat.ultra === true);
   await phone.getByRole("button", { name: "Account and appearance", exact: true }).click();
   await phone.getByRole("group", { name: "Theme", exact: true }).getByRole("button", { name: "Dark", exact: true }).click();
   await phone.getByLabel("Language", { exact: true }).selectOption("zh-CN");

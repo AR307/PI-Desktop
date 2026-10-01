@@ -16,6 +16,9 @@
 - Runtime phase: use one delegation policy source, resolve explicit child
   reasoning before launch, retain authorized resume bindings, and rebind only
   an idle parent so live workers are not cancelled by its next-turn selection.
+- Acceptance phase: add actual Electron/Android Ultra scenarios, extend the
+  mobile handoff contract without MC endpoints, and document local evidence.
+  Full host tests cover search projections as well as saved session state.
 
 ## 2026-09-25 - Relay binding carrier fallback
 

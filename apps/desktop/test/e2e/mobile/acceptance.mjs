@@ -1,3 +1,4 @@
+import { verifyUltraFlow } from "./ultra-flow.mjs";
 import assert from "node:assert/strict";
 import { createRequire } from "node:module";
 import { mkdir, writeFile } from "node:fs/promises";
@@ -189,6 +190,7 @@ try {
   await phone.getByText("Desktop event during mobile history paging", { exact: true }).waitFor();
   check("older history and live desktop output merge without duplicates", new Set((await view()).messages.map((message) => message.id)).size === (await view()).messages.length);
   await until(async () => !(await view()).snapshot?.activeTurn, "desktop paging turn finished");
+  await verifyUltraFlow({ page, phone, fixture, invoke, view, until, check, screenshot, shared, provider, autoProvider, mobileSend });
   const forbidden = await phone.evaluate(async (sessionId) => {
     try { await window.__PI_MOBILE_CONTROLLER__.relay.request("session/attach", { sessionId }); return false; }
     catch (error) { return /not.shared|FORBIDDEN|forbidden/i.test(error.message); }
@@ -230,17 +232,20 @@ try {
   await until(async () => !(await view()).busy && !(await view()).snapshot?.activeTurn && !(await view()).snapshot?.queuedTurns.length, "queue drained");
   check("queued turn uses the newly saved group and reasoning level", fixture.chatRequests.some((request) => request.prompt.includes("Queued from the phone while running") && request.group === "auto") && fixture.chats.some((body) => body.reasoning_effort === "high" && JSON.stringify(body.messages.at(-1)).includes("Queued from the phone while running")));
   check("queued request carries Fast and previous request does not", fixture.chats.some((body) => body.service_tier === "fast" && JSON.stringify(body.messages.at(-1)).includes("Queued from the phone while running")) && fixture.chats.some((body) => body.service_tier === undefined && JSON.stringify(body.messages.at(-1)).includes("mobile-slow streaming task")));
-  await page.locator(".composer-model-thinking-chip").click();
+  const desktopModelChip = page.locator(".composer-model-thinking-chip");
+  await until(async () => (await desktopModelChip.getAttribute("aria-label"))?.includes("Fast requested") && await desktopModelChip.isEnabled(), "desktop receives queued selection and returns to editable state");
+  if (await desktopModelChip.getAttribute("aria-expanded") !== "true") await desktopModelChip.click();
   await page.getByRole("switch", { name: "Fast", exact: true }).click();
   await until(async () => await page.getByRole("switch", { name: "Fast", exact: true }).getAttribute("aria-checked") === "false", "desktop confirms saved Fast off");
   await screenshot("desktop-fast-control", page);
   await page.keyboard.press("Escape");
   await until(async () => (await view()).snapshot?.session.configuration.next.fast === false, "desktop Fast off synchronizes to phone");
   check("desktop Fast toggle updates mobile");
+  const fastChildStart = fixture.chats.length;
   await mobileSend("mobile-fast-child: delegate through the authorized model");
   await until(async () => (await view()).messages.some(message => message.toolName === "Task" && message.toolResult?.details?.fast === true && message.toolResult.details.status === "completed"), "Fast child completes");
   check("child Fast survives durable history reads", (await invoke("session/get", { id: shared.id })).session.messages.some(message => message.toolName === "Task" && message.toolResult?.details?.fast === true));
-  const childRequests = fixture.chats.filter(body => body.model === "gpt-5.1");
+  const childRequests = fixture.chats.slice(fastChildStart).filter(body => body.model === "gpt-5.1");
   check("A creates B with independent Fast including tool continuation", childRequests.length >= 2 && childRequests.every(body => body.service_tier === "fast"));
   await until(async () => (await view()).messages.some(message => message.toolName === "Task" && message.toolResult?.details?.fast === true), "child metadata reaches mobile");
   await phone.locator(".delegation-card").filter({ hasText: "Fast requested" }).first().waitFor();
@@ -250,7 +255,7 @@ try {
   }).first();
   const processHeader = childProcess.locator(":scope > .tool-activity-header");
   if (await processHeader.getAttribute("aria-expanded") !== "true") await processHeader.click();
-  const childGroup = page.locator(".tool-activity-group.has-subagents .tool-activity-header").first();
+  const childGroup = childProcess.locator(".tool-activity-group.has-subagents .tool-activity-header").first();
   if (await childGroup.getAttribute("aria-expanded") !== "true") await childGroup.click();
   await page.locator(".subagent-topology-node-status").filter({ hasText: "Fast requested" }).first().waitFor();
   await page.locator(".subagent-topology-node-status").filter({ hasText: "Fast requested" }).first().scrollIntoViewIfNeeded();
