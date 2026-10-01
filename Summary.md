@@ -13,6 +13,8 @@
   semantics remain intact. Failed-only dispatches still get parent feedback.
 - Added real-loop regression coverage and isolated Electron user journeys for
   parallel handoff, editable drafts, staggered/rapid completion and silent wake.
+  Explicit user input admitted at the boundary keeps its steering continuation
+  instead of waiting for worker settlement.
   Validation results are recorded with the candidate in the acceptance README.
 
 

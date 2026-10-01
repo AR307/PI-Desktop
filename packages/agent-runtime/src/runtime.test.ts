@@ -7740,6 +7740,39 @@ describe("DesktopAgentRuntime subagents", () => {
       }
     });
 
+    it("honors user input admitted at handoff without automatic polling", async () => {
+      let admitted = false;
+      const input = "Answer this new question while the workers continue.";
+      const runtime = createRuntime({
+        subagents: [explorer],
+        onEvent(value) {
+          const envelope = value as AgentEventEnvelope;
+          if (envelope.event.type !== "tool_end" || admitted) return;
+          admitted = true;
+          runtime.steer({ text: input }, "handoff-turn", {
+            id: "handoff-steering", role: "user", content: input,
+            createdAt: "2026-10-01T00:00:00.000Z",
+          });
+        },
+      });
+      runtime.setTurnReasoning("high", true);
+      const requests: AgentMessage[][] = [];
+      scriptedParent(runtime, requests);
+      subagentRuns.calls.length = 0;
+      subagentRuns.instances.length = 0;
+      subagentRuns.deferred = true;
+      try {
+        await runtime.prompt("Inspect both modules.", undefined, "handoff-turn");
+        expect(admitted).toBe(true);
+        expect(requests).toHaveLength(2);
+        expect(JSON.stringify(requests[1])).toContain(input);
+        expect(runtime.getStatus()).toMatchObject({ isRunning: false, backgroundDelegations: 2 });
+      } finally {
+        subagentRuns.deferred = false;
+        await runtime.dispose();
+      }
+    });
+
     it.each([false, true])("preserves ordinary continuation and failed-dispatch feedback (invalid=%s)", async (invalid) => {
       const runtime = createRuntime({ subagents: [explorer] });
       runtime.setTurnReasoning("high", invalid);

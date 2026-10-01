@@ -11307,7 +11307,8 @@ This test plan spec is accepted when:
   1. Submit a two-worker Task batch. Both actual worker requests start. Without
      pressing Stop, the parent becomes idle and the composer is editable. No
      second parent request runs while both streams remain held.
-  2. Type a draft. Finish only the first worker. Its report silently wakes one
+  2. Send a new user message; it receives an answer without cancelling either
+     worker. Then type a draft. Finish only the first worker. Its report silently wakes one
      integration turn; the other worker remains running and the draft survives.
   3. Finish the second worker. Its report triggers integration, with no fake user
      message, TaskWait poll, duplicate worker or remaining queue item.

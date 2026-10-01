@@ -23,20 +23,28 @@ export async function verifyUltraHandoff({ page, fixture, send, tasks, idle, unt
   check("Ultra dispatches the complete parallel batch, releases the input, and makes no extra parent request");
   await screenshot("ultra-idle-workers-running");
 
+  await send("CONTROL_INPUT: acknowledge this note without cancelling either worker.");
+  await until(() => parentCalls().length === 2, "explicit user prompt reaches the idle parent");
+  await until(idle, "explicit user answer finishes");
+  assert.equal(workers().length, 2);
+  assert(workers().every(call => !call.closed));
+  await editor.fill("Draft stays editable while both workers run.");
+  check("a new user message is answered while both detached workers remain active");
+
   fixture.releaseWorkers("Channel A");
-  await until(() => parentCalls().length === 2, "first report wakes the parent");
+  await until(() => parentCalls().length === 3, "first report wakes the parent");
   await until(idle, "first silent integration completes");
   assert(workers().find(call => call.group === "中文 Channel B") && !workers().find(call => call.group === "中文 Channel B").closed);
-  assert(parentCalls()[1].prompt.includes("CONTROLLED_WORKER_REPORT"));
-  assert(parentCalls()[1].body.messages.filter(message => message.role === "tool").every(message => message.content.includes("Actual model: grok-4.7")));
+  assert(parentCalls()[2].prompt.includes("CONTROLLED_WORKER_REPORT"));
+  assert(parentCalls()[2].body.messages.filter(message => message.role === "tool").every(message => message.content.includes("Actual model: grok-4.7")));
   assert.equal(await editor.innerText(), "Draft stays editable while both workers run.");
   fixture.releaseWorkers("中文 Channel B");
-  await until(() => parentCalls().length === 3, "second report wakes the parent");
+  await until(() => parentCalls().length === 4, "second report wakes the parent");
   await until(async () => (await tasks()).slice(initialTasks).every(message => message.toolResult.details.status === "completed"), "both worker cards complete");
   await until(idle, "all Ultra integration ends");
-  assert.equal((await session()).messages.filter(message => message.role === "user").length, initialUsers + 1);
+  assert.equal((await session()).messages.filter(message => message.role === "user").length, initialUsers + 2);
   assert.equal((await invoke("agent/queue/list", { sessionId })).entries.length, 0);
-  assert(parentCalls().slice(1).every(call => call.prompt.includes("Subagent reports ready:")));
+  assert(parentCalls().slice(2).every(call => call.prompt.includes("Subagent reports ready:")));
   assert.equal((await tasks()).slice(initialTasks).length, 2);
   assert.equal(await editor.innerText(), "Draft stays editable while both workers run.");
   check("each settled worker silently wakes integration without polling, fake user bubbles, duplicate workers, or lost drafts");
@@ -55,7 +63,7 @@ export async function verifyUltraHandoff({ page, fixture, send, tasks, idle, unt
   assert.equal(rapidParents.filter(call => !call.prompt.includes("Subagent reports ready:")).length, 1);
   assert(rapidParents.length >= 2 && rapidParents.length <= 3);
   assert.equal((await invoke("agent/queue/list", { sessionId })).entries.length, 0);
-  assert.equal((await session()).messages.filter(message => message.role === "user").length, initialUsers + 2);
+  assert.equal((await session()).messages.filter(message => message.role === "user").length, initialUsers + 3);
   check("rapid parallel settlements preserve every report and wake only through the existing silent queue");
   fixture.controls.immediate = false;
 }

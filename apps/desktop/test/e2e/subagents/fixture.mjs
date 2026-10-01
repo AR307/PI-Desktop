@@ -43,6 +43,7 @@ export async function subagentFixture() {
       emit({ content: parent ? "Independent parent work in progress." : "Worker progress is visible." });
       held.set(call, () => finish(parent ? "Parent finished." : "CONTROLLED_WORKER_REPORT")); return;
     }
+    if (prompt.includes("CONTROL_INPUT")) { finish("Acknowledged your note."); return; }
     finish(prompt.includes("Subagent reports ready:") ? "Parent received the internal worker report." : "Background work submitted.");
   });
   await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));

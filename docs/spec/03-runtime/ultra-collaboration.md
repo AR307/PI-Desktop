@@ -41,7 +41,9 @@ not an extra hidden continuation of the dispatch turn. Multiple ready reports
 share a wake; reports arriving later use the existing boundary/wake delivery.
 The parent may integrate completed reports while others still run, then end its
 turn again until another completion. This does not require all workers to finish
-at once and does not prevent a new user prompt while they run.
+at once and does not prevent a new user prompt while they run. An explicit user
+message admitted at the boundary still receives its normal steering continuation;
+the handoff must not retain it without answering until a worker finishes.
 
 An entirely rejected dispatch does not claim a successful handoff: the parent
 can explain the errors, without silently replacing the requested model or doing

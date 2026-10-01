@@ -7941,7 +7941,11 @@ export class DesktopAgentRuntime {
       case "agent_end":
         // Input admitted after pi's last queue poll still belongs to this turn.
         // Continue after the current run settles; never wake the follow-up FIFO.
-        if (!this.delegationHandoff && this.pendingSteering.size && this.acceptingSteering && !this.runCancelled && !this.turnHadError) break;
+        if (this.pendingSteering.size && this.acceptingSteering && !this.runCancelled && !this.turnHadError) {
+          // Explicitly admitted user input is not automatic delegation polling.
+          this.delegationHandoff = false;
+          break;
+        }
         if (
           this.suppressOverflowRunEnd ||
           this.suppressProviderRetryRunEnd ||
