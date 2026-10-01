@@ -878,3 +878,17 @@ This completion record supersedes the earlier pending acceptance notes.
   the previous manual preview profile. Normal-origin Android APK is built and
   its native login screen is open in the existing PiMobileQA emulator.
 - No production login, paid model call, push or release was performed.
+
+## 2026-10-01 - Capability-derived Ultra summary
+
+- Replaced the persistent Ultra warning with a selected-only summary on desktop
+  and mobile: native maximum + Workflow + Subagent. Both clients reuse the
+  existing highest-native-tier resolver; no family-name overrides or new wire
+  parameters are added. Ordinary reasoning keeps the menu free of the hint.
+- Added capability-label coverage and actual Electron/mobile keyboard, drag
+  and selection/clear acceptance. Validation results are recorded below.
+
+- Baseline actual Electron reproduction failed on the always-visible obsolete
+  hint before the fix. Shared labels 4, i18n 37, mobile 17 and desktop reasoning
+  checks 31 pass. Shared/i18n/runtime compilation, desktop/mobile typechecks
+  and a rebuilt Electron/runtime bundle pass. Candidate visual checks follow.

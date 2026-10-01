@@ -41,3 +41,13 @@ MC only relays the existing configuration frames. No server API or database
 table is added. Controlled Electron/mobile acceptance proves request wiring,
 concurrency, current/next isolation and durable resume; it does not prove how a
 real model autonomously decomposes work. Paid/live-model evaluation is separate.
+
+## Selected-tier summary
+
+Desktop and mobile show the Ultra summary only while Ultra is selected.
+The summary uses the selected model binding's highest declared native tier,
+followed by Workflow + Subagent (for example, Max + Workflow + Subagent or
+Xhigh + Workflow + Subagent). It is not inferred from a model-family name.
+Models without native reasoning display Workflow + Subagent without inventing
+a tier. Leaving Ultra or changing models hides the summary. This replaces the
+previous always-visible cost/delegation hint and does not change execution.

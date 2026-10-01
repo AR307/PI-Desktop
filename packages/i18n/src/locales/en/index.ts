@@ -2,7 +2,7 @@ import { mobileSyncEn } from "../mobile-sync.js";
 import { mobileEn } from "../mobile.js";
 import { imagesEn } from "../images.js";
 export const en = {
-  ultra: {"label":"Ultra","hint":"Highest supported reasoning with proactive parallel subagents. May increase model calls and cost.","unavailable":"Select a chat model and enable subagents to use Ultra."},
+  ultra: {"label":"Ultra","hint":"{{reasoning}}Workflow + Subagent","unavailable":"Select a chat model and enable subagents to use Ultra."},
   mobileSync: mobileSyncEn,
   mobile: mobileEn,
   images: imagesEn,

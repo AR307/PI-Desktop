@@ -4,7 +4,7 @@ import { imagesEn } from "../images.js";
 import { en, type EnglishCatalog } from "../en/index.js";
 
 export const fr = {
-  ultra: {"label":"Ultra","hint":"Highest supported reasoning with proactive parallel subagents. May increase model calls and cost.","unavailable":"Select a chat model and enable subagents to use Ultra."},
+  ultra: {"label":"Ultra","hint":"{{reasoning}}Workflow + Subagent","unavailable":"Select a chat model and enable subagents to use Ultra."},
   mobileSync: mobileSyncEn,
   mobile: mobileEn,
   images: imagesEn,

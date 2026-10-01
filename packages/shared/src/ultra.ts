@@ -15,3 +15,9 @@ export function highestThinkingLevel(capabilities: UltraThinkingCapabilities): S
     level !== "off" && capabilities.supportedThinkingLevels.includes(level),
   ) ?? "omit";
 }
+
+/** Native tier prefix for the localized Ultra summary; never infer a tier. */
+export function ultraReasoningPrefix(capabilities: UltraThinkingCapabilities): string {
+  const level = highestThinkingLevel(capabilities);
+  return level === "omit" ? "" : `${level.charAt(0).toUpperCase()}${level.slice(1)} + `;
+}

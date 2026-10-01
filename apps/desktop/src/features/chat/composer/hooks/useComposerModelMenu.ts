@@ -6,6 +6,7 @@ import type {
   ThinkingSelection,
 } from "@pi-desktop/shared";
 import {
+  ultraReasoningPrefix,
   mirrorCodingFastAvailable,
   imageGenerationBindings,
   initialThinkingLevelForBinding,
@@ -137,6 +138,7 @@ export function useComposerModelMenu({
       provider ? providerModels[provider.id] : undefined,
     );
   const availableThinkingLevels = providerThinkingLevels(thinkingProvider);
+  const ultraReasoning = thinkingProvider ? ultraReasoningPrefix(thinkingProvider) : "";
   const thinkingMenuLevels: ThinkingSelection[] = [...sessionThinkingMenuLevels(availableThinkingLevels), ...(ultraAvailable ? ["ultra" as const] : [])];
   const modelGroups = useMemo(
     () =>
@@ -426,7 +428,7 @@ export function useComposerModelMenu({
   };
 
   return {
-    ultra, ultraAvailable,
+    ultra, ultraAvailable, ultraReasoning,
     fast, fastAvailable, fastBusy, toggleFast,
     task,
     selectedImage: imageSelection,

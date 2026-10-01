@@ -138,7 +138,7 @@ export function ComposerModelPicker({
             <span className="composer-menu-entry-value" title={modelLabel}>{modelLabel}</span>
             <IconChevronRight size={14} aria-hidden="true" />
           </button>
-          {!imageMode && <small role="status">{t(controller.ultraAvailable ? "ultra.hint" : "ultra.unavailable")}</small>}
+          {!imageMode && controller.ultra && <small role="status">{t(controller.ultraAvailable ? "ultra.hint" : "ultra.unavailable", { reasoning: controller.ultraReasoning })}</small>}
           {/* Reasoning stays on the native inline slider. */}
           {!imageMode && thinkingMenuLevels.length > 1 ? (
             <ThinkingLevelSlider

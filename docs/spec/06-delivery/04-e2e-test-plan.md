@@ -16219,3 +16219,12 @@ commit, remote base, suites and local-versus-production boundary in Summary.md.
 - Installed Electron, real account/paid API and cross-version rollback are
   separate release qualification. No MCP, Codemode or virtual-router migration
   is included. See `docs/project/pi-0991-adoption.md` for candidate evidence.
+
+### E2E-ULTRA-selected-tier-summary
+
+Open the desktop model picker at an ordinary reasoning level: no Ultra hint
+is visible. Select the last stop with End and by pointer drag: the summary
+shows the current binding's highest native tier plus Workflow + Subagent.
+Leave Ultra: the summary disappears. Verify the same select/leave behavior in
+the phone model sheet and capability-derived Max/Xhigh labels. No provider
+request parameter or ordinary reasoning choice changes with this copy update.
