@@ -85,3 +85,30 @@ executable source tree remains unchanged.
   model call or production MC acceptance was performed.
 - No live-preview restart, push, release, or server deployment. Documentation-only
   follow-up records this result without changing the tested executable tree.
+
+## ReturnToParent acceptance, 2026-10-01
+
+- Task candidate: 80630e583c44c83ad036d2acbec2e397fa15ae9e.
+- Base main: 920b12b8e053165d343a421b3cb8ee93c50a436a, fetched before
+  candidate preparation and verified as an ancestor. The branch preserves the
+  previously validated Ultra handoff implementation. A linear rebase attempt
+  encountered unrelated historical merge conflicts and was aborted; no unrelated
+  conflict was resolved or retained.
+- Runtime tests: 374 passed (runtime, return operation, Ultra policy, delegation
+  history and child runtime). Desktop projection/presentation tests: 137 passed.
+  Mobile transcript tests: 15 passed. i18n tests: 37 passed.
+- Shared/i18n/runtime/desktop/mobile TypeScript checks passed. Desktop, rebuilt
+  sidecar and mobile web builds passed. Style-token validation passed.
+  Scoped Biome lint processed no files because these paths are outside its
+  configured includes; it is not reported as a successful lint run.
+- Actual isolated Electron + local controlled MC/HTTP/SSE: 15 checks passed,
+  no renderer errors. Covers parallel model/channel binding, parent/child Stop,
+  visible successful/failed/stopped returns, keyboard expansion, failed-worker
+  resume, Ultra handoff, explicit user input, rapid completion and reload.
+  Dark/English and light/Chinese screenshots were visually reviewed.
+- Evidence: .artifacts/return-to-parent-final/result.json, run.log and
+  return-completed.png / return-reload-light-zh.png. The first candidate exposed
+  an outer-process folding bug; evidence remains separately in
+  .artifacts/return-to-parent-candidate and the final candidate fixes it.
+- No production MC or paid model requests, Android-device installation, user
+  preview restart, Git push or release. Rust was unchanged; no Cargo suite ran.

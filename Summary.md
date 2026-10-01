@@ -976,3 +976,12 @@ This completion record supersedes the earlier pending acceptance notes.
   hiding a successful return. The canonical and cached projections now keep
   receipts in the visible response flow, while ordinary tools stay folded.
   Added an explicit projection regression and rerun the real user path.
+
+### ReturnToParent validation
+
+Candidate 80630e583 on origin/main 920b12b8e passed 374 runtime, 137 desktop,
+15 mobile-transcript and 37 i18n tests, targeted TypeScript checks, desktop /
+sidecar / mobile builds, style-token validation and 15 actual isolated Electron
+checks. Dark/English and light/Chinese screenshots reviewed. Evidence is under
+.artifacts/return-to-parent-final. No production call, Android-device acceptance,
+user preview restart, push or release. See the subagent E2E README for boundaries.
