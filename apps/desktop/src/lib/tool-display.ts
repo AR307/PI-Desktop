@@ -1,3 +1,5 @@
+import { RETURN_TO_PARENT_TOOL } from "@pi-desktop/shared";
+
 export type ToolAction =
   | "read"
   | "list"
@@ -102,7 +104,7 @@ export function getToolAction(toolName?: string): ToolAction {
   // Delegation (ADR 0062, ADR 0089) is matched on the exact name, minus any
   // provider namespace: a plugin tool called "CreateTask" is not a subagent
   // call and keeps its generic presentation.
-  if (isDelegationStartTool(toolName) || delegationLifecycleKind(toolName)) {
+  if (toolName === RETURN_TO_PARENT_TOOL || isDelegationStartTool(toolName) || delegationLifecycleKind(toolName)) {
     return "delegate";
   }
   if (bareToolName(toolName) === "todowrite") return "todo";

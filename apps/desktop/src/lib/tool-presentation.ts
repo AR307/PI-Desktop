@@ -1,4 +1,5 @@
 import type { UiMessage } from "@pi-desktop/shared";
+import { subagentReturnDetails } from "@pi-desktop/shared";
 import {
   delegationLifecycleKind,
   getToolAction,
@@ -634,6 +635,13 @@ function resultBlocks(
       break;
     }
     case "delegate": {
+      const returned = subagentReturnDetails(message);
+      if (returned) {
+        if (returned.report) blocks.push(codeBlock("output", returned.report, "markdown"));
+        const metadata = Object.fromEntries(Object.entries(returned).filter(([key]) => key !== "report" && key !== "kind"));
+        blocks.push(...recordBlocks(metadata, "details"));
+        break;
+      }
       // A lifecycle row (ADR 0089) has no brief and no report of its own: it
       // reports on subagents. Its body is the roster the runtime returned, as
       // a named table rather than the raw `delegations[]` JSON (D268).
@@ -663,6 +671,7 @@ function resultBlocks(
             Object.entries(details).filter(
               ([key]) =>
                 key !== "agent" &&
+                key !== "report" &&
                 key !== "error" &&
                 key !== "modelId" &&
                 key !== "thinkingLevel",

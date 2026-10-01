@@ -21,6 +21,7 @@ import type {
 } from "@pi-desktop/shared";
 import {
   PROVIDER_RETRY_MAX_RETRIES,
+  isReturnToParent,
 } from "@pi-desktop/shared";
 import type {
   AssistantActivityItem,
@@ -342,6 +343,11 @@ export const ActivityGroup = memo(function ActivityGroup({
     delegationTimings={delegationTimings}
     onUserInteraction={claimDisclosure}
   />;
+
+  // Completion returns are visible controls, never buried in process details.
+  if (items.every(item => item.kind === "tool" && isReturnToParent(item.message))) {
+    return <div className="subagent-return-group">{renderedItems}</div>;
+  }
 
   if (!hasSubagentTopology) {
     return (

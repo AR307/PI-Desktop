@@ -1,4 +1,5 @@
-import { highestThinkingLevel } from "@pi-desktop/shared";
+import { returnToParent } from "./return-to-parent.js";
+import { highestThinkingLevel, isReturnToParent } from "@pi-desktop/shared";
 import { delegationGuidance, delegationHandoffGuidance, delegationSystemPrompt, resolveDelegationThinking, shouldHandOffDelegations } from "./ultra-policy.js";
 import { assertMirrorCodingFast, withMirrorCodingFast } from "./mirrorcoding-fast.js";
 import { assistantReplay, canRestorePartialResponse, responseContentFacts, responseDiagnostics, responseOutcome, responseOutcomeError, restoredAssistantBlocks } from "./response-outcome.js";
@@ -498,6 +499,7 @@ export type DelegationRecord = {
    * `TaskWait` result, the turn-boundary delivery, or a wake turn (D628).
    * Auto-delivery is a single shot per record. */
   reportDelivered: boolean;
+  returnPublished?: boolean;
   /** Stable chain identity; never appears in a tool parameter (ADR 0279). */
   delegateSessionId: string;
   /** Prior `delegationId` this run continues, when `Task.resume` was set. */
@@ -2793,7 +2795,9 @@ export class DesktopAgentRuntime {
       // parent's model context (ADR 0062): the parent only ever saw the `Task`
       // report, and replaying a delegate's messages would both contradict that
       // and reintroduce the context cost delegation exists to avoid.
-      if (m.parentToolCallId) continue;
+      // ReturnToParent is a runtime-owned receipt, not a parent model call.
+      // Its report is restored through the settled Task result exactly once.
+      if (m.parentToolCallId || isReturnToParent(m)) continue;
       const timestamp = Date.parse(m.createdAt) || Date.now();
       if (m.role === "user") {
         toolCarrier = undefined;
@@ -4693,10 +4697,25 @@ export class DesktopAgentRuntime {
     this.emit(
       {
         type: "message_end",
-        message: settledDelegationMessage(record.taskMessage, delegationSummary(record)),
+        message: settledDelegationMessage(record.taskMessage, {
+          ...delegationSummary(record),
+          ...(record.result ? { report: record.result.report } : {}),
+        }),
       },
       record.taskTurnId,
     );
+    if (record.status !== "running" && record.result && !record.returnPublished) {
+      this.emit({
+        type: "message_end",
+        message: returnToParent({
+          delegationId: record.delegationId, agent: record.agentName,
+          status: record.status, report: record.result.report,
+          completedAt: record.completedAt ?? record.startedAt,
+          summary: delegationSummary(record),
+        }),
+      }, record.taskTurnId);
+      record.returnPublished = true;
+    }
   }
 
   /** Cap retained history so a long session cannot grow the registry forever.

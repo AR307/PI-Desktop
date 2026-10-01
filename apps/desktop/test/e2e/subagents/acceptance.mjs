@@ -6,6 +6,7 @@ import { resolve, join } from "node:path";
 import { HostProcess } from "@pi-desktop/host-runtime";
 import { subagentFixture } from "./fixture.mjs";
 import { verifyUltraHandoff } from "./ultra-handoff.mjs";
+import { verifyReturnCards } from "./return-to-parent.mjs";
 
 const require = createRequire(import.meta.url);
 const { _electron } = require(process.env.PI_TEST_PLAYWRIGHT ?? "playwright");
@@ -91,6 +92,7 @@ try {
   await until(() => children.every(call => call.closed), "all upstream streams closed");
   check("keyboard stop cancels only one worker; group stop cancels remaining workers");
   await screenshot("workers-stopped");
+  await verifyReturnCards({ page, session, until, screenshot, check, label: "stopped" });
 
   await invoke("session/configure", sessionId, { mode: "agent", ultra: true });
   await send("CONTROL_REPORT: run and deliver one background report.");
@@ -105,6 +107,7 @@ try {
   assert.equal((await invoke("agent/queue/list", { sessionId })).entries.length, 0);
   check("background report wakes the parent without a visible or persisted fake user message");
   await screenshot("silent-report-delivered");
+  await verifyReturnCards({ page, session, until, screenshot, check, label: "completed" });
 
   fixture.controls.failChild = true;
   await send("CONTROL_FAIL: a rejected Grok channel must not become Astra.");
@@ -112,6 +115,7 @@ try {
   await until(idle, "failed worker parent idle");
   const failed = (await tasks()).find(message => message.toolResult.details.status === "failed");
   assert.equal(failed.toolResult.details.modelId, "grok-4.7");
+  await verifyReturnCards({ page, session, until, screenshot, check, label: "failed" });
   fixture.controls.resume = failed.toolResult.details.delegationId;
   await send("CONTROL_RESUME: continue the same worker without changing its channel.");
   await until(async () => (await tasks()).some(message => message.toolArgs?.resume === fixture.controls.resume), "resumed worker starts");
@@ -123,11 +127,13 @@ try {
   assert.equal(fixture.calls.filter(call => call.worker).at(-1).body.model, "grok-4.7");
   check("failed delegation resumes on its exact Grok model/channel, never inherited Astra");
   await until(idle, "resume settled");
+  await verifyReturnCards({ page, session, until, screenshot, check, label: "resumed" });
   await verifyUltraHandoff({ page, fixture, send, tasks, idle, until, session, invoke, sessionId, screenshot, check });
   await invoke("settings/set", { ...await invoke("settings/get"), language: "zh-CN", theme: "light" });
   await page.reload(); await page.locator(".app-shell:not(.app-shell-boot)").waitFor(); await page.locator(".startup-splash").waitFor({ state: "hidden" });
   await page.locator('[data-sidebar-session-row="' + sessionId + '"] .thread-item-main').first().click();
   await screenshot("persisted-light-zh");
+  await verifyReturnCards({ page, session, until, screenshot, check, label: "reload-light-zh", language: "zh-CN" });
   assert.equal((await tasks()).at(-1).toolResult.details.modelId, "grok-4.7");
   check("reload preserves settled status and actual model/channel in Chinese light theme");
   assert.deepEqual(errors, []);

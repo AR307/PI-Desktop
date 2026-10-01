@@ -53,3 +53,14 @@ describe("live conversation", () => {
     expect(merged.map((row) => row.id)).toEqual(["early", "assistant-one", "tail"]);
   });
 });
+
+
+describe("subagent return receipts", () => {
+  it("keeps a desktop return visible and unique after stream replay and history refresh", () => {
+    const receipt: UiMessage = { ...message, id: "run:return", role: "tool", toolName: "ReturnToParent", toolCallId: "run:return", toolStatus: "success", status: "complete", toolResult: { details: { kind: "subagent-return", delegationId: "run", agent: "explorer", status: "completed", report: "Actual report", modelId: "grok-4.7", groupId: "中文分组" } } };
+    let messages = applyTranscriptEvent([], event({ type: "message_end", message: receipt }));
+    messages = applyTranscriptEvent(messages, event({ type: "message_end", message: receipt }));
+    expect(mergeMessages(messages, [receipt])).toEqual([receipt]);
+    expect(messages[0].parentToolCallId).toBeUndefined();
+  });
+});

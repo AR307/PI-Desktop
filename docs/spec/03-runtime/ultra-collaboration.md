@@ -35,7 +35,7 @@ finishTurn boundary returns end. The composer becomes usable while worker cards
 remain running. No further parent provider request or TaskWait polling is needed
 to keep the workers alive. Ordinary mode retains its existing continuation rule.
 
-Reports silently wake integration through the existing host queue. Even workers
+Reports wake integration through the existing internal host queue and publish a visible ReturnToParent receipt. Even workers
 that settle before Task returns use that queue after the parent end events,
 not an extra hidden continuation of the dispatch turn. Multiple ready reports
 share a wake; reports arriving later use the existing boundary/wake delivery.
@@ -55,7 +55,7 @@ unchanged. Parent Stop and explicit worker cancellation remain independent.
 The `ultra` boolean travels through session configuration and current/next/chat
 snapshots, separately from SessionThinkingLevel. Task summaries persist actual
 model key, group, native reasoning, Fast and completion. Settling a Task updates
-its original row without another tool call, usage entry, or history position;
+its original row without re-executing Task or adding token usage;
 replaying its initial snapshot cannot revive a completed worker. Both clients
 display accepted child configuration. Unavailable tools/definitions are reported
 before launch, not represented as successful collaboration.

@@ -166,3 +166,28 @@ does not auto-restart delegates.
 - **Detect the wake by matching report-like text.** Rejected outright: user
   text must never be able to impersonate runtime control flow. Only the
   host-owned notification provenance enables report expansion.
+
+
+## Amendment: visible ReturnToParent receipts (2026-10-01)
+
+The internal wake remains non-user input, but settlement is no longer invisible:
+the runtime executes ReturnToParent once for each settled child run and publishes
+its native tool result as a top-level transcript row. This is a runtime-owned
+completion operation, not a parent-model tool call or an extra provider request.
+It also records failed, timed-out and stopped outcomes without calling them
+successful completion. Stopped/aborted runs still do not auto-wake the parent.
+
+The existing full-message event, host outbox and mobile transcript transport
+persist and distribute the receipt. Its stable run-scoped ID prevents a repeated
+snapshot from adding another card. Immediate completions publish after the Task
+snapshot exists; a resumed run has its own receipt. The original Task snapshot
+contains the returned report for provider history restoration. History projection
+excludes the runtime-owned receipt, preventing an invented ReturnToParent call or
+a second copy of the report in the model context. Existing TaskWait/boundary/wake
+delivery continues to own live parent-context injection.
+
+Desktop and mobile display the receipt collapsed, with the terminal status and
+ReturnToParent name. Expanding it shows the report and actual worker binding.
+Desktop places it outside generic process disclosures so completion is visible
+without opening nested activity groups. Native tool disclosure, keyboard and
+copy affordances are reused. No database table, new RPC or MC change is required.

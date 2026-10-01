@@ -2,7 +2,7 @@ import { memo, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Bot, Download, ImagePlus, FileText, ChevronDown, LoaderCircle, Scissors, UnfoldVertical } from "lucide-react";
 import type { ImageGenerationResult, MessageAttachment, UiMessage } from "@pi-desktop/shared";
-import { canContinueResponse } from "@pi-desktop/shared";
+import { canContinueResponse, subagentReturnDetails, subagentReturnLabel } from "@pi-desktop/shared";
 import { useMobileStore } from "../state/store";
 import type { MobileController } from "../state/controller";
 import {
@@ -80,16 +80,19 @@ function ToolPayload({ label, value }: { label: string; value: unknown }) {
 
 function ToolCard({ message, controller }: { message: UiMessage; controller: MobileController }) {
   const { t } = useTranslation("translation", { keyPrefix: "mobile" });
+  const { t: translate } = useTranslation();
+  const returned = subagentReturnDetails(message);
   const running = message.toolStatus === "running";
   const [open, setOpen] = useState(running);
   useEffect(() => { if (running) setOpen(true); }, [running]);
   const diff = extractToolDiff(message.toolName, message.toolArgs);
   return <details className="tool-card" open={open} onToggle={(event) => setOpen((event.target as HTMLDetailsElement).open)}>
-    <summary><span>{running ? <LoaderCircle size={15} className="spin"/> : <ChevronDown size={15}/>} {message.toolName ?? t("tool")}</span><small>{delegationFastRequested(message) ? `${t("fastRequested")} · ` : ""}{message.toolStatus}</small></summary>
+    <summary><span>{running ? <LoaderCircle size={15} className="spin"/> : <ChevronDown size={15}/>} {returned ? translate(subagentReturnLabel(returned.status)) : message.toolName ?? t("tool")}</span><small>{delegationFastRequested(message) ? `${t("fastRequested")} · ` : ""}{returned ? "ReturnToParent" : message.toolStatus}</small></summary>
     {open && <>
+      {returned && <><p className="muted">{[returned.agent, returned.modelKey ?? returned.modelId, returned.groupId, returned.thinkingLevel].filter(Boolean).join(" · ")}</p><Markdown>{returned.report}</Markdown></>}
       {message.toolName === "Task" && <p className="muted">{delegationConfiguration(message)}</p>}
-      {diff ? <DiffBlock before={diff.before} after={diff.after} path={diff.path}/> : message.toolArgs !== undefined && <ToolPayload label={t("input")} value={message.toolArgs}/>}
-      {message.toolResult !== undefined && <ToolPayload label={t("result")} value={message.toolResult}/>}
+      {!returned && (diff ? <DiffBlock before={diff.before} after={diff.after} path={diff.path}/> : message.toolArgs !== undefined && <ToolPayload label={t("input")} value={message.toolArgs}/>)}
+      {!returned && message.toolResult !== undefined && <ToolPayload label={t("result")} value={message.toolResult}/>}
       {messageHasTruncatedContent(message) && <LoadFullButton controller={controller} messageId={message.id}/>}
     </>}
   </details>;

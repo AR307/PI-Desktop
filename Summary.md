@@ -955,3 +955,19 @@ This completion record supersedes the earlier pending acceptance notes.
 - Rebuilt the normal-origin Android preview APK. With user authorization,
   gracefully restarted the desktop from this branch using a preserved copy of
   the latest test profile. The visible window is ready; no model call was sent.
+
+
+## 2026-10-01 - Visible subagent returns
+
+- Added the runtime-owned ReturnToParent completion operation and shared result
+  contract. Every settled run publishes one durable native tool receipt; the
+  existing internal queue still delivers reports and wakes parent integration.
+- Reused desktop tool disclosure and mobile details cards with terminal-status
+  labels. Receipts stay visible outside generic process groups and expand to the
+  actual returned report/model/channel. No fake user messages or extra LLM calls.
+- Preserved Ultra handoff, independent worker cancellation, fast completion,
+  resume and history restoration. Settled Task reports restore context while
+  ReturnToParent receipts remain display-only provider-side.
+- Added runtime, desktop projection, mobile replay and controlled Electron
+  scenarios. Local validation evidence is recorded after candidate acceptance;
+  no production MC, paid model call, user preview restart or release is included.

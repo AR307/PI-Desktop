@@ -4,7 +4,7 @@ import type {
   MessageUsage,
   UiMessage,
 } from "@pi-desktop/shared";
-import { addUsage, hostedSearchRounds } from "@pi-desktop/shared";
+import { addUsage, hostedSearchRounds, isReturnToParent } from "@pi-desktop/shared";
 import { isDelegationStartTool } from "./tool-display";
 
 export type AssistantActivityItem =
@@ -237,7 +237,8 @@ export function buildTranscriptEntries(
     if (
       last?.kind === "activity" &&
       last.items.length > 0 &&
-      isDelegationStartActivity(last.items[0]) === isDelegationStartActivity(item)
+      isDelegationStartActivity(last.items[0]) === isDelegationStartActivity(item) &&
+      isReturnToParent(last.items[0].message) === isReturnToParent(item.message)
     ) {
       last.items.push(item);
       return;

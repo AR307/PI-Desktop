@@ -80,3 +80,4 @@ export * from "./event-usage.js";
 export * from "./ultra.js";
 
 export * from "./delegation-notification.js";
+export * from "./subagent-return.js";

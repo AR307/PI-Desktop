@@ -7319,8 +7319,9 @@ describe("DesktopAgentRuntime subagents", () => {
         if (!settlesEarly) await settle();
         const events = onEvent.mock.calls.map(([envelope]) => envelope);
         const snapshots = events.filter((envelope) =>
-          envelope.event.type === "message_end" && envelope.event.message.role === "tool",
+          envelope.event.type === "message_end" && envelope.event.message.toolName === "Task",
         );
+        expect(events.filter(envelope => envelope.event.type === "message_end" && envelope.event.message.toolName === "ReturnToParent")).toHaveLength(1);
         expect(snapshots).toHaveLength(1);
         expect(snapshots[0]).toMatchObject({
           turnId: "original-turn",
@@ -7702,7 +7703,7 @@ describe("DesktopAgentRuntime subagents", () => {
       (runtime as unknown as { models: typeof models }).models = models;
     }
 
-    it.each([false, true])("ends the whole Task batch and silently wakes for reports (immediate=%s)", async (immediate) => {
+    it.each([false, true])("ends the Task batch and publishes one ReturnToParent per worker before waking (immediate=%s)", async (immediate) => {
       const onEvent = vi.fn();
       const host = { call: vi.fn(async () => ({ id: "wake" })) };
       const runtime = createRuntime({ subagents: [explorer], host, onEvent });
@@ -7727,12 +7728,36 @@ describe("DesktopAgentRuntime subagents", () => {
         }
         await vi.waitFor(() => expect(host.call).toHaveBeenCalledWith("session.queuePush", expect.objectContaining({ notification: "subagent-report" })));
         expect(host.call).toHaveBeenCalledTimes(1);
+        const returns = onEvent.mock.calls.map(([envelope]) => (envelope as AgentEventEnvelope).event)
+          .filter(event => event.type === "message_end" && event.message.toolName === "ReturnToParent");
+        expect(returns).toHaveLength(2);
+        expect(new Set(returns.map(event => event.type === "message_end" ? event.message.id : "" )).size).toBe(2);
+        for (const event of returns) {
+          if (event.type !== "message_end") throw new Error("Expected return message");
+          expect(event.message).toMatchObject({ role: "tool", toolStatus: "success", status: "complete" });
+          expect(event.message.parentToolCallId).toBeUndefined();
+          expect(event.message.toolResult).toMatchObject({ details: { status: "completed", report: "handoff report", agent: "explorer" } });
+        }
         await runtime.prompt({ text: "Subagent reports ready:", delegationNotification: true });
         expect(requests).toHaveLength(2);
         expect(JSON.stringify(requests[1])).toContain("handoff report");
         expect(requests[1].filter(message => message.role === "toolResult")).toHaveLength(2);
         expect(runtime.getStatus().isRunning).toBe(false);
         expect(host.call).toHaveBeenCalledTimes(1);
+        const snapshots = new Map<string, UiMessage>();
+        for (const [value] of onEvent.mock.calls) {
+          const envelope = value as AgentEventEnvelope;
+          if (envelope.event.type === "message_end") snapshots.set(envelope.event.message.id, envelope.event.message);
+        }
+        const restored = createRuntime({ history: [...snapshots.values()] });
+        try {
+          const messages = (restored as unknown as { agent: { state: { messages: AgentMessage[] } } }).agent.state.messages;
+          const results = messages.filter(message => message.role === "toolResult");
+          expect(results).toHaveLength(2);
+          expect(results.every(message => message.toolName === "Task")).toBe(true);
+          expect(results.every(message => JSON.stringify(message.content).includes("handoff report"))).toBe(true);
+          expect(JSON.stringify(messages)).not.toContain("ReturnToParent");
+        } finally { await restored.dispose(); }
       } finally {
         subagentRuns.deferred = false;
         subagentRuns.result = undefined;

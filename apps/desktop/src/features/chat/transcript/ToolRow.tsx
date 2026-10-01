@@ -14,6 +14,7 @@ import {
 } from "react";
 import { useTranslation } from "react-i18next";
 import type { UiMessage } from "@pi-desktop/shared";
+import { isReturnToParent, subagentReturnDetails, subagentReturnLabel } from "@pi-desktop/shared";
 import { useOpenPreviewTarget } from "../../../hooks/use-preview-target";
 import { useChatFileMenu } from "../../../hooks/use-chat-file-menu";
 import { ContextMenu } from "../../../components/ContextMenu";
@@ -185,19 +186,21 @@ function HostToolRow({
   const { fileMenu, openFileMenu, closeFileMenu } = useChatFileMenu();
   const openSubagentTab = useAppStore((s) => s.openSubagentTab);
   const activeWorkPanelTabId = useAppStore((s) => s.activeWorkPanelTabId);
+  const returned = isReturnToParent(message);
+  const returnDetails = subagentReturnDetails(message);
   const status = message.toolStatus;
   const action = getToolAction(message.toolName);
   // A run row states what the command did, not what the call around it did: an
   // exit code the shell reported outranks a tool call that came back fine
   // (D227). Property reads only, so a streaming row can afford it every tick.
   const run = action === "run" ? runOutcome(message) : null;
-  const failed = status === "error" || run === "failed";
+  const failed = status === "error" || run === "failed" || returnDetails?.status === "failed" || returnDetails?.status === "timed_out";
   // Detailed mode opens the last tool of the last activity group. Compact keeps
   // payloads collapsed so a live burst only updates the header. Failure and
   // denial stay in the row head without expanding the payload automatically.
   const revealRequest = useMessageRevealRequest(message.id);
   const disclosure = useAutomaticDisclosure(
-    autoOpen && !failed && status !== "denied",
+    autoOpen && !returned && !failed && status !== "denied",
     revealRequest,
     disclosureKey("tool", message.id),
   );
@@ -211,11 +214,11 @@ function HostToolRow({
     onUserInteraction?.();
     collapseDisclosure();
   }, [collapseDisclosure, onUserInteraction]);
-  const actionLabel = t(
+  const actionLabel = returned ? t(subagentReturnLabel(returnDetails?.status)) : t(
     status === "running" ? TOOL_RUNNING_KEYS[action] : TOOL_ACTION_KEYS[action],
   );
   const rawName = getToolDisplayName(message.toolName) || t("chat.tool");
-  const argSummary = getToolSummary(message.toolName, message.toolArgs);
+  const argSummary = returned ? "ReturnToParent" : getToolSummary(message.toolName, message.toolArgs);
   const previewTarget = PREVIEWABLE_ACTIONS.has(action)
     ? getToolPreviewTarget(message.toolArgs, root)
     : null;
@@ -292,7 +295,7 @@ function HostToolRow({
   // running it has no roster yet, and `delegationIds` would otherwise reach the
   // head as a JSON blob of UUIDs (D268).
   const summary = lifecycle ? rosterSummary : argSummary;
-  const statusLabel = creating
+  const statusLabel = returned ? t(subagentReturnLabel(returnDetails?.status)) : creating
     ? t("chat.subagentCreating")
     : outcome
       ? t(`chat.subagentStatus.${outcome}`)
@@ -392,7 +395,7 @@ function HostToolRow({
     <div
       className={`tool-row ${variant === "topology" ? "subagent-topology-node" : ""} ${
         renderedOpen ? "open" : ""
-      } status-${run === "failed" ? "error" : status || "success"}${outcome ? ` outcome-${outcome.replaceAll("_", "-")}` : ""}${creating ? " outcome-creating" : ""}`}
+      } status-${failed ? "error" : status || "success"}${outcome ? ` outcome-${outcome.replaceAll("_", "-")}` : ""}${creating ? " outcome-creating" : ""}`}
       role={variant === "topology" ? "listitem" : "region"}
       data-message-id={message.id}
       aria-label={`${t("chat.toolCall")}: ${rawName}${agentName ? `, ${agentName}` : ""}${modelLabel ? `, ${modelLabel}` : ""}${statusLabel ? `, ${statusLabel}` : ""}`}

@@ -1684,3 +1684,21 @@ retries and images retain physical account/model attribution. Nested immediate
 parent and owning Task remain distinct. The migration does not add coding-agent
 AgentSession, Codemode or virtual routing. See the coding-agent design review for
 future adoption conditions.
+
+
+## Subagent return receipt
+
+Each settled subagent run invokes the runtime-owned ReturnToParent completion
+operation once. The chat displays a top-level expandable tool row: "Subagent
+completed" for success, "Subagent failed" for failed/timed-out runs and "Subagent
+stopped" for cancellations. The report, agent, actual model/provider/group,
+reasoning and requested Fast state remain available in the result details.
+The operation adds no model call or token usage and never creates user input.
+
+Parent-turn handoff, background execution, user Stop, worker Stop, delivery
+coalescing and automatic parent integration retain their existing semantics.
+The receipt is separate from the original Task card and visible by default;
+only its details are collapsed. Replayed events and reload do not duplicate it.
+Resume yields another receipt for the new run. Mobile receives the same durable
+message. Restoration sends the report through the settled Task result and skips
+the receipt rather than fabricating a provider-facing tool call.

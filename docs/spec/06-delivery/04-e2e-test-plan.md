@@ -16292,3 +16292,22 @@ request parameter or ordinary reasoning choice changes with this copy update.
   restore them on exit; never include clipboard data in test output.
 - The unmodified build fails the actual context-menu/native-clipboard assertion.
   The repaired build passes; no account authorization or model request is needed.
+
+
+#### E2E-SUBAGENT-return-to-parent
+
+- Use the isolated subagent HTTP/SSE fixture and a fresh Electron profile.
+- Start two Ultra workers; parent ends and composer becomes usable. Release each
+  worker separately; confirm one ReturnToParent row per run and automatic parent
+  integration without polling, duplicate generation or fake user messages.
+- Without opening generic process details, locate the collapsed "Subagent
+  completed" row. Enter/click expands the actual report, model and channel;
+  another click collapses it. Verify stopped and failed labels are truthful.
+- Resume a failed worker; old receipt remains and the new run gets its own row.
+- Include immediate parallel completion. Reload in Chinese/light theme and
+  verify count, report, group and collapsed state; English/dark checks precede it.
+- Continue after runtime restart; upstream history contains settled Task reports
+  but no invented ReturnToParent call/result pair. No MC production calls.
+- Automation: apps/desktop/test/e2e/subagents/return-to-parent.mjs invoked from
+  acceptance.mjs. Mobile transcript replay is covered by its live-event test;
+  Android device validation remains separate from Electron acceptance.
