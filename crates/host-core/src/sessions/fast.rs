@@ -132,6 +132,7 @@ mod tests {
             Some("high"),
             None,
             Some(true),
+            None,
         )
         .unwrap()
         .unwrap();
@@ -192,6 +193,7 @@ mod tests {
                 Some("high"),
                 None,
                 fast,
+                None,
             )
             .unwrap()
             .unwrap()
@@ -243,6 +245,7 @@ mod tests {
             None,
             None,
             Some(true),
+            None,
         )
         .unwrap();
         let error = configure_session_with_thinking(
@@ -254,6 +257,7 @@ mod tests {
             Some("high"),
             None,
             Some(true),
+            None,
         )
         .unwrap_err();
         assert!(error.to_string().contains("PI_FAST_UNAVAILABLE"));
@@ -265,6 +269,7 @@ mod tests {
             &session.id,
             "agent",
             Some(&slow),
+            None,
             None,
             None,
             None,

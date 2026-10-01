@@ -447,7 +447,7 @@ export function registerAgentIpc({
       req.sessionId,
       session,
       settings,
-      { fast: session.fast === true },
+      { fast: session.fast === true, ultra: session.ultra === true },
     );
     sidecar.setProjectInstructionRoot(req.sessionId, launch.projectPath);
 
@@ -465,7 +465,7 @@ export function registerAgentIpc({
     activeTurns.set(req.sessionId, durableTurnId);
     captureTurnConfiguration(host, req.sessionId, durableTurnId, {
       mode: launch.sidecarParams.mode, providerId: launch.providerId, modelId: launch.modelId,
-      thinkingLevel: launch.sidecarParams.thinkingLevel, fast: launch.sidecarParams.provider.fast === true,
+      thinkingLevel: launch.sidecarParams.thinkingLevel, ultra: launch.sidecarParams.ultra, fast: launch.sidecarParams.provider.fast === true,
     });
     activeTurnUsages.delete(req.sessionId);
 

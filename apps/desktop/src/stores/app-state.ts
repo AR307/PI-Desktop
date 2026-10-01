@@ -99,6 +99,7 @@ export type RefreshSessionsOptions = {
 
 /** Toolbar selections retained on the unpersisted new-task draft. */
 export type DraftSessionConfiguration = {
+  ultra?: boolean;
   fast?: boolean;
   mode: Mode;
   thinkingLevel: SessionThinkingLevel;
@@ -210,6 +211,7 @@ export type AppState = {
   forkSession: (id: string) => Promise<void>;
   forkAssistantMessage: (messageId: string) => Promise<void>;
   configureActiveSession: (config: {
+    ultra?: boolean;
     fast?: boolean;
     mode: Mode;
     providerId?: string;

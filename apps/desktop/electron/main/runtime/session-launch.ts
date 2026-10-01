@@ -1,3 +1,4 @@
+import { highestThinkingLevel } from "@pi-desktop/shared";
 import { join } from "node:path";
 import {
   ErrorCodes as SharedErrorCodes,
@@ -265,6 +266,7 @@ export function createSessionLaunchRuntime({
     overrides: {
       mode?: Mode;
       fast?: boolean;
+      ultra?: boolean;
       providerId?: string;
       modelId?: string;
       thinkingLevel?: SessionThinkingLevel;
@@ -385,7 +387,8 @@ export function createSessionLaunchRuntime({
       });
     const modelConfig = catalogModelConfig;
     const thinkingCapabilities = capabilitiesFromModelConfig(modelConfig);
-    const thinkingLevel = clampThinkingLevel(
+    const ultra = overrides.ultra === true;
+    const thinkingLevel = ultra ? highestThinkingLevel(thinkingCapabilities) : clampThinkingLevel(
       thinkingCapabilities,
       normalizeThinkingLevel(
         overrides.thinkingLevel ??
@@ -534,10 +537,6 @@ export function createSessionLaunchRuntime({
     // on the account row are also listed: they have no API secret, so the
     // generic opt-in path never resolved them and Task.model always reported
     // an empty catalog. Statically pinned definition entries take precedence.
-    const imageCandidates = imageGenerationBindings(
-      settings.imageGenerationModels,
-      settings.imageGeneration,
-    );
     const subagentModelKeys: string[] = [];
     for (const row of providers.providers) {
       if (!row.enabled) continue;
@@ -666,6 +665,9 @@ export function createSessionLaunchRuntime({
             : [],
         ),
     );
+    if (ultra && (!subagentCatalog.definitions.length || modelConfig?.toolCall === false)) {
+      throw new Error("PI_ULTRA_UNAVAILABLE: Enable subagents and select a tool-capable chat model.");
+    }
     const mode = normalizeMode(overrides.mode ?? session.mode ?? settings.defaultMode ?? "agent");
     // Only user/approved-plan launches opt in. Auxiliary calls never inherit Fast.
     const fast = isMirrorCodingAccount && overrides.fast === true;
@@ -677,6 +679,7 @@ export function createSessionLaunchRuntime({
         sessionId,
         mode,
         thinkingLevel,
+        ultra,
         infiniteProviderRetry: settings.infiniteProviderRetry === true,
         commandShell,
         scratchDir: join(dataDir, "scratch", sessionId),

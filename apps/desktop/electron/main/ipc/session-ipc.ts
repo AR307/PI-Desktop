@@ -534,6 +534,7 @@ export function registerSessionIpc({
       id: string,
       config: {
         mode: Mode;
+        ultra?: boolean;
         fast?: boolean;
         providerId?: string;
         modelId?: string;

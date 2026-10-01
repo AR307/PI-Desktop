@@ -625,6 +625,7 @@ mod tests {
                     None,
                     Some("auto"),
                     None,
+                    None,
                 )
                 .unwrap();
             }

@@ -8,6 +8,7 @@ import type { MobileController } from "../state/controller";
 import {
   buildDiffLines,
   delegationFastRequested,
+  delegationConfiguration,
   extractToolDiff,
   isDisplayTruncated,
   messageHasTruncatedContent,
@@ -86,6 +87,7 @@ function ToolCard({ message, controller }: { message: UiMessage; controller: Mob
   return <details className="tool-card" open={open} onToggle={(event) => setOpen((event.target as HTMLDetailsElement).open)}>
     <summary><span>{running ? <LoaderCircle size={15} className="spin"/> : <ChevronDown size={15}/>} {message.toolName ?? t("tool")}</span><small>{delegationFastRequested(message) ? `${t("fastRequested")} · ` : ""}{message.toolStatus}</small></summary>
     {open && <>
+      {message.toolName === "Task" && <p className="muted">{delegationConfiguration(message)}</p>}
       {diff ? <DiffBlock before={diff.before} after={diff.after} path={diff.path}/> : message.toolArgs !== undefined && <ToolPayload label={t("input")} value={message.toolArgs}/>}
       {message.toolResult !== undefined && <ToolPayload label={t("result")} value={message.toolResult}/>}
       {messageHasTruncatedContent(message) && <LoadFullButton controller={controller} messageId={message.id}/>}
@@ -126,8 +128,8 @@ export const Message = memo(function Message({ message, controller, reference }:
 });
 
 /** Collapsible run of messages one delegate produced (`parentToolCallId`). */
-export const DelegationCard = memo(function DelegationCard({ id, agentName, running, fast, messages, controller, reference }: {
-  id: string; agentName?: string; running: boolean; fast: boolean; messages: UiMessage[]; controller: MobileController; reference(file: PickedAttachment): void;
+export const DelegationCard = memo(function DelegationCard({ id, agentName, configuration, running, fast, messages, controller, reference }: {
+  id: string; agentName?: string; configuration: string; running: boolean; fast: boolean; messages: UiMessage[]; controller: MobileController; reference(file: PickedAttachment): void;
 }) {
   const { t } = useTranslation("translation", { keyPrefix: "mobile" });
   const [open, setOpen] = useState(false);
@@ -136,6 +138,7 @@ export const DelegationCard = memo(function DelegationCard({ id, agentName, runn
       <span className="delegation-title">{running ? <LoaderCircle size={15} className="spin"/> : <Bot size={15}/>} {agentName ?? t("subagent")}</span>
       <small>{fast ? `${t("fastRequested")} · ` : ""}{t(running ? "working" : "ready")} · {messages.length}</small>
     </summary>
+    {configuration && <p className="muted">{configuration}</p>}
     {open && <div className="delegation-body">{messages.map((message) => <Message key={message.id} message={message} controller={controller} reference={reference}/>)}</div>}
   </details>;
 });

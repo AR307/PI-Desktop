@@ -27,6 +27,13 @@ export function delegateModelId(message: UiMessage): string {
 }
 
 /** Requested tier accepted for the child, not its parent or an unaccepted tool argument. */
+export function delegateGroupId(message: UiMessage): string {
+  const payload = toolResultPayload(message);
+  const value = payload && typeof payload === "object" ? (payload as { groupId?: unknown }).groupId : undefined;
+  return typeof value === "string" ? value : "";
+}
+
+/** Requested tier accepted for the child, not its parent or an unaccepted tool argument. */
 export function delegateFastRequested(message: UiMessage): boolean {
   const payload = toolResultPayload(message);
   return !!payload && typeof payload === "object" && (payload as { fast?: unknown }).fast === true;

@@ -1,5 +1,19 @@
 # PI-Desktop MirrorCoding Edition
 
+## 2026-10-01 - Ultra session collaboration
+
+- Added persistent Ultra to the native desktop reasoning slider and mobile
+  model sheet. It resolves explicit native capability, never a wire Ultra enum.
+- Reused Task workers with proactive bounded delegation and independent child
+  reasoning. Authorization, Fast and planning permissions remain independent.
+- Idle parent model changes retain background workers. Both clients display
+  accepted child model/group/reasoning. Fixed Task completion persistence found
+  by real Electron acceptance so history reload no longer revives finished work.
+- Architecture: shared/ultra resolves levels; agent-runtime/ultra-policy owns
+  strategy; Rust session KV owns selection; existing clients own presentation.
+- Local validation and its production boundary: docs/ultra-validation.md.
+  No MC server changes, push or release.
+
 ## 2026-09-25 - Relay binding carrier fallback
 
 - MirrorCoding relay binding lookup now accepts the explicit local binding

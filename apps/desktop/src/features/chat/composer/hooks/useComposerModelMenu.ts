@@ -3,6 +3,7 @@ import type {
   Mode,
   ProviderPublic,
   SessionThinkingLevel,
+  ThinkingSelection,
 } from "@pi-desktop/shared";
 import {
   mirrorCodingFastAvailable,
@@ -44,7 +45,7 @@ type UseComposerModelMenuOptions = {
   thinkingLevel: SessionThinkingLevel;
   controlsBlocked: boolean;
   configureActiveSession: (configuration: {
-    mode: Mode; providerId?: string; modelId?: string; thinkingLevel: SessionThinkingLevel; fast?: boolean;
+    mode: Mode; providerId?: string; modelId?: string; thinkingLevel: SessionThinkingLevel; fast?: boolean; ultra?: boolean;
   }) => Promise<void>;
   imageSelection?: { providerId?: string; modelId?: string };
   onSelectImage?: (selection: { providerId: string; modelId: string }) => Promise<void>;
@@ -64,6 +65,8 @@ export function useComposerModelMenu({
   onSelectImage,
 }: UseComposerModelMenuOptions) {
   const { t } = useTranslation();
+  const ultra = useAppStore((s) => (activeSessionId ? s.sessions.find((session) => session.id === activeSessionId)?.ultra : s.draftConfiguration?.ultra) === true);
+  const ultraAvailable = task !== "image" && !!provider?.enabled && !!modelId;
   const fast = useAppStore((s) => (activeSessionId ? s.sessions.find((session) => session.id === activeSessionId)?.fast : s.draftConfiguration?.fast) === true);
   const fastAvailable = task !== "image" && !!provider?.enabled && !!modelId && mirrorCodingFastAvailable(provider.mirrorCoding, modelId, provider.models.find((entry) => entry.id === modelId)?.mirrorCodingGroupId);
   const [fastBusy, setFastBusy] = useState(false);
@@ -91,6 +94,7 @@ export function useComposerModelMenu({
     providerId: provider?.id,
     modelId,
     configureActiveSession,
+    thinkingLevel,
     showToast,
   });
   thinkingConfigRef.current = {
@@ -98,20 +102,22 @@ export function useComposerModelMenu({
     providerId: provider?.id,
     modelId,
     configureActiveSession,
+    thinkingLevel,
     showToast,
   };
-  const thinkingQueueRef = useRef<ReturnType<typeof createLatestCommitQueue<SessionThinkingLevel>> | null>(
+  const thinkingQueueRef = useRef<ReturnType<typeof createLatestCommitQueue<ThinkingSelection>> | null>(
     null,
   );
   if (!thinkingQueueRef.current) {
-    thinkingQueueRef.current = createLatestCommitQueue<SessionThinkingLevel>({
+    thinkingQueueRef.current = createLatestCommitQueue<ThinkingSelection>({
       send: async (level) => {
         const current = thinkingConfigRef.current;
         await current.configureActiveSession({
           mode: current.mode,
           providerId: current.providerId,
           modelId: current.modelId,
-          thinkingLevel: level,
+          thinkingLevel: level === "ultra" ? current.thinkingLevel : level,
+          ultra: level === "ultra",
         });
       },
       onError: (error) => {
@@ -131,7 +137,7 @@ export function useComposerModelMenu({
       provider ? providerModels[provider.id] : undefined,
     );
   const availableThinkingLevels = providerThinkingLevels(thinkingProvider);
-  const thinkingMenuLevels = sessionThinkingMenuLevels(availableThinkingLevels);
+  const thinkingMenuLevels: ThinkingSelection[] = [...sessionThinkingMenuLevels(availableThinkingLevels), ...(ultraAvailable ? ["ultra" as const] : [])];
   const modelGroups = useMemo(
     () =>
       providers
@@ -350,6 +356,7 @@ export function useComposerModelMenu({
         providerId: candidate.id,
         modelId: nextModelId,
         thinkingLevel: nextThinkingLevel,
+        ultra: ultra && !selectionChanged,
         fast: fast && !selectionChanged && nextFastAvailable,
       });
       if (fast && (selectionChanged || !nextFastAvailable)) showToast(t(selectionChanged ? "mirrorCoding.fastReset" : "mirrorCoding.fastDisabled"));
@@ -369,7 +376,7 @@ export function useComposerModelMenu({
    * after the in-flight write settles. Returns false when the configuration
    * is rejected or invalidated by a session/model change.
    */
-  const commitThinkingLevel = (level: SessionThinkingLevel) => {
+  const commitThinkingLevel = (level: ThinkingSelection) => {
     const queue = thinkingQueueRef.current;
     if (!queue) return Promise.resolve(false);
     return queue.commit(level);
@@ -419,6 +426,7 @@ export function useComposerModelMenu({
   };
 
   return {
+    ultra, ultraAvailable,
     fast, fastAvailable, fastBusy, toggleFast,
     task,
     selectedImage: imageSelection,

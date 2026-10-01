@@ -237,6 +237,7 @@ export class MobilePeer {
     } else {
       const result = await configureSession(this.deps.host(), record.id, {
         mode: requestedMode,
+        ...(input.ultra === undefined ? {} : { ultra: input.ultra }),
         ...(input.fast === undefined ? {} : { fast: input.fast }),
         ...(providerId !== undefined ? { providerId } : {}),
         ...(modelId !== undefined ? { modelId } : {}),
@@ -281,12 +282,12 @@ export class MobilePeer {
       mode: taskMode,
       ...(providerId ? { providerId } : {}),
       ...(modelId ? { modelId } : {}),
-      ...(image ? { fast: false } : { thinkingLevel: record.thinkingLevel, fast: record.fast === true }),
+      ...(image ? { ultra: false, fast: false } : { thinkingLevel: record.thinkingLevel, ultra: record.ultra === true, fast: record.fast === true }),
       ...(config ? { imageConfig: config } : {}),
     } satisfies MobileSessionConfiguration["next"];
     const chat = {
       mode: record.mode,
-      fast: record.fast === true,
+      ultra: record.ultra === true, fast: record.fast === true,
       ...(record.providerId ? { providerId: record.providerId } : {}),
       ...(record.modelId ? { modelId: record.modelId } : {}),
       ...(record.thinkingLevel ? { thinkingLevel: record.thinkingLevel } : {}),
@@ -302,7 +303,7 @@ export class MobilePeer {
       pendingTurn: busy,
       ...(!canPrompt(record) ? { blockedReason: "read_only" as const } : busy ? { blockedReason: "running" as const } : approvalPending ? { blockedReason: "approval_pending" as const } : {}),
     };
-    return { ...described, providerId, modelId, thinkingLevel: record.thinkingLevel, fast: !image && record.fast === true,
+    return { ...described, providerId, modelId, thinkingLevel: record.thinkingLevel, ultra: !image && record.ultra === true, fast: !image && record.fast === true,
       groupName, taskMode, ...(config ? { imageConfig: config } : {}), configuration,
       capabilities: { canPrompt: canPrompt(record), canStop: record.capabilities?.canStop ?? record.source !== "pi-native" } };
   }
@@ -427,7 +428,7 @@ async function rethrowAfterRollback(error: unknown, host: () => HostRpc, record:
 
 async function restoreHostConfiguration(host: () => HostRpc, record: SessionSummary): Promise<void> {
   await configureSession(host(), record.id, {
-    fast: record.fast === true,
+    ultra: record.ultra === true, fast: record.fast === true,
     mode: record.mode,
     ...(record.providerId !== undefined ? { providerId: record.providerId } : {}),
     ...(record.modelId !== undefined ? { modelId: record.modelId } : {}),
@@ -436,6 +437,7 @@ async function restoreHostConfiguration(host: () => HostRpc, record: SessionSumm
 }
 
 function parseConfiguration(params: Record<string, unknown>): MobileSessionConfigureInput {
+  if (params.ultra !== undefined && typeof params.ultra !== "boolean") throw new RacpError("INVALID_ARGUMENT", "invalid_ultra");
   if (params.fast !== undefined && typeof params.fast !== "boolean") throw new RacpError("INVALID_ARGUMENT", "invalid_fast");
   const modeValue = params.mode;
   if (modeValue !== undefined && modeValue !== "agent" && modeValue !== "plan" && modeValue !== "goal" && modeValue !== "image") {
@@ -465,6 +467,7 @@ function parseConfiguration(params: Record<string, unknown>): MobileSessionConfi
   }
   return {
     ...(modeValue !== undefined ? { mode: modeValue } : {}),
+    ...(typeof params.ultra === "boolean" ? { ultra: params.ultra } : {}),
     ...(typeof params.fast === "boolean" ? { fast: params.fast } : {}),
     ...(providerId !== undefined ? { providerId } : {}),
     ...(modelId !== undefined ? { modelId } : {}),

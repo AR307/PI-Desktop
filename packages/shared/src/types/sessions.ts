@@ -23,6 +23,7 @@ export type SessionConfigurationInput = {
   modelId?: string;
   thinkingLevel?: SessionThinkingLevel;
   permissionMode?: PermissionMode;
+  ultra?: boolean;
   fast?: boolean;
 };
 
@@ -34,6 +35,7 @@ export type SessionCapabilities = {
 
 export type SessionSummary = {
   /** Saved next-turn MC Fast preference; new sessions start disabled. */
+  ultra?: boolean;
   fast?: boolean;
   id: string;
   /** Transcript authority. Omitted by older hosts and normalized to `desktop`. */

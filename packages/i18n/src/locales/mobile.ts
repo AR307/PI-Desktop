@@ -1,4 +1,6 @@
 export const mobileEn = {
+  ultraHint: "Highest supported reasoning with proactive parallel subagents. May increase model calls and cost.",
+  ultraUnavailable: "Select a chat model and enable subagents to use Ultra.",
   fast: "Fast",
   fastRequested: "Fast requested",
   fastHint: "Request a faster service tier. Provider availability and pricing apply; acceleration is not guaranteed.",
@@ -44,6 +46,8 @@ export const mobileEn = {
 };
 
 export const mobileZhCN: typeof mobileEn = {
+  ultraHint: "最高可用推理，主动并行子代理；可能增加模型调用和费用。",
+  ultraUnavailable: "请选择聊天模型并启用子代理后使用 Ultra。",
   fast: "Fast 模式",
   fastRequested: "已请求 Fast",
   fastHint: "请求快速服务档位，实际可用性与计费由服务端决定，不保证已加速。",

@@ -8,7 +8,7 @@ import { TRANSCRIPT_DISPLAY_TRUNCATION_MARKER, type MobileCompactionMark, type U
  */
 export type TranscriptEntry =
   | { kind: "message"; message: UiMessage }
-  | { kind: "delegation"; id: string; agentName?: string; running: boolean; fast: boolean; messages: UiMessage[] }
+  | { kind: "delegation"; id: string; agentName?: string; configuration: string; running: boolean; fast: boolean; messages: UiMessage[] }
   | { kind: "compaction"; id: string };
 
 export function buildTranscriptEntries(
@@ -29,7 +29,7 @@ export function buildTranscriptEntries(
     if (parent) {
       let group = groups.get(parent);
       if (!group) {
-        group = { kind: "delegation", id: parent, running: false, fast: delegationFastRequested(tasks.get(parent)), messages: [] };
+        group = { kind: "delegation", id: parent, configuration: delegationConfiguration(tasks.get(parent)), running: false, fast: delegationFastRequested(tasks.get(parent)), messages: [] };
         groups.set(parent, group);
         entries.push(group);
       }
@@ -44,6 +44,15 @@ export function buildTranscriptEntries(
     }
   }
   return entries;
+}
+
+/** Only accepted Task metadata describes the requested child tier. */
+export function delegationConfiguration(message: UiMessage | undefined): string {
+  if (message?.toolName !== "Task" || !message.toolResult || typeof message.toolResult !== "object") return "";
+  const details = (message.toolResult as { details?: unknown }).details;
+  if (!details || typeof details !== "object") return "";
+  const row = details as Record<string, unknown>;
+  return [row.modelId, row.groupId, row.thinkingLevel].filter((value) => typeof value === "string" && value !== "omit" && value !== "off").join(" · ");
 }
 
 /** Only accepted Task metadata describes the requested child tier. */

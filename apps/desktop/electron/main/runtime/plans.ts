@@ -445,7 +445,7 @@ async function dispatchApprovedPlan(rawExecution: unknown): Promise<void> {
       execution.sessionId,
       sessionResult.session,
       settings,
-      { mode: "agent", fast: sessionResult.session.fast === true },
+      { mode: "agent", fast: sessionResult.session.fast === true, ultra: sessionResult.session.ultra === true },
     );
     const turn = await runtimeState.host.call<{ turnId: string }>("session.beginTurn", {
       sessionId: execution.sessionId,
@@ -457,7 +457,7 @@ async function dispatchApprovedPlan(rawExecution: unknown): Promise<void> {
     activeTurns.set(execution.sessionId, turnId);
     captureTurnConfiguration(runtimeState.host, execution.sessionId, turnId, {
       mode: launch.sidecarParams.mode, providerId: launch.providerId, modelId: launch.modelId,
-      thinkingLevel: launch.sidecarParams.thinkingLevel, fast: launch.sidecarParams.provider.fast === true,
+      thinkingLevel: launch.sidecarParams.thinkingLevel, ultra: launch.sidecarParams.ultra, fast: launch.sidecarParams.provider.fast === true,
     });
     activeTurnUsages.delete(execution.sessionId);
     approvedExecutionIdsBySession.set(execution.sessionId, execution.id);

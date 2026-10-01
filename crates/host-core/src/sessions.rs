@@ -11,6 +11,7 @@ use std::sync::{Mutex, OnceLock};
 
 use crate::transcripts::{self, CompactionRecord, MessageRecord, RevisionRecord};
 
+mod delegation_updates;
 mod fork_files;
 mod usage;
 pub use usage::record_usage;
@@ -101,6 +102,8 @@ fn validate_thinking_level(level: &str) -> Result<()> {
 pub struct SessionSummary {
     #[serde(default)]
     pub fast: bool,
+    #[serde(default)]
+    pub ultra: bool,
     pub id: String,
     pub title: String,
     /// Number of messages in the current canonical transcript. This is the
@@ -1208,13 +1211,15 @@ fn session_created_at(db: &Database, session_id: &str) -> Result<String> {
 const SUMMARY_SELECT: &str =
     "SELECT s.id, s.title, s.last_seq, p.path, s.model_id, s.provider_id, s.mode,
             s.thinking_level, s.permission_mode, s.updated_at, s.created_at,
-            COALESCE((SELECT value_json = 'true' FROM kv WHERE ns = 'app' AND key = 'session-fast:' || s.id), 0) AS fast
+            COALESCE((SELECT value_json = 'true' FROM kv WHERE ns = 'app' AND key = 'session-fast:' || s.id), 0) AS fast,
+            COALESCE((SELECT value_json = 'true' FROM kv WHERE ns = 'app' AND key = 'session-ultra:' || s.id), 0) AS ultra
      FROM sessions s LEFT JOIN projects p ON p.id = s.project_id
      WHERE s.deleted_at IS NULL";
 
 pub(crate) fn summary_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<SessionSummary> {
     Ok(SessionSummary {
         fast: row.get("fast")?,
+        ultra: row.get("ultra")?,
         id: row.get(0)?,
         title: row.get(1)?,
         message_count: row.get(2)?,
@@ -1389,6 +1394,7 @@ pub fn create_session_with_options(
         ])?;
     Ok(SessionSummary {
         fast: false,
+        ultra: false,
         id,
         title,
         message_count: 0,
@@ -1750,6 +1756,7 @@ pub fn fork_session_through(
 
     let summary = SessionSummary {
         fast: false,
+        ultra: false,
         id,
         title,
         message_count: records.len() as i64,
@@ -1786,7 +1793,7 @@ pub fn configure_session(
     provider_id: Option<&str>,
     model_id: Option<&str>,
 ) -> Result<Option<SessionSummary>> {
-    configure_session_with_thinking(db, id, mode, provider_id, model_id, None, None, None)
+    configure_session_with_thinking(db, id, mode, provider_id, model_id, None, None, None, None)
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -1799,6 +1806,7 @@ pub fn configure_session_with_thinking(
     thinking_level: Option<&str>,
     permission_mode: Option<&str>,
     fast: Option<bool>,
+    ultra: Option<bool>,
 ) -> Result<Option<SessionSummary>> {
     if !(is_valid_mode(mode) || mode == "chat") {
         return Err(anyhow!("mode must be plan or agent"));
@@ -1826,6 +1834,7 @@ pub fn configure_session_with_thinking(
     let next_model_id = model_id.or(current.model_id.as_deref());
     let same_selection = next_provider_id == current.provider_id.as_deref()
         && next_model_id == current.model_id.as_deref();
+    let selected_ultra = ultra.unwrap_or(current.ultra && same_selection);
     let selected_fast = fast::resolve(
         db,
         next_provider_id,
@@ -1859,6 +1868,10 @@ pub fn configure_session_with_thinking(
         &format!("session-fast:{id}"),
         &serde_json::json!(selected_fast),
     )?;
+    db.set_setting(
+        &format!("session-ultra:{id}"),
+        &serde_json::json!(selected_ultra),
+    )?;
     tx.commit()?;
     Ok(get_session(db, id)?.map(|detail| detail.summary))
 }
@@ -1866,8 +1879,8 @@ pub fn configure_session_with_thinking(
 pub fn delete_session(db: &Database, id: &str) -> Result<bool> {
     let tx = db.conn().unchecked_transaction()?;
     tx.execute(
-        "DELETE FROM kv WHERE ns = 'app' AND key = ?1",
-        [format!("session-fast:{id}")],
+        "DELETE FROM kv WHERE ns = 'app' AND key IN (?1, ?2)",
+        [format!("session-fast:{id}"), format!("session-ultra:{id}")],
     )?;
     let n = db
         .conn()
@@ -1986,6 +1999,7 @@ pub fn append_message(
                 params![session_id, record.id, text, record.is_error],
             )?;
         } else {
+            delegation_updates::refresh_task(db, session_id, &message, &record, text.as_deref())?;
             return Ok(());
         }
     } else {
@@ -4355,6 +4369,7 @@ mod tests {
             Some("high"),
             None,
             None,
+            None,
         )
         .unwrap()
         .unwrap();
@@ -4379,6 +4394,7 @@ mod tests {
             Some("turbo"),
             None,
             None,
+            None
         )
         .is_err());
         let omitted = configure_session_with_thinking(
@@ -4388,6 +4404,7 @@ mod tests {
             None,
             None,
             Some("omit"),
+            None,
             None,
             None,
         )
@@ -4499,6 +4516,7 @@ mod tests {
         let db = test_db();
         let summary = SessionSummary {
             fast: false,
+            ultra: false,
             id: "import-claude-code-abc".into(),
             title: "Imported".into(),
             message_count: 1,
@@ -4550,6 +4568,7 @@ mod tests {
         let db = test_db();
         let base = SessionSummary {
             fast: false,
+            ultra: false,
             id: "import-codex-one".into(),
             title: "Imported".into(),
             message_count: 0,
@@ -5404,6 +5423,7 @@ mod tests {
         let db = test_db();
         let summary = SessionSummary {
             fast: false,
+            ultra: false,
             id: "thinking-import".into(),
             title: "Thinking".into(),
             message_count: 0,
@@ -5778,6 +5798,7 @@ mod tests {
             Some("high"),
             Some("auto"),
             None,
+            None,
         )
         .unwrap();
 
@@ -5853,6 +5874,7 @@ mod tests {
             Some("model-2"),
             Some("off"),
             Some("ask"),
+            None,
             None,
         )
         .unwrap();
@@ -7460,3 +7482,4 @@ mod tests {
     }
 }
 mod fast;
+mod ultra;

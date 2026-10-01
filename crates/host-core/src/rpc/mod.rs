@@ -2560,6 +2560,14 @@ async fn handle_request(
                             .ok_or_else(|| rpc_err(1002, "fast must be boolean", "INVALID_PARAMS"))
                     })
                     .transpose()?,
+                params
+                    .get("ultra")
+                    .map(|value| {
+                        value
+                            .as_bool()
+                            .ok_or_else(|| rpc_err(1002, "ultra must be boolean", "INVALID_PARAMS"))
+                    })
+                    .transpose()?,
             )
             .map_err(|e| {
                 let message = e.to_string();
@@ -7478,6 +7486,7 @@ mod tests {
             None,
             Some("auto"),
             None,
+            None,
         )
         .unwrap();
         let state = Arc::new(Mutex::new(app_state));
@@ -7594,6 +7603,7 @@ mod tests {
             None,
             Some("ask"),
             None,
+            None,
         )
         .unwrap();
         let state = Arc::new(Mutex::new(app_state));
@@ -7681,6 +7691,7 @@ mod tests {
             None,
             None,
             Some("ask"),
+            None,
             None,
         )
         .unwrap();
@@ -7795,6 +7806,7 @@ mod tests {
             None,
             Some("ask"),
             None,
+            None,
         )
         .unwrap();
         let state = Arc::new(Mutex::new(app_state));
@@ -7890,6 +7902,7 @@ mod tests {
             None,
             Some("auto"),
             None,
+            None,
         )
         .unwrap();
         let state = Arc::new(Mutex::new(app_state));
@@ -7980,6 +7993,7 @@ mod tests {
             None,
             Some("auto"),
             None,
+            None,
         )
         .unwrap();
         let state = Arc::new(Mutex::new(app_state));
@@ -8059,6 +8073,7 @@ mod tests {
             None,
             None,
             Some("auto"),
+            None,
             None,
         )
         .unwrap();
@@ -8615,6 +8630,7 @@ mod tests {
             None,
             Some("ask"),
             None,
+            None,
         )
         .unwrap();
         let state = Arc::new(Mutex::new(app_state));
@@ -8709,6 +8725,7 @@ mod tests {
             None,
             Some("auto"),
             None,
+            None,
         )
         .unwrap();
         let auto = handle_request(
@@ -8756,6 +8773,7 @@ mod tests {
             None,
             None,
             Some("ask"),
+            None,
             None,
         )
         .unwrap();
@@ -8905,6 +8923,7 @@ mod tests {
             None,
             Some("auto"),
             None,
+            None,
         )
         .unwrap();
         let state = Arc::new(Mutex::new(app_state));
@@ -8970,6 +8989,7 @@ mod tests {
             None,
             None,
             Some("auto"),
+            None,
             None,
         )
         .unwrap();
@@ -9041,6 +9061,7 @@ mod tests {
             None,
             Some("ask"),
             None,
+            None,
         )
         .unwrap();
         #[cfg(windows)]
@@ -9108,6 +9129,7 @@ mod tests {
             None,
             None,
             Some("auto"),
+            None,
             None,
         )
         .unwrap();

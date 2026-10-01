@@ -16,6 +16,12 @@ function message(id: string, overrides: Partial<UiMessage> = {}): UiMessage {
 }
 
 describe("transcript view projection", () => {
+  it("shows the accepted child model, group and native reasoning", () => {
+    const task = message("01", { role: "tool", toolName: "Task", toolCallId: "task-1", toolResult: { details: { modelId: "child", groupId: "group-b", thinkingLevel: "max" } } });
+    const reply = message("02", { parentToolCallId: "task-1", agentName: "explorer" });
+    const group = buildTranscriptEntries([task, reply]).find(entry => entry.kind === "delegation");
+    expect(group?.configuration).toBe("child · group-b · max");
+  });
   it("shows accepted child Fast metadata without assuming parent or requested arguments", () => {
     const task = message("01", { role: "tool", toolName: "Task", toolCallId: "task-1", toolArgs: { fast: true } });
     const reply = message("02", { parentToolCallId: "task-1", agentName: "explorer" });

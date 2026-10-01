@@ -80,6 +80,7 @@ import {
   delegateAgentName,
   delegateFastRequested,
   delegateModelId,
+  delegateGroupId,
   delegateThinkingLevel,
 } from "./model";
 import { PluginToolCard } from "./PluginToolCard";
@@ -243,7 +244,7 @@ function HostToolRow({
   const thinkingLevel =
     variant === "topology" ? delegateThinkingLevel(message) : undefined;
   const thinkingLabel = thinkingLevel ?? "";
-  const modelLabel = [modelId, thinkingLabel].filter(Boolean).join(" ");
+  const modelLabel = [modelId, variant === "topology" ? delegateGroupId(message) : "", thinkingLabel].filter(Boolean).join(" · ");
   // The delegate's last answer row is its report, so the body must not print
   // the same text a second time.
   const nestedReport = delegate?.items.some((item) => item.kind === "answer");

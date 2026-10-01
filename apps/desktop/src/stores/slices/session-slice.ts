@@ -604,6 +604,7 @@ export function createSessionSlice({
         set((state) => ({
           draftConfiguration: {
             mode: config.mode,
+            ultra: config.ultra ?? ((config.providerId === state.draftConfiguration?.providerId && config.modelId === state.draftConfiguration?.modelId) && state.draftConfiguration?.ultra === true),
             fast: config.fast ?? state.draftConfiguration?.fast ?? false,
             thinkingLevel: config.thinkingLevel,
             providerId:

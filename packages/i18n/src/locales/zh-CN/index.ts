@@ -4,6 +4,7 @@ import { imagesZhCN } from "../images.js";
 import { en, type EnglishCatalog } from "../en/index.js";
 
 export const zhCN = {
+  ultra: {"label":"Ultra","hint":"最高可用推理，主动并行子代理；可能增加模型调用和费用。","unavailable":"请选择聊天模型并启用子代理后使用 Ultra。"},
   mobileSync: mobileSyncZhCN,
   mobile: mobileZhCN,
   images: imagesZhCN,

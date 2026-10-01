@@ -34,14 +34,16 @@ export function ComposerModelPicker({
   t,
   controller,
   modelLabel,
-  thinkingLabel,
-  thinkingLevel,
+  thinkingLabel: nativeThinkingLabel,
+  thinkingLevel: nativeThinkingLevel,
   selectedProviderId,
   selectedModelId,
   controlsBlocked,
   onCloseOtherMenus,
   rootActions,
 }: ComposerModelPickerProps) {
+  const thinkingLabel = controller.ultra ? t("ultra.label") : nativeThinkingLabel;
+  const thinkingLevel = controller.ultra ? "ultra" : nativeThinkingLevel;
   const {
     task,
     open,
@@ -136,6 +138,7 @@ export function ComposerModelPicker({
             <span className="composer-menu-entry-value" title={modelLabel}>{modelLabel}</span>
             <IconChevronRight size={14} aria-hidden="true" />
           </button>
+          {!imageMode && <small role="status">{t(controller.ultraAvailable ? "ultra.hint" : "ultra.unavailable")}</small>}
           {/* Reasoning stays on the native inline slider. */}
           {!imageMode && thinkingMenuLevels.length > 1 ? (
             <ThinkingLevelSlider

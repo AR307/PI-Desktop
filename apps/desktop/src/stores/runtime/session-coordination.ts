@@ -269,8 +269,8 @@ export function createSessionCoordination({
       throw error;
     }
     const sessionId = created.session.id;
-    if (draftConfig?.fast === true) {
-      const configured = await api.configureSession(sessionId, { mode: created.session.mode, fast: true });
+    if (draftConfig?.fast === true || draftConfig?.ultra === true) {
+      const configured = await api.configureSession(sessionId, { mode: created.session.mode, fast: draftConfig?.fast === true, ultra: draftConfig?.ultra === true });
       if (configured.session) created.session = { ...created.session, ...configured.session };
     }
     if (!runtime.navigationIntentIsCurrent(active)) {

@@ -102,7 +102,7 @@ export const Conversation = memo(function Conversation({ controller }: { control
   const modeLabel = imageMode ? t("imageGeneration") : t(session?.taskMode ?? "agent");
   const modelLabel = session?.modelId ? `${session.modelId}${session.groupName ? ` · ${session.groupName}` : ""}` : t("chooseModel");
   return <main className="conversation">
-    <div className="conversation-controls"><button className="config-chip" onClick={() => setConfigPanel("mode")} disabled={!session || configuring}><Settings2 size={15}/>{modeLabel}<ChevronDown size={14}/></button><button className="config-chip model-chip" onClick={() => setConfigPanel("model")} disabled={!session || configuring}><span>{modelLabel}</span><ChevronDown size={14}/></button></div>
+    <div className="conversation-controls"><button className="config-chip" onClick={() => setConfigPanel("mode")} disabled={!session || configuring}><Settings2 size={15}/>{modeLabel}<ChevronDown size={14}/></button><button className="config-chip model-chip" onClick={() => setConfigPanel("model")} disabled={!session || configuring}><span>{modelLabel}{session?.configuration?.next.ultra && session?.taskMode !== "image" ? " · Ultra" : ""}</span><ChevronDown size={14}/></button></div>
     <div className="transcript" ref={scroll} onScroll={() => { const element = scroll.current; if (element) stick.current = element.scrollHeight - element.scrollTop - element.clientHeight < 100; }}>
       <div ref={topSentinel} className="history-sentinel" aria-hidden="true"/>
       {snapshot?.hasMoreHistory && (loadingOlder
@@ -112,7 +112,7 @@ export const Conversation = memo(function Conversation({ controller }: { control
       {entries.map((entry) => entry.kind === "message"
         ? <Message key={entry.message.id} message={entry.message} controller={controller} reference={reference}/>
         : entry.kind === "delegation"
-          ? <DelegationCard key={`delegation:${entry.id}`} id={entry.id} agentName={entry.agentName} running={entry.running} fast={entry.fast} messages={entry.messages} controller={controller} reference={reference}/>
+          ? <DelegationCard key={`delegation:${entry.id}`} id={entry.id} agentName={entry.agentName} configuration={entry.configuration} running={entry.running} fast={entry.fast} messages={entry.messages} controller={controller} reference={reference}/>
           : <CompactionDivider key={`compaction:${entry.id}`}/>)}
       {imageRunning && <div className="action-card">{t("imageGeneration")} · {t("working")}</div>}
       {snapshot?.pendingApprovals.map((request) => <Approval key={request.id} request={request} controller={controller} markdown={snapshot?.plans?.find((plan) => plan.id === request.id)?.markdown}/>)}
