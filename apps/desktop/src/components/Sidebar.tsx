@@ -1442,7 +1442,7 @@ export function Sidebar({
 
   const copyConversationId = async (session: SessionSummary) => {
     try {
-      await navigator.clipboard.writeText(session.id);
+      await api.writeClipboardText(session.id);
       showToast(t("chat.copied"));
     } catch (error) {
       reportError(error);

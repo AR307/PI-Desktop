@@ -85,6 +85,11 @@ describe("Plan protocol contracts", () => {
     }
   });
 
+  it("exposes native clipboard text writes through the preload whitelist", () => {
+    expect(IPC.invoke.clipboardWriteText).toBe("pi-desktop/clipboard/writeText");
+    expect(IPC_WHITELIST.has(IPC.invoke.clipboardWriteText)).toBe(true);
+  });
+
   it("exposes the vendor-account OAuth channels through the preload whitelist", () => {
     expect(IPC.invoke.providersOauthStart).toBe(
       "pi-desktop/providers/oauth/start",

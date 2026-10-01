@@ -895,6 +895,8 @@ export const api = {
     }),
   recordClipboardPaste: (text: string) =>
     invoke<{ ok: boolean }>(IPC.invoke.clipboardRecordPaste, { text }),
+  writeClipboardText: (text: string) =>
+    invoke<{ ok: boolean }>(IPC.invoke.clipboardWriteText, { text }),
   clearProject: () => invoke(IPC.invoke.projectClear),
   removeProject: (path: string) =>
     invoke<{ removed: boolean; sessionsRemoved: number }>(

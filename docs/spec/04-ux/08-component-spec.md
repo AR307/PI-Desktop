@@ -1408,7 +1408,9 @@ near-zero duration. A folded group keeps its rows mounted, `aria-hidden`, and
   standalone Sessions section and becomes active; later transcript/configuration changes
   do not affect the source. The action is disabled for a running source.
 - Copy conversation ID is available without developer mode and writes the
-  durable session id to the clipboard. Open
+  durable session id through the main-process native clipboard IPC, independent
+  of browser Clipboard API permissions. The IPC accepts text from the main
+  window only; failed writes do not display a success toast. Open
   session path opens `<data_dir>/scratch/<sessionId>/` in the system file
   manager, creating the directory if it does not exist yet. Only Open session
   path requires developer mode.

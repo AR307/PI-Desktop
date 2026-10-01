@@ -350,6 +350,7 @@ export const IPC = {
     composerImportFiles: "pi-desktop/composer/importFiles",
     composerPasteFiles: "pi-desktop/composer/pasteFiles",
     clipboardRecordPaste: "pi-desktop/clipboard/recordPaste",
+    clipboardWriteText: "pi-desktop/clipboard/writeText",
     composerCommands: "pi-desktop/composer/commands",
     workspaceDiff: "pi-desktop/workspace/diff",
     workspaceReviewRollback: "pi-desktop/workspace/review/rollback",

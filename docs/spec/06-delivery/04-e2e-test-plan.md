@@ -16228,3 +16228,19 @@ shows the current binding's highest native tier plus Workflow + Subagent.
 Leave Ultra: the summary disappears. Verify the same select/leave behavior in
 the phone model sheet and capability-derived Max/Xhigh labels. No provider
 request parameter or ordinary reasoning choice changes with this copy update.
+
+### E2E-CLIPBOARD-conversation-id-native-copy
+
+- Run `node apps/desktop/test/e2e/clipboard/acceptance.mjs` after building
+  shared/runtime and Electron; use an isolated profile and the real Rust host.
+- Seed a conversation with developer mode disabled. Deny browser clipboard
+  permissions in the isolated Electron session, right-click its sidebar row,
+  and choose Copy conversation ID. Native clipboard text must equal that row
+  durable ID and the success toast must appear; no browser permission prompt.
+- Reject malformed payloads and invocations from the plugin-launcher renderer
+  without changing clipboard contents. Repeat after renderer reload with
+  Chinese/light settings; also capture English/dark screenshots.
+- Preserve previous clipboard text, HTML, RTF and image in process memory and
+  restore them on exit; never include clipboard data in test output.
+- The unmodified build fails the actual context-menu/native-clipboard assertion.
+  The repaired build passes; no account authorization or model request is needed.

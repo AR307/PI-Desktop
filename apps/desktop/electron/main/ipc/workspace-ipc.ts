@@ -1,4 +1,4 @@
-import { BrowserWindow, dialog, shell, type OpenDialogOptions } from "electron";
+import { BrowserWindow, clipboard, dialog, shell, type OpenDialogOptions } from "electron";
 import { dirname } from "node:path";
 import { homedir } from "node:os";
 import { existsSync, statSync } from "node:fs";
@@ -568,6 +568,20 @@ export function registerWorkspaceIpc({
           paths,
         ),
       };
+    },
+  );
+
+  handleWithEvent(
+    IPC.invoke.clipboardWriteText,
+    async (event, input: { text?: unknown } | null = {}) => {
+      assertMainWindowSender(event);
+      if (typeof input?.text !== "string") {
+        throw Object.assign(new Error("text must be a string"), {
+          errorCode: ErrorCodes.INVALID_ARGUMENT,
+        });
+      }
+      clipboard.writeText(input.text);
+      return { ok: true };
     },
   );
 

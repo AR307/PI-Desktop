@@ -1,5 +1,20 @@
 # PI-Desktop MirrorCoding Edition
 
+## 2026-10-01 - Native conversation ID copying
+
+- Fixed the sidebar context-menu copy action failing with browser clipboard
+  permission denial. It now uses the existing preload IPC architecture and
+  Electron Main native clipboard writing instead of navigator.clipboard.
+- Added a string-only, main-window-only clipboard write channel; plugin
+  permissions, other copy actions, sessions and subagent settings are unchanged.
+- Reproduced the failure in an isolated Electron window before the fix. The
+  same real context-menu flow then passed with browser clipboard writes denied,
+  including Chinese/light reload, English/dark feedback, invalid input and
+  non-main sender rejection. Evidence: `.artifacts/clipboard-fixed/`.
+- Shared protocol tests passed 14/14; sidebar and clipboard regressions passed
+  32/32. Shared, i18n, runtime and Desktop TypeScript checks passed; sidecar and
+  Electron builds passed. No provider calls, user-profile changes or release.
+
 ## 2026-10-01 - Ultra session collaboration
 
 - Added persistent Ultra to the native desktop reasoning slider and mobile
