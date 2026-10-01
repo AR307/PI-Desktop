@@ -54,6 +54,12 @@ delegates instead of aborting them, and `MAX_SUBAGENT_CONCURRENCY` counts
 every running delegate. `TaskWait` keeps its blocking-convergence semantics
 unchanged.
 
+Ultra now makes this detachment the default after a successful Task batch,
+instead of waiting for the model to choose to stop. The native finishTurn hook
+ends after all batch results. Already-settled reports also defer to the wake
+queue for that handoff, so they cannot hide the parent end boundary. Ordinary
+turn-boundary report delivery is unchanged. See ultra-session-orchestration.md.
+
 ### 2. Settlement wakes the idle session (uses D386)
 
 A delegate that settles while the session is idle queues one wake turn through

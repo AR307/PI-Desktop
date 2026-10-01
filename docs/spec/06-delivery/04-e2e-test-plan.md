@@ -11279,7 +11279,8 @@ This test plan spec is accepted when:
 
 - **Preconditions**: Isolated Electron profile, bundled sidecar, real Rust host,
   and controlled loopback MC authorization/catalog/SSE service. Two channels
-  provide Grok 4.7; the parent uses Astra with Ultra enabled.
+  provide Grok 4.7; the parent starts in ordinary mode for the Stop regression,
+  then enables Ultra for asynchronous report and resume journeys.
 - **Steps and expected results**:
   1. Send a prompt delegating to both channels. Actual worker HTTP model IDs and
      group headers match each catalog key; Task output names the actual binding.
@@ -11297,6 +11298,28 @@ This test plan spec is accepted when:
   aliases, definition pins, pending cancellation and restored group identity.
 - **Boundary**: Controlled transport proves request wiring and visible behavior,
   not production MC authorization, real-model compliance or upstream quality.
+
+#### E2E-SUBAGENT-ultra-automatic-handoff
+
+- **Preconditions**: The isolated Electron, host and controlled HTTP/SSE setup
+  above; rebuild the sidecar before launching. Enable Ultra on the parent.
+- **Steps and expected results**:
+  1. Submit a two-worker Task batch. Both actual worker requests start. Without
+     pressing Stop, the parent becomes idle and the composer is editable. No
+     second parent request runs while both streams remain held.
+  2. Type a draft. Finish only the first worker. Its report silently wakes one
+     integration turn; the other worker remains running and the draft survives.
+  3. Finish the second worker. Its report triggers integration, with no fake user
+     message, TaskWait poll, duplicate worker or remaining queue item.
+  4. Repeat with immediate worker responses. No report is lost; all subsequent
+     parent requests have completion provenance, not a dispatch continuation.
+  5. Repeat an invalid dispatch and ordinary-mode delegation. Rejected tools
+     retain explanatory feedback; ordinary independent parent work is unchanged.
+- **Automation**: apps/desktop/test/e2e/subagents/ultra-handoff.mjs, called from
+  acceptance.mjs; runtime.test.ts also covers settlement before the native turn
+  boundary, invalid dispatch and ordinary continuation with the real pi loop.
+- **Boundary**: Controlled models prove lifecycle and UI wiring, not autonomous
+  task decomposition or production-provider behavior. User preview is untouched.
 
 #### E2E-SUBAGENT-context-overflow-compacts-before-failing
 

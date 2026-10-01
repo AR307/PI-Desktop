@@ -1,5 +1,21 @@
 # PI-Desktop MirrorCoding Edition
 
+## 2026-10-01 - Ultra automatic asynchronous handoff
+
+- Successful Ultra Task batches now end the parent turn through pi's native
+  finishTurn hook after all workers start and tool results enter history.
+  The composer becomes idle without cancelling background subagents.
+- The existing silent host wake queue resumes integration on worker settlement,
+  including workers that finish during dispatch. No polling, longer wait,
+  additional scheduler or MC interface is introduced.
+- A single policy source aligns Ultra system guidance, Task description and
+  startup feedback. Ordinary delegation, explicit-model errors, Stop and resume
+  semantics remain intact. Failed-only dispatches still get parent feedback.
+- Added real-loop regression coverage and isolated Electron user journeys for
+  parallel handoff, editable drafts, staggered/rapid completion and silent wake.
+  Validation results are recorded with the candidate in the acceptance README.
+
+
 ## 2026-10-01 - Truthful subagent lifecycle and channel selection
 
 - Background reports now use host-owned queue provenance. Internal wake turns

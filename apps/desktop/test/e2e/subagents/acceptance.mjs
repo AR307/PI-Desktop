@@ -5,6 +5,7 @@ import { createRequire } from "node:module";
 import { resolve, join } from "node:path";
 import { HostProcess } from "@pi-desktop/host-runtime";
 import { subagentFixture } from "./fixture.mjs";
+import { verifyUltraHandoff } from "./ultra-handoff.mjs";
 
 const require = createRequire(import.meta.url);
 const { _electron } = require(process.env.PI_TEST_PLAYWRIGHT ?? "playwright");
@@ -56,7 +57,7 @@ try {
   assert(groups.every(Boolean));
   await invoke("providers/update", { id: account.id, models: account.models.map(model => ({ ...model, availableForSubagents: model.id === "grok-4.7", mirrorCodingGroupId: "Channel A" })) });
   fixture.controls.keys = groups.map(group => group.id + "/grok-4.7");
-  await invoke("session/configure", sessionId, { mode: "agent", providerId: groups[0].id, modelId: "gpt-6-astra", ultra: true, permissionMode: "ask" });
+  await invoke("session/configure", sessionId, { mode: "agent", providerId: groups[0].id, modelId: "gpt-6-astra", ultra: false, permissionMode: "ask" });
   await invoke("settings/set", { ...await invoke("settings/get"), language: "en", theme: "dark" });
   await invoke("project/set", workspace);
   await page.reload(); await page.locator(".app-shell:not(.app-shell-boot)").waitFor(); await page.locator(".startup-splash").waitFor({ state: "hidden" });
@@ -91,6 +92,7 @@ try {
   check("keyboard stop cancels only one worker; group stop cancels remaining workers");
   await screenshot("workers-stopped");
 
+  await invoke("session/configure", sessionId, { mode: "agent", ultra: true });
   await send("CONTROL_REPORT: run and deliver one background report.");
   await until(async () => (await tasks()).length === 3, "report worker starts");
   await until(idle, "parent idles while worker is active");
@@ -121,6 +123,7 @@ try {
   assert.equal(fixture.calls.filter(call => call.worker).at(-1).body.model, "grok-4.7");
   check("failed delegation resumes on its exact Grok model/channel, never inherited Astra");
   await until(idle, "resume settled");
+  await verifyUltraHandoff({ page, fixture, send, tasks, idle, until, session, invoke, sessionId, screenshot, check });
   await invoke("settings/set", { ...await invoke("settings/get"), language: "zh-CN", theme: "light" });
   await page.reload(); await page.locator(".app-shell:not(.app-shell-boot)").waitFor(); await page.locator(".startup-splash").waitFor({ state: "hidden" });
   await page.locator('[data-sidebar-session-row="' + sessionId + '"] .thread-item-main').first().click();

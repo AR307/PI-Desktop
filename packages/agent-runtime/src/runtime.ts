@@ -1,5 +1,5 @@
 import { highestThinkingLevel } from "@pi-desktop/shared";
-import { delegationGuidance, delegationSystemPrompt, resolveDelegationThinking } from "./ultra-policy.js";
+import { delegationGuidance, delegationHandoffGuidance, delegationSystemPrompt, resolveDelegationThinking, shouldHandOffDelegations } from "./ultra-policy.js";
 import { assertMirrorCodingFast, withMirrorCodingFast } from "./mirrorcoding-fast.js";
 import { assistantReplay, canRestorePartialResponse, responseContentFacts, responseDiagnostics, responseOutcome, responseOutcomeError, restoredAssistantBlocks } from "./response-outcome.js";
 import { upstreamRequestDiagnostics, type RequestDiagnostics } from "./request-diagnostics.js";
@@ -1671,6 +1671,8 @@ export class DesktopAgentRuntime {
   /** The current run's `agent_end` reached listeners: the visible turn is
    * closed, so a boundary delivery must fall back to the wake queue (D628). */
   private turnEndEmitted = false;
+  /** A dispatched Ultra batch releases this turn, including already-settled reports. */
+  private delegationHandoff = false;
   /** A wake turn is queued and not yet consumed; further settlements ride it
    * instead of queueing their own (D628). Reset when any turn starts. */
   private queuedDelegationWake = false;
@@ -2077,12 +2079,15 @@ export class DesktopAgentRuntime {
       // ordering guarantee is untouched.
       toolExecution: "parallel",
       steeringMode: "all",
-      // pi-agent-core 0.87 replaces shouldStopAfterTurn with finishTurn. A
-      // queued renderer prompt ends a completed turn at the next boundary,
-      // without treating an error or abort as a graceful stop.
-      finishTurn: async ({ message }) => {
-        if (!this.gracefulStopRequested) return;
-        if (message.stopReason === "error" || message.stopReason === "aborted") return;
+      // Finish the entire tool batch before either a graceful stop or Ultra
+      // handoff. Ending normally releases the parent without aborting workers.
+      finishTurn: async (turn) => {
+        if (turn.message.stopReason === "error" || turn.message.stopReason === "aborted") return;
+        if (this.ultra && this.mode === "agent" && !this.runCancelled &&
+            shouldHandOffDelegations(turn, id => this.delegations.has(id))) {
+          this.delegationHandoff = true;
+        }
+        if (!this.gracefulStopRequested && !this.delegationHandoff) return;
         this.gracefulStopRequested = false;
         return { action: "end" };
       },
@@ -4227,7 +4232,8 @@ export class DesktopAgentRuntime {
       label: "Task",
       description: [
         delegationGuidance(this.ultra && this.mode === "agent"),
-        "Start one subagent in the background and return immediately; keep working while it runs, then converge with TaskWait when you need its report.",
+        "Start one subagent in the background and return immediately.",
+        delegationHandoffGuidance(this.ultra && this.mode === "agent"),
         "Use it only when the work is genuinely separable and substantial: parallel exploration of independent directions that each need many tool calls (one Task per direction in the same assistant message), a large multi-file implementation with a complete spec (fixer), an adversarial read-only review of a non-trivial change you already finished (code-reviewer), or a wide search whose raw output would fill this context (explorer, test-runner). A single file lookup or a small edit does not warrant delegation.",
         "Do not delegate what you can finish in a couple of tool calls, and do not delegate anything that needs the user — a subagent cannot ask a question or propose a plan on your behalf.",
         ...(this.availableSubagentModelKeys().length
@@ -4238,7 +4244,7 @@ export class DesktopAgentRuntime {
               "No delegation model overrides are configured. Omit `model` to use the definition's default, or the parent model when no default is pinned. Repeating a definition's own Default model key is the same as omitting `model`; never invent a provider/model key.",
             ]),
         "`task` is the delegate's only instruction. It cannot see this conversation, and you cannot correct it while it runs, so state the goal, the paths and facts it cannot infer, and exactly what to report back.",
-        "To run delegates concurrently, emit several Task calls in one assistant message. A message that mixes Task with any other tool runs one call at a time. You may keep working, talk to the user, or end your turn while they run: delegates continue in the background and the runtime delivers their reports when they finish — at your turn's boundary, or by waking the session when it is idle. Call TaskStop only to cancel.",
+        "To run delegates concurrently, emit several Task calls in one assistant message. A message that mixes Task with any other tool runs one call at a time. Call TaskStop only to cancel.",
         "To continue a previous subagent, pass its `resume` id (the `delegationId` returned by Task). Saying \"reuse\" in prose is not enough. Do not pass `model` when resuming; start a new delegation to change models.",
         `Available subagents:\n${catalog}`,
       ].join("\n\n"),
@@ -4597,7 +4603,7 @@ export class DesktopAgentRuntime {
           content: [
             {
               type: "text",
-              text: `Actual model: ${provider.modelId}; provider/channel: ${provider.name} (${provider.id})${provider.mirrorCodingGroupId ? `; group: ${provider.mirrorCodingGroupId}` : ""}; thinking: ${thinkingLevel}. Delegation ${delegationId} started: the ${definition.name} subagent is working in the background${label ? ` (${label})` : ""}. Continue your own independent work and call TaskWait with this delegationId when you need its report, or simply end your turn — the subagent keeps running and the runtime delivers its report when it settles. Call TaskStop only to cancel it.`,
+              text: `Actual model: ${provider.modelId}; provider/channel: ${provider.name} (${provider.id})${provider.mirrorCodingGroupId ? `; group: ${provider.mirrorCodingGroupId}` : ""}; thinking: ${thinkingLevel}. Delegation ${delegationId} started: the ${definition.name} subagent is working in the background${label ? ` (${label})` : ""}. ${delegationHandoffGuidance(this.ultra && this.mode === "agent")}`,
             },
           ],
           details: {
@@ -4767,6 +4773,7 @@ export class DesktopAgentRuntime {
    */
   private holdTurnForUndeliveredReports(): boolean {
     return (
+      !this.delegationHandoff &&
       this.undeliveredSettledDelegations().length > 0 &&
       !this.runCancelled &&
       !this.turnHadError
@@ -5027,7 +5034,8 @@ export class DesktopAgentRuntime {
       !this.runCancelled &&
       !this.turnHadError &&
       epoch === this.turnEpoch &&
-      !this.turnEndEmitted
+      !this.turnEndEmitted &&
+      !this.delegationHandoff
     ) {
       if (this.pendingSteering.size) {
         await this.waitForIdleAndSteering();
@@ -7933,7 +7941,7 @@ export class DesktopAgentRuntime {
       case "agent_end":
         // Input admitted after pi's last queue poll still belongs to this turn.
         // Continue after the current run settles; never wake the follow-up FIFO.
-        if (this.pendingSteering.size && this.acceptingSteering && !this.runCancelled && !this.turnHadError) break;
+        if (!this.delegationHandoff && this.pendingSteering.size && this.acceptingSteering && !this.runCancelled && !this.turnHadError) break;
         if (
           this.suppressOverflowRunEnd ||
           this.suppressProviderRetryRunEnd ||
@@ -8111,6 +8119,7 @@ export class DesktopAgentRuntime {
     // consumes a queued wake: its boundary delivery takes over the reports.
     this.queuedDelegationWake = false;
     this.turnEndEmitted = false;
+    this.delegationHandoff = false;
     this.currentAssistant = undefined;
     this.requestStartedAt = Date.now();
     this.setMode("agent");
@@ -8246,6 +8255,7 @@ export class DesktopAgentRuntime {
     // reports settled by now leave through this turn's boundary delivery.
     this.queuedDelegationWake = false;
     this.turnEndEmitted = false;
+    this.delegationHandoff = false;
     // A queued wake turn expands here, before the compaction preflight, so the
     // injected reports count against the context budget (D628).
     const wakeDelivery = this.prepareDelegationWakeDelivery(modelInput);

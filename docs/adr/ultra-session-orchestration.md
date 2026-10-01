@@ -20,6 +20,20 @@ tool-catalog lifecycle changes still use the existing runtime lifecycle. The
 existing Task settlement event updates its original Rust-owned row rather than
 being discarded as a duplicate. Persisted child bindings support exact resume.
 
+## Asynchronous handoff amendment, 2026-10-01
+
+The earlier guidance encouraged the parent to keep working and only allowed it
+to end. Real use produced repeated short TaskWait calls and unrelated parent
+work while a delegate was still executing. A longer timeout would preserve the
+wrong lifecycle, and prompt-only wording would still rely on model compliance.
+
+After a successful Ultra Task batch, use pi-agent-core's native finishTurn hook
+to end the parent run before another provider request. The hook runs after every
+tool result, so parallel fan-out is not cut off after the first worker. Reports
+that race with the handoff go through the existing silent wake queue after end
+events rather than holding the dispatch turn open. No abort, new scheduler,
+worker registry or host protocol is introduced. Normal mode remains unchanged.
+
 ## Consequences
 
 Ultra can increase calls/cost; it promises neither worker count nor model speed.

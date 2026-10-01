@@ -27,6 +27,27 @@ explicitly enables it again. Fast is independent.
   choices. Unsupported levels fail before requesting a model. Resume omission
   keeps the child's last accepted level and exact authorized binding.
 
+## Dispatch and asynchronous handoff
+
+Ultra ends the parent turn normally after a successful Task batch. All calls in
+that batch start and their tool results enter history before pi's native
+finishTurn boundary returns end. The composer becomes usable while worker cards
+remain running. No further parent provider request or TaskWait polling is needed
+to keep the workers alive. Ordinary mode retains its existing continuation rule.
+
+Reports silently wake integration through the existing host queue. Even workers
+that settle before Task returns use that queue after the parent end events,
+not an extra hidden continuation of the dispatch turn. Multiple ready reports
+share a wake; reports arriving later use the existing boundary/wake delivery.
+The parent may integrate completed reports while others still run, then end its
+turn again until another completion. This does not require all workers to finish
+at once and does not prevent a new user prompt while they run.
+
+An entirely rejected dispatch does not claim a successful handoff: the parent
+can explain the errors, without silently replacing the requested model or doing
+its assigned work. Error, truncated-response and user-stop semantics are
+unchanged. Parent Stop and explicit worker cancellation remain independent.
+
 ## Persistence and interface
 
 The `ultra` boolean travels through session configuration and current/next/chat

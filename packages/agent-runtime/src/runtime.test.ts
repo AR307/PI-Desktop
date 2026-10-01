@@ -7678,6 +7678,88 @@ describe("DesktopAgentRuntime subagents", () => {
     subagentRuns.deferred = false;
   });
 
+  describe("Ultra asynchronous handoff", () => {
+    function scriptedParent(runtime: DesktopAgentRuntime, requests: AgentMessage[][], invalid = false): void {
+      const models = {
+        streamSimple: (_model: unknown, context: { messages: AgentMessage[] }) => {
+          requests.push([...context.messages]);
+          const dispatch = requests.length === 1;
+          const message = assistantMessage({
+            content: dispatch
+              ? [0, 1].map(index => ({ type: "toolCall", id: "handoff-" + index, name: "Task", arguments: { agent: invalid ? "missing-worker" : "explorer", task: "Inspect module " + index } }))
+              : [{ type: "text", text: invalid ? "The requested worker is unavailable." : "Integrated worker reports." }],
+            stopReason: dispatch ? "toolUse" : "stop",
+          }) as AssistantMessage;
+          const stream = createAssistantMessageEventStream();
+          queueMicrotask(() => {
+            stream.push({ type: "start", partial: message });
+            stream.push({ type: "done", reason: dispatch ? "toolUse" : "stop", message });
+            stream.end(message);
+          });
+          return stream;
+        },
+      };
+      (runtime as unknown as { models: typeof models }).models = models;
+    }
+
+    it.each([false, true])("ends the whole Task batch and silently wakes for reports (immediate=%s)", async (immediate) => {
+      const onEvent = vi.fn();
+      const host = { call: vi.fn(async () => ({ id: "wake" })) };
+      const runtime = createRuntime({ subagents: [explorer], host, onEvent });
+      runtime.setTurnReasoning("high", true);
+      const requests: AgentMessage[][] = [];
+      scriptedParent(runtime, requests);
+      subagentRuns.calls.length = 0;
+      subagentRuns.instances.length = 0;
+      subagentRuns.deferred = !immediate;
+      subagentRuns.result = { agentName: "explorer", status: "completed", report: "handoff report", turns: 1, toolCalls: 0 };
+      try {
+        await runtime.prompt("Inspect the two independent modules.");
+        expect(subagentRuns.calls).toHaveLength(2);
+        expect(requests).toHaveLength(1);
+        expect(runtime.getStatus()).toMatchObject({ isRunning: false });
+        expect(onEvent.mock.calls.map(([envelope]) => envelope as AgentEventEnvelope).filter(envelope => envelope.event.type === "agent_end")).toHaveLength(1);
+        if (!immediate) {
+          expect(runtime.getStatus().backgroundDelegations).toBe(2);
+          expect(host.call.mock.calls).toHaveLength(0);
+          subagentRuns.resolveRun?.(subagentRuns.result);
+          subagentRuns.resolveRun?.(subagentRuns.result);
+        }
+        await vi.waitFor(() => expect(host.call).toHaveBeenCalledWith("session.queuePush", expect.objectContaining({ notification: "subagent-report" })));
+        expect(host.call).toHaveBeenCalledTimes(1);
+        await runtime.prompt({ text: "Subagent reports ready:", delegationNotification: true });
+        expect(requests).toHaveLength(2);
+        expect(JSON.stringify(requests[1])).toContain("handoff report");
+        expect(requests[1].filter(message => message.role === "toolResult")).toHaveLength(2);
+        expect(runtime.getStatus().isRunning).toBe(false);
+        expect(host.call).toHaveBeenCalledTimes(1);
+      } finally {
+        subagentRuns.deferred = false;
+        subagentRuns.result = undefined;
+        await runtime.dispose();
+      }
+    });
+
+    it.each([false, true])("preserves ordinary continuation and failed-dispatch feedback (invalid=%s)", async (invalid) => {
+      const runtime = createRuntime({ subagents: [explorer] });
+      runtime.setTurnReasoning("high", invalid);
+      const requests: AgentMessage[][] = [];
+      scriptedParent(runtime, requests, invalid);
+      subagentRuns.calls.length = 0;
+      subagentRuns.instances.length = 0;
+      subagentRuns.deferred = true;
+      try {
+        await runtime.prompt("Inspect the assigned modules.");
+        expect(requests).toHaveLength(2);
+        expect(subagentRuns.calls).toHaveLength(invalid ? 0 : 2);
+        expect(runtime.getStatus().isRunning).toBe(false);
+      } finally {
+        subagentRuns.deferred = false;
+        await runtime.dispose();
+      }
+    });
+  });
+
   describe("detached delegation and wake (D628)", () => {
     const WAKE_PREFIX = "Subagent reports ready:";
 
