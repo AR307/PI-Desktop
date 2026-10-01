@@ -858,3 +858,17 @@ This completion record supersedes the earlier pending acceptance notes.
   failure; do not describe the whole cross-platform suite as passing.
 - All changes are committed locally on codex/upstream-01510. No push, release,
   primary-checkout modification, or user data cleanup was performed.
+
+
+## 2026-10-01 - Consolidated local test preview
+
+- Created codex/pi-integrated-test from current origin/main and integrated the
+  complete committed MC/Fast, upstream 0.15.10 and Ultra task chain.
+- Integration source: c41acccc4002ead0ed1050591db851e8e4faf8a6. Fork main:
+  920b12b8e053165d343a421b3cb8ee93c50a436a. Version remains 0.15.10.
+- No obsolete pre-rewrite branches were merged into the current architecture;
+  no user changes, primary checkout, production profile or remote refs changed.
+- The preview is rebuilt from this worktree, including runtime dist, bundled
+  sidecar, Electron and Rust. Test profiles and artifacts remain Git-ignored.
+- Final test results and local launch locations are recorded in
+  docs/integrated-preview-validation.md. This is not a signed release.
