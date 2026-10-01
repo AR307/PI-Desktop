@@ -872,3 +872,9 @@ This completion record supersedes the earlier pending acceptance notes.
   sidecar, Electron and Rust. Test profiles and artifacts remain Git-ignored.
 - Final test results and local launch locations are recorded in
   docs/integrated-preview-validation.md. This is not a signed release.
+
+- Consolidated preview verification completed: Electron/mobile-web 88 passed,
+  no renderer/cleanup errors; desktop is running with an independent copy of
+  the previous manual preview profile. Normal-origin Android APK is built and
+  its native login screen is open in the existing PiMobileQA emulator.
+- No production login, paid model call, push or release was performed.
