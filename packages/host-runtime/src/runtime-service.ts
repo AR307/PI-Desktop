@@ -1,3 +1,4 @@
+import { SUBAGENT_REPORT_SUBJECT } from "@pi-desktop/shared";
 import { randomUUID } from "node:crypto";
 
 import type { RuntimePort, TurnStartRequest, TurnSteerRequest } from "@pi-desktop/agent-host";
@@ -338,17 +339,19 @@ export class RuntimeService implements RuntimePort {
       status: "complete",
       ...(command ? { command } : {}),
     };
-    try {
-      await host.call("session.appendMessage", { sessionId, message: userMessage, turnId });
-    } catch (error) {
-      await this.finishTurn(sessionId, "error", errorCodeOf(error), { turnId });
-      // A turn whose user message could not be appended must not be started:
-      // running it would execute a prompt the transcript does not contain.
-      throw error;
+    const notification = request.principal.subject === SUBAGENT_REPORT_SUBJECT;
+    if (!notification) {
+      try {
+        await host.call("session.appendMessage", { sessionId, message: userMessage, turnId });
+      } catch (error) {
+        await this.finishTurn(sessionId, "error", errorCodeOf(error), { turnId });
+        // A turn whose user message could not be appended must not be started:
+        // running it would execute a prompt the transcript does not contain.
+        throw error;
+      }
+      this.emit({ sessionId, turnId, ts: this.now(), event: { type: "message_start", message: userMessage } });
+      this.emit({ sessionId, turnId, ts: this.now(), event: { type: "message_end", message: userMessage } });
     }
-    this.emit({ sessionId, turnId, ts: this.now(), event: { type: "message_start", message: userMessage } });
-    this.emit({ sessionId, turnId, ts: this.now(), event: { type: "message_end", message: userMessage } });
-
     let result: { accepted: boolean; turnId: string };
     try {
       result = await sidecar.call<{ accepted: boolean; turnId: string }>("agent.prompt", {
@@ -359,7 +362,8 @@ export class RuntimeService implements RuntimePort {
         content,
         ...(sessionMessage ? { sessionMessage: sessionMessage.origin } : {}),
         attachments: [],
-        userMessageId: userMessage.id,
+        userMessageId: notification ? undefined : userMessage.id,
+        ...(notification ? { delegationNotification: true } : {}),
         // Per-turn permission ceiling override (R1 leftover; spec §7.3). Only
         // forwarded when the effective mode differs from the session's stored
         // mode — a widening request has already been refused upstream so any

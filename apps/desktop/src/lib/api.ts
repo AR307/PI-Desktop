@@ -974,6 +974,8 @@ export const api = {
     invoke(IPC.invoke.agentAbort, { sessionId }),
   stop: (sessionId: string, turnId?: string) =>
     invoke<AgentStopResponse>(IPC.invoke.agentStop, { sessionId, ...(turnId ? { turnId } : {}) }),
+  stopDelegations: (sessionId: string, delegationIds?: string[]) =>
+    invoke<import("@pi-desktop/shared").AgentStopDelegationsResponse>(IPC.invoke.agentStopDelegations, { sessionId, delegationIds }),
   queuePrompt: (req: AgentQueuePushRequest) =>
     invoke<QueuedTurnSummary>(IPC.invoke.agentQueuePush, req),
   listQueuedPrompts: (sessionId: string) =>

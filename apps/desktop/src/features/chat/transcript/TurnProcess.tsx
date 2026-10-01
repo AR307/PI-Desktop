@@ -1,4 +1,4 @@
-import type { SubagentOutcome } from "../../../lib/subagent-topology";
+import { isDelegationActivityItem, subagentOutcome, type SubagentOutcome } from "../../../lib/subagent-topology";
 import { useContext, useEffect, useId, useMemo, useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import type { AssistantTurnPart } from "../../../lib/assistant-turns";
@@ -46,8 +46,11 @@ export function TurnProcess({
   ), [processParts, delegationStatuses]);
   const thinkingNow = useMemo(() => isTurnThinking(turnParts, isActive), [turnParts, isActive]);
   const visibleSteps = useMemo(() => cachedVisibleProcessSteps(processParts, mode === "compact", isActive), [processParts, mode, isActive]);
+  const runningDelegates = useMemo(() => processParts.some(part => part.kind === "activity" &&
+    part.items.some(item => isDelegationActivityItem(item) && subagentOutcome(item.message, delegationStatuses) === "running")),
+  [processParts, delegationStatuses]);
   const disclosure = useAutomaticDisclosure(
-    shouldAutoOpenTurnProcess(mode, isActive, summary.issues > 0),
+    runningDelegates || shouldAutoOpenTurnProcess(mode, isActive, summary.issues > 0),
     revealRequest,
     disclosureKey("turn", turnId),
   );

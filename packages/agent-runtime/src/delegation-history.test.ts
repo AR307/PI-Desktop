@@ -613,11 +613,11 @@ describe("seedDelegateMessages budget truncation (ADR 0299 §7)", () => {
 describe("rebuildChainsFromTranscript", () => {
   it("restores the latest accepted child reasoning and exact group binding", () => {
     const first = taskRow("first-call", "first", "Inspect A");
-    first.toolResult = { details: { delegationId: "first", agent: "explorer", status: "completed", modelId: "child", modelKey: "group-provider/child", thinkingLevel: "max" } };
+    first.toolResult = { details: { delegationId: "first", agent: "explorer", status: "completed", modelId: "child", modelKey: "group-provider/child", groupId: "XAI", thinkingLevel: "max" } };
     const resumed = taskRow("second-call", "second", "Continue", { resume: "first" });
-    resumed.toolResult = { details: { delegationId: "second", agent: "explorer", status: "completed", modelId: "child", modelKey: "group-provider/child", thinkingLevel: "low" } };
+    resumed.toolResult = { details: { delegationId: "second", agent: "explorer", status: "completed", modelId: "child", modelKey: "group-provider/child", groupId: "XAI", thinkingLevel: "low" } };
     const [chain] = rebuildChainsFromTranscript([first, resumed]);
-    expect(chain).toMatchObject({ latestThinkingLevel: "low", latestModelKey: "group-provider/child", latestModelId: "child" });
+    expect(chain).toMatchObject({ latestThinkingLevel: "low", latestModelKey: "group-provider/child", latestModelId: "child", latestGroupId: "XAI" });
   });
   it("groups resume links into one chain with the latest objective", () => {
     const transcript: UiMessage[] = [

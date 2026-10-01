@@ -56,13 +56,13 @@ test("launch resolves definition-only pins without granting Task.model selection
   assert.ok(initial.subagentProviders["fixture/private"]);
   assert.ok(initial.subagentProviders["fixture/backup"]);
   assert.deepEqual(initial.subagents.find((d) => d.name === "private-reviewer").fallbackModels, [{ providerId: "fixture", modelId: "backup" }]);
-  assert.deepEqual(initial.subagentModelKeys, ["fixture/allowed"]);
+  assert.deepEqual(initial.subagentModelKeys, ["fixture-provider/allowed"]);
   assert.equal(initial.subagents.find((d) => d.name === "private-reviewer").model.modelId, "private");
 
   // A pin already in the resolved map still needs an independent opt-in.
   provider.models[1].availableForSubagents = true;
   const optedIn = (await launch()).sidecarParams;
-  assert.deepEqual(optedIn.subagentModelKeys, ["fixture/private", "fixture/allowed"]);
+  assert.deepEqual(optedIn.subagentModelKeys, ["fixture-provider/private", "fixture-provider/allowed"]);
   provider.models[1].availableForSubagents = false;
   provider.models[2].availableForSubagents = false;
   const revoked = (await launch()).sidecarParams;
@@ -91,13 +91,13 @@ test("MirrorCoding delegates require opt-in and selected-group chat capability, 
     authKind: "mirrorcoding",
     models: [
       { id: "chat-a", thinkingLevels: ["off"], mirrorCodingGroupId: "group" },
-      { id: "chat-b", thinkingLevels: ["off"], mirrorCodingGroupId: "group", availableForSubagents: true },
+      { id: "chat-b", thinkingLevels: ["off"], mirrorCodingGroupId: "removed-default", availableForSubagents: true },
       { id: "image-1", thinkingLevels: ["off"], mirrorCodingGroupId: "group", availableForSubagents: true },
     ],
     mirrorCoding: {
       scope: "account",
       accountId: 1,
-      groups: [{ id: "group", routes: { "chat-a": "openai", "chat-b": "openai" }, modelCapabilities: { "chat-a": { modes: ["text"] }, "chat-b": { modes: ["text", "image"] }, "image-1": { modes: ["image"] } } }],
+      groups: [{ id: "second", routes: { "chat-b": "openai" }, modelCapabilities: { "chat-b": { modes: ["text"] } } }, { id: "group", routes: { "chat-a": "openai", "chat-b": "openai" }, modelCapabilities: { "chat-a": { modes: ["text"] }, "chat-b": { modes: ["text", "image"] }, "image-1": { modes: ["image"] } } }],
       routes: { "chat-a": "openai", "chat-b": "openai" },
       imageModels: { "image-1": { generation_path: "/v1/images/generations" }, "chat-b": { generation_path: "/v1/images/generations" } },
       imageRoutes: { "image-1": { generation: "image-generation" } },
@@ -110,11 +110,14 @@ test("MirrorCoding delegates require opt-in and selected-group chat capability, 
     models: account.models,
     mirrorCoding: {
       scope: "group",
+      groupId: "group",
+      modelCapabilities: { "chat-b": { modes: ["text", "image"] } },
       accountId: 1,
       routes: { "chat-b": "openai" },
       imageModels: { "image-1": { generation_path: "/v1/images/generations" } },
     },
   };
+  const second = { ...group, id: "mc-second", name: "Second channel", mirrorCoding: { ...group.mirrorCoding, groupId: "second" } };
   const bound = [];
   const shell = { id: "bash", label: "Bash", dialect: "posix", available: true, isDefault: true };
   const runtime = createSessionLaunchRuntime({
@@ -122,7 +125,7 @@ test("MirrorCoding delegates require opt-in and selected-group chat capability, 
       isAvailable: () => true,
       call: async (method) => {
         if (method === "commandShells.list") return { configuredId: "bash", effective: shell, fallback: false, choices: [shell] };
-        if (method === "providers.list") return { providers: [account, group] };
+        if (method === "providers.list") return { providers: [account, group, second] };
         if (method === "providers.getSecret") return {};
         if (method === "agents.active") return { subagents: [] };
         if (method === "skills.active") return { skills: [] };
@@ -163,16 +166,32 @@ test("MirrorCoding delegates require opt-in and selected-group chat capability, 
     [...new Map(bound.map((row) => [`${row.providerId}:${row.modelId}`, row])).values()],
     [
       { providerId: "mc-account", modelId: "chat-a" },
-      { providerId: "mc-account", modelId: "chat-b" },
+      { providerId: "mc-group", modelId: "chat-b" },
+      { providerId: "mc-second", modelId: "chat-b" },
     ],
   );
   assert.deepEqual(launched.subagentModelKeys, [
-    "mirrorcoding/chat-b",
+    "mc-group/chat-b", "mc-second/chat-b",
   ]);
-  assert.equal(launched.subagentProviders["mirrorcoding/chat-b"].id, "mc-account");
+  assert.equal(launched.subagentProviders["mc-group/chat-b"].id, "mc-group");
+  assert.equal(launched.subagentProviders["mc-second/chat-b"].id, "mc-second");
+  const { resolveSubagentModelSource } = await import("../electron/main/runtime/subagent-model-sources.ts");
+  assert.equal(resolveSubagentModelSource([account, group, second], "mc-second", "chat-b").provider.id, "mc-second");
+  assert.throws(() => resolveSubagentModelSource([account, group, second], "mirrorcoding", "chat-b"), /Choose a channel explicitly/);
+  const denied = { ...account, models: account.models.map(model => ({ ...model, availableForSubagents: false })) };
+  assert.throws(() => resolveSubagentModelSource([denied, group, second], "mc-second", "chat-b"), /not enabled for subagents/);
   assert.equal(launched.provider.fast, false, "auxiliary resolution never inherits saved Fast");
   const fastLaunch = (await runtime.resolveAgentRuntimeLaunch("session", {
     providerId: account.id, modelId: "chat-a", projectPath: root, fast: true,
   }, {}, { fast: true })).sidecarParams;
   assert.equal(fastLaunch.provider.fast, true, "user launch explicitly carries Fast");
+});
+
+
+test("ordinary providers with the same model remain independently selectable by exact channel", async () => {
+  const { subagentModelSources, resolveSubagentModelSource } = await import("../electron/main/runtime/subagent-model-sources.ts");
+  const providers = ["channel-a", "channel-b"].map(id => ({ id, vendorKey: "openai", name: id, enabled: true, authKind: "none", models: [{ id: "shared-model", availableForSubagents: true }] }));
+  assert.deepEqual(subagentModelSources(providers).map(source => source.key), ["channel-a/shared-model", "channel-b/shared-model"]);
+  assert.equal(resolveSubagentModelSource(providers, "channel-b", "shared-model").provider.id, "channel-b");
+  assert.throws(() => resolveSubagentModelSource(providers, "openai", "shared-model"), /matches multiple accounts/);
 });

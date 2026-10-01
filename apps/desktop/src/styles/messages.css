@@ -3300,3 +3300,7 @@
     opacity: 0.7;
   }
 }
+
+.subagent-group-actions, .subagent-card-actions { display: flex; align-items: center; min-width: 0; }
+.subagent-group-actions > .tool-activity-header, .subagent-card-actions > .subagent-topology-node-header { flex: 1; min-width: 0; }
+.subagent-stop-button { flex: 0 0 auto; margin-inline-end: 8px; width: 24px; height: 24px; padding: 4px; }

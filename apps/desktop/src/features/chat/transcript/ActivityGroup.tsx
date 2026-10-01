@@ -1,5 +1,6 @@
 import { activityTimingInputs, cachedVisibleActivityItems } from "../../../lib/transcript-activity-summary";
 import { reuseReferences } from "../../../lib/transcript-summary";
+import { SubagentStopButton } from "./SubagentStopButton";
 import { ActivityItems } from "./ActivityItems";
 import { DisclosureScope, disclosureKey } from "./disclosure";
 import { ProcessActivityGroup } from "./ProcessActivityGroup";
@@ -358,43 +359,46 @@ export const ActivityGroup = memo(function ActivityGroup({
         runtimeActivity ? ` phase-${runtimeActivity.phase}` : ""
       }`}
     >
-      <button
-        ref={titleRef}
-        className="tool-activity-header"
-        aria-expanded={open}
-        aria-controls={detailsId}
-        onClick={toggleDisclosure}
-      >
-        <span className="tool-activity-icon" aria-hidden>
+      <div className="subagent-group-actions">
+        <button
+          ref={titleRef}
+          className="tool-activity-header"
+          aria-expanded={open}
+          aria-controls={detailsId}
+          onClick={toggleDisclosure}
+        >
+          <span className="tool-activity-icon" aria-hidden>
+            {hasSubagentTopology ? (
+              <IconWorkflow size={15} />
+            ) : (
+              <IconSparkles size={14} />
+            )}
+          </span>
+          <span className={`tool-activity-label ${live ? "running" : ""}`}>
+            {label}
+          </span>
           {hasSubagentTopology ? (
-            <IconWorkflow size={15} />
-          ) : (
-            <IconSparkles size={14} />
-          )}
-        </span>
-        <span className={`tool-activity-label ${live ? "running" : ""}`}>
-          {label}
-        </span>
-        {hasSubagentTopology ? (
-          <span className="subagent-activity-metrics">
-            {t("chat.subagentCount", { count: subagentSummary.total })}
-            <span aria-hidden> · </span>
-            {t("chat.subagentFinishedCount", {
-              finished: subagentSummary.finished,
-              total: subagentSummary.total,
-            })}
-            <span aria-hidden> · </span>
-            {elapsed}
+            <span className="subagent-activity-metrics">
+              {t("chat.subagentCount", { count: subagentSummary.total })}
+              <span aria-hidden> · </span>
+              {t("chat.subagentFinishedCount", {
+                finished: subagentSummary.finished,
+                total: subagentSummary.total,
+              })}
+              <span aria-hidden> · </span>
+              {elapsed}
+            </span>
+          ) : items.length > 1 ? (
+            <span className="tool-activity-count">
+              {t("chat.processingSteps", { count: items.length })}
+            </span>
+          ) : null}
+          <span className="tool-activity-caret" aria-hidden>
+            <IconChevronRight size={12} />
           </span>
-        ) : items.length > 1 ? (
-          <span className="tool-activity-count">
-            {t("chat.processingSteps", { count: items.length })}
-          </span>
-        ) : null}
-        <span className="tool-activity-caret" aria-hidden>
-          <IconChevronRight size={12} />
-        </span>
-      </button>
+        </button>
+        {topologyLive ? <SubagentStopButton /> : null}
+      </div>
       {tail ? (
         <div className="tool-activity-preview" aria-hidden>
           {tail}

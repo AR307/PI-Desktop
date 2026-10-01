@@ -207,6 +207,23 @@ async function settle(): Promise<void> {
 }
 
 describe("RuntimeService prompt lifecycle", () => {
+  it("delivers a host-owned subagent wake without persisting or broadcasting a user row", async () => {
+    const { host, sidecar, service, events } = build();
+    await service.prompt({ sessionId: "s1", content: "Subagent reports ready: child-1", effectivePermissionMode: "ask", principal: { ...owner, subject: "runtime:subagent-report" } });
+    expect(host.calls.some(call => call.method === "session.appendMessage")).toBe(false);
+    expect(events).toEqual([]);
+    expect(sidecar.calls.find(call => call.method === "agent.prompt")?.params).toMatchObject({ delegationNotification: true, turnId: "turn-1" });
+  });
+
+  it("does not hide user text that happens to look like a subagent notification", async () => {
+    const { host, sidecar, service, events } = build();
+    const content = "Subagent reports ready: text typed by the user";
+    await service.prompt({ sessionId: "s1", content, effectivePermissionMode: "ask", principal: owner });
+    expect(host.messages.get("s1")?.[0]?.content).toBe(content);
+    expect(events).toHaveLength(2);
+    expect(sidecar.calls.find(call => call.method === "agent.prompt")?.params.delegationNotification).toBeUndefined();
+  });
+
   it("opens a durable turn, persists the user row, then starts the runtime under that turn id", async () => {
     const { host, sidecar, service, events } = build();
     const { turnId } = await service.prompt({ sessionId: "s1", content: "hello", effectivePermissionMode: "ask", principal: owner });

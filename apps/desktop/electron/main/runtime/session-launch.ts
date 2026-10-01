@@ -1,3 +1,4 @@
+import { subagentModelSources } from "./subagent-model-sources";
 import { highestThinkingLevel } from "@pi-desktop/shared";
 import { join } from "node:path";
 import {
@@ -39,7 +40,6 @@ import {
 import type { Logger } from "../logger";
 import type { PluginRuntime } from "../plugin-runtime";
 import type { UserMcpRuntime } from "../user-mcp";
-import { mirrorCodingChatAvailable } from "@pi-desktop/shared";
 import type { RuntimeState } from "./context";
 import type { RuntimeProvider } from "./provider-catalog";
 import type { LoadedSkillDocument } from "../skill-document";
@@ -531,111 +531,92 @@ export function createSessionLaunchRuntime({
             };
       },
     });
-    // Delegation model catalog: opted-in bindings are pre-resolved so the
-    // system prompt can list them and the parent agent can pass them to
-    // `Task.model` without an extra RPC round-trip. MirrorCoding chat models
-    // on the account row are also listed: they have no API secret, so the
-    // generic opt-in path never resolved them and Task.model always reported
-    // an empty catalog. Statically pinned definition entries take precedence.
+    // Pre-resolve each opted-in model/channel under its exact provider/model
+    // key. Account rows own MC opt-in; group rows select the actual route.
+    // Statically pinned definition entries keep their existing bindings.
     const subagentModelKeys: string[] = [];
-    for (const row of providers.providers) {
-      if (!row.enabled) continue;
+    for (const { provider: row, model: binding, key } of subagentModelSources(providers.providers)) {
       const isMirrorCodingRow = row.authKind === "mirrorcoding";
-      // Group rows only project the account's models for routing; the account
-      // row owns the delegation catalog and its bindings carry the chosen group.
-      if (isMirrorCodingRow && row.mirrorCoding?.scope !== "account") continue;
-      for (const binding of row.models ?? []) {
-        const mirrorCodingChat =
-          isMirrorCodingRow &&
-          mirrorCodingChatAvailable(row.mirrorCoding, binding.id, binding.mirrorCodingGroupId);
-        if (!binding.availableForSubagents || (isMirrorCodingRow && !mirrorCodingChat)) continue;
-        let key = `${row.vendorKey ?? row.name}/${binding.id}`;
-        // Two provider rows can share a vendor alias. Opting in one row must
-        // not authorize the credential-bearing pin resolved from another row.
-        if (subagentBindings.providers[key]?.id && subagentBindings.providers[key].id !== row.id) {
-          key = `${row.id}/${binding.id}`;
-        }
-        if (subagentBindings.providers[key]) {
+      if (subagentBindings.providers[key]) {
+        subagentModelKeys.push(key);
+        continue; // already resolved, and independently opted in
+      }
+      if (isMirrorCodingRow) {
+        // MirrorCoding credentials never leave main: the delegation catalog
+        // carries a local relay binding instead of a raw secret, exactly
+        // like the session's own MirrorCoding launch path.
+        if (!mirrorCodingBindingFor) continue;
+        try {
+          subagentBindings.providers[key] = await mirrorCodingBindingFor(
+            row.id,
+            binding.id,
+            sessionId,
+          );
           subagentModelKeys.push(key);
-          continue; // already resolved, and independently opted in
+        } catch {
+          // Account disconnected or the route is gone; the model simply
+          // stays out of this launch's delegation catalog.
         }
-        if (isMirrorCodingRow) {
-          // MirrorCoding credentials never leave main: the delegation catalog
-          // carries a local relay binding instead of a raw secret, exactly
-          // like the session's own MirrorCoding launch path.
-          if (!mirrorCodingBindingFor) continue;
-          try {
-            subagentBindings.providers[key] = await mirrorCodingBindingFor(
-              row.id,
-              binding.id,
-              sessionId,
-            );
-            subagentModelKeys.push(key);
-          } catch {
-            // Account disconnected or the route is gone; the model simply
-            // stays out of this launch's delegation catalog.
-          }
-          continue;
+        continue;
+      }
+      const isVendorAccount = row.authKind === OAUTH_AUTH_KIND;
+      let apiKey = "";
+      if (!isVendorAccount && row.authKind !== "none") {
+        try {
+          apiKey =
+            (
+              await runtimeState.host!.call<{ value?: string }>("providers.getSecret", {
+                id: row.id,
+              })
+            ).value ?? "";
+        } catch {
+          continue; // skip if secret unavailable
         }
-        const isVendorAccount = row.authKind === OAUTH_AUTH_KIND;
-        let apiKey = "";
-        if (!isVendorAccount && row.authKind !== "none") {
-          try {
-            apiKey =
-              (
-                await runtimeState.host!.call<{ value?: string }>("providers.getSecret", {
-                  id: row.id,
-                })
-              ).value ?? "";
-          } catch {
-            continue; // skip if secret unavailable
-          }
-          if (!apiKey) continue;
-        }
-        let catalogModelConfig: Parameters<typeof modelConfigWithBinding>[0];
-        if (isVendorAccount) {
-          const vb = await vendorOAuth.bindingFor(row.id, binding.id);
-          if (!vb) continue;
-          catalogModelConfig =
-            vb.modelConfig ?? catalogModelConfigFor(modelsDevCatalog, {
-              providerId: row.id,
-            vendorKey: row.vendorKey,
-              baseUrl: vb.baseUrl ?? row.baseUrl,
-              apiStyle: vb.apiStyle ?? row.apiStyle,
-              modelId: binding.id,
-            });
-        } else {
-          catalogModelConfig = catalogModelConfigFor(modelsDevCatalog, {
+        if (!apiKey) continue;
+      }
+      let catalogModelConfig: Parameters<typeof modelConfigWithBinding>[0];
+      if (isVendorAccount) {
+        const vb = await vendorOAuth.bindingFor(row.id, binding.id);
+        if (!vb) continue;
+        catalogModelConfig =
+          vb.modelConfig ?? catalogModelConfigFor(modelsDevCatalog, {
             providerId: row.id,
             vendorKey: row.vendorKey,
-            baseUrl: row.baseUrl,
-            apiStyle: row.apiStyle,
+            baseUrl: vb.baseUrl ?? row.baseUrl,
+            apiStyle: vb.apiStyle ?? row.apiStyle,
             modelId: binding.id,
           });
-        }
-        const effective = effectiveSubagentModelConfig(
-          row,
-          binding.id,
-          catalogModelConfig,
-        );
-        const mc = effective.modelConfig;
-        const caps = effective.capabilities;
-        subagentBindings.providers[key] = {
-          id: row.id,
-          name: row.name,
-          ...(row.vendorKey ? { vendorKey: row.vendorKey } : {}),
-          ...(row.baseUrl ? { baseUrl: row.baseUrl } : {}),
+      } else {
+        catalogModelConfig = catalogModelConfigFor(modelsDevCatalog, {
+          providerId: row.id,
+          vendorKey: row.vendorKey,
+          baseUrl: row.baseUrl,
+          apiStyle: row.apiStyle,
           modelId: binding.id,
-          apiKey,
-          ...(row.authKind ? { authKind: row.authKind } : {}),
-          ...(row.apiStyle ? { apiStyle: row.apiStyle } : {}),
-          ...optionalProviderHeaders(row.headers),
-          supportsReasoning: caps.supportsReasoning,
-          supportedThinkingLevels: [...caps.supportedThinkingLevels],
-          ...(mc ? { modelConfig: mc } : {}),
-        };
-        subagentModelKeys.push(key);
+        });
       }
+      const effective = effectiveSubagentModelConfig(
+        row,
+        binding.id,
+        catalogModelConfig,
+      );
+      const mc = effective.modelConfig;
+      const caps = effective.capabilities;
+      subagentBindings.providers[key] = {
+        id: row.id,
+        name: row.name,
+        ...(row.vendorKey ? { vendorKey: row.vendorKey } : {}),
+        ...(row.baseUrl ? { baseUrl: row.baseUrl } : {}),
+        modelId: binding.id,
+        apiKey,
+        ...(row.authKind ? { authKind: row.authKind } : {}),
+        ...(row.apiStyle ? { apiStyle: row.apiStyle } : {}),
+        ...optionalProviderHeaders(row.headers),
+        supportsReasoning: caps.supportsReasoning,
+        supportedThinkingLevels: [...caps.supportedThinkingLevels],
+        ...(mc ? { modelConfig: mc } : {}),
+      };
+      subagentModelKeys.push(key);
     }
 
     const subagentDiagnostics = [

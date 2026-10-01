@@ -968,8 +968,10 @@ the host-owned queue (`session.queuePush`, D386). The queued content is the
 stable `Subagent reports ready:` marker line plus the settled delegation ids —
 report bodies stay out of the queue — and one queued wake serves every
 settlement until a turn consumes it (the push is idempotent on the settled
-ids). At the wake turn's prompt preflight the runtime recognizes the marker by
-its exact prefix, never by loose matching over arbitrary user text, and
+ids). The durable queue identifies an internal wake by the host-owned
+`runtime:subagent-report` principal, not the marker text. It stays out of
+user queue projections and is neither persisted nor emitted as a user bubble.
+At prompt preflight the runtime consumes the internal notification flag and
 expands the prompt with every undelivered report plus a heartbeat before the
 model reads it. Reports are marked delivered only after the preflight passes,
 so a compaction or context-budget failure leaves them claimable by the next
@@ -982,8 +984,11 @@ publication; a failed `SubagentRun` initialization returns a tool error and
 never leaves a running record. User Stop ends only the parent turn. A terminal
 parent error (including exhausted HTTP 429) likewise detaches the delegates
 and returns the session to idle — Continue is admitted because `isRunning` no
-longer counts delegates (amends D352). Only `TaskStop` and runtime disposal
-abort a delegate; disposal settles it as `aborted`, which remains resumable.
+longer counts delegates (amends D352). Only explicit delegate cancellation
+(`TaskStop`, the per-worker stop button, or the Subagent group stop-all button)
+and runtime disposal abort a delegate. These controls use the same runtime
+cancellation path. Cards show actual worker state; pending cancellation is not
+reported as stopped. Disposal settles it as `aborted`, which remains resumable.
 Delegates do not survive an app restart: a run the app closed while it worked
 rebuilds from the transcript as an `interrupted`, resumable chain, and the
 wake applies only while the app runs.

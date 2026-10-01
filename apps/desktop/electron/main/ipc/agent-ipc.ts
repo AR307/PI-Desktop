@@ -1,3 +1,4 @@
+import { delegationNotification, type InternalAgentPrompt } from "../runtime/delegation-notification";
 import type { ImageService } from "../images/service";
 import { IPC, ErrorCodes, compactionRecordId, findSkillMentions, isGlobalPermissionMode, isRpcTimeoutError, type AgentEventEnvelope, type AgentPromptRequest, type AgentSteerRequest, type UiMessage, type AgentQueuePushRequest, type AgentStopRequest, type AskToolResolution, type GlobalPermissionMode, type MessageUsage, type PlanExecutionFinishStatus, type PlanResolutionResult, type PlanResolveRequest, type PromptEnhancementRequest, type SessionSummarizeTitleRequest, type VoiceOrigin, canonicalThinkingLevel, type ThinkingLevel } from "@pi-desktop/shared";
 import type { FinishTurn } from "../runtime/plans";
@@ -318,7 +319,7 @@ export function registerAgentIpc({
     });
   });
 
-  handle(IPC.invoke.agentPrompt, async (req: AgentPromptRequest) => {
+  handle(IPC.invoke.agentPrompt, async (req: InternalAgentPrompt) => {
     if (!sidecar) throw new Error("sidecar unavailable");
     const voiceOrigin = parseVoiceOrigin(req.voiceOrigin);
     if (req.sessionId.startsWith("native-pi:")) {
@@ -591,36 +592,37 @@ export function registerAgentIpc({
           }
         : {}),
     };
-    try {
-      await host.call("session.appendMessage", {
+    if (!req[delegationNotification]) {
+      try {
+        await host.call("session.appendMessage", {
+          sessionId: req.sessionId,
+          message: userMessage,
+          turnId: durableTurnId,
+        });
+      } catch (error) {
+        await finishTurn(
+          req.sessionId,
+          "error",
+          (error as { data?: { errorCode?: string }; errorCode?: string })?.data
+            ?.errorCode ??
+            (error as { errorCode?: string })?.errorCode,
+          { turnId: durableTurnId },
+        );
+        // A turn whose user message could not be appended must not be started:
+        // restarting it here would run a prompt the transcript does not contain.
+        throw error;
+      }
+      emitAgentEvent({
         sessionId: req.sessionId,
-        message: userMessage,
-        turnId: durableTurnId,
-      });
-    } catch (error) {
-      await finishTurn(
-        req.sessionId,
-        "error",
-        (error as { data?: { errorCode?: string }; errorCode?: string })?.data
-          ?.errorCode ??
-          (error as { errorCode?: string })?.errorCode,
-        { turnId: durableTurnId },
-      );
-      // A turn whose user message could not be appended must not be started:
-      // restarting it here would run a prompt the transcript does not contain.
-      throw error;
+        ts: Date.now(),
+        event: { type: "message_start", message: userMessage },
+      } satisfies AgentEventEnvelope);
+      emitAgentEvent({
+        sessionId: req.sessionId,
+        ts: Date.now(),
+        event: { type: "message_end", message: userMessage },
+      } satisfies AgentEventEnvelope);
     }
-    emitAgentEvent({
-      sessionId: req.sessionId,
-      ts: Date.now(),
-      event: { type: "message_start", message: userMessage },
-    } satisfies AgentEventEnvelope);
-    emitAgentEvent({
-      sessionId: req.sessionId,
-      ts: Date.now(),
-      event: { type: "message_end", message: userMessage },
-    } satisfies AgentEventEnvelope);
-
     let result: { accepted: boolean; turnId: string };
     try {
       result = await sidecar.call<{ accepted: boolean; turnId: string }>(
@@ -642,7 +644,8 @@ export function registerAgentIpc({
               size: attachment.message.size,
               data: attachment.inlineData,
             })),
-          userMessageId: userMessage.id,
+          userMessageId: req[delegationNotification] ? undefined : userMessage.id,
+          ...(req[delegationNotification] ? { delegationNotification: true } : {}),
           // Per-turn permission ceiling override (R1 leftover; spec §7.3). The
           // sidecar records it on the turn context; enforcement of a NARROWER
           // ceiling still routes through the session's stored mode until
@@ -715,6 +718,14 @@ export function registerAgentIpc({
       data: { providerId: launch.providerId, modelId: launch.modelId },
     });
     return result;
+  });
+
+  handle(IPC.invoke.agentStopDelegations, async (req: import("@pi-desktop/shared").AgentStopDelegationsRequest) => {
+    if (!sidecar) throw new Error("sidecar unavailable");
+    if (!req.sessionId || (req.delegationIds !== undefined && (!Array.isArray(req.delegationIds) || req.delegationIds.some((id) => typeof id !== "string" || !id)))) {
+      throw new Error("Invalid subagent stop request");
+    }
+    return sidecar.call("agent.stopDelegations", req);
   });
 
   handle(IPC.invoke.agentAbort, async (req: { sessionId: string; turnId?: string }) => {

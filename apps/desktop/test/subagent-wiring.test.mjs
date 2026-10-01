@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 
+const modelSources = await readMainModule("runtime/subagent-model-sources.ts");
 const sessionLaunchSource = await readMainModule("runtime/session-launch.ts");
 const providerCatalogSource = await readMainModule("runtime/provider-catalog.ts");
 const desktopSidecarSource = await readMainModule("runtime/sidecar.ts");
@@ -31,12 +32,12 @@ const hostProcessSource = await readFile(
 
 test("MirrorCoding chat models enter the delegation catalog through the local relay", () => {
   assert.match(sessionLaunchSource, /mirrorCodingBindingFor\(/);
-  assert.match(sessionLaunchSource, /scope !== "account"/);
-  assert.match(sessionLaunchSource, /mirrorCodingChat/);
-  assert.match(sessionLaunchSource, /mirrorCodingChatAvailable/);
-  assert.match(desktopSidecarSource, /scope === "account"/);
-  assert.match(desktopSidecarSource, /availableForSubagents/);
-  assert.match(desktopSidecarSource, /mirrorCodingChatAvailable/);
+  assert.match(modelSources, /scope !== "account"/);
+  assert.match(modelSources, /mirrorCodingChat/);
+  assert.match(modelSources, /mirrorCodingChatAvailable/);
+  assert.match(modelSources, /scope === "account"/);
+  assert.match(modelSources, /availableForSubagents/);
+  assert.match(modelSources, /mirrorCodingChatAvailable/);
 });
 
 test("every launch resolves the subagent catalog and its pinned models", () => {
@@ -87,8 +88,8 @@ test("the sidecar forwards subagent bindings and the independent override opt-in
   assert.equal(sidecarSource.match(/^\s+subagentModelKeys,$/gm)?.length, 2);
 });
 test("on-demand Task.model lookup uses unique provider matching (#286)", () => {
-  assert.match(desktopSidecarSource, /findSubagentProviderSource\(/);
-  assert.match(desktopSidecarSource, /subagentProviderLookupError\(/);
+  assert.match(modelSources, /findSubagentProviderSource\(/);
+  assert.match(modelSources, /subagentProviderLookupError\(/);
   assert.doesNotMatch(
     desktopSidecarSource,
     /filter\(\(p\) => \(p\.vendorKey[\s\S]*?\[0\]/,

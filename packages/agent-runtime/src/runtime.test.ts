@@ -6752,6 +6752,24 @@ describe("DesktopAgentRuntime subagents", () => {
     } finally { await runtime.dispose(); subagentRuns.deferred = false; }
   });
 
+  it("keeps an explicit model/channel separate from definition fallback", async () => {
+    const child = { ...provider, id: "mc-xai", name: "XAI channel", modelId: "grok-4.7", mirrorCodingGroupId: "XAI" };
+    const runtime = createRuntime({
+      subagents: [{ ...explorer, fallbackModels: [{ providerId: provider.id, modelId: provider.modelId }] }],
+      subagentProviders: { "mc-xai/grok-4.7": child },
+      subagentModelKeys: ["mc-xai/grok-4.7"],
+    });
+    subagentRuns.calls.length = 0;
+    subagentRuns.result = undefined;
+    subagentRuns.deferred = true;
+    try {
+      const started = await taskTool(runtime).execute("explicit-channel", { agent: "explorer", model: "mc-xai/grok-4.7", task: "Inspect the selected channel." });
+      expect(started.content[0].text).toContain("Actual model: grok-4.7; provider/channel: XAI channel (mc-xai); group: XAI");
+      expect(subagentRuns.calls[0].provider.modelId).toBe("grok-4.7");
+      expect(subagentRuns.calls[0].fallbackModels).toEqual([]);
+    } finally { await runtime.dispose(); subagentRuns.deferred = false; }
+  });
+
   it("isolates explicitly requested Fast from parent and parallel siblings", async () => {
     const parent = { ...provider, authKind: "mirrorcoding", fast: true, fastAvailable: true };
     const child = { ...parent, id: "mc-child", modelId: "child", fast: false };
@@ -7820,7 +7838,7 @@ describe("DesktopAgentRuntime subagents", () => {
         (runtime as any).agent.prompt = agentPrompt;
         (runtime as any).agent.waitForIdle = vi.fn(async () => undefined);
         await runtime.prompt(
-          `${WAKE_PREFIX} ${delegationId}`,
+          { text: `${WAKE_PREFIX} ${delegationId}`, delegationNotification: true },
           "wake-user",
           "wake-turn",
         );
@@ -7835,7 +7853,7 @@ describe("DesktopAgentRuntime subagents", () => {
         // Single shot: a second wake turn does not replay the report.
         await (runtime as any).handleAgentEvent({ type: "agent_end", messages: [] });
         await runtime.prompt(
-          `${WAKE_PREFIX} ${delegationId}`,
+          { text: `${WAKE_PREFIX} ${delegationId}`, delegationNotification: true },
           "wake-user-2",
           "wake-turn-2",
         );
@@ -8954,7 +8972,7 @@ describe("DesktopAgentRuntime subagents", () => {
       ];
       const runtime = createRuntime({
         provider: moved,
-        subagents: [explorer],
+        subagents: [{ ...explorer, fallbackModels: [{ providerId: moved.id, modelId: moved.modelId }] }],
         history,
         subagentProviders: { "remote/remote-model": remote },
         subagentModelKeys: ["remote/remote-model"],
@@ -8969,6 +8987,7 @@ describe("DesktopAgentRuntime subagents", () => {
       });
 
       // The session model is no reason to refuse: the chain keeps its own.
+      expect(subagentRuns.calls[0].fallbackModels).toEqual([]);
       expect((result.details as any).error).toBeUndefined();
       expect((result.details as any).resumedFrom).toBe("del-1");
       expect(subagentRuns.calls[0].provider).toBe(remote);

@@ -61,21 +61,29 @@ the existing host-owned queue (`session.queuePush`). The queued content is the
 stable marker line `Subagent reports ready:` plus the settled delegation ids;
 report bodies never enter the queue. One queued wake serves every settlement
 until a turn consumes it, and the push is idempotent on the settled ids. The
-runtime recognizes a wake turn at prompt preflight by the exact marker prefix
-— never by loose matching over arbitrary user text — and expands the prompt
+host records these wakes with the existing queue principal subject
+`runtime:subagent-report`. Desktop uses a main-only symbol to carry this
+provenance to its prompt handler; headless hosts use the same principal.
+The runtime receives an internal notification flag, never infers control flow
+from user text, and expands the prompt
 with every undelivered report plus a heartbeat for still-running delegates,
 before the compaction preflight measures the context. Reports are marked
 delivered only after the preflight passes, so a compaction or context-budget
 failure leaves them claimable by the next wake. Stopped and aborted runs are
 never auto-delivered; their chains stay resumable instead. Both the desktop
 sidecar and the headless `pi-host` already route `session.queuePush`, so no
-new transport is introduced.
+new transport is introduced. Internal wakes are excluded from user queue
+projections and never appended or emitted as user messages. The parent can
+consume a report silently; its genuine answer and worker details remain visible.
 
 ### 3. Stop stops the turn, not the delegates (amends D352)
 
 User Stop (`abort()`) and a terminal parent error end only the parent turn.
-Delegates keep running in the background; `TaskStop` and the Task card remain
-the explicit way to cancel one. Only `dispose()` still aborts delegates —
+Delegates keep running in the background. The Task card has an individual
+stop control, and the Subagent group has a stop-all control. Both use
+`pi-desktop/agent/stop-delegations`, which delegates to the same runtime cancellation
+method as `TaskStop`. A cancellation request that has not settled stays
+running/pending; neither parent status nor clicking Stop fabricates completion. Only `dispose()` still aborts delegates —
 process exit cannot be survived — and a dispose-aborted run settles as
 `aborted`. D352's original motive (a fatal parent error must not leave the
 session stuck busy) is preserved by decision 1: the session reads idle because
@@ -98,10 +106,12 @@ runtime's `status` events (which now also fire on delegation start and
 settlement). An idle session shows it as a sidebar status dot and an
 idle-session chip above the docked composer ("N subagents running in
 background", localized in every shipped catalog). A running turn shows
-nothing new — the turn's own activity indicator already explains it. The IPC
-contract is untouched: `backgroundDelegations` is an optional field on the
-existing `AgentStatus` payload, and mobile projections pass it through
-transparently.
+nothing new — the turn's own activity indicator already explains it.
+Task cards use worker-owned status even after the parent stops. The process
+disclosure remains accessible while background workers run. The optional
+`backgroundDelegations` field remains on `AgentStatus`; the desktop-only
+stop IPC returns acknowledged and pending delegation IDs. Mobile status
+projections remain unchanged; this change adds no mobile stop control.
 
 ### Boundary: no restart survival
 
@@ -129,8 +139,8 @@ does not auto-restart delegates.
   delegates that used to die with their turn.
 - A rare benign race remains: if the user prompts between an idle settlement
   and the queued wake draining, the user turn delivers the reports and the
-  wake turn arrives empty, saying so briefly. Removing the queued wake item by
-  hand suppresses further wakes until any next turn resets the guard.
+  wake turn arrives empty. It may finish silently rather than producing a
+  synthetic user row or forcing another visible reply.
 
 ## Alternatives considered
 
@@ -145,7 +155,8 @@ does not auto-restart delegates.
 - **A dedicated wake RPC / event instead of a queued marker turn.** Rejected:
   the host queue already owns exactly this behavior — durable, idempotent,
   starts the turn the moment the session is idle, defers while busy (D386) —
-  and a marker turn is visible and debuggable where a hidden RPC is not.
+  without a second scheduler. Its internal principal remains diagnosable
+  without exposing transport markers in the user's transcript.
 - **Detect the wake by matching report-like text.** Rejected outright: user
-  text must never be able to impersonate runtime control flow; the marker is
-  a stable prefix constant checked with `startsWith`.
+  text must never be able to impersonate runtime control flow. Only the
+  host-owned notification provenance enables report expansion.

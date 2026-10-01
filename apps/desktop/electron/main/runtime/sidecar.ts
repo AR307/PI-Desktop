@@ -1,10 +1,9 @@
+import { resolveSubagentModelSource } from "./subagent-model-sources";
 import { registerImageTools } from "../images/tools";
 import { IPC, type AgentEventEnvelope, type UiMessage } from "@pi-desktop/shared";
 import {
-  findSubagentProviderSource,
   modelConfigWithBinding,
   loadInstructionChain,
-  subagentProviderLookupError,
   type RuntimeProviderConfig,
   classifySidecarCrash,
   sidecarCrashErrorCode,
@@ -25,7 +24,6 @@ import type { ModelsDevCatalog } from "../models-dev-catalog";
 import type { PluginRuntime } from "../plugin-runtime";
 import type { RuntimeState } from "./context";
 import type { FinishTurn } from "./plans";
-import { mirrorCodingChatAvailable } from "@pi-desktop/shared";
 import type { MirrorCodingRuntime } from "../mirrorcoding/runtime";
 import { formatSkillToolContent, type LoadedSkillDocument } from "../skill-document";
 
@@ -419,7 +417,7 @@ export function createSidecarRuntime({
         sessionId: String(params.sessionId ?? ""),
         content: String(params.content ?? ""),
         ...(typeof params.idempotencyKey === "string" ? { idempotencyKey: params.idempotencyKey } : {}),
-      });
+      }, params.notification === "subagent-report");
     },
     queuePrioritize: async (params) => {
       if (!runtimeState.agentHostBridge) throw new Error("agent host unavailable");
@@ -437,33 +435,9 @@ export function createSidecarRuntime({
     const modelId = key.slice(slash + 1);
     if (!modelId) throw new Error("empty model id");
 
-    // MirrorCoding group rows only project the account's models for routing.
-    // Keep them out of alias matching so "mirrorcoding/<model>" resolves to
-    // the one account row that owns the delegation catalog.
-    const allProviders = (await listRuntimeProviders(false)).filter(
-      (row) => row.authKind !== "mirrorcoding" || row.mirrorCoding?.scope === "account",
+    const { provider } = resolveSubagentModelSource(
+      await listRuntimeProviders(false), providerPart, modelId,
     );
-    const provider = findSubagentProviderSource(providerPart, allProviders);
-    if (!provider) {
-      throw new Error(subagentProviderLookupError(providerPart, allProviders));
-    }
-
-    const binding = (provider.models ?? []).find(
-      (model: { id: string; availableForSubagents?: boolean }) =>
-        model.id === modelId || model.id.toLowerCase() === modelId.toLowerCase(),
-    );
-    const unavailable = provider.authKind === "mirrorcoding" && !mirrorCodingChatAvailable(provider.mirrorCoding, modelId, binding?.mirrorCodingGroupId);
-    // MC uses a relay instead of an API key, but delegation still requires
-    // the same explicit opt-in as every other source.
-    if (
-      !binding ||
-      unavailable ||
-      !binding.availableForSubagents
-    ) {
-      throw new Error(
-        `model "${modelId}" on provider "${provider.name}" is not enabled for delegation`,
-      );
-    }
 
     const isVendorAccount = provider.authKind === OAUTH_AUTH_KIND;
     const isMirrorCoding = provider.authKind === "mirrorcoding";

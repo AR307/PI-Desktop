@@ -11,6 +11,7 @@ export function delegationGuidance(ultra: boolean): string {
 export function delegationSystemPrompt(ultra: boolean): string {
   return ["## Delegation", delegationGuidance(ultra),
     "No recursive delegation, duplicate work, or agent debates.",
+    "Honor the user's requested delegate model and channel by using the exact catalog key on every new Task. A failed delegation does not authorize substituting the parent model or taking over that assigned work. Keep unrelated work moving, resume the same delegation when its binding is available, and report an unavailable binding instead of claiming a different model fulfilled it.",
     "Allow at most one optional review pass unless the user requests more. Fix and retest concrete, in-scope defects without restarting broad reviews.",
     "Do not invent objections or turn speculative risks into blockers. Stop when the requested work is complete and relevant checks pass, or report a genuine blocker.",
     "You may end your turn while delegates run: they keep working in the background and their reports are delivered automatically. Use TaskWait when the next step needs a report; TaskStop explicitly cancels a delegate.",

@@ -51,3 +51,22 @@ Xhigh + Workflow + Subagent). It is not inferred from a model-family name.
 Models without native reasoning display Workflow + Subagent without inventing
 a tier. Leaving Ultra or changing models hides the summary. This replaces the
 previous always-visible cost/delegation hint and does not change execution.
+
+## Delegation control and model identity
+
+Subagent reports are internal notifications, not synthetic user messages.
+The parent can consume them silently. Genuine assistant answers and worker
+cards remain visible. Parent Stop does not stop detached workers or change
+their cards to stopped. Desktop cards provide individual cancellation and
+the Subagent header provides stop-all; both wait for actual worker settlement.
+
+Task.model selects an exact provider ID/model ID pair. Each enabled MC group
+with text permission is separately advertised for an opted-in account model;
+ordinary providers with identical model IDs likewise remain distinct. An
+ambiguous alias returns available exact choices rather than choosing a group.
+Task startup reports the actual model, provider/channel, group and reasoning.
+Explicit model choices and resumes do not use definition fallback models.
+Resume retains the original worker transcript and exact authorized binding;
+an unavailable channel reports its error instead of inheriting the parent.
+An explicit delegation failure is not permission to substitute another model
+or take over the delegated work without the user's agreement.

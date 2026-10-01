@@ -124,7 +124,7 @@ try {
   const autoProvider = providers.find((item) => item.mirrorCoding?.groupId === "auto");
   const accountProvider = providers.find((item) => item.mirrorCoding?.scope === "account");
   await invoke("providers/update", { id: accountProvider.id, models: accountProvider.models.map(model => model.id === "gpt-5.1" ? { ...model, availableForSubagents: true, mirrorCodingGroupId: "中文 分组" } : model) });
-  fixture.control.subagentModel = `${accountProvider.vendorKey ?? accountProvider.name}/gpt-5.1`;
+  fixture.control.subagentModel = `${provider.id}/gpt-5.1`;
   await invoke("settings/set", { ...await invoke("settings/get"), defaultProviderId: provider.id, defaultModelId: "gpt-5", language: "en", theme: "dark" });
   await invoke("session/configure", shared.id, { providerId: provider.id, modelId: "gpt-5", thinkingLevel: "medium", permissionMode: "ask", mode: "agent" });
   const hidden = (await invoke("session/create", { title: "Private desktop session", providerId: provider.id, modelId: "gpt-5", mode: "agent" })).session;

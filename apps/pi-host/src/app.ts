@@ -1,3 +1,4 @@
+import { SUBAGENT_REPORT_SUBJECT } from "@pi-desktop/shared";
 import { mkdir } from "node:fs/promises";
 
 import { AgentHost, type ApprovalPort } from "@pi-desktop/agent-host";
@@ -186,7 +187,7 @@ export async function startPiHost(config: PiHostConfig, options: { log?: HostLog
         throw new Error("extension model configuration is not available on a headless host");
       },
       queuePush: async (params) =>
-        agentHost.startTurn({ subject: "extension", roles: ["controller"] }, {
+        agentHost.startTurn({ subject: params.notification === "subagent-report" ? SUBAGENT_REPORT_SUBJECT : "extension", roles: ["controller"] }, {
           sessionId: String(params.sessionId ?? ""),
           admission: "queue",
           input: { text: String(params.content ?? "") },

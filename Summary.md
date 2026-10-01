@@ -1,5 +1,23 @@
 # PI-Desktop MirrorCoding Edition
 
+## 2026-10-01 - Truthful subagent lifecycle and channel selection
+
+- Background reports now use host-owned queue provenance. Internal wake turns
+  reach the parent without synthetic user bubbles or visible queue markers;
+  ordinary user text that resembles a wake marker stays ordinary user input.
+- Worker cards retain their real running state when the parent stops. Added
+  small individual stop buttons and a group stop-all button, reusing TaskStop's
+  runtime cancellation path. Pending cancellation is never shown as stopped.
+- The delegated-model catalog lists exact provider/model keys for every eligible
+  channel. MC account models own opt-in/settings while group providers bind the
+  route. Stale account defaults no longer hide other available groups.
+- Task reports actual model/channel/group. Explicit overrides and resume cannot
+  fall through a definition's alternative models. Resume preserves group identity
+  with the transcript; Ultra guidance does not authorize silent takeover.
+- No database table, MC endpoint, credential exposure, push or release changes.
+  Controlled Electron acceptance and validation evidence are documented beside
+  the subagent E2E suite. The user's live preview remains untouched.
+
 ## 2026-10-01 - Native conversation ID copying
 
 - Fixed the sidebar context-menu copy action failing with browser clipboard

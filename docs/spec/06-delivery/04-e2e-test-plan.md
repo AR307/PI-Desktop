@@ -11246,15 +11246,16 @@ This test plan spec is accepted when:
   - Step 2 shows the background work: the sidebar row carries the subagents
     dot and the idle chat surface shows the "N subagents running in
     background" chip; both disappear when no delegate runs.
-  - Step 3 wakes the session once: one queued turn whose user row is the
-    `Subagent reports ready:` marker line with the settled id, whose model
-    context received the full report exactly once, and whose Task card shows
-    the settled outcome. No report body appears in the queue content.
+  - Step 3 wakes the session once through an internal queued turn. The model
+    context receives the report exactly once and the Task card shows the
+    settled outcome. No synthetic user row or internal marker appears in
+    conversation history or the visible queue.
   - Step 4 delivers the second report without a second queued wake turn — it
     rides the running wake turn's boundary delivery.
-  - Step 5 stops only the parent turn: the delegate keeps running, `TaskStop`
-    remains the way to cancel it, and its later settlement wakes the session
-    as in step 3.
+  - Step 5 stops only the parent turn: the delegate and its card stay running.
+    Its per-worker stop button and the group stop-all button remain accessible;
+    these and TaskStop cancel explicitly, never through parent-state projection.
+    Later settlement wakes the session as in step 3.
   - Step 6 queues nothing while the session is busy; the report is injected at
     that turn's boundary and the wake queue stays empty.
   - Step 7 does not revive the delegate: the run reads as `interrupted`,
@@ -11273,6 +11274,29 @@ This test plan spec is accepted when:
   `apps/desktop/test/sidebar-session-status.test.mjs`. The desktop journey
   needs a capable environment. Required suites: `test:e2e`,
   `test:e2e:subagents`.
+
+#### E2E-SUBAGENT-silent-reports-stop-and-channels
+
+- **Preconditions**: Isolated Electron profile, bundled sidecar, real Rust host,
+  and controlled loopback MC authorization/catalog/SSE service. Two channels
+  provide Grok 4.7; the parent uses Astra with Ultra enabled.
+- **Steps and expected results**:
+  1. Send a prompt delegating to both channels. Actual worker HTTP model IDs and
+     group headers match each catalog key; Task output names the actual binding.
+  2. Stop the parent. Both worker streams and cards stay running, with individual
+     and stop-all controls visible. Keyboard-activate one stop button, then stop
+     the remaining worker with the group button. Actual streams close separately.
+  3. Let a worker complete after the parent idles. Its report reaches the parent
+     but creates no user message or visible internal queue entry.
+  4. Reject a worker request. Resume it with a new instruction; it keeps Grok and
+     its original channel, not Astra. No automatic model fallback is allowed.
+  5. Reload in Chinese/light theme. Settled state and actual binding remain.
+- **Automation**: `apps/desktop/test/e2e/subagents/acceptance.mjs`. Screenshots
+  and request summaries are written to an isolated `PI_TEST_OUTPUT` directory.
+  Runtime and launch tests separately exercise opt-in revocation, ambiguous
+  aliases, definition pins, pending cancellation and restored group identity.
+- **Boundary**: Controlled transport proves request wiring and visible behavior,
+  not production MC authorization, real-model compliance or upstream quality.
 
 #### E2E-SUBAGENT-context-overflow-compacts-before-failing
 

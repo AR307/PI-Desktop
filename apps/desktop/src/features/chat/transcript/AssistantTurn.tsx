@@ -288,8 +288,8 @@ export const AssistantTurn = memo(function AssistantTurn({
   // or text and never on a Task's attached child transcript identity.
   const delegationItems = useMemo(() => tools.map((message) => ({ kind: "tool" as const, message })), [tools]);
   const rawDelegationStatuses = useMemo(
-    () => collectDelegationStatuses(delegationItems, { turnLive: isActive }),
-    [delegationItems, isActive],
+    () => collectDelegationStatuses(delegationItems),
+    [delegationItems],
   );
   const rawDelegationTimings = useMemo(
     () => collectDelegationTimings(delegationItems),

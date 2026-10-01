@@ -139,13 +139,13 @@ test("text and delegate-child changes keep tool inputs stable; cross-part TaskWa
   const settled = { ...first, parts: [...first.parts.slice(0, -1), { kind: "activity", items: [settledWait] }] };
   assert.notEqual(reuseReferences(tools, getAssistantTurnSummary(settled).tools), tools);
   const inputs = getAssistantTurnSummary(settled).toolItems;
-  const statuses = collectDelegationStatuses(inputs, { turnLive: true });
+  const statuses = collectDelegationStatuses(inputs);
   const timings = collectDelegationTimings(inputs);
   assert.equal(statuses.get("d"), "failed");
   assert.deepEqual(delegationTimingBounds([task], timings), { startedAt: 1000, completedAt: 6000 });
   assert.deepEqual(cachedActivitySummary([task], statuses), activitySummary([task], statuses));
   assert.equal(cachedActivitySummary([task], statuses).issues, 1);
-  assert.equal(collectDelegationStatuses(getAssistantTurnSummary(first).toolItems, { turnLive: false }).get("d"), "aborted");
+  assert.equal(collectDelegationStatuses(getAssistantTurnSummary(first).toolItems).get("d"), "running");
 });
 
 test("cached activity timing exactly preserves invalid timestamps and fallback durations", () => {

@@ -1,3 +1,5 @@
+import { SUBAGENT_REPORT_SUBJECT } from "@pi-desktop/shared";
+import { delegationNotification } from "./runtime/delegation-notification";
 import {
   AgentHost,
   RacpError,
@@ -125,6 +127,7 @@ export function createAgentHostBridge(options: AgentHostBridgeOptions) {
           {
             sessionId: request.sessionId,
             content: request.content,
+            ...(request.principal.subject === SUBAGENT_REPORT_SUBJECT ? { [delegationNotification]: true } : {}),
             ...(request.userMessageId ? { messageId: request.userMessageId } : {}),
             ...(request.sessionMessageId ? { sessionMessageId: request.sessionMessageId } : {}),
             ...(request.userMessageId ? { messageId: request.userMessageId } : {}),
@@ -257,15 +260,15 @@ export function createAgentHostBridge(options: AgentHostBridgeOptions) {
     approvals,
     queueStore,
     onQueueChange: (sessionId, entries) => {
-      options.onQueueChange?.({ sessionId, entries: entries.map(toQueueSummary) });
+      options.onQueueChange?.({ sessionId, entries: entries.filter((entry) => entry.principalSubject !== SUBAGENT_REPORT_SUBJECT).map(toQueueSummary) });
     },
   });
 
   /** The desktop's queue operations, all under the owner principal. */
   const queue = {
-    async push(request: AgentQueuePushRequest): Promise<QueuedTurnSummary> {
+    async push(request: AgentQueuePushRequest, notification = false): Promise<QueuedTurnSummary> {
       const result = await forIpc(() =>
-        agentHost.startTurn(DESKTOP_PRINCIPAL, {
+        agentHost.startTurn(notification ? { ...DESKTOP_PRINCIPAL, subject: SUBAGENT_REPORT_SUBJECT } : DESKTOP_PRINCIPAL, {
           sessionId: request.sessionId,
           admission: "queue",
             ...(request.idempotencyKey ? { idempotencyKey: request.idempotencyKey } : {}),
@@ -295,7 +298,7 @@ export function createAgentHostBridge(options: AgentHostBridgeOptions) {
           };
     },
     list(sessionId: string): QueuedTurnSummary[] {
-      return agentHost.queueEntries(sessionId).map(toQueueSummary);
+      return agentHost.queueEntries(sessionId).filter((entry) => entry.principalSubject !== SUBAGENT_REPORT_SUBJECT).map(toQueueSummary);
     },
     async remove(turnId: string): Promise<void> {
       const turn = agentHost.getTurn(turnId);

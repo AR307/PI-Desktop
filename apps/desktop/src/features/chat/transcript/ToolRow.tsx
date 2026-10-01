@@ -1,3 +1,4 @@
+import { SubagentStopButton } from "./SubagentStopButton";
 import { GeneratedImages } from "./GeneratedImages";
 import "../../../styles/generated-images.css";
 import { ImageResult, imageResultFromMessage } from "../../images/ImageResult";
@@ -397,67 +398,70 @@ function HostToolRow({
       aria-label={`${t("chat.toolCall")}: ${rawName}${agentName ? `, ${agentName}` : ""}${modelLabel ? `, ${modelLabel}` : ""}${statusLabel ? `, ${statusLabel}` : ""}`}
     >
       {variant === "topology" ? (
-        <button
-          className="subagent-topology-node-header"
-          aria-expanded={panelOpen}
-          aria-controls={panelOpen ? `work-panel-surface-subagent:${panelSelectionId}` : undefined}
-          disabled={!hasDetails}
-          title={[agentName || rawName, modelLabel, summary].filter(Boolean).join(" · ")}
-          onClick={() => {
-            if (!hasDetails) return;
-            onUserInteraction?.();
-            openSubagentTab(panelSelectionId, agentName || undefined);
-          }}
-        >
-          <span className="subagent-topology-avatar" aria-hidden>
-            <IconBot size={15} />
-            <span className="subagent-topology-status-icon">
-              {outcome === "completed" ? (
-                <IconCheck size={8} />
-              ) : outcome === "aborted" ? (
-                <IconStop size={7} />
-              ) : outcome === "running" ? (
-                <span />
-              ) : (
-                <IconCircleAlert size={8} />
-              )}
-            </span>
-          </span>
-          <span className="subagent-topology-node-copy">
-            <span className="subagent-topology-node-title-row">
-              <span className="subagent-topology-node-title">
-                {agentName || t("chat.subagentUnnamed")}
+        <div className="subagent-card-actions">
+          <button
+            className="subagent-topology-node-header"
+            aria-expanded={panelOpen}
+            aria-controls={panelOpen ? `work-panel-surface-subagent:${panelSelectionId}` : undefined}
+            disabled={!hasDetails}
+            title={[agentName || rawName, modelLabel, summary].filter(Boolean).join(" · ")}
+            onClick={() => {
+              if (!hasDetails) return;
+              onUserInteraction?.();
+              openSubagentTab(panelSelectionId, agentName || undefined);
+            }}
+          >
+            <span className="subagent-topology-avatar" aria-hidden>
+              <IconBot size={15} />
+              <span className="subagent-topology-status-icon">
+                {outcome === "completed" ? (
+                  <IconCheck size={8} />
+                ) : outcome === "aborted" ? (
+                  <IconStop size={7} />
+                ) : outcome === "running" ? (
+                  <span />
+                ) : (
+                  <IconCircleAlert size={8} />
+                )}
               </span>
-              {modelLabel ? (
-                <span
-                  className="subagent-topology-node-model"
-                  title={modelLabel}
-                  aria-label={modelLabel}
-                >
-                  {modelLabel}
+            </span>
+            <span className="subagent-topology-node-copy">
+              <span className="subagent-topology-node-title-row">
+                <span className="subagent-topology-node-title">
+                  {agentName || t("chat.subagentUnnamed")}
+                </span>
+                {modelLabel ? (
+                  <span
+                    className="subagent-topology-node-model"
+                    title={modelLabel}
+                    aria-label={modelLabel}
+                  >
+                    {modelLabel}
+                  </span>
+                ) : null}
+                <span className="subagent-topology-node-status">
+                  {delegateFastRequested(message) ? `${t("mirrorCoding.fastRequested")} · ` : ""}
+                  {statusLabel}
+                  {duration ? ` · ${duration}` : ""}
+                </span>
+              </span>
+              {summary ? (
+                <span className="subagent-topology-node-summary" title={summary}>
+                  {summary}
                 </span>
               ) : null}
-              <span className="subagent-topology-node-status">
-                {delegateFastRequested(message) ? `${t("mirrorCoding.fastRequested")} · ` : ""}
-                {statusLabel}
-                {duration ? ` · ${duration}` : ""}
-              </span>
+              {delegate?.items.length ? (
+                <span className="subagent-topology-node-steps">
+                  {t("chat.processingSteps", { count: delegate.items.length })}
+                </span>
+              ) : null}
             </span>
-            {summary ? (
-              <span className="subagent-topology-node-summary" title={summary}>
-                {summary}
-              </span>
+            {outcome === "running" ? (
+              <span className="tool-spinner" aria-label={t("chat.running")} />
             ) : null}
-            {delegate?.items.length ? (
-              <span className="subagent-topology-node-steps">
-                {t("chat.processingSteps", { count: delegate.items.length })}
-              </span>
-            ) : null}
-          </span>
-          {outcome === "running" ? (
-            <span className="tool-spinner" aria-label={t("chat.running")} />
-          ) : null}
-        </button>
+          </button>
+          {outcome === "running" && toolRowDelegationId(message) ? <SubagentStopButton delegationId={toolRowDelegationId(message)} /> : null}
+        </div>
       ) : (
         <div className={`tool-row-head${runHead ? " is-run" : ""}`}>
           <button

@@ -70,6 +70,7 @@ export type DelegationChain = {
   latestThinkingLevel?: import("@pi-desktop/shared").SessionThinkingLevel;
   /** `providerId/modelId` key the latest run resolved (ADR 0279 §4). */
   latestModelKey?: string;
+  latestGroupId?: string;
   /** Settled status of the latest run; `running` while it works. Owns the
    * resumability gate so pruning finished delegation records cannot make a
    * stopped chain look reusable (ADR 0279). */
@@ -514,6 +515,7 @@ export type RebuiltTaskCall = {
   task?: string;
   modelId?: string;
   modelKey?: string;
+  groupId?: string;
   fast?: boolean;
   thinkingLevel?: import("@pi-desktop/shared").SessionThinkingLevel;
   createdAt: number;
@@ -592,6 +594,7 @@ export function rebuildChainsFromTranscript(
       ...(task ? { task } : {}),
       ...(modelId ? { modelId } : {}),
       modelKey: typeof details?.modelKey === "string" ? details.modelKey : undefined,
+      groupId: typeof details?.groupId === "string" ? details.groupId : undefined,
       fast: details?.fast === true,
       thinkingLevel: isSubagentThinkingLevel(details?.thinkingLevel) ? details.thinkingLevel : undefined,
       status: chainStatusFromDetail(details, row),
@@ -657,6 +660,7 @@ export function rebuildChainsFromTranscript(
       latestObjective: latest?.objective ?? root.objective,
       latestModelId: latest?.modelId,
       latestModelKey: latest?.modelKey,
+      latestGroupId: latest?.groupId,
       latestFast: latest?.fast === true,
       latestThinkingLevel: latest?.thinkingLevel,
       latestStatus: latest?.status,

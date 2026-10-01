@@ -277,6 +277,8 @@ export type RuntimePromptAttachment = AgentPromptAttachment & {
 };
 
 export type RuntimePrompt = {
+  /** Supplied only by the host-owned notification queue. */
+  delegationNotification?: boolean;
   text: string;
   sessionMessage?: SessionMessageOrigin;
   attachments?: RuntimePromptAttachment[];
@@ -3933,8 +3935,8 @@ export class DesktopAgentRuntime {
         grants[key] = provider;
         return provider;
       }
-    } catch {
-      // Host does not support on-demand resolution or the key is invalid.
+    } catch (error) {
+      throw new Error(`Model/channel "${key}" is not available for delegation: ${error instanceof Error ? error.message : String(error)}`);
     }
     return undefined;
   }
@@ -3979,7 +3981,7 @@ export class DesktopAgentRuntime {
         ? provider.supportedThinkingLevels.join("/")
         : "none";
       lines.push(
-        `- \`${key}\` — ${provider.name}, ${reasoning}, thinking: ${levels}, Fast: ${provider.fastAvailable ? "available (request fast:true)" : "unavailable"}`,
+        `- \`${key}\` — ${provider.name}${provider.mirrorCodingGroupId ? `, channel/group: ${provider.mirrorCodingGroupId}` : ""}, model: ${provider.modelId}, ${reasoning}, thinking: ${levels}, Fast: ${provider.fastAvailable ? "available (request fast:true)" : "unavailable"}`,
       );
     }
     lines.push(
@@ -4141,11 +4143,12 @@ export class DesktopAgentRuntime {
       ? this.subagentProviders[key] ?? this.subagentOverrideProviders[key]
       : undefined;
     const matches = (candidate: RuntimeProviderConfig | undefined) =>
-      candidate?.modelId.trim().toLowerCase() === modelId;
+      candidate?.modelId.trim().toLowerCase() === modelId &&
+      (chain.latestGroupId === undefined || candidate?.mirrorCodingGroupId === chain.latestGroupId);
     if (chain.latestModelKey) {
       const current = `${this.provider.id}/${this.provider.modelId}` === chain.latestModelKey ? this.provider : undefined;
       const keyed = current ?? binding(chain.latestModelKey) ??
-        await this.resolveSubagentModel(chain.latestModelKey);
+        await this.resolveSubagentModel(chain.latestModelKey).catch(() => undefined);
       // A known binding must not silently become a different account with the
       // same model id after its grant disappears.
       return matches(keyed) ? keyed : undefined;
@@ -4229,7 +4232,7 @@ export class DesktopAgentRuntime {
         "Do not delegate what you can finish in a couple of tool calls, and do not delegate anything that needs the user — a subagent cannot ask a question or propose a plan on your behalf.",
         ...(this.availableSubagentModelKeys().length
           ? [
-              "Only pass `model` when deliberately overriding the definition default with a listed delegation model; otherwise omit it. Repeating the definition's own Default model key, or the exact parent provider/model, is the same as omitting `model`.",
+              "Use the exact listed provider/model key to select both model and channel. Never drop an explicitly requested model/channel after a failure or claim that an inherited model is the requested one. Read the actual binding returned by Task. Only pass `model` when deliberately overriding the definition default with a listed delegation model; otherwise omit it. Repeating the definition's own Default model key, or the exact parent provider/model, selects that binding explicitly without model fallback.",
             ]
           : [
               "No delegation model overrides are configured. Omit `model` to use the definition's default, or the parent model when no default is pinned. Repeating a definition's own Default model key is the same as omitting `model`; never invent a provider/model key.",
@@ -4317,7 +4320,7 @@ export class DesktopAgentRuntime {
             if (!provider) {
               return this.subagentToolError(
                 toolCallId,
-                `The ${definition.name} subagent pins ${definition.model?.providerId}/${definition.model?.modelId}, which is not configured in PI-Desktop. Do this work yourself or delegate to another subagent.`,
+                `The ${definition.name} subagent pins ${definition.model?.providerId}/${definition.model?.modelId}, which is not configured in PI-Desktop. Restore that model/channel or ask the user before changing the requested delegation.`,
               );
             }
           } else if (this.isSessionModelOverride(modelOverride)) {
@@ -4329,8 +4332,8 @@ export class DesktopAgentRuntime {
             if (!provider) {
               try {
                 provider = await this.resolveSubagentModel(modelOverride);
-              } catch {
-                // Resolution failed; fall through to the error below.
+              } catch (error) {
+                return this.subagentToolError(toolCallId, error instanceof Error ? error.message : String(error));
               }
             }
           }
@@ -4349,7 +4352,7 @@ export class DesktopAgentRuntime {
           if (!provider) {
             return this.subagentToolError(
               toolCallId,
-              `The ${definition.name} subagent pins ${definition.model?.providerId}/${definition.model?.modelId}, which is not configured in PI-Desktop. Do this work yourself or delegate to another subagent.`,
+              `The ${definition.name} subagent pins ${definition.model?.providerId}/${definition.model?.modelId}, which is not configured in PI-Desktop. Restore that model/channel or ask the user before changing the requested delegation.`,
             );
           }
         }
@@ -4457,6 +4460,7 @@ export class DesktopAgentRuntime {
           originalTask: resumedChain?.originalTask ?? task,
           objective,
           latestModelId: provider.modelId,
+          latestGroupId: provider.mirrorCodingGroupId,
           latestFast: fast,
           latestThinkingLevel: thinkingLevel,
           ...(providerKey ? { latestModelKey: providerKey } : {}),
@@ -4501,7 +4505,7 @@ export class DesktopAgentRuntime {
             provider,
             infiniteProviderRetry: this.infiniteProviderRetry,
             thinkingLevel,
-            fallbackModels: (definition.fallbackModels ?? []).map((pin) => ({
+            fallbackModels: (modelOverride || resumedChain ? [] : definition.fallbackModels ?? []).map((pin) => ({
               key: subagentModelKey(pin),
               provider: this.subagentProviders[subagentModelKey(pin)],
             })),
@@ -4514,6 +4518,7 @@ export class DesktopAgentRuntime {
               this.delegationChains.retarget(record.delegateSessionId, {
                 modelKey: this.delegationModelKeyFor(next),
                 modelId: next.modelId,
+                groupId: next.mirrorCodingGroupId,
                 thinkingLevel: level,
               });
               this.publishDelegationSettlement(record);
@@ -4592,7 +4597,7 @@ export class DesktopAgentRuntime {
           content: [
             {
               type: "text",
-              text: `Delegation ${delegationId} started: the ${definition.name} subagent is working in the background${label ? ` (${label})` : ""}. Continue your own independent work and call TaskWait with this delegationId when you need its report, or simply end your turn — the subagent keeps running and the runtime delivers its report when it settles. Call TaskStop only to cancel it.`,
+              text: `Actual model: ${provider.modelId}; provider/channel: ${provider.name} (${provider.id})${provider.mirrorCodingGroupId ? `; group: ${provider.mirrorCodingGroupId}` : ""}; thinking: ${thinkingLevel}. Delegation ${delegationId} started: the ${definition.name} subagent is working in the background${label ? ` (${label})` : ""}. Continue your own independent work and call TaskWait with this delegationId when you need its report, or simply end your turn — the subagent keeps running and the runtime delivers its report when it settles. Call TaskStop only to cancel it.`,
             },
           ],
           details: {
@@ -4786,6 +4791,7 @@ export class DesktopAgentRuntime {
         sessionId: this.sessionId,
         idempotencyKey: `delegation-wake:${ids.join("+")}`,
         content: `${DELEGATION_WAKE_PREFIX} ${ids.join(", ")}`,
+        notification: "subagent-report",
       })
       .catch(() => {
         // The next settlement or turn boundary retries; losing one push must
@@ -4809,8 +4815,7 @@ export class DesktopAgentRuntime {
   ):
     | { input: string | RuntimePrompt; markDelivered: () => void }
     | undefined {
-    const text = typeof input === "string" ? input : input.text;
-    if (!text.startsWith(DELEGATION_WAKE_PREFIX)) return undefined;
+    if (typeof input === "string" || !input.delegationNotification) return undefined;
     const settled = this.undeliveredSettledDelegations();
     const still = this.runningDelegations();
     const formatted = formatDelegationResults(
@@ -4833,10 +4838,9 @@ export class DesktopAgentRuntime {
         : still.length > 0
           ? `No new subagent reports; they were already delivered.\n\n${heartbeat}`
           : "All subagent reports were already delivered. Continue the user's original task.";
-    const expanded = `${text}\n\n${body}`;
+    const expanded = `${input.text}\n\n${body}`;
     return {
-      input:
-        typeof input === "string" ? expanded : { ...input, text: expanded },
+      input: { ...input, text: expanded },
       markDelivered: () => {
         for (const record of settled) {
           if (formatted.includedDelegationIds.has(record.delegationId)) {
@@ -5292,6 +5296,56 @@ export class DesktopAgentRuntime {
     };
   }
 
+  /** Shared cancellation path for TaskStop and native transcript controls. */
+  async stopDelegations(ids: string[] = []) {
+    const targets = ids.length
+      ? ids
+          .map((id) => this.delegations.get(id))
+          .filter(
+            (record): record is DelegationRecord =>
+              record !== undefined && record.status === "running",
+          )
+      : this.runningDelegations();
+    for (const record of targets) {
+      record.stopRequested = true;
+      record.abort();
+    }
+    // Cancellation is cooperative: bound the wait so a worker that ignores
+    // abort cannot wedge the parent tool call. Still-running workers are
+    // explicitly returned as pending, never mislabeled as stopped.
+    let stopTimeout: ReturnType<typeof setTimeout> | undefined;
+    await Promise.race([
+      Promise.all(targets.map((record) => record.completion)),
+      new Promise<void>((resolve) => {
+        stopTimeout = setTimeout(resolve, 5_000);
+      }),
+    ]);
+    if (stopTimeout !== undefined) clearTimeout(stopTimeout);
+    const pending = targets.filter((record) => record.status === "running");
+    const stopped = targets.filter((record) => record.status === "stopped");
+    const settled = targets.filter(
+      (record) => record.status !== "running" && record.status !== "stopped",
+    );
+    const text =
+      targets.length === 0
+        ? "No matching running subagents to stop."
+        : pending.length > 0
+          ? `Cancellation requested for ${targets.length} subagent${targets.length === 1 ? "" : "s"}; ${pending.length} have not confirmed termination and remain running.`
+          : settled.length > 0
+            ? `Cancellation settled for ${targets.length} subagent${targets.length === 1 ? "" : "s"}: ${stopped.length} stopped and ${settled.length} had already finished.`
+            : `Stopped ${stopped.length} subagent${stopped.length === 1 ? "" : "s"}.`;
+    return {
+      content: [{ type: "text" as const, text }],
+      details: {
+        stopped: stopped.map(delegationSummary),
+        stopPending: pending.map(delegationSummary),
+        ...(settled.length > 0
+          ? { settled: settled.map(delegationSummary) }
+          : {}),
+      },
+    };
+  }
+
   /** `TaskStop`: stop running delegations (ADR 0089). */
   private buildSubagentStopTool(): AgentTool {
     return {
@@ -5313,54 +5367,7 @@ export class DesktopAgentRuntime {
           isRecord(params) && Array.isArray(params.delegationIds)
             ? params.delegationIds.map(String)
             : [];
-        const targets = ids.length
-          ? ids
-              .map((id) => this.delegations.get(id))
-              .filter(
-                (record): record is DelegationRecord =>
-                  record !== undefined && record.status === "running",
-              )
-          : this.runningDelegations();
-        for (const record of targets) {
-          record.stopRequested = true;
-          record.abort();
-        }
-        // Cancellation is cooperative: bound the wait so a worker that ignores
-        // abort cannot wedge the parent tool call. Still-running workers are
-        // explicitly returned as pending, never mislabeled as stopped.
-        let stopTimeout: ReturnType<typeof setTimeout> | undefined;
-        await Promise.race([
-          Promise.all(targets.map((record) => record.completion)),
-          new Promise<void>((resolve) => {
-            stopTimeout = setTimeout(resolve, 5_000);
-          }),
-        ]);
-        if (stopTimeout !== undefined) clearTimeout(stopTimeout);
-        const pending = targets.filter((record) => record.status === "running");
-        const stopped = targets.filter((record) => record.status === "stopped");
-        const settled = targets.filter(
-          (record) => record.status !== "running" && record.status !== "stopped",
-        );
-        const text =
-          targets.length === 0
-            ? "No matching running subagents to stop."
-            : pending.length > 0
-              ? `Cancellation requested for ${targets.length} subagent${targets.length === 1 ? "" : "s"}; ${pending.length} have not confirmed termination and remain running.`
-              : settled.length > 0
-                ? `Cancellation settled for ${targets.length} subagent${targets.length === 1 ? "" : "s"}: ${stopped.length} stopped and ${settled.length} had already finished.`
-                : `Stopped ${stopped.length} subagent${stopped.length === 1 ? "" : "s"}.`;
-        return {
-          content: [{ type: "text", text }],
-          details: {
-            stopped: stopped.map(delegationSummary),
-            ...(pending.length > 0
-              ? { stopPending: pending.map(delegationSummary) }
-              : {}),
-            ...(settled.length > 0
-              ? { settled: settled.map(delegationSummary) }
-              : {}),
-          },
-        };
+        return this.stopDelegations(ids);
       },
     };
   }
@@ -8231,7 +8238,7 @@ export class DesktopAgentRuntime {
     // Main resolves this provenance from the Host ledger. Never infer it from
     // prompt text, model output, extension content, or restored history.
     const origin = typeof input === "string" ? undefined : input.sessionMessage;
-    this.allowSilentCompletion = origin?.kind === "completion" &&
+    this.allowSilentCompletion = (typeof input !== "string" && input.delegationNotification === true) || origin?.kind === "completion" &&
       origin.targetSessionId === this.sessionId &&
       Boolean(origin.messageId?.trim() && origin.replyToMessageId?.trim());
     this.turnEpoch += 1;

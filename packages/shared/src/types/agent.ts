@@ -133,6 +133,9 @@ export type AgentStopResponse = {
   requested: boolean;
 };
 
+export type AgentStopDelegationsRequest = { sessionId: string; delegationIds?: string[] };
+export type AgentStopDelegationsResponse = { stopped: string[]; pending: string[] };
+
 /** One entry of the Host-owned turn queue as the renderer mirrors it (D386). */
 export type QueuedTurnSummary = {
   id: string;

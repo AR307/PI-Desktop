@@ -431,6 +431,7 @@ async function handle(method: string, params: any): Promise<unknown> {
       }
       const prompt: RuntimePrompt = {
         text: content,
+        ...(params.delegationNotification === true ? { delegationNotification: true } : {}),
         attachments,
         ...(params.sessionMessage ? { sessionMessage: params.sessionMessage as SessionMessageOrigin } : {}),
       };
@@ -510,6 +511,16 @@ async function handle(method: string, params: any): Promise<unknown> {
         await runtime.abort();
       }
       return { ok: true };
+    }
+    case "agent.stopDelegations": {
+      const runtime = runtimes.get(String(params.sessionId));
+      if (!runtime) return { stopped: [], pending: [] };
+      const ids = Array.isArray(params.delegationIds) ? params.delegationIds.map(String) : [];
+      const result = await runtime.stopDelegations(ids);
+      return {
+        stopped: result.details.stopped.map((entry) => entry.delegationId),
+        pending: result.details.stopPending.map((entry) => entry.delegationId),
+      };
     }
     case "agent.stop": {
       const sessionId = String(params.sessionId);

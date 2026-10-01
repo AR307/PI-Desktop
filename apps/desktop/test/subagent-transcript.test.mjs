@@ -59,7 +59,7 @@ test("a delegation card reads its outcome from the lifecycle rows", () => {
   assert.match(topologySource, /payload\.delegations/);
   assert.match(topologySource, /payload\.stopped/);
   assert.match(topologySource, /statuses\.set\(id, status\)/);
-  assert.match(topologySource, /turnLive/);
+  assert.doesNotMatch(topologySource, /turnLive/);
   assert.match(
     topologySource,
     /const settled = statuses\?\.get\(delegationId\);\s*\n\s*if \(settled\) return settled;/,
@@ -72,7 +72,7 @@ test("a delegation card reads its outcome from the lifecycle rows", () => {
   );
   assert.match(
     transcriptSource,
-    /collectDelegationStatuses\(delegationItems, \{ turnLive: isActive \}\)/,
+    /collectDelegationStatuses[(]delegationItems[)]/,
   );
   assert.match(transcriptSource, /const tools = reuseReferences\(toolsRef\.current, summary\.tools\)/);
   assert.match(transcriptSource, /delegationItems = useMemo\(\(\) => tools\.map/);

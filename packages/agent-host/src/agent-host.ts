@@ -81,6 +81,7 @@ export type AgentHostOptions = {
 
 /** A queued turn together with the prompt it will send. */
 export type QueueEntryView = {
+  principalSubject: string;
   turn: RacpTurn;
   content: string;
   sessionMessageId?: string;
@@ -871,6 +872,7 @@ export class AgentHost {
   queueEntries(sessionId: string): QueueEntryView[] {
     const state = this.state(sessionId);
     return this.queue.list(sessionId).map((record) => ({
+      principalSubject: record.principalSubject,
       turn: this.toRacpTurn(state, this.ensureTurn(state, record.id)),
       content: record.content,
       ...(record.sessionMessageId ? { sessionMessageId: record.sessionMessageId } : {}),
