@@ -19,6 +19,9 @@
 - Acceptance phase: add actual Electron/Android Ultra scenarios, extend the
   mobile handoff contract without MC endpoints, and document local evidence.
   Full host tests cover search projections as well as saved session state.
+- Final candidate c7b640280: 88 Electron/mobile-web and 24 native Android checks
+  passed on controlled services. Host tests passed 705/705; focused runtime
+  352/352 and desktop 134/134. Live model decomposition remains untested.
 
 ## 2026-09-25 - Relay binding carrier fallback
 

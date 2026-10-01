@@ -53,8 +53,28 @@ generation/share/reference use, restart recovery and light/English plus
 dark/Chinese screenshots. A complete pre-commit run passed 24 checks with no
 WebView exceptions (`.artifacts/ultra-android-second/report.json`).
 
-Final committed-candidate Electron/Android report locations and results are
-recorded below after the final acceptance run.
+## Final committed-candidate acceptance
+
+- Tested commit: `c7b6402809dd289970496e7868a4326adf65d481`.
+- Base main: `920b12b8e053165d343a421b3cb8ee93c50a436a`, refreshed before the run.
+- Electron/mobile-web: **88 checks passed**, no renderer errors or cleanup
+  failures. The report records the same commit and clean tree at both ends:
+  `.artifacts/ultra-candidate/report.json`.
+- Native Android: **24 checks passed**, no WebView errors:
+  `.artifacts/ultra-android-candidate/report.json`. Temporary QA application-ID
+  and generated dependency paths were restored; tracked Android configuration
+  has no residual diff.
+- Reviewed actual desktop Ultra-slider, mobile worker and native Android
+  model-panel screenshots. Light/English, dark/Chinese, narrow viewport,
+  keyboard, focus, image and restart flows are covered by the harness.
+- Representative screenshots: `.artifacts/ultra-candidate/desktop-ultra-slider.png`
+  and `.artifacts/ultra-android-candidate/android-ultra-panel.png`.
+- Desktop style-token validation passed. No task artifacts, isolated profiles,
+  synthetic credentials or QA APKs are committed.
+
+This final record is documentation-only; the tested application tree remains
+the candidate above. The QA APK targets its controlled local service, not the
+production MC environment, and is not presented as a release build.
 
 ## Evidence boundary
 
