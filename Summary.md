@@ -892,3 +892,10 @@ This completion record supersedes the earlier pending acceptance notes.
   hint before the fix. Shared labels 4, i18n 37, mobile 17 and desktop reasoning
   checks 31 pass. Shared/i18n/runtime compilation, desktop/mobile typechecks
   and a rebuilt Electron/runtime bundle pass. Candidate visual checks follow.
+
+- Final candidate cc98ac6ab4c1cf75c7ae7f82d9c33ff1f3b531ba passed 89 actual
+  Electron/mobile-web checks, with no renderer or cleanup errors. Reviewed
+  both selected-tier screenshots; ordinary selection hides the summary.
+- Rebuilt the normal-origin Android preview APK. With user authorization,
+  gracefully restarted the desktop from this branch using a preserved copy of
+  the latest test profile. The visible window is ready; no model call was sent.

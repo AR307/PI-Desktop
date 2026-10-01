@@ -87,3 +87,22 @@ model quality claim is made.
 No installer, portable release, signed production APK or remote publication
 is part of this request. Existing non-English/Chinese locales currently use
 English Ultra copy. All native model parameters and MC contracts stay intact.
+
+## Selected-tier summary follow-up (2026-10-01)
+
+- Candidate: cc98ac6ab4c1cf75c7ae7f82d9c33ff1f3b531ba; base main unchanged.
+- Before the fix, actual Electron acceptance fails because the obsolete warning
+  is still visible at ordinary reasoning (.artifacts/ultra-label-red).
+- After the fix: 89 Electron/mobile-web checks pass, with no renderer or cleanup
+  errors (.artifacts/ultra-label-green/report.json). Keyboard End and pointer
+  drag show the capability-derived summary; leaving Ultra hides it on both
+  clients. Desktop and mobile screenshots were visually reviewed.
+- Shared tier-label tests: 4 passed (Max, Xhigh, High, and undeclared reasoning);
+  i18n 37, mobile 17 and desktop reasoning/menu tests 31 passed. Relevant
+  compilation, desktop/mobile typechecks, runtime bundle and Electron builds
+  passed. Normal-origin Android debug APK built successfully; a new native
+  device acceptance run was not required for this renderer-only copy change.
+- The user authorized restart after acceptance. The previous preview closed
+  gracefully, its test profile was preserved, and the new visible desktop
+  window was confirmed ready. No production inference or paid call was sent.
+- The validation update is documentation-only; no remote push or release.
