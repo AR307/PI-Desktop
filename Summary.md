@@ -15,7 +15,10 @@
   parallel handoff, editable drafts, staggered/rapid completion and silent wake.
   Explicit user input admitted at the boundary keeps its steering continuation
   instead of waiting for worker settlement.
-  Validation results are recorded with the candidate in the acceptance README.
+  Final candidate 7528d904a passed 351 targeted runtime tests and 10 isolated
+  Electron checks, with rebuilt sidecar/Desktop and affected typechecks.
+  Evidence and scope are recorded in the subagent acceptance README. No live
+  preview restart, paid calls, push or release were performed.
 
 
 ## 2026-10-01 - Truthful subagent lifecycle and channel selection

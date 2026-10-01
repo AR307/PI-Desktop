@@ -27,7 +27,11 @@ node apps/desktop/test/e2e/subagents/acceptance.mjs
    child cancels one; group Stop cancels the other.
 3. A completed background worker wakes its parent without a fake user bubble.
 4. A failed worker resumes on its original model/channel.
-5. A renderer reload keeps settled state and binding details in Chinese/light;
+5. Ultra releases the parent after a complete parallel dispatch, without Stop or
+   a second parent request. The user can type and send while workers run.
+6. Staggered and rapid reports silently wake integration without duplicate
+   workers, fake user bubbles, polling or lost drafts.
+7. A renderer reload keeps settled state and binding details in Chinese/light;
    initial interactions use English/dark. Screenshots cover both themes.
 
 The fixture controls model choices, so this is not proof of autonomous model
@@ -57,3 +61,27 @@ obedience, production MC access, or a live provider's reliability.
 
 A following documentation-only commit records this evidence; the tested
 executable source tree remains unchanged.
+
+## Ultra handoff validation, 2026-10-01
+
+- Task candidate: 7528d904afe02bdd3ae562d7c4be66587a242f78.
+- Base origin/main: 920b12b8e053165d343a421b3cb8ee93c50a436a, freshly fetched
+  and verified as an ancestor before final candidate acceptance.
+- Runtime regressions: 351/351 passed across runtime.test.ts,
+  ultra-policy.test.ts, delegation-chain.test.ts and delegation-history.test.ts.
+  The initial repro made two parent requests for held workers and three for
+  immediate workers instead of one; both now yield at the native boundary.
+  A separate red/green regression preserves user input admitted at handoff.
+- Actual Electron acceptance: 10/10 checks passed, no renderer page errors.
+  Evidence: .artifacts/ultra-handoff-final/result.json, run.log and screenshots.
+  Visually inspected the idle parent with two running workers, editable draft,
+  report integration and the Chinese/light reload. No user profile was used.
+- Shared and desktop dependency TypeScript builds passed, including agent-runtime
+  and host-runtime; Desktop noEmit typecheck, rebuilt sidecar and electron-vite
+  build passed. E2E script syntax and git diff whitespace checks passed.
+- Repository Biome includes do not cover the changed runtime/E2E files; no lint
+  coverage is claimed for them. No Rust source changed, so existing provisioned
+  host binaries were reused. No full monorepo suite, Android-device run, paid
+  model call or production MC acceptance was performed.
+- No live-preview restart, push, release, or server deployment. Documentation-only
+  follow-up records this result without changing the tested executable tree.
