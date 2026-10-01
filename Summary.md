@@ -971,3 +971,8 @@ This completion record supersedes the earlier pending acceptance notes.
 - Added runtime, desktop projection, mobile replay and controlled Electron
   scenarios. Local validation evidence is recorded after candidate acceptance;
   no production MC, paid model call, user preview restart or release is included.
+
+- Candidate Electron testing caught the outer turn-level process disclosure
+  hiding a successful return. The canonical and cached projections now keep
+  receipts in the visible response flow, while ordinary tools stay folded.
+  Added an explicit projection regression and rerun the real user path.

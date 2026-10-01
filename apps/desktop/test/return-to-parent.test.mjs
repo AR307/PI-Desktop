@@ -38,3 +38,20 @@ test("Task details do not repeat the report already shown in nested child histor
   const blocks = buildToolPresentation(task, { hideDelegateReport: true });
   assert(!JSON.stringify(blocks).includes("Report from channel B."));
 });
+
+
+test("settled return stays visible outside both live and cached turn-process projections", async () => {
+  const { projectTurnProcess } = await import("../src/lib/turn-process.ts");
+  const { getAssistantTurnSummary } = await import("../src/lib/transcript-summary.ts");
+  const { entries } = buildTranscriptEntries([
+    { id: "user", role: "user", content: "Inspect", createdAt: "2026-10-01T00:00:00Z" },
+    { id: "task", role: "tool", toolName: "Task", toolCallId: "task", content: "", createdAt: "2026-10-01T00:00:01Z" },
+    returned,
+    { id: "answer", role: "assistant", content: "Integrated report.", createdAt: "2026-10-01T00:00:03Z" },
+  ]);
+  const entry = entries[1];
+  for (const { process, responses } of [projectTurnProcess(entry), getAssistantTurnSummary(entry)]) {
+    assert.deepEqual(process.map(part => part.items[0].message.id), ["task"]);
+    assert.deepEqual(responses.map(part => part.kind === "message" ? part.message.id : part.items[0].message.id), ["run:return", "answer"]);
+  }
+});

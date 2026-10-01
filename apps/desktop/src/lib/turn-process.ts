@@ -1,5 +1,6 @@
 import type { AppSettings, UiMessage } from "@pi-desktop/shared";
 import type { AssistantTurnEntry, AssistantTurnPart } from "./assistant-turns";
+import { isSubagentReturnPart } from "./assistant-turns";
 import { activityItemHasIssue } from "./activity-summary";
 
 type ThinkingDisplayMode = NonNullable<AppSettings["thinkingDisplayMode"]>;
@@ -88,11 +89,12 @@ export function projectTurnProcess(entry: AssistantTurnEntry) {
   const answer =
     last?.kind === "message" && last.message.content.trim() ? last : undefined;
   const process: AssistantTurnPart[] = [];
-  const responses: Extract<AssistantTurnPart, { kind: "message" }>[] = [];
+  const responses: AssistantTurnPart[] = [];
   for (const part of entry.parts) {
     if (
-      part.kind === "message" &&
-      (part === answer || part.message.error || part.message.imageGeneration)
+      isSubagentReturnPart(part) ||
+      (part.kind === "message" &&
+      (part === answer || part.message.error || part.message.imageGeneration))
     ) {
       responses.push(part);
     } else {

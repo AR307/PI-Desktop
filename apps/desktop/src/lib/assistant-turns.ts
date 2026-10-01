@@ -42,6 +42,12 @@ export type SubagentRun = {
   items: SubagentRunItem[];
 };
 
+/** Completion receipts remain visible outside the turn process disclosure. */
+export function isSubagentReturnPart(part: AssistantTurnPart): boolean {
+  return part.kind === "activity" && part.items.length > 0 &&
+    part.items.every(item => item.kind === "tool" && isReturnToParent(item.message));
+}
+
 export type AssistantTurnPart =
   | { kind: "message"; message: UiMessage }
   | {

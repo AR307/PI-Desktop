@@ -1,5 +1,6 @@
 import type { MessageUsage, UiMessage } from "@pi-desktop/shared";
 import type { AssistantActivityItem, AssistantTurnEntry, AssistantTurnPart } from "./assistant-turns";
+import { isSubagentReturnPart } from "./assistant-turns";
 
 const contentFacts = new WeakMap<UiMessage, { trimmedContent: string; hasContent: boolean }>();
 
@@ -31,7 +32,7 @@ export type AssistantTurnSummary = {
   streaming: boolean;
   hasContent: boolean;
   process: AssistantTurnPart[];
-  responses: Extract<AssistantTurnPart, { kind: "message" }>[];
+  responses: AssistantTurnPart[];
   lastActivityPart?: AssistantTurnPart;
 };
 
@@ -55,7 +56,8 @@ export function getAssistantTurnSummary(entry: AssistantTurnEntry): AssistantTur
   const answer = last?.kind === "message" && messageContentFacts(last.message).hasContent ? last : undefined;
   for (const part of entry.parts) {
     if (part.kind === "activity") {
-      result.process.push(part);
+      if (isSubagentReturnPart(part)) result.responses.push(part);
+      else result.process.push(part);
       result.lastActivityPart = part;
       for (const item of part.items) {
         result.activityItems.push(item);
