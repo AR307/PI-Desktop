@@ -32,3 +32,28 @@ node apps/desktop/test/e2e/subagents/acceptance.mjs
 
 The fixture controls model choices, so this is not proof of autonomous model
 obedience, production MC access, or a live provider's reliability.
+
+## Local validation, 2026-10-01
+
+- Task candidate: d5cd009693bc8826e8835cbec3bbc8ed3f81a861.
+- Base origin/main: 920b12b8e053165d343a421b3cb8ee93c50a436a, fetched
+  successfully before candidate validation and verified as an ancestor.
+- Electron acceptance: 6/6 user journeys passed, no renderer page errors.
+  Evidence: .artifacts/subagent-controls-final/result.json and screenshots.
+  Visually inspected running-after-parent-stop.png (English/dark) and
+  persisted-light-zh.png (Chinese/light) from that candidate.
+- Targeted checks: Desktop 137, runtime 346, host-runtime 22, agent-host 46,
+  shared protocol 14 and i18n 37 tests passed (602 total).
+- Shared, i18n, agent-host, host-runtime, agent-runtime, Desktop, pi-host and
+  mobile TypeScript checks passed. Runtime JS and sidecar bundle plus Electron
+  build passed. Repository-configured scoped Biome and style-token checks,
+  plus git diff whitespace checks, passed. Biome currently checks only two of
+  the changed files under the repository's allowlist; it is not full coverage.
+- No Rust source changed, so no Rust rebuild/test was required. No full monorepo
+  suite, Android device test or production/paid-model call ran in this task.
+  Actual autonomous model compliance and production channel authorization remain
+  outside controlled-fixture acceptance. The user's live preview was not stopped
+  or restarted. No push, release or MC deployment was performed.
+
+A following documentation-only commit records this evidence; the tested
+executable source tree remains unchanged.

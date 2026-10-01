@@ -15,8 +15,10 @@
   fall through a definition's alternative models. Resume preserves group identity
   with the transcript; Ultra guidance does not authorize silent takeover.
 - No database table, MC endpoint, credential exposure, push or release changes.
-  Controlled Electron acceptance and validation evidence are documented beside
-  the subagent E2E suite. The user's live preview remains untouched.
+  Controlled Electron acceptance passed 6/6 journeys on candidate d5cd00969;
+  602 targeted tests, affected typechecks and runtime/Desktop builds passed.
+  Validation details are in apps/desktop/test/e2e/subagents/README.md.
+  The user's live preview remains untouched; production calls were not tested.
 
 ## 2026-10-01 - Native conversation ID copying
 
