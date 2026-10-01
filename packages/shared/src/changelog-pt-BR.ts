@@ -2,6 +2,17 @@ import type { ChangelogEntry } from "./changelog.js";
 
 export const ptBREntries: ChangelogEntry[] = [
   {
+    "version": "0.15.11",
+    "date": "2026-10-01",
+    "highlights": [
+      "Ultra combina raciocínio específico do modelo, transferência assíncrona e subagentes retomáveis com modelos distintos.",
+      "Cartões persistentes ReturnToParent mostram resultados e estados corretos, com controles para parar um ou todos os subagentes.",
+      "Catálogos MirrorCoding, protocolos nativos e Fast por sessão ficam alinhados; respostas parciais são preservadas para continuar.",
+      "Android recebe controles de modelo e modo, Fast e Ultra sincronizados, geração de imagens e cartões de resultados."
+    ]
+  },
+
+  {
     "version": "0.15.10",
     "date": "2026-09-28",
     "highlights": [

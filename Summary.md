@@ -985,3 +985,14 @@ sidecar / mobile builds, style-token validation and 15 actual isolated Electron
 checks. Dark/English and light/Chinese screenshots reviewed. Evidence is under
 .artifacts/return-to-parent-final. No production call, Android-device acceptance,
 user preview restart, push or release. See the subagent E2E README for boundaries.
+
+## 2026-10-01 — Desktop and Android 0.15.11 release candidate
+
+- Consolidates the committed MirrorCoding, Fast, mobile, Ultra, subagent control, asynchronous handoff, clipboard and ReturnToParent work.
+- Synchronizes workspace version 0.15.11 and Android versionCode 3; ships localized release notes.
+- Desktop Windows assets publish to AR307/PI-Desktop. Android APK publishes only to AR307/Mirrorcoding-APP; its source remains in this monorepo.
+- Retains the existing Android signing identity for upgrade continuity. Final validation and publication evidence is recorded in docs/releases/0.15.11.md.
+
+- Release preflight resolves inherited ADR id/index drift and supplies the four missing Chinese domain-spec mirrors; no runtime behavior changes.
+
+- Updates stale clipboard, ReturnToParent disclosure and sidecar cancellation source contracts; corrects the import-page test boundary on Windows. Release checks retain their intended assertions.

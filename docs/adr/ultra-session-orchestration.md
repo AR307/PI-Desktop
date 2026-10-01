@@ -1,6 +1,6 @@
-# Ultra session orchestration
+# ADR: Ultra session orchestration
 
-Status: Implemented candidate, 2026-10-01
+- Status: Implemented candidate, 2026-10-01
 
 ## Context
 

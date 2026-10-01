@@ -292,7 +292,7 @@ test("detailed mode opens the last tool while compact keeps payloads collapsed",
     /const autoOpenLatest =\s*!compact && isLast && item === lastItem/,
   );
   assert.match(transcriptSource, /<ToolRow[\s\S]*?autoOpen=\{autoOpenLatest\}/);
-  assert.match(transcriptToolRowSource, /const disclosure = useAutomaticDisclosure\(\s*autoOpen && !failed && status !== "denied",\s*revealRequest/);
+  assert.match(transcriptToolRowSource, /const disclosure = useAutomaticDisclosure\(\s*autoOpen && !returned && !failed && status !== "denied",\s*revealRequest/);
   assert.match(transcriptSource, /onClick=\{toggleDisclosure\}/);
   assert.match(transcriptSource, /onCollapse=\{collapseDisclosure\}/);
   assert.match(transcriptSource, /onUserInteraction=\{claimDisclosure\}/);

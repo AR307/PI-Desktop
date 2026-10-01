@@ -339,6 +339,9 @@ ADR 0285）。渲染进程除了一个标识徽章外看不到本地/远程之�
 | `LIVE_NETWORK_POLICY_UNSUPPORTED` | 否 | 桌面代理路由无法由 Live 传输安全表示 |
 | `LIVE_AUDIO_BACKPRESSURE` | 否 | PCM 或播放 credit 的有界容量已耗尽 |
 | `LIVE_EXECUTION_NOT_CONNECTED` | 否 | Provider 请求了当前不支持的函数/delegation 执行路径 |
+| `PI_FAST_UNAVAILABLE` | 不 | 所选模型、组和协议不支持 Fast；刷新目录、保留输入，不静默降速 |
+| `MODEL_THINKING_ONLY` | 不 | 只有思考，没有正文或合法工具轮；保留内容并提供继续，不自动重放 |
+| `MODEL_OUTPUT_TRUNCATED` | 不 | 上游明确因输出上限终止；保留部分内容并提供继续，不自动重放 |
 
 ## 4. 映射规则
 

@@ -2,6 +2,17 @@ import type { ChangelogEntry } from "./changelog.js";
 
 export const frEntries: ChangelogEntry[] = [
   {
+    "version": "0.15.11",
+    "date": "2026-10-01",
+    "highlights": [
+      "Ultra associe le raisonnement adapté au modèle, un relais asynchrone et des sous-agents reprenables avec leur propre modèle.",
+      "Les cartes persistantes ReturnToParent affichent les résultats et le bon état, avec arrêt individuel ou global des sous-agents.",
+      "Les catalogues MirrorCoding, protocoles natifs et Fast par session sont alignés ; les réponses partielles restent disponibles pour continuer.",
+      "Android reçoit les réglages de modèle et de mode, Fast et Ultra synchronisés, la génération d’images et les cartes de résultats."
+    ]
+  },
+
+  {
     "version": "0.15.10",
     "date": "2026-09-28",
     "highlights": [

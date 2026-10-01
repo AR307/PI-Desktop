@@ -12,13 +12,14 @@ import { readSettingsSourceSync } from "./helpers/source-contracts.mjs";
 import { loadStylesSync } from "./helpers/styles.mjs";
 import assert from "node:assert/strict";
 import test from "node:test";
+import { sep } from "node:path";
 
 const settings = readSettingsSourceSync();
 const styles = loadStylesSync();
 
 const start = settings.indexOf(" * Settings ▸ Import.");
 assert.ok(start > 0, "import page module missing from the settings domain");
-const end = settings.indexOf("\n/* features/settings/", start);
+const end = settings.indexOf(String.fromCharCode(10) + "/* features" + sep + "settings" + sep, start);
 const page = settings.slice(start, end === -1 ? undefined : end);
 
 function cssRule(selector) {

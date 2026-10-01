@@ -46,7 +46,7 @@ test("main opens only a resolved session scratch directory", () => {
 
 test("conversation id is available without developer mode; scratch remains developer-only", () => {
   assert.match(sidebarSource, /data-action="copy-conversation-id"/);
-  assert.match(sidebarSource, /navigator\.clipboard\.writeText\(session\.id\)/);
+  assert.match(sidebarSource, /api\.writeClipboardText\(session\.id\)/);
   assert.match(sidebarSource, /data-action="open-session-path"/);
   assert.match(sidebarSource, /api\.openSessionScratchPath\(session\.id\)/);
   assert.doesNotMatch(sidebarSource, /data-action="copy-session-path"/);

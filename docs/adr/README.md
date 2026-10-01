@@ -355,3 +355,10 @@ Each ADR includes:
 | provider-system-certificates | [Desktop sidecar uses OS-trusted certificates](provider-system-certificates.md) | Accepted |
 | image-generation-capability | [Image generation as a configured Agent capability](image-generation-capability.md) | Accepted |
 | retained-browser-pages-per-tab | [Retain a host-owned browser page per resource tab](retained-browser-pages-per-tab.md) | Accepted |
+| detached-delegation-and-wake | [Detached Delegation and Idle Wake](detached-delegation-and-wake.md) | Accepted |
+| image-generation-pipeline | [Image generation outside the conversational agent loop](image-generation-pipeline.md) | Accepted |
+| mobile-companion-relay | [Scoped MC relay for the Android companion](mobile-companion-relay.md) | Accepted |
+| mobile-transcript-cache-and-delta-sync | [Mobile transcript cache and delta sync](mobile-transcript-cache-and-delta-sync.md) | Accepted |
+| response-completion-recovery | [Native MC Claude routing and non-destructive response recovery](response-completion-recovery.md) | Accepted |
+| ultra-session-orchestration | [Ultra session orchestration](ultra-session-orchestration.md) | Accepted |
+| mirrorcoding-account-provider-model-routing | [MirrorCoding Account Provider With Model-Level Group Routing](mirrorcoding-account-provider-model-routing.md) | Accepted |

@@ -2,6 +2,17 @@ import type { ChangelogEntry } from "./changelog.js";
 
 export const trEntries: ChangelogEntry[] = [
   {
+    "version": "0.15.11",
+    "date": "2026-10-01",
+    "highlights": [
+      "Ultra, modele özgü akıl yürütme, asenkron devir ve farklı modellerle sürdürülebilir alt ajanlar sunar.",
+      "Kalıcı ReturnToParent kartları sonuçları ve doğru durumu gösterir; alt ajanlar tek tek veya topluca durdurulabilir.",
+      "MirrorCoding katalogları, yerel protokoller ve oturuma özel Fast uyumlu hâle getirildi; kısmi yanıtlar devam etmek için korunur.",
+      "Android model ve mod denetimleri, eşitlenen Fast ve Ultra, görsel üretimi ve sonuç kartları güncellendi."
+    ]
+  },
+
+  {
     "version": "0.15.10",
     "date": "2026-09-28",
     "highlights": [

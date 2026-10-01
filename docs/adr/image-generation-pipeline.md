@@ -1,6 +1,6 @@
-# Image generation outside the conversational agent loop
+# ADR: Image generation outside the conversational agent loop
 
-Status: Accepted for local implementation, 2026-09-21.
+- Status: Accepted for local implementation, 2026-09-21.
 
 ## Context
 

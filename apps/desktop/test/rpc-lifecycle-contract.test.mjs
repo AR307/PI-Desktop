@@ -75,8 +75,8 @@ test("sidecar detaches host listeners and gates every child write", () => {
   assert.match(sidecarSource, /private closeTransport\(error: Error\)/);
   assert.match(sidecarSource, /unsubscribeHostExit/);
   assert.match(sidecarSource, /private writeToChild\(payload: string\)/);
-  assert.match(sidecarSource, /private localToolTimers = new Set/);
-  assert.match(sidecarSource, /this\.localToolTimers\.clear\(\)/);
+  assert.match(sidecarSource, /private localToolControllers = new Map/);
+  assert.match(sidecarSource, /this\.localToolControllers\.clear\(\)/);
   assert.match(sidecarSource, /this\.child\.stdin\.destroyed/);
   assert.doesNotMatch(
     sidecarSource.replace(/private writeToChild\([\s\S]*?\n  \}/, ""),
