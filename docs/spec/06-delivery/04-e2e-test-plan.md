@@ -6502,9 +6502,10 @@ must keep splitting are covered by `markdown-blocks.test.mjs`.
   1. Start an Agent-mode conversation and submit a task covered by the root
      instruction.
   2. Let the agent read or edit `packages/api/handler.ts`.
-  3. Add `packages/api/AGENTS.override.md`, then have the agent access another
+  3. Have the agent read an attachment outside the project root.
+  4. Add `packages/api/AGENTS.override.md`, then have the agent access another
      file in that directory.
-  4. Edit the root instruction while the session is idle, then submit a
+  5. Edit the root instruction while the session is idle, then submit a
      follow-up task.
 - **Expected**: The initial runtime receives the root chain. Before the file
   tool executes, the nested instruction is appended after its root source and
@@ -6512,8 +6513,13 @@ must keep splitting are covered by `markdown-blocks.test.mjs`.
   `AGENTS.md`; `CLAUDE.md` and `.claude/CLAUDE.md` are fallback names. The idle
   follow-up uses changed root content rather than reusing the prior runtime.
   Empty, unreadable, oversized, and out-of-root instruction files do not block
-  the turn; combined UTF-8 content is capped at 32 KiB. If path-specific
-  resolution exceeds its two-second deadline or the host is unavailable, the
+  the turn; combined UTF-8 content is capped at 32 KiB. A file tool whose target
+  is outside the project root, or targets the root itself, keeps the root chain
+  rather than clearing the project instructions; instruction files are still
+  read only from inside the root. A fixture-backed sidecar run verifies that a
+  nested read applies nested rules and a following attachment read restores the
+  root rules without loading an outside `AGENTS.md`. If path-specific resolution exceeds its
+  two-second deadline or the host is unavailable, the
   file tool continues with the base chain and does not retain a sibling
   directory's rules. Repeated file tools in the same directory during one
   prompt reuse one path-resolution claim; the next prompt resolves again so
@@ -6523,9 +6529,10 @@ must keep splitting are covered by `markdown-blocks.test.mjs`.
 - **Specs linked**: `03-runtime/02-agent-runtime.md`
 - **Acceptance**: C (chat/stream), F (persistence)
 - **Milestone**: M5
-- **Status**: Partially automated (`project-instructions.test.ts`,
-  `runtime.test.ts`); full
-  provider/UI journey Draft
+- **Status**: Resolver and runtime behavior are automated in
+  `project-instructions.test.ts` and `runtime.test.ts`; the fixture-backed
+  sidecar scenario runs through `pnpm test:e2e:hosted-search`. The broader full
+  provider/UI journey remains Draft.
 
 #### E2E-AGENTS-002: Global settings and project menus manage instruction files
 
