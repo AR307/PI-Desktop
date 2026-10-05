@@ -5,6 +5,7 @@ export const deEntries: ChangelogEntry[] = [
     "version": "0.16.1",
     "date": "2026-10-04",
     "highlights": [
+      "Laufende Unteragenten lassen sich direkt in ihrer Karte oder Detailansicht stoppen, einzeln oder für die aktuelle Sitzung, ohne den Hauptagenten zu stoppen.",
       "Wählen Sie in den Einstellungen einen eigenen Datenspeicherort, verfolgen Sie eine geprüfte Kaltmigration und leeren Sie nur neu erzeugbare Caches.",
       "Geplante Aufgaben können im Intervall laufen: alle 5 Minuten bis zu 24 Stunden, gezählt ab dem Zeitpunkt, an dem die Aufgabe aktiviert wurde.",
       "Die Seite „Geplant“ verbindet die Aufgabenliste mit der ausgewählten Aufgabe: letztes Ergebnis, nächste Ausführung, Anweisung und Ausführungsverlauf.",

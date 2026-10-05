@@ -343,3 +343,13 @@ export type AgentEventEnvelope = {
   /** Definition name of the emitting subagent. */
   agentName?: string;
 };
+
+/** Explicit user cancellation; omitted IDs select this session's running delegates. */
+export type AgentStopSubagentsRequest = {
+  sessionId: string;
+  delegationIds?: string[];
+};
+
+export type AgentStopSubagentsResponse = {
+  pending: string[];
+};

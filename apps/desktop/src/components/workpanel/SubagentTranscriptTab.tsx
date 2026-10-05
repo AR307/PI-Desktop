@@ -1,3 +1,6 @@
+import { toolResultPayload } from "../../lib/tool-presentation";
+import { SubagentStopButton } from "../../features/chat/transcript/SubagentStopButton";
+import { collectDelegationStatuses, subagentOutcome } from "../../lib/subagent-topology";
 import { Fragment, useLayoutEffect, useMemo } from "react";
 import { useTranslation } from "react-i18next";
 import { useAppStore } from "../../stores/app-store";
@@ -29,7 +32,7 @@ import { Markdown } from "../Markdown";
  * on the same delegation append further turns, so a resumed delegate reads as
  * one continuing user/assistant exchange.
  *
- * The tab is display-only: the composer at the foot is a disabled textarea
+ * The tab allows explicit cancellation; the composer at the foot is a disabled textarea
  * whose placeholder says the delegate is driven by the main agent. There is
  * deliberately no send path.
  */
@@ -48,6 +51,18 @@ function SubagentTranscriptSurface({ delegationId }: { delegationId: string }) {
   // the empty key keeps the hook's contract while nothing is active.
   const transcript = useTranscriptView(activeSessionId ?? "");
   const { messages } = transcript;
+  const delegateRunning = useMemo(() => {
+    const items = messages
+      .filter(message => message.role === "tool")
+      .map(message => ({ kind: "tool" as const, message }));
+    const statuses = collectDelegationStatuses(items);
+    return items.some(({ message }) => {
+      const payload = toolResultPayload(message);
+      return payload && typeof payload === "object" &&
+        "delegationId" in payload && payload.delegationId === delegationId &&
+        subagentOutcome(message, statuses) === "running";
+    });
+  }, [messages, delegationId]);
   const isRunning = useAppStore(
     (state) => (activeSessionId ? state.runningSessions[activeSessionId] ?? false : false),
   );
@@ -99,6 +114,11 @@ function SubagentTranscriptSurface({ delegationId }: { delegationId: string }) {
   return (
     <DisclosureAnchorContext.Provider value={disclosureAnchorNotifier}>
       <div className="subagent-transcript-tab" data-testid="subagent-transcript-tab">
+        {delegateRunning ? (
+          <div className="subagent-transcript-actions">
+            <SubagentStopButton delegationId={delegationId} running />
+          </div>
+        ) : null}
         <div
           ref={scrollRef}
           data-scroll-owner="follow"

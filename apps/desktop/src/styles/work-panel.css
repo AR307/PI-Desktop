@@ -374,6 +374,12 @@
  * column (scroll area above a read-only composer) and the composer itself.
  * The scroll area owns the only scrollbar; the composer never scrolls.
  */
+.subagent-transcript-actions {
+  display: flex;
+  justify-content: flex-end;
+  padding: 8px 12px;
+}
+
 .subagent-transcript-tab {
   display: flex;
   min-width: 0;

@@ -49,6 +49,7 @@ Examples:
 - `pi-desktop/agent/prompt`
 - `pi-desktop/agent/steer`
 - `pi-desktop/agent/stop`
+- `pi-desktop/agent/stop-subagents`
 - `pi-desktop/agent/abort`
 - `pi-desktop/agent/event/message`
 - `pi-desktop/agent/askTool/resolve`
@@ -297,6 +298,21 @@ cancel running tools, or open a second concurrent turn. An idle session returns
 The renderer owns the removable, in-memory queued-prompt list per session. It
 calls this channel only for a queued item's **Send now** action and releases
 that item through the ordinary `agent/prompt` flow after the terminal event.
+
+### 5.2a stop-subagents
+
+`pi-desktop/agent/stop-subagents` accepts `{ sessionId, delegationIds? }` and
+returns `{ pending: string[] }`. Omitting IDs selects all currently running
+delegates in that session; an explicitly empty or malformed selection is
+rejected. The local Desktop route forwards to `agent.stopSubagents` on the
+existing sidecar runtime and never starts a runtime or prompts the model.
+Native/remote session controls are not exposed by this local route.
+
+It reuses `TaskStop` cancellation, waiting up to five seconds for termination.
+Unconfirmed IDs are returned in `pending`; their durable status stays running
+until settlement. The parent and unselected delegates remain active. Existing
+terminal Task snapshots carry settlement through the normal persistence and
+renderer event path; no synthetic tool call is added to model history.
 
 ### 5.3 abort
 

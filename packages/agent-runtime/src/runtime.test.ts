@@ -7811,7 +7811,37 @@ describe("DesktopAgentRuntime subagents", () => {
     await runtime.dispose();
   });
 
-  it("returns a pending cancellation instead of hanging when a delegate ignores abort", async () => {
+  it("scopes direct cancellation to selected IDs and the owning session", async () => {
+    const runtime = createRuntime({ subagents: [explorer] });
+    const other = createRuntime({ subagents: [explorer] });
+    subagentRuns.deferred = true;
+    subagentRuns.instances.length = 0;
+    try {
+      const start = async (owner: typeof runtime, callId: string) => {
+        const result = await taskTool(owner).execute(callId, { agent: "explorer", task: callId });
+        return String(result.details.delegationId);
+      };
+      const first = await start(runtime, "direct-A");
+      const second = await start(runtime, "direct-B");
+      const foreign = await start(other, "other-session");
+      const stopped = await runtime.stopSubagents([first, first, foreign]);
+      expect(stopped.details.stopped).toMatchObject([{ delegationId: first, status: "stopped" }]);
+      expect((await runtime.stopSubagents([first])).details.stopped).toEqual([]);
+      // Both remaining delegates must still be running to be selected by stop-all.
+      expect((await runtime.stopSubagents()).details.stopped).toMatchObject([
+        { delegationId: second, status: "stopped" },
+      ]);
+      expect((await other.stopSubagents()).details.stopped).toMatchObject([
+        { delegationId: foreign, status: "stopped" },
+      ]);
+    } finally {
+      subagentRuns.deferred = false;
+      await runtime.dispose();
+      await other.dispose();
+    }
+  });
+
+  it.each(["tool", "desktop"])("returns pending cancellation when a delegate ignores %s stop", async (entry) => {
     const runtime = createRuntime({ subagents: [explorer] });
     subagentRuns.calls.length = 0;
     subagentRuns.instances.length = 0;
@@ -7830,9 +7860,9 @@ describe("DesktopAgentRuntime subagents", () => {
 
     vi.useFakeTimers();
     try {
-      const stopping = stop.execute("stop-unresponsive", {
-        delegationIds: [delegationId],
-      });
+      const stopping = entry === "desktop"
+        ? runtime.stopSubagents([delegationId])
+        : stop.execute("stop-unresponsive", { delegationIds: [delegationId] });
       await vi.advanceTimersByTimeAsync(5_000);
       const result = await stopping;
       expect(result.content[0].text).toContain("remain running");
