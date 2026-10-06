@@ -2024,7 +2024,12 @@ Renderer: `apps/desktop/src/components/Markdown.tsx` + `apps/desktop/src/lib/shi
   Searchable/copyable source and source offsets continue to use the complete
   message. Smooth text release stops above 32 Ki code units. Shiki returns to
   plain text before splitting when code exceeds 100,000 code units, 800 lines,
-  or a 2,000-code-unit line; tool output uses the same guard.
+  or a 2,000-code-unit line; tool output uses the same guard. Tool text blocks
+  longer than 32 Ki code units show one UTF-16-safe page at a time, with a
+  possible extra code unit where needed to keep a surrogate pair together, and
+  localized previous/next controls. A live output follows its latest page until
+  the reader navigates away. The tool block's Copy action still copies the full
+  result.
 - **Plugins**: `remark-gfm` (tables, task lists, strikethrough, autolinks),
   `remark-math` + `rehype-katex` (inline `$…$` or `\(…\)`, display `$$…$$`
   or `\[…\]`). Raw HTML is

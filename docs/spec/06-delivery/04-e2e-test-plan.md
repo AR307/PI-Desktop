@@ -6347,24 +6347,29 @@ must keep splitting are covered by `markdown-blocks.test.mjs`.
   fails by 40.125px of content height and 40px of row movement when the reserved
   lane is removed (issue #323).
 
-#### E2E-263: Native interaction stays live during large transcript streaming
+#### E2E-263: Native interaction stays live during large transcript and tool-output rendering
 
 - **Preconditions**: Isolated visible Electron window with the production
-  `Markdown` renderer and built app stylesheet. A separate local Node fixture
-  emits ordered synthetic deltas; no provider, real Host, production session,
-  or user data is used.
-- **Steps**: Stream a 90 Ki-code-unit unbroken message plus a final marker from
-  the child process. Once the rendered message exceeds the streaming-tail
-  threshold, use Electron `webContents.sendInputEvent` to click, type into the
-  draft, switch to another session and back, collapse and expand the transcript,
-  and scroll while deltas continue. Finish the stream and compare every received
-  source code unit, sequence number, final marker, and rendered source length.
+  `Markdown` and `ToolDetailBlocks` renderers and built app stylesheet. A
+  separate local Node fixture emits ordered synthetic deltas; no provider, real
+  Host, production session, or user data is used.
+- **Steps**: Mount a 680 Ki-code-unit tool result, then stream a 90 Ki-code-unit
+  unbroken message plus a final marker from the child process. Once the rendered
+  message exceeds the streaming-tail threshold, use Electron
+  `webContents.sendInputEvent` to click, move between tool-output pages, type
+  into the draft, switch to another session and back, collapse and expand the
+  transcript, and scroll while deltas continue. Finish the stream and compare
+  every received source code unit, sequence number, final marker, and rendered
+  source length.
 - **Expected**: Every native action is acknowledged while streaming remains
   active, each completes within 250 ms, and the action P95 is at most 100 ms on
   the recorded environment. The independent producer advances all 180 sequence
   numbers in order; switching sessions does not move or lose the background
-  stream, and the finished content retains the exact received source.
-- **Specs linked**: `04-ux/08-component-spec.md` §8.7.
+  stream, and the finished content retains the exact received source. The large
+  tool result exposes page controls, renders one page at a time (at most 32 Ki
+  code units plus one code unit where a surrogate pair crosses the boundary),
+  and retains its final page marker.
+- **Specs linked**: `04-ux/08-component-spec.md` §8.7, §9.6.
 - **Status**: Automated by `pnpm test:e2e:renderer-responsiveness`. The parent
   Electron process drives native input under an external 25-second deadline;
   the renderer cannot self-report its own timeout. The fixture is deterministic
