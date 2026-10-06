@@ -42,6 +42,10 @@
 - Offline image acceptance also passed through the real attachment relay and
   IndexedDB, including grant revocation. Local Windows/APK delivery and exact
   validation boundaries are recorded in docs/mobile-account-sync-validation.md.
+- Actual Android covering installation also retained native credentials,
+  pairing, directory and transcript caches; cancellation returned safely to the
+  app. The storage fixture hook exists only in acceptance builds and is absent
+  from both a fresh production bundle and the delivered release-variant APK.
 
 
 ## 2026-10-06 - Upstream 0.16.1, mobile registration and scratch previews

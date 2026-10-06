@@ -98,6 +98,11 @@ with `ANDROID_HOME`, `PI_ANDROID_SERIAL` and `PI_ANDROID_UPDATE_APP_ID` set.
 The harness serves the manifest/APK only on localhost, uses `adb reverse`, and
 captures screenshots under `.artifacts/mobile-update-qa`. Use a fresh isolated
 application ID for each full run; no production account or GitHub call is made.
+For another version pair, set `PI_ANDROID_UPDATE_VERSION_CODE` to the target code
+and install the preceding code first. `PI_ANDROID_UPDATE_OUTPUT` chooses a separate
+artifact directory containing that run's `update.apk`. The acceptance-only storage
+fixture uses the real native secure store and cache services to verify credentials,
+pairing, directory and history survive installer cancellation and covering upgrade.
 
 ## Controlled acceptance environment
 

@@ -57,6 +57,7 @@ the installed previous application. Windows previews are not Authenticode signed
 | PiMobileQA Capacitor WebView + real Electron/Rust | 36 checks passed; zero errors. `../mobile-sync-acceptance/.artifacts/mobile-account-1791295655816/report.json`. Test candidate `795afc875`, desktop candidate `e4b2d966a`, mobile product includes `f8a9a5a81`. The script is integrated locally as `5088896a9`. |
 | Real attachment relay + offline mobile browser | 4 checks passed; zero errors. `.artifacts/mobile-attachment-cache-1791296237494/report.json`, clean candidate `53bf9a962`. |
 | Android native updater | Four native user-flow groups passed on isolated `xyz.mirrorcoding.pi.mobile.updateqa2`: signed-out check; download/cancel; retry and force-stop recovery; system covering install from code 5 to 6. Screenshots are in `../mobile-update/.artifacts/mobile-update-qa/`. |
+| Android upgrade data retention | The same native installer flow passed on isolated `xyz.mirrorcoding.pi.mobile.updateqa3`, code 7 to 8. After cancelling installation and after successful covering installation, real secure-storage credentials, cached pairing, directory and history remained readable. Test commit `47460701c`, locally integrated as `2f681513d`; six screenshot stages under `../mobile-update/.artifacts/mobile-update-retention-qa/`. |
 | Windows packaged applications | NSIS payload passed the real preload/IPC/Rust boot probe. Portable self-extraction and its real window passed version/protocol queries; `.artifacts/portable-visible-1791295051315/report.json` and `portable.png`. The installer wizard itself was not executed. |
 
 The account flows verify three computers, same-path isolation, empty projects,
@@ -72,7 +73,9 @@ once, reopens its preview offline without another read, then revokes the grant
 and verifies removal of cached image bytes and directory visibility.
 
 The final release APK was built from mobile-update candidate `78d0119b9`, which
-contains the same final mobile product source as the main task worktree. Native
+contains the same final mobile runtime as the main task worktree. The later
+acceptance-only storage hook is eliminated from production builds; a fresh
+production build and the delivered APK were checked for its absence. Native
 acceptance used isolated application IDs; the normal installed app was not
 overwritten by those tests. Reviewed screenshots include dark English, light
 Chinese, multiple computers, offline history, image preview and Android installer.
@@ -115,6 +118,11 @@ For the normal APK, compile shared dependencies and typecheck mobile, then run
 `apps/mobile/android`. Align and sign the unsigned release output using the
 existing locally managed signing identity. Keep signing credentials outside
 source and command logs. Never publish an APK signed with a different identity.
+
+The retention scenario seeds only controlled fixture credentials through the
+existing native store and seeds caches through their public services. It verifies
+them after real system installer operations. This tests application storage
+continuity; it does not claim a live MC session was reauthenticated during upgrade.
 
 Generate its corresponding release manifest from repository metadata:
 
