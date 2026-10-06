@@ -196,6 +196,15 @@ non-secret `accountLabel`, and a `connected` flag. The custom-provider dialog
 does not edit or delete OAuth rows; the Vendor accounts card calls
 `providers.delete` for the selected row.
 
+Plugin-owned OAuth rows use the same `authKind` and encrypted secret reference,
+but keep the manifest-owned row id `plugin:<pluginId>:<declaredId>`. The
+`provider.oauth` callback handles login and refresh for that row, and one
+credential is stored per declared provider contribution. Signing out deletes
+only its OAuth secret; the provider row remains until the plugin is disabled,
+uninstalled, or removes the declaration. Plugin-owned rows and their secrets
+are excluded from portable configuration capture because the plugin manifest
+recreates the row on the destination host.
+
 `models` is the provider's selected model binding array. Each binding owns its
 context/output limits and explicit thinking configuration. Published catalog
 levels seed a newly selected known model, but the binding may enable any

@@ -531,26 +531,28 @@ fn the_declaration_shape_is_validated() {
     );
     assert!(read_manifest_err(&root).contains("declares model m twice"));
 
-    // OAuth needs the Host-owned login flow, which does not exist yet.
+    // OAuth declarations require an explicit OAuth capability grant.
     write_plugin(
         &root,
         declaration_manifest(
             json!([{ "id": "demo", "name": "Demo", "authKind": "oauth",
-                     "models": [{ "id": "m" }] }]),
-            permissions,
+                     "baseUrl": "https://api.example.com/v1", "models": [{ "id": "m" }] }]),
+            permissions.clone(),
         ),
     );
-    assert!(read_manifest_err(&root).contains("unsupported authKind oauth"));
+    assert!(read_manifest_err(&root).contains("require the provider.oauth permission"));
 
     write_plugin(
         &root,
         declaration_manifest(
             json!([{ "id": "demo", "name": "Demo", "authKind": "oauth",
-                     "oauth": { "label": "Demo" }, "models": [{ "id": "m" }] }]),
-            json!(["provider.register"]),
+                     "baseUrl": "https://api.example.com/v1",
+                     "oauth": { "loginLabel": "Continue in browser", "isSubscription": true },
+                     "models": [{ "id": "m" }] }]),
+            json!(["provider.register", "provider.oauth"]),
         ),
     );
-    assert!(read_manifest_err(&root).contains("not supported in this release"));
+    assert!(PluginManager::read_manifest(&root).is_ok());
 }
 
 /// A row id already in use by something other than this plugin cannot arise

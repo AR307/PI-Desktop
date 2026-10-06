@@ -257,20 +257,50 @@ pub(crate) fn validate_contributions(root: &Path, manifest: &PluginManifest) -> 
                     bail!("PLUGIN_INVALID: provider {id} has unsupported apiStyle {style}");
                 }
             }
-            // `oauth` declarations arrive with the Host-owned plugin login
-            // flow. Until it exists, a manifest that asks for one is refused
-            // rather than turned into a row nobody can sign in to.
-            if obj.get("oauth").is_some() {
-                bail!(
-                    "PLUGIN_INVALID: provider {id} declares oauth; plugin OAuth providers are not supported in this release"
-                );
-            }
             let auth_kind = obj
                 .get("authKind")
                 .and_then(Value::as_str)
                 .unwrap_or("api_key");
             if !is_known_auth_kind(auth_kind) {
                 bail!("PLUGIN_INVALID: provider {id} has unsupported authKind {auth_kind}");
+            }
+            if auth_kind == "oauth" {
+                require_permission(manifest, "provider.oauth", "OAuth providers")?;
+                if obj.get("baseUrl").and_then(Value::as_str).is_none() {
+                    bail!("PLUGIN_INVALID: provider {id} requires baseUrl for OAuth");
+                }
+            }
+            if let Some(oauth) = obj.get("oauth") {
+                if auth_kind != "oauth" {
+                    bail!("PLUGIN_INVALID: provider {id} oauth metadata requires authKind oauth");
+                }
+                let oauth = oauth.as_object().ok_or_else(|| {
+                    anyhow!("PLUGIN_INVALID: provider {id} oauth must be an object")
+                })?;
+                if let Some(field) = oauth
+                    .keys()
+                    .find(|key| key.as_str() != "loginLabel" && key.as_str() != "isSubscription")
+                {
+                    bail!("PLUGIN_INVALID: provider {id} oauth has unsupported field {field}");
+                }
+                if let Some(login_label) = oauth.get("loginLabel") {
+                    if login_label
+                        .as_str()
+                        .map(str::trim)
+                        .filter(|value| !value.is_empty() && value.encode_utf16().count() <= 128)
+                        .is_none()
+                    {
+                        bail!(
+                            "PLUGIN_INVALID: provider {id} oauth.loginLabel must be a non-empty string of at most 128 characters"
+                        );
+                    }
+                }
+                if oauth
+                    .get("isSubscription")
+                    .is_some_and(|value| !value.is_boolean())
+                {
+                    bail!("PLUGIN_INVALID: provider {id} oauth.isSubscription must be a boolean");
+                }
             }
             if let Some(base_url) = obj.get("baseUrl").and_then(Value::as_str) {
                 // The runtime reaches this endpoint, so a declaration may only
@@ -396,7 +426,9 @@ pub(crate) fn validate_contributions(root: &Path, manifest: &PluginManifest) -> 
                             anyhow!("PLUGIN_INVALID: theme {id} asset missing: {raw}")
                         })?;
                         if !asset_path.starts_with(&package_root) {
-                            bail!("PLUGIN_INVALID: theme {id} asset {raw} resolves outside the plugin package");
+                            bail!(
+                                "PLUGIN_INVALID: theme {id} asset {raw} resolves outside the plugin package"
+                            );
                         }
                         asset_path
                     };
