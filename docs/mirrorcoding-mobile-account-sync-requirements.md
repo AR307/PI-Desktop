@@ -46,10 +46,11 @@ Devices and grants must be scoped to the authenticated account.
 Desktop creates the existing `POST /api/pi-sync/pairings` with its deviceId and:
 
 ```json
-{ "scope": { "kind": "account", "id": "account-id", "label": "Account work" } }
+{ "scope": { "kind": "account", "id": "account-id", "label": "All projects and sessions" } }
 ```
 
-MC verifies the account ID against authenticated identity and that the creating
+The label is display text, not an authorization field. MC verifies the account
+ID against authenticated identity and that the creating
 computer opted in. Codes remain eight digits, ten minutes, one-use, same-account
 claim only. Claim continues through `POST /api/pi-sync/pairings/claim` with the
 registered mobile deviceId. The resulting grant is:
@@ -60,7 +61,7 @@ registered mobile deviceId. The resulting grant is:
   "accountId": "account-id",
   "mobileDeviceId": "phone-id",
   "mobileDeviceName": "PI Android",
-  "scope": { "kind": "account", "id": "account-id", "label": "Account work" },
+  "scope": { "kind": "account", "id": "account-id", "label": "All projects and sessions" },
   "createdAt": "2026-10-06T00:00:00Z"
 }
 ```
@@ -83,8 +84,10 @@ Do not rely on a ticket issued before revocation. Desktop `peer.open` includes
 trusted accountId, mobileDeviceId and current applicable grants. PI checks each
 directory, history, change, attachment and mutation request against local scope.
 
-Desktop control notifications use `devices.changed` / `grants.changed`.
-Phones receive JSON-RPC notifications on their active relay connections:
+Desktop control connections consume `grants.changed` to refresh authorization.
+Device directory notifications are for phones; PI Desktop does not consume a
+`devices.changed` control message. Phones receive these JSON-RPC notifications
+on their active relay connections:
 
 ```json
 { "jsonrpc": "2.0", "method": "mobile.devicesChanged", "params": {} }

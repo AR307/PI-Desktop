@@ -39,6 +39,9 @@
   an offline restart. Windows installer and Portable previews were built; their
   packaged application boot checks passed. Final delivery details follow in the
   acceptance record; no production calls, push or release were performed.
+- Offline image acceptance also passed through the real attachment relay and
+  IndexedDB, including grant revocation. Local Windows/APK delivery and exact
+  validation boundaries are recorded in docs/mobile-account-sync-validation.md.
 
 
 ## 2026-10-06 - Upstream 0.16.1, mobile registration and scratch previews
