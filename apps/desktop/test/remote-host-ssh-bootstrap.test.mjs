@@ -198,7 +198,7 @@ test("an arm64 Linux remote installs the published arm64 bundle", async () => {
 
   assert.equal(
     fetched[0],
-    `https://github.com/vastsa/PI-Desktop/releases/download/v${VERSION}/${arm64Artifact}.sha256`,
+    `https://github.com/AR307/PI-Desktop/releases/download/v${VERSION}/${arm64Artifact}.sha256`,
   );
   assert.equal(outcome.ssh.version, VERSION);
   const upload = transport.calls.uploads[0];

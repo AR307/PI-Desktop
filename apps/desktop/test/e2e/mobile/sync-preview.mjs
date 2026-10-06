@@ -159,6 +159,8 @@ try {
   assert(windowCapture, "native window capture is available");
   await writeFile(join(output, "desktop-window-preview.png"), Buffer.from(windowCapture.split(",")[1], "base64"));
   check("local fixture required no paid model requests", fixture.chats.length === 0);
+  await invoke("mirrorcoding/logout", true);
+  check("explicit desktop logout clears device and local sharing scopes", !(await invoke("settings/get")).mobileSync && !(await invoke("mobile-sync/status")).deviceId);
 } catch (error) { errors.push(error.stack ?? String(error)); console.error(error); process.exitCode = 1; }
 finally {
   await closeDesktop().catch(error => errors.push(String(error)));

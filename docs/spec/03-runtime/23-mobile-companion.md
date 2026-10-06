@@ -19,6 +19,9 @@ keeps both in secure credential storage. Restarts and token rotation reuse that
 identity. Desktop reauthorization supplies both fields once for the new
 authorization; catalog/grant refreshes never register again. A missing secret
 requires explicit sign-out and pairing again, not a guessed client device ID.
+Explicit desktop logout also clears its encrypted installation credentials and
+local share scopes after account revocation. Reauthorization without logout
+retains the installation identity and its scopes.
 
 Mobile login first reads MC's encryption policy and uses RSA-OAEP-256 when enabled.
 Account/sync HTTP 429 and 503 preserve credentials and honor Retry-After, including

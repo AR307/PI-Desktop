@@ -20,7 +20,7 @@ const serial = process.env.PI_ANDROID_SERIAL ?? "emulator-5554";
 const appId = "xyz.mirrorcoding.pi.mobile";
 const adb = (...args) => runFile(adbPath, ["-s", serial, ...args], { encoding: "utf8", maxBuffer: 4 * 1024 * 1024 });
 await mkdir(output, { recursive: true });
-const fixture = await mobileFixture();
+const fixture = await mobileFixture({ encryptedLogin: true });
 const passed = [], errors = [];
 let desktop, page, device, phone, closing = false;
 const check = (name, result = true) => { assert(result, name); passed.push(name); console.log(`PASS ${name}`); };
@@ -53,6 +53,9 @@ async function connectWebView() {
   await phone.locator(".mobile-shell").waitFor();
 }
 async function screenshot(name) {
+  await phone.evaluate(() => Promise.allSettled(document.getAnimations()
+    .filter((animation) => animation.effect?.getTiming().iterations !== Infinity)
+    .map((animation) => animation.finished)));
   const { stdout } = await runFile(adbPath, ["-s", serial, "exec-out", "screencap", "-p"], { encoding: "buffer", maxBuffer: 8 * 1024 * 1024 });
   await writeFile(join(output, `${name}.png`), stdout);
   check(`${name}: no horizontal overflow`, await phone.evaluate(() => document.documentElement.scrollWidth <= innerWidth));
@@ -107,9 +110,17 @@ try {
   if ((await view()).signedIn) await phone.evaluate(() => window.__PI_MOBILE_CONTROLLER__.logout());
   await phone.locator('[name="username"]').fill("mobileqa");
   await phone.locator('[name="password"]').fill("mobile-pass");
+  fixture.control.rateLimitOnce = "/api/pi-mobile/auth/login";
+  await phone.locator(".login-form button[type=submit]").click();
+  await phone.getByRole("alert").filter({ hasText: "rate limited" }).waitFor();
+  check("native login explains HTTP 429 and Retry-After", (await phone.getByRole("alert").textContent()).includes("Try again after"));
+  await screenshot("android-login-rate-limited");
+  await until(async () => Date.now() >= (await view()).retryAt, "native login cooldown");
+  await phone.locator('[name="password"]').fill("mobile-pass");
   await phone.locator(".login-form button[type=submit]").click();
   await phone.getByRole("heading", { name: "Shared work", exact: true }).waitFor();
   check("native password login and secure credential write");
+  check("native login uses MC-declared RSA-OAEP-256 without plaintext", fixture.control.encryptedLogins === 1);
   await phone.getByRole("button", { name: "Pair desktop", exact: true }).click();
   await phone.getByLabel("8-digit pairing code").click();
   await until(async () => /mInputShown=true|isInputViewShown=true/.test((await adb("shell", "dumpsys", "input_method")).stdout), "pairing keyboard");

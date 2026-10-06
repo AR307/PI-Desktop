@@ -77,10 +77,15 @@ account/password checks, optional password-encryption policy, risk checks and
 
 | Method and path | Request | Successful data |
 | --- | --- | --- |
-| POST `/api/pi-mobile/auth/login` | `{username,password}` | `{session}` or `{challenge}` |
+| GET `/api/pi-mobile/auth/encryption-key` | None | `{enabled:false}` or `{enabled:true,encryptionKeyId,publicKey,algorithm:"RSA-OAEP-256"}` |
+| POST `/api/pi-mobile/auth/login` | `{username,password}`; when encryption is enabled, `{username,passwordEncrypted,encryptionKeyId}` | `{session}` or `{challenge}` |
 | POST `/api/pi-mobile/auth/challenge` | `{challengeId,code}` | `{session}` or another `{challenge}` |
 | POST `/api/pi-mobile/auth/refresh` | `{refreshToken}` | `{session}` |
 | POST `/api/pi-mobile/auth/logout` | `{refreshToken}` | `{}` |
+
+The encrypted login uses the declared SPKI PEM public key, RSA-OAEP with SHA-256
+and MGF1-SHA256, UTF-8 password bytes and standard Base64. An invalid enabled
+encryption policy is an error, never permission to send plaintext.
 
 ```json
 {
@@ -123,13 +128,39 @@ Another device does not gain access merely by claiming an identifier.
 
 | Method and path | Request / result |
 | --- | --- |
-| POST `/api/pi-sync/devices/register` | `{deviceId?,kind:"desktop"\|"mobile",name}` → `{deviceId}` |
+| POST `/api/pi-sync/devices/register` | Initial `{kind:"desktop"\|"mobile",name}` → `{deviceId,deviceSecret}`; restore with saved `{deviceId,deviceSecret,kind,name}` → `{deviceId}` |
 | GET `/api/pi-sync/devices` | `{devices:[{deviceId,name,kind,online}]}`; visible paired desktops only for mobile |
 | POST `/api/pi-sync/pairings` | `{deviceId,scope}` → `{pairing}` |
 | POST `/api/pi-sync/pairings/{id}/cancel` | `{}` → `{}`; desktop owner only |
 | POST `/api/pi-sync/pairings/claim` | `{code,deviceId}` → `{grant}` |
 | GET `/api/pi-sync/grants` | `{grants:[...]}`; mobile receives its registered device's grants; desktop supplies `?deviceId=<desktopDeviceId>` to select its grants |
 | POST `/api/pi-sync/grants/{id}/revoke` | `{}` → `{}`; participating desktop/mobile under the authenticated owning account |
+
+MC creates the device ID; the installation secret is returned only once. The
+clients save both in their existing secure storage. Repeating registration under
+the same authorization returns the ID without a new secret, so restarts, token
+refreshes and grant refreshes must reuse the saved identity instead of registering
+again. Desktop reauthorization restores that identity once with the saved secret.
+Explicit logout clears credentials and local scopes; a new installation must
+pair again. A device ID alone is not sufficient to restore an installation.
+
+### Client alignment and rate-limit findings (2026-10-06)
+
+The preceding encryption and registration fields align with MC's existing
+`pi-desktop-mirrorcoding-auth.md`, sections 11.2 and 11.3; they do not request new
+server endpoints. Source inspection found model traffic uses `ModelRequestRateLimit`,
+while mobile auth uses the global API and shared-IP `CriticalRateLimit` policies.
+Sync registration, pairing creation and tickets use distinct user-critical
+scopes; claiming a code also uses the critical-IP policy. Thus model usage does
+not directly consume the mobile login bucket, but other critical operations
+from the same IP can. This is source evidence, not a measurement of production
+rate-limit settings or proxy behavior.
+
+PI honors numeric/date `Retry-After` on empty or JSON 429/503 responses, keeps
+valid credentials, and prevents registration failures from proceeding to pairing.
+Controlled Electron/Android tests verify these client behaviors. Any remaining
+production throttling requires MC-side request correlation and limiter/proxy
+inspection; PI does not disable server limits or automatically replay mutations.
 
 ```json
 {

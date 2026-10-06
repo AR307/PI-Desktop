@@ -229,6 +229,16 @@ export class MobileSyncService {
     if (this.heartbeat) clearInterval(this.heartbeat); this.heartbeat = undefined;
     const socket = this.socket; this.socket = undefined; socket?.close(); this.closePeers();
   }
+  async forgetDevice(): Promise<void> {
+    this.active = false;
+    this.epoch += 1;
+    this.disconnect();
+    await this.refreshTask;
+    await this.deps.credentials.clear();
+    this.settings = undefined;
+    await this.deps.host().call("settings.set", { mobileSync: null });
+    this.publish({ status: "signed_out", deviceId: undefined, grants: [], pairings: [], error: undefined, retryAt: undefined });
+  }
   dispose() { this.stopConfiguration(); this.disposed = true; this.epoch += 1; this.disconnect(); }
 }
 

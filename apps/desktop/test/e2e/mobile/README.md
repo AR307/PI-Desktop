@@ -42,6 +42,12 @@ responses with Retry-After, server-issued installation identities, pairing,
 restart without registration, token refresh preserving device secrets, history,
 and an interactive temporary-session HTML link in the native browser view.
 It makes no model requests and records both renderer and native-window captures.
+It also verifies explicit desktop logout clears the local installation identity
+and share scopes.
+
+```powershell
+node apps/desktop/test/e2e/mobile/sync-preview.mjs
+```
 
 ```powershell
 $env:PI_TEST_OUTPUT = Join-Path $PWD ('.artifacts/mobile-' + (Get-Date -Format 'yyyyMMdd-HHmmss'))
@@ -95,6 +101,7 @@ app, restarts the app, and puts a fixture image in the device's Downloads folder
 It does not clear Android application data or bypass secure storage.
 
 Native scenarios cover password login, real secure credential persistence,
+empty 429/Retry-After recovery and MC-declared RSA-OAEP-256 password encryption,
 pairing, Android Back, continuation and streamed replies, soft-keyboard layout,
 background/foreground recovery with a draft, the system file picker, reference
 image upload, image generation/preview, the Android save/share sheet, reuse of a

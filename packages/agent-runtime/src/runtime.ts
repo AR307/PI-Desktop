@@ -6390,7 +6390,8 @@ export class DesktopAgentRuntime {
     // agentLoopContinue refuses a transcript ending in an assistant message,
     // and this one carries nothing worth resending anyway.
     const messages = [...this.agent.state.messages];
-    const lastIndex = messages.findLastIndex((message) => message.role !== "system");
+    let lastIndex = messages.length - 1;
+    while (lastIndex >= 0 && messages[lastIndex].role === "system") lastIndex--;
     const last = messages[lastIndex];
     if (last?.role === "assistant" && !responseContentFacts(last).meaningful) messages.splice(lastIndex, 1);
     this.setAgentMessages(messages);

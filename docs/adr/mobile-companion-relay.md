@@ -44,6 +44,9 @@ authorization, not with each grant refresh. Android retains the device ID/secret
 when rotating its login tokens. HTTP Retry-After belongs to account/sync transport
 and does not alter model retry policy. No new MC endpoints or database tables are
 introduced; login also follows the existing encryption-key contract.
+Explicit desktop logout clears the stored installation secret and local scopes;
+ordinary restart or reauthorization retains them. This follows MC's distinction
+between resuming an installation and registering a new one after sign-out.
 
 Forking Happy (Expo) or HAPI (Kotlin/Hub) would introduce a separate UI and
 execution protocol. A generic remote desktop/terminal would not preserve PI's

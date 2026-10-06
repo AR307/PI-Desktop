@@ -8133,7 +8133,7 @@ describe("DesktopAgentRuntime subagents", () => {
 
     it.each([false, true])("ends the Task batch and publishes one ReturnToParent per worker before waking (immediate=%s)", async (immediate) => {
       const onEvent = vi.fn();
-      const host = { call: vi.fn(async () => ({ id: "wake" })) };
+      const host = { call: vi.fn(async (_method: string, _params?: unknown) => ({ id: "wake" })) };
       const runtime = createRuntime({ subagents: [explorer], host, onEvent });
       runtime.setTurnReasoning("high", true);
       const requests: AgentMessage[][] = [];

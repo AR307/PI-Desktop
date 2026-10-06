@@ -42,6 +42,7 @@ describe("changelog catalog", () => {
     expect(versions).toEqual([
       "0.16.1",
       "0.16.0",
+      "0.15.11",
       "0.15.10",
       "0.15.9",
       "0.15.6",

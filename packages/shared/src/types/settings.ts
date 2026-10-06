@@ -27,7 +27,7 @@ export type ThemePreference = "system" | "light" | "dark" | `plugin:${string}`;
 export type CloseBehavior = "ask" | "tray" | "quit";
 
 export type AppSettings = {
-  mobileSync?: MobileSyncSettings;
+  mobileSync?: MobileSyncSettings | null;
   /** MirrorCoding first-run dialog has been completed or skipped. */
   imageSessions?: Record<string, ImageSessionConfig>;
   mirrorCodingWelcomeCompleted?: boolean;

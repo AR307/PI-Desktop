@@ -33,7 +33,8 @@ const build = async (command, cwd, name) => {
   console.log(`PASS ${name}`);
 };
 try {
-  const apk = join(output, "pi-mobile-0.15.1-preview.apk");
+  const { version } = require(join(root, "apps/mobile/package.json"));
+  const apk = join(output, `pi-mobile-${version}-preview.apk`);
   if (!process.argv.includes("--verify-installed")) {
   // Use the previous acceptance application's own logout flow to remove only its
   // controlled test credential before installing the official-origin package.

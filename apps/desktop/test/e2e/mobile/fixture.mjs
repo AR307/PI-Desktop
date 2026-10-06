@@ -1,5 +1,5 @@
 import { createServer, request as httpRequest } from "node:http";
-import { randomUUID } from "node:crypto";
+import { constants, generateKeyPairSync, privateDecrypt, randomUUID } from "node:crypto";
 import { createRequire } from "node:module";
 import { pathToFileURL } from "node:url";
 import { imageFixture } from "../images/fixture.mjs";
@@ -7,8 +7,9 @@ import { imageFixture } from "../images/fixture.mjs";
 const { WebSocketServer, WebSocket } = createRequire(import.meta.url)("ws");
 
 /** Controlled MC boundary for actual desktop/mobile acceptance, never production. */
-export async function mobileFixture({ port = 0, messageHandler } = {}) {
+export async function mobileFixture({ port = 0, messageHandler, encryptedLogin = false } = {}) {
   const upstream = await imageFixture();
+  const loginKey = encryptedLogin ? generateKeyPairSync("rsa", { modulusLength: 2048 }) : null;
   const devices = new Map(), sessions = new Map(), refreshTokens = new Map();
   const desktopAuth = { kind: "desktop", accountId: "901", deviceId: undefined };
   const pairings = new Map(), grants = new Map(), tickets = new Map(), desktops = new Map(), peers = new Map();
@@ -119,9 +120,17 @@ export async function mobileFixture({ port = 0, messageHandler } = {}) {
         res.setHeader("Retry-After", "3");
         res.writeHead(429).end(); return;
       }
-      if (url.pathname === "/api/pi-mobile/auth/encryption-key") { json({ enabled: false }); return; }
+      if (url.pathname === "/api/pi-mobile/auth/encryption-key") {
+        json(loginKey ? { enabled: true, encryptionKeyId: "fixture-key", algorithm: "RSA-OAEP-256", publicKey: loginKey.publicKey.export({ type: "spki", format: "pem" }) } : { enabled: false }); return;
+      }
       if (url.pathname === "/api/pi-mobile/auth/login") {
-        if (!["mobileqa", "other"].includes(body.username) || body.password !== "mobile-pass") { fail("INVALID_CREDENTIALS", 401); return; }
+        let password = body.password;
+        if (loginKey) {
+          if (password !== undefined || body.encryptionKeyId !== "fixture-key" || typeof body.passwordEncrypted !== "string") { fail("ENCRYPTED_PASSWORD_REQUIRED"); return; }
+          password = privateDecrypt({ key: loginKey.privateKey, padding: constants.RSA_PKCS1_OAEP_PADDING, oaepHash: "sha256" }, Buffer.from(body.passwordEncrypted, "base64")).toString();
+          control.encryptedLogins = (control.encryptedLogins ?? 0) + 1;
+        }
+        if (!["mobileqa", "other"].includes(body.username) || password !== "mobile-pass") { fail("INVALID_CREDENTIALS", 401); return; }
         if (control.challenge) { json({ challenge: { challengeId: body.username, type: "totp" } }); return; }
         json({ session: issue(account(body.username)) }); return;
       }

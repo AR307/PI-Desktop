@@ -24,9 +24,20 @@
   persistence, pairing, chat continuation, Fast/Ultra, keyboard/Back, attachments,
   image generation/share, foreground recovery and process restart. Requests were
   served exclusively by the controlled local fixture.
+- Native acceptance now also requires an empty 429 recovery and an RSA-OAEP-256
+  login on Android, using a fixture that refuses plaintext when encryption is on.
+- The delivery helper derives the preview APK name from the mobile package
+  version; native screenshots wait for finite transitions to finish.
+- Aligned the MC handoff's encryption/one-time registration fields with the
+  existing server contract and recorded the separate model/auth limiter scopes.
+- Explicit desktop logout clears the encrypted installation secret and sharing
+  scopes after account revocation; reauthorization without logout retains the
+  installation identity. Runtime recovery stays compatible with the ES2022 build.
 - Integration retains native clipboard routing for the new session-link action,
   adapts MC metadata to upstream's providerKey field and preserves Ultra child
   lifecycle and empty-response recovery with chronological system messages.
+- Remote-host bootstrap expectations retain the fork's AR307 release source.
+  Changelog checks also retain the fork's shipped 0.15.11 entry.
 - Windows host regression checks found and fixed relocated capability keys using
   unnormalized path separators; project overrides now survive a profile move.
 
