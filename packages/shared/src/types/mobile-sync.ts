@@ -45,6 +45,8 @@ export type MobileSyncSettings = {
   scopes: MobileSyncScope[];
   revokedGrantIds: string[];
   accountSyncEnabled?: boolean;
+  /** Retry the MC discovery update after a temporary network failure. */
+  accountSharingPending?: boolean;
 };
 
 /** Account discovery contains device metadata, never transcript content. */
