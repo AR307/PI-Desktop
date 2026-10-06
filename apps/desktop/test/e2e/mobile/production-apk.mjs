@@ -38,10 +38,13 @@ try {
   if (!process.argv.includes("--verify-installed")) {
   // Use the previous acceptance application's own logout flow to remove only its
   // controlled test credential before installing the official-origin package.
+  await adb("shell", "am", "force-stop", appId);
+  await adb("shell", "am", "start", "-n", `${appId}/.MainActivity`);
   const acceptancePage = await connect();
   assert(await acceptancePage.evaluate(() => Boolean(window.__PI_MOBILE_CONTROLLER__)), "existing app is the controlled acceptance package");
   await acceptancePage.getByRole("button", { name: /^(Account and appearance|账号与外观)$/ }).click();
   await acceptancePage.getByRole("dialog").getByRole("button", { name: /^(Sign out|退出登录)$/ }).click();
+  await acceptancePage.getByRole("dialog", { name: /^(Sign out|退出登录)$/ }).getByRole("button", { name: /^(Sign out|退出登录)$/ }).click();
   await acceptancePage.locator('[name="username"]').waitFor({ timeout: 40_000 });
   await device.close(); device = undefined;
   await build("pnpm --filter @pi-desktop/mobile build", root, "mobile-production-web");

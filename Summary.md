@@ -28,6 +28,8 @@
   login on Android, using a fixture that refuses plaintext when encryption is on.
 - The delivery helper derives the preview APK name from the mobile package
   version; native screenshots wait for finite transitions to finish.
+  It follows the account sheet's sign-out confirmation before replacing the
+  controlled test package with official-origin assets.
 - Aligned the MC handoff's encryption/one-time registration fields with the
   existing server contract and recorded the separate model/auth limiter scopes.
 - Explicit desktop logout clears the encrypted installation secret and sharing
@@ -40,6 +42,15 @@
   Changelog checks also retain the fork's shipped 0.15.11 entry.
 - Windows host regression checks found and fixed relocated capability keys using
   unnormalized path separators; project overrides now survive a profile move.
+- Final executable candidate `43ab7ad2f` passed 16 Electron/browser checks and
+  27 actual PiMobileQA checks against controlled MC/upstreams. Full JS builds,
+  sidecar bundle, desktop typecheck, lint, 1,354 runtime tests, 1,192 shared
+  source/dist tests, 20 mobile tests, 38 i18n tests and 774 Rust tests passed;
+  Rust format and Clippy also passed. Detailed evidence and the non-green broad
+  Windows desktop suite are recorded in the mobile acceptance README.
+- Rebuilt and installed the debug-signed 0.16.1 preview APK with official-origin
+  assets and no acceptance hooks. The launch check stops at login; production
+  authentication/pairing and MC limiter deployment remain unverified.
 
 ## 2026-10-01 - Ultra automatic asynchronous handoff
 

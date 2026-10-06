@@ -161,6 +161,50 @@ the service. Joint MC acceptance must run separately against the MC team's
 local service using the [handoff contract](../../../../../docs/mirrorcoding-mobile-sync-requirements.md).
 Record those results separately from fixture runs and production deployment.
 
+## Upstream/mobile/preview candidate acceptance (2026-10-06)
+
+- Executable candidate: `43ab7ad2f1934cf5c049bdebddec8db68798ce8b`.
+- Fork base: `920b12b8e053165d343a421b3cb8ee93c50a436a` (`origin/main`).
+- Integrated upstream: `924a03a7b04a51e3213142d147ed4d1e67a0ed0e`, version 0.16.1.
+- Environment: Windows, Node 24.19, Rust 1.90, JDK 21, existing PiMobileQA
+  `emulator-5554`. Electron/Rust profiles and MC/upstream fixtures were isolated.
+
+| Check actually run | Result |
+| --- | --- |
+| `sync-preview.mjs` | 16 passed; `.artifacts/sync-preview-1791259138033/report.json` |
+| `android.mjs` | 27 passed; `.artifacts/android-1791259174205/report.json` |
+| `pnpm build:js` and desktop `bundle:runtime` | Passed; desktop, mobile and documentation built |
+| Desktop typecheck and `pnpm lint` | Passed |
+| Agent runtime tests | 1,354 passed |
+| Shared tests | 1,192 passed (includes source and generated dist suites) |
+| Mobile and i18n tests | 20 and 38 passed |
+| Focused desktop account/browser/remote-bootstrap tests | 38 passed |
+| `cargo +1.90.0 test -p host-core --locked` | 774 passed |
+| Rust format and all-target Clippy | Passed |
+
+Screenshots were inspected for the native HTML browser guest, Android login
+rate-limit notice, pairing, and light/dark conversation layouts. The desktop
+window capture (not renderer-only capture) confirms the native page is visible
+and interactive. The native suite rejects plaintext when RSA login is enabled.
+
+The broad desktop suite was also run, not silently omitted: 3,558 passed,
+46 failed and 8 skipped. Two local-network failures (MCP OAuth and plugin egress)
+passed focused reruns. One AR307-versus-upstream download expectation was corrected
+and passed. The remaining 43 failures concern Windows-incompatible POSIX/macOS
+shell/SSH fixtures, chmod/path-separator expectations, and the plugin filesystem
+fixture's `INVALID_ARGUMENT` versus `NOT_FOUND` expectation. The complete desktop
+suite is therefore **not reported green**; raw failures are retained in
+`.artifacts/desktop-tests.jsonl`. No actual macOS/Linux build was performed.
+
+After the native suite, the package helper was corrected to follow the visible
+sign-out confirmation. It then built, installed and opened
+`.artifacts/mobile-package-0.16.1/pi-mobile-0.16.1-preview.apk`: debug-signed,
+official MC origin, no acceptance hooks. That probe stopped at login without
+submitting credentials to production. The emulator retains this normal preview,
+not an APK tied to the stopped fixture. The package report and login captures
+are in the same directory. No paid model call, MC deployment, push or Release
+was part of this acceptance.
+
 ## Native Messages response recovery
 
 Run `node apps/desktop/test/e2e/mobile/response-recovery.mjs` after the builds
