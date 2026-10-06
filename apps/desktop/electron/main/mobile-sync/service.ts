@@ -256,9 +256,11 @@ export class MobileSyncService {
   }
   private async publishSharing(): Promise<void> {
     if (!this.settings) return;
-    await this.request(`/devices/${encodeURIComponent(this.settings.deviceId)}/sharing`, { accountSyncEnabled: this.settings.accountSyncEnabled === true });
+    const deviceId = this.settings.deviceId;
+    const enabled = this.settings.accountSyncEnabled === true;
+    await this.request(`/devices/${encodeURIComponent(deviceId)}/sharing`, { accountSyncEnabled: enabled });
     await this.write(async () => {
-      if (!this.settings) return;
+      if (!this.settings || this.settings.deviceId !== deviceId || (this.settings.accountSyncEnabled === true) !== enabled) return;
       this.settings.accountSharingPending = false;
       await this.persist();
     });
