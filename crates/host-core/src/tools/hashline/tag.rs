@@ -178,7 +178,7 @@ pub fn looks_binary_bytes(bytes: &[u8]) -> bool {
     if bytes.starts_with(UTF16LE_BOM) || bytes.starts_with(UTF16BE_BOM) {
         let little_endian = bytes.starts_with(UTF16LE_BOM);
         let body = &bytes[2..];
-        return body.len() % 2 != 0
+        return !body.len().is_multiple_of(2)
             || std::char::decode_utf16(body.chunks_exact(2).map(|pair| {
                 if little_endian {
                     u16::from_le_bytes([pair[0], pair[1]])
