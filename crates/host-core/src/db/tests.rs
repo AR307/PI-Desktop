@@ -158,6 +158,8 @@ fn v20_database_migrates_the_session_checklist_with_a_backup() {
              DROP TABLE IF EXISTS session_todo;
              ALTER TABLE sessions DROP COLUMN todo_revision;
              ALTER TABLE sessions DROP COLUMN todo_updated_at;
+             DROP INDEX IF EXISTS idx_sessions_updated_id;
+             CREATE INDEX idx_sessions_updated ON sessions(updated_at DESC);
              PRAGMA user_version = 20;",
         )
         .unwrap();
@@ -1658,4 +1660,40 @@ fn a_v16_file_gains_the_provider_owner_column() {
         )
         .unwrap();
     assert!(owner.is_none());
+}
+
+#[test]
+fn migrates_v21_to_v22_replaces_session_index() {
+    let dir = tempfile::tempdir().unwrap();
+    let db_path = dir.path().join("pi.sqlite");
+    {
+        // Open a fresh database which creates the latest schema
+        let db = Database::open(&db_path).unwrap();
+        db.conn().execute_batch(
+            "
+            DROP INDEX IF EXISTS idx_sessions_updated_id;
+            CREATE INDEX idx_sessions_updated ON sessions(updated_at DESC);
+            PRAGMA user_version = 21;
+            "
+        ).unwrap();
+    }
+    
+    let db = Database::open(&db_path).unwrap();
+    
+    let version: i64 = db.conn().query_row("PRAGMA user_version", [], |r| r.get(0)).unwrap();
+    assert_eq!(version, crate::db::SCHEMA_VERSION);
+    
+    let old_index_exists: bool = db.conn().query_row(
+        "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='index' AND name='idx_sessions_updated')",
+        [],
+        |r| r.get(0)
+    ).unwrap();
+    assert!(!old_index_exists, "idx_sessions_updated should be dropped");
+    
+    let new_index_exists: bool = db.conn().query_row(
+        "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='index' AND name='idx_sessions_updated_id')",
+        [],
+        |r| r.get(0)
+    ).unwrap();
+    assert!(new_index_exists, "idx_sessions_updated_id should be created");
 }
