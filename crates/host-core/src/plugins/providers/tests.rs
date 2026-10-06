@@ -553,6 +553,54 @@ fn the_declaration_shape_is_validated() {
         ),
     );
     assert!(PluginManager::read_manifest(&root).is_ok());
+
+    let oauth_permissions = json!(["provider.register", "provider.oauth"]);
+    let invalid_oauth_providers = [
+        (
+            json!([{ "id": "demo", "name": "Demo", "authKind": "oauth",
+                     "models": [{ "id": "m" }] }]),
+            "requires baseUrl for OAuth",
+        ),
+        (
+            json!([{ "id": "demo", "name": "Demo", "authKind": "api_key",
+                     "baseUrl": "https://api.example.com/v1",
+                     "oauth": { "loginLabel": "Continue" },
+                     "models": [{ "id": "m" }] }]),
+            "requires authKind oauth",
+        ),
+        (
+            json!([{ "id": "demo", "name": "Demo", "authKind": "oauth",
+                     "baseUrl": "https://api.example.com/v1", "oauth": "invalid",
+                     "models": [{ "id": "m" }] }]),
+            "oauth must be an object",
+        ),
+        (
+            json!([{ "id": "demo", "name": "Demo", "authKind": "oauth",
+                     "baseUrl": "https://api.example.com/v1",
+                     "oauth": { "unexpected": true }, "models": [{ "id": "m" }] }]),
+            "oauth has unsupported field unexpected",
+        ),
+        (
+            json!([{ "id": "demo", "name": "Demo", "authKind": "oauth",
+                     "baseUrl": "https://api.example.com/v1", "oauth": { "loginLabel": " " },
+                     "models": [{ "id": "m" }] }]),
+            "oauth.loginLabel must be a non-empty string",
+        ),
+        (
+            json!([{ "id": "demo", "name": "Demo", "authKind": "oauth",
+                     "baseUrl": "https://api.example.com/v1",
+                     "oauth": { "isSubscription": "yes" }, "models": [{ "id": "m" }] }]),
+            "oauth.isSubscription must be a boolean",
+        ),
+    ];
+    for (providers, expected_error) in invalid_oauth_providers {
+        write_plugin(
+            &root,
+            declaration_manifest(providers, oauth_permissions.clone()),
+        );
+        let error = read_manifest_err(&root);
+        assert!(error.contains(expected_error), "{error}");
+    }
 }
 
 /// A row id already in use by something other than this plugin cannot arise
