@@ -963,10 +963,14 @@ Before sharing a package:
 8. Run `pi-plugin pack` and install the resulting package in a clean app state.
 9. Record the printed SHA-256 next to the release artifact.
 
-For the official marketplace, submit the package and catalog metadata to
-[`vastsa/pi-desktop-plugins`](https://github.com/vastsa/pi-desktop-plugins) and
-follow that repository's `CONTRIBUTING.md`. The marketplace catalog is a
-separate repository; adding a plugin here does not publish it.
+For the official marketplace, publish on the plugin center,
+[plugins.aiuo.net](https://plugins.aiuo.net): create the plugin, bind the repository it lives in,
+tag the version and submit it — from the console, or with the publishing skill over MCP. The
+center packs the files, audits the source, records the SHA-256 and publishes the version, then
+mirrors the catalog and packages to
+[AIUO-Net/pi-desktop-plugins](https://github.com/AIUO-Net/pi-desktop-plugins) for the GitHub
+backup channel. Plugin sources are never hosted in the distribution repository, and pull requests
+that add them are closed.
 
 Signatures are not the current trust primitive. Package SHA-256 and explicit
 permission review are the implemented baseline; follow the
