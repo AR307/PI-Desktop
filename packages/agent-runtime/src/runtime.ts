@@ -1920,6 +1920,7 @@ export class DesktopAgentRuntime {
     lastErrorCode?: string;
   };
   private terminatingToolCalls = new Set<string>();
+  private delegateMutationTerminations = new Map<string, { code: string; message: string }>();
   private fullEntries: MessageEntry[];
   private readonly systemJournal = new SystemTranscriptJournal();
   private composedSections: Record<string, string> = {};
@@ -2462,11 +2463,26 @@ export class DesktopAgentRuntime {
   }: AfterToolCallContext): AfterToolCallResult | undefined {
     const terminate = this.terminatingToolCalls.delete(toolCall.id);
     const failed = this.failedHostToolCalls.delete(toolCall.id);
+    const error = this.delegateMutationTerminations.get(toolCall.id);
+    this.delegateMutationTerminations.delete(toolCall.id);
     if (!failed) return terminate ? { terminate: true } : undefined;
     return {
       isError: true,
       ...(terminate ? { terminate: true } : {}),
+      ...(error ? { error } : {}),
     };
+  }
+
+  private mutationTerminationMessage(
+    kind: "edit" | "patch-command",
+    target: string,
+    errorCode?: string,
+  ): string {
+    const recovery = mutationTerminationAdvice(kind, errorCode);
+    const lastError = errorCode ? ` Last error: ${errorCode}.` : "";
+    return kind === "edit"
+      ? `Stopped after ${MAX_MUTATION_RECOVERY_FAILURES} failed Edit attempts on ${target}.${lastError} ${recovery}`
+      : `Stopped after ${MAX_MUTATION_RECOVERY_FAILURES} failed patch commands.${lastError} ${recovery}`;
   }
 
   private async afterToolCall(
@@ -3577,6 +3593,16 @@ export class DesktopAgentRuntime {
                 ? { lastErrorCode: result.errorCode }
                 : {}),
             };
+          } else {
+            const kind = mutationFailureKind ?? "edit";
+            this.delegateMutationTerminations.set(toolCallId, {
+              code: "MUTATION_RETRY_BUDGET_EXHAUSTED",
+              message: this.mutationTerminationMessage(
+                kind,
+                failedEditPath ?? "the patch command",
+                result.errorCode,
+              ),
+            });
           }
         }
         const rawContent = result.content;
@@ -4969,6 +4995,7 @@ export class DesktopAgentRuntime {
       // its calls left behind rather than pinning those arguments for the session.
       for (const toolCallId of record.pendingToolCallIds ?? []) {
         this.delegateToolCalls.delete(toolCallId);
+        this.delegateMutationTerminations.delete(toolCallId);
       }
       record.pendingToolCallIds = undefined;
       this.publishDelegationSettlement(record);
@@ -8505,13 +8532,11 @@ export class DesktopAgentRuntime {
       termination.kind,
       termination.lastErrorCode,
     );
-    const lastError = termination.lastErrorCode
-      ? ` Last error: ${termination.lastErrorCode}.`
-      : "";
-    const message =
-      termination.kind === "edit"
-        ? `Stopped after ${MAX_MUTATION_RECOVERY_FAILURES} failed Edit attempts on ${termination.target}.${lastError} ${recovery}`
-        : `Stopped after ${MAX_MUTATION_RECOVERY_FAILURES} failed patch commands.${lastError} ${recovery}`;
+    const message = this.mutationTerminationMessage(
+      termination.kind,
+      termination.target,
+      termination.lastErrorCode,
+    );
     const error = {
       code: "MUTATION_RETRY_BUDGET_EXHAUSTED",
       message,
@@ -9100,6 +9125,7 @@ export class DesktopAgentRuntime {
     this.mutationFailureCounts.clear();
     this.mutationRecoveryGraces.clear();
     this.mutationOwners.clear();
+    this.delegateMutationTerminations.clear();
     this.pendingMutationTermination = undefined;
     this.terminatingToolCalls.clear();
     this.delegateToolCalls.clear();

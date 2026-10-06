@@ -328,7 +328,9 @@ keeps only the ordering and loop-guard rules. The agent mutation workflow is:
    command (`apply_patch`, `git apply`, or `patch`) — returns a terminating tool
    result with an error-specific recovery hint, so that agent stops after reporting
    the exact mismatch. A delegate's failures do not consume the parent's or another
-   delegate's budget or terminate the parent turn. A new parent prompt resets only
+   delegate's budget or terminate the parent turn. An exhausted delegate reports
+   `MUTATION_RETRY_BUDGET_EXHAUSTED` as its own failed Task result, even if it
+   produced earlier text; `Task(resume)` may continue its chain. A new parent prompt resets only
    the parent's budget; a detached delegate retains its budget until it finishes.
    Do not hand-edit old unified-diff hunk headers or continue a repair loop.
 4. Keep mutations to one path sequential, even when read/search calls are

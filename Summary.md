@@ -31,6 +31,9 @@
   budget; detached subagents retain theirs until completion.
 - Runtime regression tests cover same-file delegates, parent error reporting,
   and the cross-prompt lifecycle.
+- Real provider-fixture acceptance now proves an exhausted delegate with earlier
+  report text returns a failed Task result, while its sibling and parent continue;
+  `Task(resume)` completes from the preserved chain.
 
 ## 2026-10-06 - Native Read of PowerShell logs
 

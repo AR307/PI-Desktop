@@ -473,7 +473,9 @@ occurrence, because repeating one of those means the model is guessing.
 Counting a grace is per code and per agent run, not per call. A stale tag followed
 by unseen lines is two distinct honest failures while the same code twice is
 not. Parent and delegated runs have independent budgets even when editing the
-same file. A delegate's exhausted budget stops only that delegate; a new parent
+same file. A delegate's exhausted budget stops only that delegate and returns a
+failed Task result with the same recovery code, even after earlier report text;
+the chain remains available to `Task(resume)`. A new parent
 prompt resets the parent's budget without resetting a still-running delegate.
 
 When the count does reach the limit the tool result carries `terminate: true`

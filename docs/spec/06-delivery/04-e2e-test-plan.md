@@ -4,7 +4,7 @@
 
 | ID | User sequence and expected result |
 | --- | --- |
-| E2E-DELEGATE-EDIT-01 | Start two writing subagents against one file. Make one submit two malformed Edit operations, then have the other submit its first malformed Edit. Only the first subagent is near its three-failure limit; the second and parent remain able to edit. When the first subagent reaches its third counted failure, it stops without ending the parent turn. A new parent prompt has a fresh budget while a still-running delegate retains its own budget. |
+| E2E-DELEGATE-EDIT-01 | Start two writing subagents against one file. After A emits visible text, make A submit three malformed Edit operations while B submits two. A returns a failed Task result with `MUTATION_RETRY_BUDGET_EXHAUSTED`; B completes after A stops, and the parent turn remains successful. Resume A with `Task(resume)` and confirm the resumed run completes. A new parent prompt has a fresh budget while a still-running delegate retains its own budget. |
 
 ## Native file tools: PowerShell logs
 
