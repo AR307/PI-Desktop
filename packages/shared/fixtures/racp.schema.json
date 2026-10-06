@@ -505,6 +505,276 @@
       "content": {}
     }
   },
+  "SessionChange": {
+    "anyOf": [
+      {
+        "type": "object",
+        "required": [
+          "revision",
+          "kind",
+          "messageId",
+          "sequence",
+          "item"
+        ],
+        "properties": {
+          "revision": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "kind": {
+            "type": "string",
+            "const": "upsert"
+          },
+          "messageId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "sequence": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "item": {
+            "type": "object",
+            "required": [
+              "id",
+              "turnId",
+              "itemType",
+              "status",
+              "createdAt",
+              "content"
+            ],
+            "properties": {
+              "id": {
+                "type": "string",
+                "minLength": 1
+              },
+              "turnId": {
+                "type": "string",
+                "minLength": 1
+              },
+              "itemType": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "const": "message"
+                  },
+                  {
+                    "type": "string",
+                    "const": "tool"
+                  },
+                  {
+                    "type": "string",
+                    "const": "compaction"
+                  }
+                ]
+              },
+              "status": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "const": "streaming"
+                  },
+                  {
+                    "type": "string",
+                    "const": "completed"
+                  }
+                ]
+              },
+              "sequence": {
+                "type": "integer",
+                "minimum": 1
+              },
+              "createdAt": {
+                "type": "string"
+              },
+              "parentToolCallId": {
+                "type": "string"
+              },
+              "nestedParentToolCallId": {
+                "type": "string"
+              },
+              "agentName": {
+                "type": "string"
+              },
+              "content": {}
+            }
+          }
+        }
+      },
+      {
+        "type": "object",
+        "required": [
+          "revision",
+          "kind",
+          "messageId"
+        ],
+        "properties": {
+          "revision": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "kind": {
+            "type": "string",
+            "const": "delete"
+          },
+          "messageId": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      }
+    ]
+  },
+  "SessionChangesPage": {
+    "type": "object",
+    "required": [
+      "sessionId",
+      "afterRevision",
+      "revision",
+      "hasMore",
+      "changes"
+    ],
+    "properties": {
+      "sessionId": {
+        "type": "string",
+        "minLength": 1
+      },
+      "afterRevision": {
+        "type": "integer",
+        "minimum": 0
+      },
+      "revision": {
+        "type": "integer",
+        "minimum": 0
+      },
+      "hasMore": {
+        "type": "boolean"
+      },
+      "changes": {
+        "type": "array",
+        "items": {
+          "anyOf": [
+            {
+              "type": "object",
+              "required": [
+                "revision",
+                "kind",
+                "messageId",
+                "sequence",
+                "item"
+              ],
+              "properties": {
+                "revision": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "kind": {
+                  "type": "string",
+                  "const": "upsert"
+                },
+                "messageId": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "sequence": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "item": {
+                  "type": "object",
+                  "required": [
+                    "id",
+                    "turnId",
+                    "itemType",
+                    "status",
+                    "createdAt",
+                    "content"
+                  ],
+                  "properties": {
+                    "id": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "turnId": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "itemType": {
+                      "anyOf": [
+                        {
+                          "type": "string",
+                          "const": "message"
+                        },
+                        {
+                          "type": "string",
+                          "const": "tool"
+                        },
+                        {
+                          "type": "string",
+                          "const": "compaction"
+                        }
+                      ]
+                    },
+                    "status": {
+                      "anyOf": [
+                        {
+                          "type": "string",
+                          "const": "streaming"
+                        },
+                        {
+                          "type": "string",
+                          "const": "completed"
+                        }
+                      ]
+                    },
+                    "sequence": {
+                      "type": "integer",
+                      "minimum": 1
+                    },
+                    "createdAt": {
+                      "type": "string"
+                    },
+                    "parentToolCallId": {
+                      "type": "string"
+                    },
+                    "nestedParentToolCallId": {
+                      "type": "string"
+                    },
+                    "agentName": {
+                      "type": "string"
+                    },
+                    "content": {}
+                  }
+                }
+              }
+            },
+            {
+              "type": "object",
+              "required": [
+                "revision",
+                "kind",
+                "messageId"
+              ],
+              "properties": {
+                "revision": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "kind": {
+                  "type": "string",
+                  "const": "delete"
+                },
+                "messageId": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              }
+            }
+          ]
+        }
+      }
+    }
+  },
   "SessionSnapshot": {
     "type": "object",
     "required": [
@@ -1279,6 +1549,10 @@
       },
       "generatedAt": {
         "type": "string"
+      },
+      "syncRevision": {
+        "type": "integer",
+        "minimum": 0
       }
     }
   },
@@ -1982,6 +2256,10 @@
       },
       "generatedAt": {
         "type": "string"
+      },
+      "syncRevision": {
+        "type": "integer",
+        "minimum": 0
       }
     }
   },
@@ -2603,6 +2881,12 @@
           "history": {
             "type": "boolean"
           },
+          "directory": {
+            "type": "boolean"
+          },
+          "incrementalSync": {
+            "type": "boolean"
+          },
           "toolRelay": {
             "type": "boolean"
           },
@@ -2754,6 +3038,12 @@
             "type": "boolean"
           },
           "itemContent": {
+            "type": "boolean"
+          },
+          "directory": {
+            "type": "boolean"
+          },
+          "incrementalSync": {
             "type": "boolean"
           },
           "bindings": {

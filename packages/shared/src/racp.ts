@@ -244,6 +244,33 @@ export const RacpItemSummarySchema = Type.Object({
 });
 export type RacpItemSummary = Static<typeof RacpItemSummarySchema>;
 
+/** A durable transcript change; this revision survives host process restarts. */
+export const RacpSessionChangeSchema = Type.Union([
+  Type.Object({
+    revision: Type.Integer({ minimum: 1 }),
+    kind: Type.Literal("upsert"),
+    messageId: Type.String({ minLength: 1 }),
+    sequence: Type.Integer({ minimum: 0 }),
+    item: RacpItemSummarySchema,
+  }),
+  Type.Object({
+    revision: Type.Integer({ minimum: 1 }),
+    kind: Type.Literal("delete"),
+    messageId: Type.String({ minLength: 1 }),
+  }),
+]);
+export type RacpSessionChange = Static<typeof RacpSessionChangeSchema>;
+
+export const RacpSessionChangesPageSchema = Type.Object({
+  sessionId: Type.String({ minLength: 1 }),
+  afterRevision: Type.Integer({ minimum: 0 }),
+  /** Advance only after the complete page has been committed by the client. */
+  revision: Type.Integer({ minimum: 0 }),
+  hasMore: Type.Boolean(),
+  changes: Type.Array(RacpSessionChangeSchema),
+});
+export type RacpSessionChangesPage = Static<typeof RacpSessionChangesPageSchema>;
+
 export const RACP_TOOL_APPROVAL_DECISIONS = ["allow-once", "allow-session", "deny"] as const;
 export type RacpToolApprovalDecision = (typeof RACP_TOOL_APPROVAL_DECISIONS)[number];
 export const RACP_CONTRACT_APPROVAL_DECISIONS = ["approve", "reject"] as const;
@@ -390,6 +417,7 @@ export const RacpSessionSnapshotSchema = Type.Object({
   cursor: RacpCursorSchema,
   revision: Type.Integer({ minimum: 0 }),
   generatedAt: Type.String(),
+  syncRevision: Type.Optional(Type.Integer({ minimum: 0 })),
 });
 export type RacpSessionSnapshot = Static<typeof RacpSessionSnapshotSchema>;
 
@@ -408,6 +436,7 @@ export const RacpSessionStateSchema = Type.Object({
   cursor: RacpCursorSchema,
   revision: Type.Integer({ minimum: 0 }),
   generatedAt: Type.String(),
+  syncRevision: Type.Optional(Type.Integer({ minimum: 0 })),
 });
 export type RacpSessionState = Static<typeof RacpSessionStateSchema>;
 
@@ -423,6 +452,8 @@ export const RacpClientCapabilitiesSchema = Type.Object({
   turnQueue: Type.Optional(Type.Boolean()),
   hostEvents: Type.Optional(Type.Boolean()),
   history: Type.Optional(Type.Boolean()),
+  directory: Type.Optional(Type.Boolean()),
+  incrementalSync: Type.Optional(Type.Boolean()),
   toolRelay: Type.Optional(Type.Boolean()),
   terminal: Type.Optional(Type.Boolean()),
 });
@@ -445,6 +476,8 @@ export const RacpServerCapabilitiesSchema = Type.Object({
   sessionState: Type.Optional(Type.Boolean()),
   /** `session/item` chunked full-content reads are served (mobile profile addition). */
   itemContent: Type.Optional(Type.Boolean()),
+  directory: Type.Optional(Type.Boolean()),
+  incrementalSync: Type.Optional(Type.Boolean()),
   bindings: Type.Array(Type.Union([Type.Literal("RACP-WS"), Type.Literal("RACP-HTTP"), Type.Literal("RACP-GRPC")])),
 });
 export type RacpServerCapabilities = Static<typeof RacpServerCapabilitiesSchema>;
@@ -550,12 +583,14 @@ export const RACP_OPERATIONS = {
   "connection/ping": { role: "authenticated", profile: "v1", mutation: false },
   "host/list": { role: "authenticated", profile: "v1", mutation: false },
   "project/list": { role: "viewer", profile: "v1", mutation: false },
+  "directory/list": { role: "viewer", profile: "remote-host", mutation: false },
   "session/list": { role: "viewer", profile: "v1", mutation: false },
   "session/get": { role: "viewer", profile: "v1", mutation: false },
   "session/create": { role: "controller", profile: "v1", mutation: true },
   "session/attach": { role: "viewer", profile: "v1", mutation: false },
   "session/modelCatalog": { role: "viewer", profile: "remote-host", mutation: false },
   "session/history": { role: "viewer", profile: "v1", mutation: false },
+  "session/changes": { role: "viewer", profile: "remote-host", mutation: false },
   "events/subscribe": { role: "viewer", profile: "v1", mutation: false },
   "events/unsubscribe": { role: "viewer", profile: "v1", mutation: false },
   "events/ack": { role: "viewer", profile: "v1", mutation: false },
@@ -641,10 +676,12 @@ export const RACP_HTTP_ROUTES: Partial<Record<RacpOperation, { method: "GET" | "
   "host/list": { method: "GET", path: "/v1/hosts" },
   "project/list": { method: "GET", path: "/v1/projects" },
   "session/list": { method: "GET", path: "/v1/sessions" },
+  "directory/list": { method: "GET", path: "/v1/directory" },
   "session/create": { method: "POST", path: "/v1/sessions" },
   "session/get": { method: "GET", path: "/v1/sessions/{sessionId}" },
   "session/attach": { method: "POST", path: "/v1/sessions/{sessionId}:attach" },
   "session/history": { method: "GET", path: "/v1/sessions/{sessionId}/history" },
+  "session/changes": { method: "GET", path: "/v1/sessions/{sessionId}/changes" },
   "turn/start": { method: "POST", path: "/v1/sessions/{sessionId}/turns" },
   "turn/get": { method: "GET", path: "/v1/turns/{turnId}" },
   "turn/stop": { method: "POST", path: "/v1/turns/{turnId}:stop" },
@@ -864,6 +901,8 @@ export const RACP_SCHEMAS = {
   Cursor: RacpCursorSchema,
   EventEnvelope: RacpEventEnvelopeSchema,
   ItemSummary: RacpItemSummarySchema,
+  SessionChange: RacpSessionChangeSchema,
+  SessionChangesPage: RacpSessionChangesPageSchema,
   SessionSnapshot: RacpSessionSnapshotSchema,
   SessionState: RacpSessionStateSchema,
   ApprovalRequest: RacpApprovalRequestSchema,

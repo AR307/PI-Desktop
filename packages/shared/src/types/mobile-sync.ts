@@ -1,12 +1,13 @@
-import type { RacpSession, RacpSessionSnapshot, RacpSessionState } from "../racp.js";
+import type { RacpItemSummary, RacpSession, RacpSessionChangesPage, RacpSessionSnapshot, RacpSessionState } from "../racp.js";
 import type { ImageGenerationCapability, ImageGenerationState, ImageSessionConfig } from "./images.js";
 import type { ModelModalities, SessionThinkingLevel, ThinkingLevel } from "./models.js";
 import type { PlanProposal } from "./plans.js";
 
 /** A desktop-owned share. Project membership is resolved at request time. */
-export type MobileSyncScope = { kind: "project" | "session"; id: string; label: string };
+export type MobileSyncScope = { kind: "account" | "project" | "session"; id: string; label: string };
 
 export type MobileSyncScopeInput =
+  | { kind: "account" }
   | { kind: "project"; projectPath: string }
   | { kind: "project"; projectId: string }
   | { kind: "session"; sessionId: string };
@@ -21,7 +22,8 @@ export type MobilePairing = {
 export type MobileGrant = {
   id: string;
   accountId: string;
-  desktopDeviceId: string;
+  /** Account grants apply to each opted-in desktop; scoped grants name one desktop. */
+  desktopDeviceId?: string;
   mobileDeviceId: string;
   mobileDeviceName: string;
   scope: MobileSyncScope;
@@ -34,6 +36,7 @@ export type MobileSyncStatus = {
   grants: MobileGrant[];
   error?: string;
   retryAt?: number;
+  accountSyncEnabled?: boolean;
 };
 /** Persisted through the host settings boundary; secrets remain in Electron main. */
 export type MobileSyncSettings = {
@@ -41,7 +44,43 @@ export type MobileSyncSettings = {
   accountId: string;
   scopes: MobileSyncScope[];
   revokedGrantIds: string[];
+  accountSyncEnabled?: boolean;
 };
+
+/** Account discovery contains device metadata, never transcript content. */
+export type MobileDesktopDevice = {
+  id: string;
+  name: string;
+  online: boolean;
+  accountSyncEnabled: boolean;
+};
+
+export type MobileProject = {
+  id: string;
+  label: string;
+  path?: string;
+  archived: boolean;
+};
+
+/** Empty projects are retained independently of the paginated session list. */
+export type MobileDirectoryPage = {
+  desktopDeviceId: string;
+  projects: MobileProject[];
+  sessions: MobileSession[];
+  nextCursor?: string;
+  generatedAt: string;
+};
+
+export type MobileSessionHistoryPage = {
+  items: RacpItemSummary[];
+  hasMore: boolean;
+  /** In-memory RACP state revision. */
+  revision: number;
+  /** Durable transcript position captured with the page. */
+  syncRevision: number;
+};
+
+export type MobileSessionChangesPage = RacpSessionChangesPage;
 export type MobileTaskMode = "agent" | "plan" | "goal" | "image";
 
 /** Image capability metadata exposed to the mobile picker. */
@@ -51,6 +90,7 @@ export type MobileImageSessionConfig = ImageSessionConfig;
 export type MobileImageGenerationState = ImageGenerationState;
 
 export type MobileSession = RacpSession & {
+  archived?: boolean;
   providerId?: string;
   modelId?: string;
   thinkingLevel?: SessionThinkingLevel;
@@ -71,6 +111,7 @@ export type MobileCompactionMark = { id: string; throughMessageId: string };
 
 export type MobileSessionSnapshot = Omit<RacpSessionSnapshot, "session"> & {
   session: MobileSession;
+  syncRevision: number;
   imageJobs: MobileImageGenerationState[];
   plans: PlanProposal[];
   /** Bounded previews of the queued turns, in delivery order. */
@@ -85,6 +126,7 @@ export type MobileSessionSnapshot = Omit<RacpSessionSnapshot, "session"> & {
  */
 export type MobileSessionState = Omit<RacpSessionState, "session"> & {
   session: MobileSession;
+  syncRevision: number;
   imageJobs: MobileImageGenerationState[];
   plans: PlanProposal[];
   queuedPrompts?: MobileQueuedPrompt[];
@@ -179,6 +221,7 @@ export type MobileRelayEnvelope =
   | { type: "peer.frame"; peerId: string; frame: string }
   | { type: "peer.close"; peerId: string; reason?: string }
   | { type: "grants.changed" }
+  | { type: "devices.changed" }
   | { type: "ping" }
   | { type: "pong" };
 
