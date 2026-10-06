@@ -13,7 +13,7 @@ export async function mobileFixture({ port = 0, messageHandler, encryptedLogin =
   const devices = new Map(), sessions = new Map(), refreshTokens = new Map();
   const desktopAuth = { kind: "desktop", accountId: "901", deviceId: undefined };
   const pairings = new Map(), grants = new Map(), tickets = new Map(), desktops = new Map(), peers = new Map();
-  const chats = [], chatRequests = [], calls = [], heldChats = new Set();
+  const chats = [], chatRequests = [], calls = [], relayCalls = [], heldChats = new Set();
   const control = { relayUnavailable: false, challenge: false, dropTurnReplyOnce: false, mobileRefreshes: 0, abortedChats: 0 };
   let origin, serial = 0;
   const send = (socket, frame) => {
@@ -21,9 +21,20 @@ export async function mobileFixture({ port = 0, messageHandler, encryptedLogin =
     if (socket.bufferedAmount > 4 * 1024 * 1024) { socket.close(1013, "RELAY_UNAVAILABLE"); return; }
     socket.send(typeof frame === "string" ? frame : JSON.stringify(frame));
   };
-  const grantList = (auth) => [...grants.values()].filter((grant) => grant.accountId === auth.accountId &&
-    (auth.kind === "desktop" ? !auth.deviceId || grant.desktopDeviceId === auth.deviceId : grant.mobileDeviceId === auth.deviceId));
-  const notify = (desktopId) => send(desktops.get(desktopId), { type: "grants.changed" });
+  const grantApplies = (grant, desktopId) => {
+    const device = devices.get(desktopId);
+    return device?.accountId === grant.accountId && (grant.scope.kind === "account"
+      ? grant.scope.id === grant.accountId && device.accountSyncEnabled === true
+      : grant.desktopDeviceId === desktopId);
+  };
+  const grantList = (auth, desktopId = auth.deviceId) => [...grants.values()].filter((grant) => grant.accountId === auth.accountId &&
+    (auth.kind === "desktop" ? !desktopId || grantApplies(grant, desktopId) : grant.mobileDeviceId === auth.deviceId));
+  const notify = (accountId, type = "grants.changed") => {
+    for (const [id, socket] of desktops) if (devices.get(id)?.accountId === accountId) send(socket, { type });
+    for (const peer of peers.values()) if (devices.get(peer.mobileDeviceId)?.accountId === accountId) {
+      send(peer.socket, { jsonrpc: "2.0", method: type === "devices.changed" ? "mobile.devicesChanged" : "mobile.grantsChanged", params: {} });
+    }
+  };
   const closePeer = (peerId, reason) => {
     const peer = peers.get(peerId);
     if (!peer) return;
@@ -156,19 +167,35 @@ export async function mobileFixture({ port = 0, messageHandler, encryptedLogin =
         const current = body.deviceId ? devices.get(body.deviceId) : undefined;
         if (body.deviceId && (!current || current.accountId !== auth.accountId || current.deviceSecret !== body.deviceSecret)) { fail("DEVICE_MISMATCH", 403); return; }
         if (body.kind !== auth.kind) { fail("ACCOUNT_MISMATCH", 403); return; }
-        if (auth.deviceId && !current) { json({ deviceId: auth.deviceId }); return; }
+        if (auth.kind === "mobile" && auth.deviceId && !current) { json({ deviceId: auth.deviceId }); return; }
         const deviceId = current?.deviceId ?? `${auth.kind}-${randomUUID()}`;
         const deviceSecret = current?.deviceSecret ?? randomUUID();
-        devices.set(deviceId, { deviceId, deviceSecret, name: body.name, kind: body.kind, accountId: auth.accountId }); auth.deviceId = deviceId;
+        devices.set(deviceId, { ...current, deviceId, deviceSecret, name: body.name, kind: body.kind, accountId: auth.accountId });
+        if (auth.kind === "mobile") auth.deviceId = deviceId;
         json({ deviceId, ...(!current ? { deviceSecret } : {}) }); return;
       }
       if (url.pathname === "/api/pi-sync/devices") {
-        const visible = new Set(grantList(auth).map((grant) => grant.desktopDeviceId));
-        json({ devices: [...devices.values()].filter((device) => device.accountId === auth.accountId && (auth.kind === "desktop" || visible.has(device.deviceId))).map(({ accountId, deviceSecret, ...device }) => ({ ...device, online: desktops.has(device.deviceId) })) }); return;
+        json({ devices: [...devices.values()].filter((device) => device.kind === "desktop" && device.accountId === auth.accountId &&
+          (auth.kind === "desktop" || grantList(auth).some((grant) => grantApplies(grant, device.deviceId))))
+          .map(({ accountId, deviceSecret, ...device }) => ({ ...device, online: desktops.has(device.deviceId) })) }); return;
       }
-      if (url.pathname === "/api/pi-sync/grants") { json({ grants: grantList(auth) }); return; }
+      const sharing = /^\/api\/pi-sync\/devices\/([^/]+)\/sharing$/.exec(url.pathname);
+      if (sharing && req.method === "POST") {
+        const device = devices.get(sharing[1]);
+        if (auth.kind !== "desktop" || device?.accountId !== auth.accountId || device.kind !== "desktop") { fail("ACCOUNT_MISMATCH", 403); return; }
+        if (typeof body.accountSyncEnabled !== "boolean") { fail("INVALID_PARAMS"); return; }
+        if (device.accountSyncEnabled !== body.accountSyncEnabled) {
+          device.accountSyncEnabled = body.accountSyncEnabled;
+          notify(auth.accountId, "devices.changed");
+          for (const [id, peer] of peers) if (peer.desktopDeviceId === device.deviceId &&
+            !grantList({ kind: "mobile", accountId: auth.accountId, deviceId: peer.mobileDeviceId }).some((grant) => grantApplies(grant, device.deviceId))) closePeer(id, "GRANT_REVOKED");
+        }
+        json({ device: { deviceId: device.deviceId, accountSyncEnabled: device.accountSyncEnabled } }); return;
+      }
+      if (url.pathname === "/api/pi-sync/grants") { json({ grants: grantList(auth, url.searchParams.get("deviceId") || auth.deviceId) }); return; }
       if (url.pathname === "/api/pi-sync/pairings" && req.method === "POST") {
         if (auth.kind !== "desktop" || devices.get(body.deviceId)?.accountId !== auth.accountId) { fail("ACCOUNT_MISMATCH", 403); return; }
+        if (body.scope?.kind === "account" && (body.scope.id !== auth.accountId || !devices.get(body.deviceId)?.accountSyncEnabled)) { fail("ACCOUNT_SYNC_DISABLED", 403); return; }
         const pairing = { id: randomUUID(), code: String(++serial).padStart(8, "0"), expiresAt: new Date(Date.now() + 600_000).toISOString(), scope: body.scope };
         pairings.set(pairing.id, { pairing, desktopDeviceId: body.deviceId, accountId: auth.accountId, consumed: false });
         json({ pairing }); return;
@@ -180,9 +207,9 @@ export async function mobileFixture({ port = 0, messageHandler, encryptedLogin =
         if (stored.consumed) { fail("PAIRING_CONSUMED", 409); return; }
         if (Date.parse(stored.pairing.expiresAt) <= Date.now()) { fail("PAIRING_EXPIRED", 410); return; }
         stored.consumed = true;
-        const grant = { id: randomUUID(), accountId: auth.accountId, desktopDeviceId: stored.desktopDeviceId, mobileDeviceId: auth.deviceId,
+        const grant = { id: randomUUID(), accountId: auth.accountId, ...(stored.pairing.scope.kind === "account" ? {} : { desktopDeviceId: stored.desktopDeviceId }), mobileDeviceId: auth.deviceId,
           mobileDeviceName: devices.get(auth.deviceId).name, scope: stored.pairing.scope, createdAt: new Date().toISOString() };
-        grants.set(grant.id, grant); notify(grant.desktopDeviceId); json({ grant }); return;
+        grants.set(grant.id, grant); notify(grant.accountId); json({ grant }); return;
       }
       const cancel = /^\/api\/pi-sync\/pairings\/([^/]+)\/cancel$/.exec(url.pathname);
       if (cancel) {
@@ -195,15 +222,16 @@ export async function mobileFixture({ port = 0, messageHandler, encryptedLogin =
         const grant = grants.get(revoke[1]);
         if (grant && !grantList(auth).some((item) => item.id === grant.id)) { fail("ACCOUNT_MISMATCH", 403); return; }
         if (grant) {
-          grants.delete(grant.id); notify(grant.desktopDeviceId);
-          for (const [id, peer] of peers) if (peer.mobileDeviceId === grant.mobileDeviceId && peer.desktopDeviceId === grant.desktopDeviceId) closePeer(id, "GRANT_REVOKED");
+          grants.delete(grant.id); notify(grant.accountId);
+          for (const [id, peer] of peers) if (peer.mobileDeviceId === grant.mobileDeviceId &&
+            !grantList({ kind: "mobile", accountId: grant.accountId, deviceId: peer.mobileDeviceId }).some((item) => grantApplies(item, peer.desktopDeviceId))) closePeer(id, "GRANT_REVOKED");
         }
         json({}); return;
       }
       if (url.pathname === "/api/pi-sync/relay/ticket") {
         if (control.relayUnavailable) { fail("RELAY_UNAVAILABLE", 503); return; }
         if (devices.get(body.deviceId)?.accountId !== auth.accountId || (auth.kind === "mobile" && body.deviceId !== auth.deviceId)) { fail("ACCOUNT_MISMATCH", 403); return; }
-        if (auth.kind === "mobile" && !grantList(auth).some((grant) => grant.desktopDeviceId === body.desktopDeviceId)) { fail("GRANT_REVOKED", 403); return; }
+        if (auth.kind === "mobile" && !grantList(auth).some((grant) => grantApplies(grant, body.desktopDeviceId))) { fail("GRANT_REVOKED", 403); return; }
         if (auth.kind === "mobile" && !desktops.has(body.desktopDeviceId)) { fail("DESKTOP_OFFLINE", 503); return; }
         const ticket = randomUUID(), expiresAt = new Date(Date.now() + 60_000).toISOString();
         tickets.set(ticket, { ...auth, deviceId: body.deviceId, desktopDeviceId: body.desktopDeviceId, expiresAt });
@@ -220,12 +248,15 @@ export async function mobileFixture({ port = 0, messageHandler, encryptedLogin =
     wss.handleUpgrade(req, socket, head, (ws) => {
       if (ticket.kind === "desktop") {
         desktops.get(ticket.deviceId)?.close(4000, "REPLACED"); desktops.set(ticket.deviceId, ws);
+        notify(ticket.accountId, "devices.changed");
         ws.on("message", (data) => {
           const frame = JSON.parse(data.toString());
           if (frame.type === "ping") send(ws, { type: "pong" });
           if (frame.type === "peer.frame" && peers.get(frame.peerId)?.desktopDeviceId === ticket.deviceId) {
             const peer = peers.get(frame.peerId), reply = JSON.parse(frame.frame);
             const method = peer.requests.get(reply.id);
+            const captured = relayCalls.findLast((item) => item.peerId === frame.peerId && item.id === reply.id && !item.completed);
+            if (captured) Object.assign(captured, { completed: true, bytes: Buffer.byteLength(frame.frame), resultCount: reply.result?.changes?.length ?? reply.result?.items?.length ?? reply.result?.snapshot?.items?.length, revision: reply.result?.revision, error: reply.error?.data?.code });
             if (reply.id !== undefined) peer.requests.delete(reply.id);
             if (control.dropTurnReplyOnce && method === "turn/start" && reply.result) {
               control.dropTurnReplyOnce = false; closePeer(frame.peerId, "TEST_UNCONFIRMED_SEND");
@@ -236,16 +267,22 @@ export async function mobileFixture({ port = 0, messageHandler, encryptedLogin =
         ws.on("close", () => {
           if (desktops.get(ticket.deviceId) === ws) desktops.delete(ticket.deviceId);
           for (const [id, peer] of peers) if (peer.desktopDeviceId === ticket.deviceId) closePeer(id, "DESKTOP_OFFLINE");
+          notify(ticket.accountId, "devices.changed");
         });
       } else {
         const desktop = desktops.get(ticket.desktopDeviceId);
         if (!desktop) { ws.close(4000, "DESKTOP_OFFLINE"); return; }
+        const authorized = grantList(ticket).filter((grant) => grantApplies(grant, ticket.desktopDeviceId));
+        if (!authorized.length) { ws.close(4000, "GRANT_REVOKED"); return; }
         const peerId = randomUUID();
         peers.set(peerId, { socket: ws, desktopDeviceId: ticket.desktopDeviceId, mobileDeviceId: ticket.deviceId, requests: new Map() });
-        send(desktop, { type: "peer.open", peerId, accountId: ticket.accountId, deviceId: ticket.deviceId, grants: grantList(ticket).filter((grant) => grant.desktopDeviceId === ticket.desktopDeviceId) });
+        send(desktop, { type: "peer.open", peerId, accountId: ticket.accountId, deviceId: ticket.deviceId, grants: authorized });
         ws.on("message", (data) => {
           const request = JSON.parse(data.toString());
-          if (request.id !== undefined && request.method) peers.get(peerId)?.requests.set(request.id, request.method);
+          if (request.id !== undefined && request.method) {
+            peers.get(peerId)?.requests.set(request.id, request.method);
+            relayCalls.push({ peerId, desktopDeviceId: ticket.desktopDeviceId, id: request.id, method: request.method, sessionId: request.params?.sessionId, afterRevision: request.params?.afterRevision, includeSnapshot: request.params?.includeSnapshot });
+          }
           send(desktop, { type: "peer.frame", peerId, frame: data.toString() });
         });
         ws.on("close", () => closePeer(peerId, "disconnected"));
@@ -254,7 +291,7 @@ export async function mobileFixture({ port = 0, messageHandler, encryptedLogin =
   });
   await new Promise((resolve) => server.listen(port, "127.0.0.1", resolve));
   origin = `http://127.0.0.1:${server.address().port}`;
-  return { origin, upstream, control, calls, chats, chatRequests, devices, pairings, grants, desktops, peers,
+  return { origin, upstream, control, calls, relayCalls, chats, chatRequests, devices, pairings, grants, desktops, peers,
     expireMobileAccess() { sessions.clear(); },
     releaseChats() { for (const held of heldChats) { heldChats.delete(held); held.finish(); } },
     disconnectPhones() { for (const id of peers.keys()) closePeer(id, "TEST_DISCONNECT"); },
