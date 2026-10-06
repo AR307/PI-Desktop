@@ -112,6 +112,8 @@ try {
   await phone.getByLabel("8-digit pairing code").fill(code);
   await phone.getByRole("button", { name: "Pair and sync", exact: true }).click();
   await phone.locator(".grant-open").first().waitFor();
+  await page.locator('[data-action="close-mobile-pairing"]').click();
+  await page.locator('[data-testid="mobile-pairing-dialog"]').waitFor({ state: "hidden" });
   await openSession(session.id);
 
   await phone.locator(".attachment-preview").filter({ hasText: "controlled-image.png" }).click();
