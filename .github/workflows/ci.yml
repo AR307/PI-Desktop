@@ -108,6 +108,12 @@ jobs:
       - name: Install Electron binary
         run: pnpm --filter @pi-desktop/desktop exec install-electron
 
+      - name: Configure Chromium SUID sandbox
+        run: |
+          sandbox=apps/desktop/node_modules/electron/dist/chrome-sandbox
+          sudo chown root:root "$sandbox"
+          sudo chmod 4755 "$sandbox"
+
       - name: Build workspace packages
         run: pnpm build:js
 
