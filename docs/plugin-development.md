@@ -16,6 +16,7 @@ A plugin can contribute one or more of these capabilities:
 | Floating widget | A transparent, frameless companion window — a round orb, not a rectangle | `ui.panel` permission, `"ui": { "shape": "widget" }`, `window.pluginBridge` |
 | Work panel view | An interface docked in the app's right work panel | `contributes.views`, `ui.view` permission, `window.pluginBridge` |
 | Agent tool | A function the Agent can call | `contributes.agentTools`, `pi.agent.registerTool` |
+| OAuth provider | A provider row with host-owned sign-in and encrypted credentials | `contributes.providers`, `provider.oauth`, `onProviderOAuth` |
 | One-shot completion | A host-owned completion against the user's models | `pi.models.list`, `pi.session.getLlmContext`, `pi.agent.complete` |
 | Skill | Instructions loaded by the Agent on demand | `contributes.skills`, `agent.prompt.inject` permission |
 | Theme | Design-token overrides | `contributes.themes`, `ui.theme` permission |
@@ -189,6 +190,15 @@ promptly.
 
 Only `onLoad` and `onUnload` are fired today. Other lifecycle names in the
 manifest are reserved for the planned full lifecycle.
+
+`onProviderOAuth` is a separate operation callback for OAuth provider
+contributions, not a lifecycle hook. It handles login and refresh only for its
+own declared provider. The host stores its returned credential encrypted and
+passes only the access token to model requests; the callback can also use
+`pi.providers.oauth.prompt` and `.notify` for host-rendered login steps. The
+permission `provider.oauth` is high risk, and token egress still requires
+`net.fetch` plus the manifest's network domains. See the provider OAuth section
+in the [Plugin API](spec/07-plugins/03-plugin-api.md).
 
 ### `renderer/index.html`
 

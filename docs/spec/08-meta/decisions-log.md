@@ -5469,11 +5469,7 @@ not an unreviewed upstream registry passthrough.
 
 ## 2026-09-15 — Plugin-declared providers are Host-owned rows (D427)
 
-**A plugin may declare `contributes.providers`, and the Host materializes each entry as a provider row in the native Settings → Provider list, owned by that plugin (`providers.owner_plugin_id`, schema v17; row id `plugin:<pluginId>:<declaredId>`). The declaration is re-read on every load and is authoritative for its own fields, so a dropped entry is deleted together with both credential references; `providers.update` / `providers.delete` refuse a plugin-owned row with `PROVIDER_OWNED_BY_PLUGIN`. A non-empty declaration needs the new high-risk `provider.register` permission, and an `oauth` block or `authKind: "oauth"` is refused until a Host-owned login flow exists. See ADR 0259, `07-plugins/02-plugin-manifest-schema.md` §5.4, `07-plugins/13-plugin-permissions-matrix.md`, `03-runtime/04-data-storage.md` §4.3/§7, and E2E-PLUGIN-declared-provider-appears-in-the-native-provider-list.**
-
-It deliberately does not include plugin OAuth: the `provider.oauth` permission
-and a Host-owned plugin login flow are future work, so a declared provider has no
-OAuth login, token refresh, or account label today.
+**A plugin may declare `contributes.providers`, and the Host materializes each entry as a provider row in the native Settings → Provider list, owned by that plugin (`providers.owner_plugin_id`, schema v17; row id `plugin:<pluginId>:<declaredId>`). The declaration is re-read on every load and is authoritative for its own fields, so a dropped entry is deleted together with both credential references; `providers.update` / `providers.delete` refuse a plugin-owned row with `PROVIDER_OWNED_BY_PLUGIN`. A non-empty declaration needs the new high-risk `provider.register` permission. D427 initially excluded OAuth; D647 amends it with a Host-owned login flow and separate high-risk `provider.oauth` grant. See ADR 0259, ADR 0320, `07-plugins/02-plugin-manifest-schema.md` §5.4, `07-plugins/13-plugin-permissions-matrix.md`, `03-runtime/04-data-storage.md` §4.3/§7, and E2E-PLUGIN-declared-provider-appears-in-the-native-provider-list.**
 
 ## 2026-09-15 — Side chats materialize on first Send (#421)
 
@@ -7486,3 +7482,22 @@ must keep splitting are covered by `markdown-blocks.test.mjs`.
 - Covered by `apps/desktop/test/home-project-name.test.mjs`, which renders the
   real surface against the real store. See `04-ux/01-ui-ia.md`,
   `04-ux/08-component-spec.md`, and E2E-256.
+
+## 2026-10-06 — Plugin providers can own OAuth sign-in through a scoped callback (D647)
+
+- D647 amends ADR 0259: a plugin provider may declare `authKind: "oauth"` when
+  it has `provider.register`, the separate high-risk `provider.oauth` grant, and
+  an `onProviderOAuth` callback. The Host owns the login UI, encrypted
+  `secret:provider:<rowId>:oauth` storage, refresh serialization, and the
+  per-request auth resolver. The callback can read only its own provider's
+  OAuth credential; the Agent Runtime receives only an access token and the
+  renderer receives no tokens. `pi.providers.oauth.prompt` and `.notify` provide
+  bounded host-rendered login interaction. Host-mediated network calls still
+  need `net.fetch` and declared domains; plugin entry code remains outside an
+  OS sandbox. One credential is stored per declared provider row, and sign-out
+  clears it without deleting the manifest-owned row. Plugin-owned provider rows
+  and credentials remain out of portable configuration capture.
+- Covered by the updated plugin manifest/provider validation contracts and the
+  provider OAuth scenario in E2E-PLUGIN-declared-provider-appears-in-the-native-provider-list.
+  See ADR 0320, the plugin OAuth API and permission specs, and
+  `03-runtime/14-secrets-storage.md`.

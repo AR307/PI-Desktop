@@ -39,9 +39,11 @@ Ownership is the part that needs a decision: a provider row is no longer only
    apiStyle, models). Values the declaration does not own — stored headers and
    the OAuth account label — are preserved across a refresh.
 5. Credentials stay in the Host secret store under the same refs as any provider:
-   `secret:provider:<id>:api_key` and `secret:provider:<id>:oauth`. The plugin
-   neither holds nor exports the credential, and the row is an ordinary runtime
-   row for model resolution, discovery, and connection tests.
+   `secret:provider:<id>:api_key` and `secret:provider:<id>:oauth`. API-key
+   credentials are never handed to the plugin. OAuth credentials are accessible
+   only through the plugin's own `onProviderOAuth` callback with the separate
+   high-risk `provider.oauth` grant (ADR 0320). The row remains an ordinary
+   runtime row for model resolution, discovery, and connection tests.
 6. The user path refuses a plugin-owned row. `providers.update` and
    `providers.delete` fail with a `PROVIDER_OWNED_BY_PLUGIN` error, because the
    manifest declaration would overwrite a user edit on the next load and only the
@@ -58,13 +60,13 @@ Ownership is the part that needs a decision: a provider row is no longer only
    `plugins.uninstall`, and once at host startup for every registered plugin. A
    provider sync failure is logged as a warning; it never changes plugin
    enablement.
-10. OAuth is staged, not shipped: an `oauth` block or `authKind: "oauth"` is
-    refused at manifest validation (`plugin OAuth providers are not supported in
-    this release` / `unsupported authKind oauth`), because the Host has no plugin
-    OAuth login flow. The `provider.oauth` permission and a Host-owned login flow
-    are future work and are not available today.
-11. The plugin SDK mirrors the same authoring-time rules, requires the same
-    permission, and derives the `providers` capability token for the plugin row.
+10. OAuth contributions use the host-owned account UI and callback protocol in
+    ADR 0320. Each declaration has one encrypted OAuth credential at a time;
+    sign-out clears it while the manifest-owned row remains. Multi-account
+    provider rows are not part of this contract.
+11. The plugin SDK mirrors the same authoring-time rules, requires
+    `provider.oauth` for OAuth declarations, and derives the `providers`
+    capability token for the plugin row.
 
 ## Consequences
 
@@ -79,9 +81,10 @@ Ownership is the part that needs a decision: a provider row is no longer only
   development-plugin limit for v1.1 bound that exposure.
 - A credential is only as durable as the declaration: dropping an entry from the
   manifest, or uninstalling the plugin, deletes the stored key or token.
-- The plugin-side surface is deliberately narrow (no OAuth, no plugin-owned
-  headers, no user editing), so a row cannot become a writable side channel
-  around the provider config schema.
+- The plugin-side surface is deliberately narrow: OAuth code runs only in the
+  isolated plugin process for its own provider, while host-owned UI and secret
+  storage retain account and renderer ownership. The manifest still owns the
+  provider row and users cannot edit it.
 - The v15→v16 session-collaboration step now stamps its own version `16` instead
   of the latest schema constant, so a v15 file can walk v15→v16→v17 in one
   launch.

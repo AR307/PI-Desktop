@@ -1455,6 +1455,9 @@ sklm: {
     vendorAccountUpdated: "Satıcı hesabı güncellendi",
     vendorRemoveAccount: "Hesabı kaldır",
     vendorAccountRemoved: "{{vendor}} hesabı kaldırıldı",
+    vendorSignOut: "Oturumu kapat",
+    vendorSignedOut: "{{vendor}} oturumu kapatıldı",
+    pluginOauthFailed: "Eklenti sağlayıcı oturum açma işlemini tamamlayamadı.",
     vendorLoginStarting: "Oturum açılıyor…",
     vendorBrowserOpened:
       "Tarayıcınızda oturum açmayı bitirin, sonra bu pencereye dönün.",
@@ -2197,6 +2200,7 @@ importConfirm: "İçe aktarılan uzantılar ajan sürecinde, ajanın kendi araç
       "agent.extension": "Ajanın içinde kod çalıştır",
       "renderer.extension": "Sohbet yuvalarında arayüz çiz",
       "provider.register": "Model listesine servis ekle",
+      "provider.oauth": "Bir serviste OAuth ile oturum aç",
       "desktop.control": "Masaüstünü kontrol et",
       "models.list": "Kimliği doğrulanmış modelleri listele",
       "session.read": "Modele gönderilen geçerli konuşmayı oku",
@@ -2244,6 +2248,8 @@ importConfirm: "İçe aktarılan uzantılar ajan sürecinde, ajanın kendi araç
       "renderer.extension": "Bu eklentinin işleyici modülünü uygulama penceresine yükler; mesaj eylem çubukları, yanıt ek alanları, araç kartları, kod bloğu işleyicileri ve besteleyici kontrolleri gibi arayüz yuvası bileşenleri çizer. Modül PI-Desktop ile aynı belgede çalışır. Yalnızca güvendiğiniz kodu etkinleştirin.",
       "provider.register":
         "Bu eklentinin tanımladığı servisleri Ayarlar’daki servis listesine ekler. Uç noktayı ve modelleri eklenti sağlar; API anahtarınız PI-Desktop’ta kalır.",
+      "provider.oauth":
+        "Eklentinin, tanımladığı sağlayıcı için OAuth ile oturum açmasını ve token yenilemesini sağlar. PI-Desktop tokenları şifreler, ancak güvenilen geri çağrı bunları okuyabilir. Host üzerinden yapılan ağ erişimi için net.fetch ve tanımlı etki alanları gerekir; eklenti süreci işletim sistemi korumalı alanı değildir. Yalnızca güvendiğiniz koda verin.",
       "desktop.control":
         "Eklentinin incelenmiş PI-Desktop denetim kataloğunu çağırmasını sağlar. Yıkıcı işlemler yine confirm=true gerektirir; MCP bearer token eklentiye verilmez.",
       "models.list": "Oturum açtığınız modelleri görebilir. Anahtar almaz.",

@@ -284,6 +284,7 @@ const vendorOAuth = new VendorOAuth({
   openExternal: async (url) => {
     await safeOpenExternal(url);
   },
+  getPluginOAuthBridge: () => pluginServices.plugins,
   log: (level, message, data) => logger.app("provider", level, message, { data }),
   onAccountModels: (id, models) => modelsDevCatalog.setAccountModels(id, models),
   onAccountRemoved: (id) => modelsDevCatalog.deleteAccount(id),

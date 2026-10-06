@@ -341,6 +341,71 @@ Only enabled, authenticated provider rows are returned (API key, OAuth, or
 so a picker page can populate itself. When the host transport is unavailable,
 the call returns an empty list instead of warning (D080).
 
+### provider OAuth (requires `provider.oauth`)
+
+An OAuth provider contribution needs both `provider.register` and
+`provider.oauth`, a `baseUrl`, and an `onProviderOAuth` export from the plugin's
+main module. The host invokes the hook only for a declared contribution:
+
+```ts
+type PluginProviderOAuthRequest = {
+  operation: "login" | "refresh"
+  providerId: string       // plugin-local contribution id
+  loginId?: string         // login only; pass to prompt/notify
+  credential?: PluginProviderOAuthCredential // refresh only; this provider's credential
+}
+
+type PluginProviderOAuthCredential = {
+  accessToken: string
+  refreshToken?: string
+  expiresAt?: number       // Unix epoch milliseconds
+  accountLabel?: string
+  headers?: Record<string, string>
+}
+
+type PluginProviderOAuthContext = { signal: AbortSignal }
+
+onProviderOAuth(request, { signal }): Promise<PluginProviderOAuthCredential>
+```
+
+During login, return the credential after the user authorizes it. During
+refresh, the host passes the current credential to the same callback; return the
+updated credential. The host encrypts it under the provider row's OAuth secret
+reference and serializes refreshes. A callback can access only its own
+contribution's credential. The host sends the resolved access token to the
+Agent Runtime per request; refresh tokens never reach the renderer or Agent
+Runtime. One account is stored for each provider contribution; sign out clears
+that credential while the manifest-owned provider row remains.
+
+The plugin can use host-owned login UI without opening its own window:
+
+```ts
+if (!request.loginId) throw new Error("loginId is required for sign-in")
+const loginId = request.loginId
+
+await pi.providers.oauth.notify(loginId, {
+  kind: "deviceCode",
+  userCode,
+  verificationUri,
+  intervalSeconds,
+  expiresInSeconds,
+})
+
+const code = await pi.providers.oauth.prompt(loginId, {
+  type: "secret",
+  message: "Enter the verification code",
+})
+```
+
+`prompt` supports `text`, `secret`, `select`, and `manual_code`. `notify`
+supports non-secret `info`, `authUrl`, `deviceCode`, and `progress` events; the
+host opens valid HTTP(S) authorization URLs and reports whether the browser
+opened. The callback context signal is aborted when the user cancels, the plugin
+unloads, or the host call times out. OAuth token requests still require
+`net.fetch` and the manifest's `net.domains` when they use the host network API.
+This permission does not grant a general host secret API. Plugin entry code is
+not an OS sandbox and can use raw Node APIs, so grant it only to code you trust.
+
 ### session (requires `session.read`)
 ```ts
 pi.session.getLlmContext(): Promise<PluginLlmContext>
@@ -1118,6 +1183,7 @@ Any of the following calls must be logged for audit:
 - models.list (returned row count)
 - session.getLlmContext (session id, message count, truncated flag — never transcript text)
 - agent.complete (model key, sizes, usage — never prompt or completion text)
+- provider.oauth (plugin id, declared provider id, operation, result/error code — never credential contents)
 
 Log fields:
 - pluginId
@@ -1146,6 +1212,7 @@ The desktop plugin runtime now implements the MVP host API surface used by local
 - `agent.registerTool` / `unregisterTool` / `agent.complete`
 - `speech.registerAdapter` / `unregisterAdapter` (`speech.adapter.register`)
 - `models.list`, `session.getLlmContext`
+- `onProviderOAuth` and `pi.providers.oauth.prompt` / `notify` (`provider.oauth`)
 - `clipboard.*`, `shell.openExternal`, `net.fetch`
 - `browser.*` (guest CDP; `browser.cdp`)
 - `services.register` / `unregister`, `bus.publish` / `subscribe`, `events.on` / `off`

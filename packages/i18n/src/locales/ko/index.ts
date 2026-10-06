@@ -1465,6 +1465,9 @@ sklm: {
     vendorAccountUpdated: "벤더 계정 업데이트됨",
     vendorRemoveAccount: "계정 제거",
     vendorAccountRemoved: "{{vendor}} 계정 제거됨",
+    vendorSignOut: "로그아웃",
+    vendorSignedOut: "{{vendor}}에서 로그아웃됨",
+    pluginOauthFailed: "플러그인이 공급자 로그인을 완료하지 못했습니다.",
     vendorLoginStarting: "로그인 시작 중…",
     vendorBrowserOpened:
       "브라우저에서 로그인을 완료한 후 이 창으로 돌아오세요.",
@@ -2207,6 +2210,7 @@ importConfirm: "가져온 확장은 에이전트 프로세스 안에서 에이�
       "agent.extension": "에이전트 안에서 코드 실행",
       "renderer.extension": "채팅 슬롯에 UI 그리기",
       "provider.register": "모델 목록에 프로바이더 추가",
+      "provider.oauth": "OAuth로 프로바이더 로그인",
       "desktop.control": "데스크톱 제어",
       "models.list": "인증된 모델 목록 표시",
       "session.read": "모델에 전송되는 현재 대화 읽기",
@@ -2254,6 +2258,8 @@ importConfirm: "가져온 확장은 에이전트 프로세스 안에서 에이�
       "renderer.extension": "이 플러그인의 렌더러 모듈을 앱 창에 로드하여 메시지 작업 표시줄, 응답 추가 영역, 도구 카드, 코드 블록 렌더러, 작성기 컨트롤 등 UI 슬롯 구성 요소를 그립니다. 모듈은 PI-Desktop과 같은 문서에서 실행됩니다. 신뢰하는 코드만 활성화하세요.",
       "provider.register":
         "이 플러그인이 정의한 프로바이더를 설정의 프로바이더 목록에 추가합니다. 플러그인은 엔드포인트와 모델을 제공하며, API 키는 PI-Desktop에 남습니다.",
+      "provider.oauth":
+        "이 플러그인이 선언된 프로바이더의 OAuth 로그인과 토큰 갱신을 수행하도록 허용합니다. PI-Desktop은 토큰을 암호화하지만 신뢰하는 콜백은 토큰을 읽을 수 있습니다. 호스트가 중개하는 네트워크 접근에는 net.fetch와 선언된 도메인이 필요하며, 플러그인 프로세스는 운영체제 샌드박스가 아닙니다. 신뢰하는 코드에만 허용하세요.",
       "desktop.control":
         "플러그인이 검토된 PI-Desktop 제어 카탈로그를 호출할 수 있습니다. 파괴적 작업에는 여전히 confirm=true가 필요하며 MCP bearer token은 노출되지 않습니다.",
       "models.list": "로그인한 모델을 볼 수 있지만 키는 받지 않습니다.",

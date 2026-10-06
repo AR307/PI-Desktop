@@ -15793,22 +15793,28 @@ plugin-form fixtures in an isolated temporary directory at runtime.
   acceptance remains outstanding. Required post-integration suites: `test:e2e`,
   `test:e2e:subagents`, `test:e2e:subagent-models`.
 
-#### E2E-PLUGIN-declared-provider-appears-in-the-native-provider-list: A plugin-declared provider is a Host-owned row with thinking controls
+#### E2E-PLUGIN-declared-provider-appears-in-the-native-provider-list: Plugin providers use Host-owned rows, permissions, and OAuth sign-in
 
-- **Preconditions**: An installed local plugin declares one provider in
-  `contributes.providers` with the `provider.register` permission, one model,
-  a fixture `baseUrl`, `thinkingLevels: ["off", "low", "high"]`, and
-  `defaultThinkingLevel: "high"`; a key is stored once through Settings.
+- **Preconditions**: An installed local plugin declares one API-key provider
+  with `provider.register` and one OAuth provider with both `provider.register`
+  and `provider.oauth`. Both use a fixture `baseUrl` and one model; the API-key
+  model has `thinkingLevels: ["off", "low", "high"]` and
+  `defaultThinkingLevel: "high"`. Its `onProviderOAuth` callback uses only a
+  local OAuth fixture and host-rendered `pi.providers.oauth` interactions.
 - **Steps**: 1) Enable the plugin and open Settings → Providers. 2) Inspect
   the model binding and Composer thinking selector, then select the row as the
   session model and run a turn. 3) Change the session thinking level and run a
   second turn. 4) Try to edit the provider, then delete it, through the user
-  path. 5) Disable the plugin, inspect the list and stored credential, and
-  re-enable it. 6) Uninstall the plugin; reinstall and enable it, then remove
-  the declaration from its manifest and reload. 7) Load a manifest that
-  declares providers without `provider.register`. 8) Load a manifest that
-  declares an `oauth` block and `authKind: "oauth"`. 9) Load manifests whose
-  model uses a non-array `thinkingLevels`, a non-string entry, or a non-string
+  path. 5) Open Vendor accounts, sign in to the plugin OAuth provider using its
+  host-rendered prompt/device-code step, then select that provider and run a
+  turn. 6) Expire the fixture access token and run another turn to exercise the
+  plugin refresh callback. 7) Cancel a second login and confirm the callback's
+  abort signal fires; sign out and then disable/re-enable the plugin. 8)
+  Uninstall the plugin; reinstall and enable it, then remove the declaration
+  from its manifest and reload. 9) Load manifests that omit `provider.register`
+  or `provider.oauth`, have OAuth metadata without `authKind: "oauth"`, or
+  lack the `onProviderOAuth` module export. 10) Load manifests whose model uses a
+  non-array `thinkingLevels`, a non-string entry, or a non-string
   `defaultThinkingLevel`.
 - **Expected**: Step 1 shows one row in the native provider list with
   `ownerPluginId` set to the plugin and the row id
@@ -15818,17 +15824,21 @@ plugin-form fixtures in an isolated temporary directory at runtime.
   starts the session at `high`; the turn uses that choice. Step 3 persists and
   uses the changed session level without changing the provider declaration.
   Step 4 refuses both actions with an error whose message begins
-  `PROVIDER_OWNED_BY_PLUGIN` and leaves the row unchanged. Step 5 keeps the
-  row and sets `enabled = 0` while `secret:provider:<id>:api_key` stays stored,
-  so re-enabling restores the credential and thinking binding. Step 6 deletes
-  the row and both credential refs (`:api_key` and `:oauth`) in both orders —
-  uninstall, and a manifest that no longer declares the provider. Steps 7 and
-  8 fail manifest validation as `PLUGIN_INVALID` — the missing-permission
-  message and `plugin OAuth providers are not supported in this release` /
-  `unsupported authKind oauth` — and neither failure changes plugin enablement.
-  Step 9 rejects each malformed thinking-level field with `PLUGIN_INVALID` and
-  leaves plugin enablement unchanged.
+  `PROVIDER_OWNED_BY_PLUGIN` and leaves the row unchanged. Step 5 completes
+  login through the native OAuth dialog and stores one encrypted credential
+  under `secret:provider:<plugin-row-id>:oauth`; the renderer sees only status
+  and the non-secret account label. Step 6 invokes the refresh callback with
+  the plugin's own credential, but only the new access token reaches the Agent
+  Runtime; refresh tokens stay in Electron main and the Host secret store. Step
+  7 stops the callback on cancellation, clears the OAuth secret on sign-out,
+  keeps both manifest-owned rows across disable/enable, and restores sign-in
+  status only for credentials that remain stored. Step 8 removes both rows and
+  their credential refs when uninstalled or undeclared. Step 9 fails closed:
+  missing permissions fail manifest validation, and a missing callback fails
+  plugin load without exposing a sign-in action. Step 10 rejects malformed
+  thinking-level fields with `PLUGIN_INVALID` and leaves enablement unchanged.
 - **Specs linked**: `07-plugins/02-plugin-manifest-schema.md` §4, §5.4, §7;
+  `07-plugins/03-plugin-api.md` (provider OAuth); `07-plugins/04-plugin-security.md`;
   `07-plugins/13-plugin-permissions-matrix.md`; `03-runtime/04-data-storage.md`
   §4.3, §7; `03-runtime/11-provider-model-system.md` §6.2;
   `03-runtime/12-provider-config-schema.md` §2, §9;
@@ -15836,13 +15846,15 @@ plugin-form fixtures in an isolated temporary directory at runtime.
 - **Acceptance**: B (model config), E (tools & permissions), F (persistence),
   G (plugins), Security, Quality
 - **Milestone**: Post-MVP (R7 v1)
-- **Status**: Partially automated (`pnpm test:e2e:trusted-extensions`): the
-  declared row materializing as `plugin:<pluginId>:<declaredId>` in the native
-  provider list with its `ownerPluginId`, endpoint, models, and thinking
-  binding passes. Ownership refusal (`PROVIDER_OWNED_BY_PLUGIN`),
-  disable/enable, undeclare and uninstall cleanup, and the manifest refusals
-  are covered by host-core unit tests; the renderer's read-only row and
-  thinking-selector presentation remain additional validation.
+- **Status**: Runs in the Linux CI integration candidate through
+  `pnpm test:e2e:trusted-extensions` under Xvfb, using local
+  synthetic OAuth credentials: the API-key and OAuth declared rows, permission
+  projection, Settings sign-in picker, Host-rendered device-code and secret
+  prompt, encrypted-credential handoff, refresh, model request auth,
+  cancellation, and sign-out are exercised through the real Electron renderer
+  and plugin process. Ownership refusal, disable/enable, cleanup, and malformed
+  manifest cases remain covered by host-core checks. No live identity provider
+  is used.
 
 #### E2E-CHAT-disclosure-toggle-keeps-reading-position
 

@@ -27,7 +27,8 @@
 | `agent.tool.register` | 高 | 注册代理工具 | 安装时确认 | 工具执行情况单独审核 |
 | `agent.prompt.inject` | 高 | 注入系统提示符；激活 `contributes.skills` | 默认拒绝/强确认 | 容易导致行为劫持 |
 | `agent.extension` | 高 | 在 agent 进程内运行 `contributes.agentExtensions` 模块 | 显式确认；v1.1 仅限本地导入和开发插件 | 与 agent 自身工具同等权限；插件沙箱不适用（规格 16） |
-| `provider.register` | 高 | `contributes.providers` 成为原生 Provider 列表中的行，归插件所有并在每次加载时按 manifest 刷新 | 显式确认；v1.1 仅限本地导入和开发插件，与 `agent.extension` 一致 | 用户路径拒绝该行（`PROVIDER_OWNED_BY_PLUGIN`）；凭据仍存放在 Host secret store 的常规 provider 引用下；暂不启用 `oauth` 声明 |
+| `provider.register` | 高 | `contributes.providers` 成为原生 Provider 列表中的行，归插件所有并在每次加载时按 manifest 刷新 | 显式确认；v1.1 仅限本地导入和开发插件，与 `agent.extension` 一致 | 用户路径拒绝编辑该行（`PROVIDER_OWNED_BY_PLUGIN`）；API key 凭据仍存放在 Host secret store 的常规 provider 引用下 |
+| `provider.oauth` | 高 | 已声明 OAuth provider 的 `onProviderOAuth`；宿主渲染的 `pi.providers.oauth.prompt` / `notify` | 显式确认 | `authKind: "oauth"` 需要与 `provider.register` 一起授予。回调只能读取和刷新该 provider 声明自己的加密凭据。Host 会把刷新令牌隔离在渲染进程与 Agent Runtime 之外。宿主代发的网络请求仍需 `net.fetch` 和 `manifest.net.domains`；插件入口代码本身不是操作系统沙箱。每个 provider 声明只保存一个账号；退出登录会清除凭据 |
 | `net.fetch` | 高 | `net.fetch` | 默认拒绝 | 限定在 `manifest.net.domains` 之内；列表为空或非法即完全不放行出网（§2A） |
 | `net.websocket` | 高 | `pi.net.websocket.connect` / `send` / `close`（套接字由宿主持有；每个插件最多 4 个，帧封顶 1 MiB） | 默认拒绝 | 与 `net.fetch` 一样被限制在 `manifest.net.domains` 之内；被拒绝的主机永远到不了传输层，插件卸载、被禁用或崩溃时每个套接字都会被关闭 |
 | `net.anyHost` | 高 | 主机掌握的所有出网路径（`net.fetch`、`net.websocket`、面板 session、远程 HTTP MCP） | 安装时确认 | 对用户自填端点（自建服务器等）解除 `manifest.net.domains` 白名单；云元数据端点始终拒绝；请求时不再弹窗 |
