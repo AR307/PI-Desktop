@@ -13,9 +13,25 @@
 - Account-scoped relays keep directory subscriptions for each computer and a
   transcript subscription only for the open conversation. Changes update both
   messages and sync position transactionally.
-- Validation so far: Rust 780 tests, fmt and Clippy; mobile 19 tests and
-  shared/mobile TypeScript compilation. Actual Electron/Android acceptance and
-  preview packages are still pending integration; no production calls or push.
+- History paging retains its pre-request change position so concurrent deletion
+  cannot revive an old page. Offline paging stops at the cached boundary.
+- Directory refreshes retain notifications arriving during a request. Stale
+  writes check the current authorization before opening a cache transaction;
+  closed history instances cannot write back after revocation or sign-out.
+- Android 0.16.2/versionCode 5 adds GitHub manifest checks, native DownloadManager
+  progress/recovery and explicit system installation from Account.
+- Serializes paging, full-message expansion, durable changes and navigation
+  cache flushes so late responses cannot overwrite a newly read page.
+- Mobile sync projects oversized multi-block tool messages within relay frames
+  and uses the existing chunked item reader for complete content.
+- Real isolated Electron/mobile-browser acceptance passed multi-computer account
+  discovery, 610-row offline restart, exactly three changes after host restart,
+  and grant narrowing/revocation. Android system update acceptance passed
+  download/cancel/retry, restart, permission consent and covering installation.
+- Rust 780 tests, fmt, Clippy, mobile 22 tests, mobile-peer 8 tests and affected
+  TypeScript checks pass. The prior image sidecar child failure passes all six
+  targeted checks after rebuilding the runtime bundle. Final candidate packages
+  and long-message concurrency acceptance follow; no production calls or push.
 
 
 ## 2026-10-06 - Upstream 0.16.1, mobile registration and scratch previews

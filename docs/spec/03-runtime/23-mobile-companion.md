@@ -1,9 +1,11 @@
 # Android companion and scoped desktop sync
 
 The Android app uses the same MC account as desktop and a one-use pairing code
-to access an explicitly shared project or session. Project shares include new
-sessions as they join that project. A session share never expands to siblings.
-Desktop must be running and connected; history and execution remain on desktop.
+to access explicitly shared computers, projects or sessions. Account pairing
+discovers every computer that has opted into account sharing. Project shares
+include new sessions as they join that project; a session share never expands
+to siblings. Live operations require an online desktop. Cached history is
+readable offline; desktop remains the authority for history and execution.
 
 Desktop context menus expose Sync to mobile; account settings expose a manager
 for pending codes and paired grants. Users can cancel/regenerate codes and
@@ -114,9 +116,9 @@ desktop configuration changes through ephemeral `turn.activity` events, then
 reads the current live state. History pages use bounded Rust queries. Each command,
 subscription and outbound event rechecks current project/session membership.
 
-`connection/initialize` advertises the additions with the optional
-`sessionState` and `itemContent` capability flags; a client that does not see
-them uses the original full-snapshot contract unchanged.
+`connection/initialize` advertises `sessionState` and `itemContent`. This mobile
+client requires the current light-state/durable-change contract; a missing state
+response is a protocol error, not a reason to replace cached history.
 
 `session/state` returns the snapshot minus its transcript page (session
 description, active/queued turns, pending approvals/inputs, plans, image jobs,

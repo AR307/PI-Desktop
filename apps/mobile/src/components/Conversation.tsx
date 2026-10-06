@@ -78,7 +78,7 @@ export const Conversation = memo(function Conversation({ controller }: { control
   useEffect(() => { const input = composerInput.current; if (!input) return; input.style.height = "auto"; input.style.height = `${Math.min(input.scrollHeight, 150)}px`; }, [draft]);
   const loadOlder = useCallback(async () => {
     const element = scroll.current;
-    if (!element || loadingOlder) return;
+    if (!element || loadingOlder || !controller.canLoadEarlier()) return;
     setLoadingOlder(true);
     stick.current = false;
     anchor.current = { height: element.scrollHeight, top: element.scrollTop };

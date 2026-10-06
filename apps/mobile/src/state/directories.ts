@@ -31,6 +31,7 @@ export class MobileDirectories {
   private rows = new Map<string, DesktopDirectory>();
   private relays = new Map<string, MobileRelay>();
   private jobs = new Map<string, Promise<void>>();
+  private refreshAgain = new Set<string>();
   private generation = 0;
   constructor(private account: MobileAccount, private observer: DirectoryObserver) {}
   relay(id: string) { return this.relays.get(id); }
@@ -38,12 +39,14 @@ export class MobileDirectories {
   private emit() { this.observer.changed([...this.rows.values()]); }
 
   async restore(grants: MobileGrant[], devices: MobileDevice[]): Promise<void> {
+    const generation = this.generation;
     const accountId = this.account.session?.account.id;
     if (!accountId) return;
     for (const device of devices.filter((device) => device.kind === "desktop")) {
       const permitted = grantsForDesktop(grants, device);
       if (!permitted.length) continue;
       const cached = await readDirectory(accountId, device.deviceId);
+      if (generation !== this.generation || this.account.session?.account.id !== accountId) return;
       this.rows.set(device.deviceId, {
         desktopDeviceId: device.deviceId, projects: [], sessions: [], generatedAt: "", ...cached,
         device: { ...device, online: false }, grants: permitted, connection: "disconnected",
@@ -60,8 +63,8 @@ export class MobileDirectories {
     for (const [id] of this.rows) {
       if (available.some((device) => device.deviceId === id)) continue;
       const relay = this.relays.get(id);
-      await this.observer.removing(id);
       this.relays.delete(id); this.rows.delete(id);
+      await this.observer.removing(id);
       await relay?.close();
       await clearDesktopCache(accountId, id);
     }
@@ -84,7 +87,7 @@ export class MobileDirectories {
         for (const session of row.sessions) if (!retained.includes(session)) await cache.clear({ accountId, desktopDeviceId: device.deviceId, sessionId: session.id });
         row.sessions = retained;
         row.projects = row.projects.filter((project) => projectIds.has(project.id) || retained.some((session) => session.projectId === project.id));
-        await saveDirectory(accountId, row);
+        await saveDirectory(accountId, row, () => this.rows.get(device.deviceId) === row && generation === this.generation);
       }
     }
     this.emit();
@@ -116,26 +119,45 @@ export class MobileDirectories {
     if (relay.client.state === "connected") { await this.refresh(id); return relay; }
     if (relay.client.state === "connecting" || relay.client.state === "reconnecting") return relay;
     await relay.connect();
-    if (this.relays.get(id) === relay) { await relay.watchDirectory(); await this.refresh(id); }
+    if (this.relays.get(id) === relay) {
+      await relay.watchDirectory(); await this.refresh(id);
+      if (this.relays.get(id) === relay) await this.observer.restored(id);
+    }
     return relay;
   }
 
   refresh(id: string): Promise<void> {
-    if (this.jobs.has(id)) return this.jobs.get(id)!;
+    if (this.jobs.has(id)) { this.refreshAgain.add(id); return this.jobs.get(id)!; }
     const relay = this.relays.get(id); const row = this.rows.get(id);
     const accountId = this.account.session?.account.id;
     if (!relay || !row || !accountId || relay.client.state !== "connected") return Promise.resolve();
     const job = (async () => {
-      const directory = await relay.directory();
-      if (this.relays.get(id) !== relay || this.account.session?.account.id !== accountId) return;
-      const cache = new TranscriptCache();
-      await this.observer.removing(id, row.sessions.filter((session) => !directory.sessions.some((current) => current.id === session.id)).map((session) => session.id));
-      for (const session of row.sessions) if (!directory.sessions.some((current) => current.id === session.id)) {
-        await cache.clear({ accountId, desktopDeviceId: id, sessionId: session.id });
-      }
-      await saveDirectory(accountId, directory);
-      this.rows.set(id, { ...row, ...directory });
-      this.emit();
+      do {
+        this.refreshAgain.delete(id);
+        const before = this.rows.get(id);
+        if (!before) return;
+        const directory = await relay.directory();
+        if (this.relays.get(id) !== relay || this.account.session?.account.id !== accountId) return;
+        // A grant/discovery update replaced the row while the request was running.
+        // Read again under the current authorization before committing metadata.
+        if (before !== this.rows.get(id)) { this.refreshAgain.add(id); continue; }
+        if (!before.grants.some((grant) => grant.scope.kind === "account")) {
+          const permitted = (session: MobileDirectoryPage["sessions"][number]) => before.grants.some((grant) =>
+            grant.scope.kind === "session" ? grant.scope.id === session.id : grant.scope.id === session.projectId);
+          directory.sessions = directory.sessions.filter(permitted);
+          directory.projects = directory.projects.filter((project) => before.grants.some((grant) => grant.scope.kind === "project" && grant.scope.id === project.id) || directory.sessions.some((session) => session.projectId === project.id));
+        }
+        const cache = new TranscriptCache();
+        await this.observer.removing(id, before.sessions.filter((session) => !directory.sessions.some((current) => current.id === session.id)).map((session) => session.id));
+        if (before !== this.rows.get(id)) { this.refreshAgain.add(id); continue; }
+        for (const session of before.sessions) if (!directory.sessions.some((current) => current.id === session.id)) {
+          await cache.clear({ accountId, desktopDeviceId: id, sessionId: session.id });
+        }
+        await saveDirectory(accountId, directory, () => this.relays.get(id) === relay && before === this.rows.get(id));
+        if (this.relays.get(id) !== relay || before !== this.rows.get(id)) { this.refreshAgain.add(id); continue; }
+        this.rows.set(id, { ...before, ...directory });
+        this.emit();
+      } while (this.refreshAgain.has(id));
     })().finally(() => this.jobs.delete(id));
     this.jobs.set(id, job);
     return job;
@@ -145,6 +167,7 @@ export class MobileDirectories {
     this.generation++;
     const relays = [...this.relays.values()];
     this.relays.clear(); this.rows.clear(); this.jobs.clear();
+    this.refreshAgain.clear();
     await Promise.all(relays.map((relay) => relay.close()));
     this.emit();
   }

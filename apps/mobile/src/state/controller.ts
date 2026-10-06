@@ -120,7 +120,9 @@ export class MobileController {
     if (!identity || this.account.session?.account.id !== identity.account.id || !this.value.signedIn) return;
     const accountId = this.account.session.account.id;
     this.patch({ grants, devices });
-    await saveAccount(accountId, grants, devices);
+    const current = () => this.value.signedIn && this.account.session?.account.id === accountId;
+    await saveAccount(accountId, grants, devices, current);
+    if (!current()) return;
     await this.directories.sync(grants, devices);
     const row = this.value.desktopId ? this.directories.row(this.value.desktopId) : undefined;
     if (this.value.desktopId && !row) await this.disconnect();
@@ -146,6 +148,7 @@ export class MobileController {
 
   async selectSession(sessionId: string) {
     await this.flushCache();
+    await this.history?.close();
     const desktopDeviceId = this.value.desktopId; const accountId = this.account.session?.account.id;
     if (!desktopDeviceId || !accountId) return;
     const relay = this.directories.relay(desktopDeviceId);
@@ -169,10 +172,13 @@ export class MobileController {
       const result = await relay.attach(sessionId, cached.entry?.cursor);
       if (!valid()) return;
       if (result.kind === "state") {
-        const messages = await history.changes(relay, cached.messages, valid);
-        if (!valid()) return;
-        this.patch({ messages });
-        this.acceptState(result.state, { hasMoreHistory: cached.hasOlderCached || cached.entry?.hasMoreHistory, restoreActive: true });
+        await history.run(async () => {
+          if (!valid()) return;
+          const messages = await history.changes(relay, this.value.messages, valid);
+          if (!valid()) return;
+          this.patch({ messages });
+          this.acceptState(result.state, { restoreActive: true });
+        });
       } else {
         await history.initialize(result.snapshot);
         if (!valid()) return;
@@ -294,15 +300,20 @@ export class MobileController {
         this.stateAgain = false;
         const state = await relay.state(sessionId);
         if (relay !== this.relay || sessionId !== this.value.selectedId) return;
-        this.acceptState(state);
         const history = this.history;
         if (history && !this.syncingHistory) {
           this.syncingHistory = true;
           try {
-            await this.flushCache();
-            this.connectingEvents = [];
-            const updated = await history.changes(relay, this.value.messages, () => history === this.history);
-            if (history === this.history) this.patch({ messages: updated });
+            await history.run(async () => {
+              if (history !== this.history) return;
+              this.acceptState(state);
+              // Buffer stream events before the IndexedDB flush; no applied
+              // delta may be overwritten by the later changes response.
+              this.connectingEvents = [];
+              await this.flushCacheNow();
+              const updated = await history.changes(relay, this.value.messages, () => history === this.history);
+              if (history === this.history) this.patch({ messages: updated });
+            });
           } finally {
             this.syncingHistory = false;
             if (history === this.history) {
@@ -318,28 +329,42 @@ export class MobileController {
   }
   async refreshSession() { await this.refreshState(); }
   async earlier() {
-    const history = this.history; const first = this.value.messages[0];
-    if (!history || !first) return;
+    const history = this.history;
+    if (!history) return;
     await this.action(async () => {
-      const result = await history.earlier(first, this.relay?.client.state === "connected" ? this.relay : undefined);
-      if (history !== this.history) return;
-      this.patch({ messages: mergeMessages(result.messages, this.value.messages),
-        snapshot: this.value.snapshot ? { ...this.value.snapshot, hasMoreHistory: result.hasMore } : undefined });
+      await history.run(async () => {
+        const first = this.value.messages[0];
+        if (history !== this.history || !first) return;
+        const result = await history.earlier(first, this.relay?.client.state === "connected" ? this.relay : undefined);
+        if (history !== this.history) return;
+        this.patch({ messages: mergeMessages(result.messages, this.value.messages),
+          snapshot: this.value.snapshot ? { ...this.value.snapshot, hasMoreHistory: result.hasMore } : undefined });
+      });
+      if (this.relay?.client.state === "connected") await this.refreshState();
     });
   }
   async itemContent(messageId: string): Promise<UiMessage | undefined> {
     const history = this.history; const relay = this.relay;
     if (!history) return undefined;
-    const cached = await this.cache.message(history.address, messageId);
-    if (!relay || relay.client.state !== "connected") return cached;
-    const message = await relay.item(history.address.sessionId, messageId);
-    await history.save([message]);
-    if (history === this.history) this.patch({ messages: this.value.messages.map((candidate) => candidate.id === messageId ? message : candidate) });
-    return message;
+    return history.run(async () => {
+      if (history !== this.history) return undefined;
+      const cached = await this.cache.message(history.address, messageId);
+      if (!relay || relay.client.state !== "connected") return cached;
+      const message = await relay.item(history.address.sessionId, messageId);
+      await history.save([message]);
+      if (history === this.history) this.patch({ messages: this.value.messages.map((candidate) => candidate.id === messageId ? message : candidate) });
+      return message;
+    });
   }
   private persistCacheSoon() {
     if (this.cacheTimer) return;
-    this.cacheTimer = setTimeout(() => { this.cacheTimer = undefined; void this.background(() => this.persistCacheNow()); }, CACHE_WRITE_DELAY_MS);
+    this.cacheTimer = setTimeout(() => {
+      this.cacheTimer = undefined;
+      const history = this.history;
+      if (history) void this.background(() => history.run(async () => {
+        if (history === this.history) await this.persistCacheNow();
+      }));
+    }, CACHE_WRITE_DELAY_MS);
   }
   private async persistCacheNow() {
     const snapshot = this.value.snapshot; const history = this.history;
@@ -347,10 +372,17 @@ export class MobileController {
     await history.save(this.value.messages, snapshot, history.entry?.cursor);
   }
   private async flushCache() {
+    const history = this.history;
+    if (history) await history.run(async () => {
+      if (history === this.history) await this.flushCacheNow();
+    });
+  }
+  private async flushCacheNow() {
     this.flushFrameEvents();
     if (this.cacheTimer) { clearTimeout(this.cacheTimer); this.cacheTimer = undefined; }
     await this.persistCacheNow();
   }
+  canLoadEarlier() { return this.value.connection === "connected" || this.value.messages[0]?.id !== this.history?.entry?.oldestId; }
   async continueResponse(messageId: string, text: string): Promise<boolean> {
     const view = this.value;
     const message = view.messages.find(item => item.id === messageId);
@@ -396,7 +428,7 @@ export class MobileController {
     if (!this.relay || this.relay.client.state !== "connected") throw new Error("offlineHint");
     const result = await downloadAttachment(this.relay, history.address.sessionId, messageId, attachmentId);
     if (history !== this.history) throw new Error("Conversation changed");
-    await cacheAttachment(history.address, messageId, attachmentId, result);
+    await cacheAttachment(history.address, messageId, attachmentId, result, () => history === this.history);
     return result;
   }
   async retryImage(messageId: string, imageId: string) { await this.mutate("image/retryDownload", { messageId, imageId }); }
@@ -413,14 +445,16 @@ export class MobileController {
   back() { void this.background(async () => {
     await this.flushCache();
     if (this.value.selectedId && this.value.grant?.scope.kind !== "session") {
-      ++this.selection; this.clearFrameEvents(); await this.relay?.detach(); this.history = undefined;
+      ++this.selection; this.clearFrameEvents(); await this.history?.close(); await this.relay?.detach(); this.history = undefined;
       this.patch({ selectedId: undefined, snapshot: undefined, messages: [] });
     } else await this.disconnect();
   }); }
   async resume() { if (this.value.signedIn) await this.background(async () => { await this.refreshGrants(); await this.refreshState(); }); }
   async disconnect() {
     ++this.selection; await this.flushCache(); this.clearFrameEvents();
-    const relay = this.relay; this.relay = undefined; this.history = undefined;
+    const relay = this.relay; const history = this.history;
+    this.relay = undefined; this.history = undefined; this.connectingEvents = undefined;
+    await history?.close();
     await relay?.detach();
     this.patch({ desktopId: undefined, grant: undefined, selectedId: undefined, snapshot: undefined, messages: [], sessions: [], projects: [], catalog: undefined, connection: "disconnected", configuring: false, uncertainMessageId: undefined });
   }

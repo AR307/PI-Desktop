@@ -136,7 +136,7 @@ export class MobileRelay {
   history(sessionId: string, beforeItemId: string) {
     return this.request<MobileSessionHistoryPage>("session/history", { sessionId, beforeItemId, limit: 50 });
   }
-  changes(sessionId: string, afterRevision: number) { return this.request<MobileSessionChangesPage>("session/changes", { sessionId, afterRevision, limit: 100 }); }
+  changes(sessionId: string, afterRevision: number) { return this.request<MobileSessionChangesPage>("session/changes", { sessionId, afterRevision, limit: 50 }); }
   /** Reassemble one item's complete JSON from relay-safe chunks. */
   async item(sessionId: string, itemId: string): Promise<UiMessage> {
     const chunks: Uint8Array[] = [];

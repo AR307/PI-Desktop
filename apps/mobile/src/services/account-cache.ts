@@ -10,8 +10,9 @@ export async function readAccount(accountId: string): Promise<CachedAccount | un
   const db = await mobileDatabase();
   return dbRequest(db.transaction("accounts").objectStore("accounts").get(accountId));
 }
-export async function saveAccount(accountId: string, grants: MobileGrant[], devices: MobileDevice[]): Promise<void> {
+export async function saveAccount(accountId: string, grants: MobileGrant[], devices: MobileDevice[], current: () => boolean): Promise<void> {
   const db = await mobileDatabase();
+  if (!current()) return;
   const tx = db.transaction("accounts", "readwrite");
   const done = dbDone(tx);
   tx.objectStore("accounts").put({ key: accountId, accountId, grants, devices } satisfies CachedAccount);
@@ -21,8 +22,11 @@ export async function readDirectory(accountId: string, desktopDeviceId: string):
   const db = await mobileDatabase();
   return dbRequest(db.transaction("directories").objectStore("directories").get(directoryKey(accountId, desktopDeviceId)));
 }
-export async function saveDirectory(accountId: string, directory: MobileDirectoryPage): Promise<void> {
+export async function saveDirectory(accountId: string, directory: MobileDirectoryPage, current: () => boolean): Promise<void> {
   const db = await mobileDatabase();
+  // Check immediately before creating the transaction. A later grant-pruning
+  // transaction then runs after this one, never before a stale pending write.
+  if (!current()) return;
   const tx = db.transaction("directories", "readwrite");
   const done = dbDone(tx);
   tx.objectStore("directories").put({ ...directory, key: directoryKey(accountId, directory.desktopDeviceId), accountId } satisfies CachedDirectory);

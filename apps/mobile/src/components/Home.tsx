@@ -20,7 +20,7 @@ export function Home({ controller, view }: { controller: MobileController; view:
       return <article className="grant-card" key={directory.desktopDeviceId}>
         <button className="grant-open" onClick={() => withViewTransition(() => void controller.openGrant(grant, directory.desktopDeviceId))}>
           <span className="tile-icon"><Monitor size={22}/></span>
-          <span className="grant-content"><strong>{directory.device.name}</strong><span className="muted"><span className={`status-dot ${online ? "online" : ""}`}/>{t(online ? "online" : "offline")} · {directory.projects.length} {t("projects")} · {directory.sessions.length} {t("conversations")}</span></span><ChevronRight size={18}/>
+          <span className="grant-content"><strong>{directory.device.name}</strong><span className="muted"><span className={`status-dot ${online ? "online" : ""}`}/>{t(online ? "online" : "offline")} · {t("projectCount", { count: directory.projects.length })} · {directory.sessions.length} {t("conversations")}</span></span><ChevronRight size={18}/>
         </button>
       </article>;
     })}</div>

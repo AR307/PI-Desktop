@@ -17158,3 +17158,34 @@ host-created files. The full app's file-preview viewer is covered separately.
   `apps/desktop/test/e2e/mobile/sync-preview.mjs`. RSA login is checked using an
   actual RSA key pair at the HTTP boundary. Native Android and production MC are
   separate acceptance environments and are never inferred from this result.
+
+
+## E2E-Mobile-account-offline-20261006
+
+Use pps/desktop/test/e2e/mobile/account-sync.mjs with isolated Electron/Rust
+profiles, the controlled MC fixture and the real mobile browser application.
+Never use production accounts or paid models for these scenarios.
+
+1. Enable account sharing on two computers and claim one eight-digit code.
+   Verify separate computer/project/session trees, empty projects, ungrouped
+   sessions and same-path isolation. Discovery must transfer no history bodies.
+2. Load 610 messages, return to the list, disconnect MC and reload the phone.
+   Read every loaded page from IndexedDB without another history request.
+3. Stop one desktop, edit an old message, delete another and append a reply using
+   the real Rust host, then restart. Reconnect the phone: only those three changes
+   cross the relay, no full snapshot/history; edited/deleted rows remain correct.
+4. Opt in a third computer without another pairing, then opt out only one machine.
+   Preserve other grants and continue showing offline cached directories.
+5. Add a single-session grant, revoke the account grant, and reopen offline.
+   Only that session remains, its loaded pages still work, and other content is
+   removed. Revoking the remaining grant clears its directory and cached history.
+6. Exercise an oversized multi-block tool message through changes/history and
+   full-content expansion. Sync position advances while the complete item remains
+   accessible through chunked session/item, then readable from the offline cache.
+
+Native update acceptance uses PiMobileQA with controlled HTTPS/localhost feeds:
+check while signed out, download/cancel/retry, resume status after process restart,
+open the unknown-source permission screen, return to the installer and cancel or
+complete installation. Covering upgrades keep identity, credentials and cache.
+Record native screenshots separately from browser results. The account-grant MC
+increment and production update publication require later service validation.

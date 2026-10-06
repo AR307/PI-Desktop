@@ -9,8 +9,9 @@ export async function readAttachment(address: TranscriptAddress, message: string
   const db = await mobileDatabase();
   return dbRequest<CachedAttachment | undefined>(db.transaction("attachments").objectStore("attachments").get(attachmentKey(address, message, attachment)));
 }
-export async function cacheAttachment(address: TranscriptAddress, messageId: string, attachment: string, result: { blob: Blob; name: string }): Promise<void> {
+export async function cacheAttachment(address: TranscriptAddress, messageId: string, attachment: string, result: { blob: Blob; name: string }, current: () => boolean): Promise<void> {
   const db = await mobileDatabase();
+  if (!current()) return;
   const tx = db.transaction("attachments", "readwrite");
   const done = dbDone(tx);
   tx.objectStore("attachments").put({ ...address, ...result, messageId, key: attachmentKey(address, messageId, attachment), sessionKey: cacheKey(address) } satisfies CachedAttachment);

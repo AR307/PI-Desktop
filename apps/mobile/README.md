@@ -41,7 +41,13 @@ pairing against MirrorCoding. No desktop provider tokens enter the phone.
 - `src/styles.css`: responsive layout using the desktop's canonical color tokens.
 - `android`: Capacitor application, SDK 24 minimum / SDK 36 target.
 
-History and attachment bytes are fetched on demand from the online desktop.
+Computer/project/session indexes and loaded history render from account-scoped
+IndexedDB before networking. Older pages and attachment bytes are fetched only
+when absent locally. Loaded messages have no 500-row cap; expanded content and
+downloaded attachments remain readable offline. A Rust-owned revision reconciles
+updates and deletions across desktop restarts without fetching the full history.
+Only the open conversation subscribes to live content; other computers keep
+light directory subscriptions. Offline operation is reading only.
 Drafts survive navigation and network disconnects within the running app.
 Stopping sync does not stop desktop tasks. The app supports English and Chinese,
 light/dark/system appearance, system file picking and native save/share.
@@ -49,6 +55,13 @@ Normal app restarts preserve the signed-in device and its pairings. Explicit
 sign-out clears the local account/device credentials; the next password login
 registers a new device and requires pairing again. Existing grants can be
 revoked from the desktop's mobile-sync manager.
+
+Account pairing discovers all computers that explicitly enable account sharing;
+existing project/session grants are not widened. The MC increment is specified in
+[`mirrorcoding-mobile-account-sync-requirements.md`](../../docs/mirrorcoding-mobile-account-sync-requirements.md).
+Confirmed revocation clears only caches no longer covered by another grant.
+Explicit sign-out clears the account cache; disconnected phones learn revocation
+on their next connection.
 
 Conversation controls update only the current shared session. The phone can
 choose Agent, Plan, Goal or Image and select any currently usable desktop chat
@@ -66,6 +79,10 @@ to the system installer through the app's FileProvider. The first APK that
 contains this updater must still be installed manually; later releases can be
 installed from Account. Generate the release manifest with
 `pnpm --filter @pi-desktop/mobile update:manifest <output-file> [notes-file]`.
+Upload the resulting `mobile-update.json` and its named APK together to a formal
+release in `AR307/Mirrorcoding-APP`. The Android package version comes from this
+package's version; increment `versionCode` in `android/app/build.gradle` for every
+published APK and use the existing signing identity for covering upgrades.
 The app never installs silently and GitHub or download failures do not block
 normal account and transcript use.
 
