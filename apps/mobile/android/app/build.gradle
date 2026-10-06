@@ -3,11 +3,13 @@ apply plugin: 'com.android.application'
 android {
     namespace = "xyz.mirrorcoding.pi.mobile"
     compileSdk = rootProject.ext.compileSdkVersion
+    def acceptanceApplicationId = project.hasProperty('piMobileAcceptanceApplicationId') ? project.property('piMobileAcceptanceApplicationId').toString() : "xyz.mirrorcoding.pi.mobile"
+    def acceptanceVersionCode = project.hasProperty('piMobileAcceptanceVersionCode') ? project.property('piMobileAcceptanceVersionCode').toString().toInteger() : 5
     defaultConfig {
-        applicationId "xyz.mirrorcoding.pi.mobile"
+        applicationId acceptanceApplicationId
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 5
+        versionCode acceptanceVersionCode
         versionName new groovy.json.JsonSlurper().parse(file('../../package.json')).version
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         aaptOptions {

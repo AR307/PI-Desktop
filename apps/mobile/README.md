@@ -86,6 +86,19 @@ published APK and use the existing signing identity for covering upgrades.
 The app never installs silently and GitHub or download failures do not block
 normal account and transcript use.
 
+For controlled native acceptance, build two debug APKs with the same isolated
+`piMobileAcceptanceApplicationId` and version codes 6 and 5, using Gradle's
+`-PpiMobileAcceptanceApplicationId=...` and
+`-PpiMobileAcceptanceVersionCode=...` properties. Build code 6 first and place
+it at `.artifacts/mobile-update-qa/update.apk`, then install code 5. Build the
+web assets with Vite `--mode acceptance` and
+`VITE_MOBILE_UPDATE_MANIFEST_URL=http://127.0.0.1:38479/mobile-update.json`.
+After `cap sync android`, run `node apps/mobile/test/android-update-e2e.mjs`
+with `ANDROID_HOME`, `PI_ANDROID_SERIAL` and `PI_ANDROID_UPDATE_APP_ID` set.
+The harness serves the manifest/APK only on localhost, uses `adb reverse`, and
+captures screenshots under `.artifacts/mobile-update-qa`. Use a fresh isolated
+application ID for each full run; no production account or GitHub call is made.
+
 ## Controlled acceptance environment
 
 Use `vite --mode acceptance` with `VITE_MC_ORIGIN` set to the controlled local MC
