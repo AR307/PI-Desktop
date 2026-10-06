@@ -5,6 +5,8 @@
 use sha2::{Digest, Sha256};
 
 const UTF8_BOM: &[u8] = &[0xEF, 0xBB, 0xBF];
+const UTF16LE_BOM: &[u8] = &[0xFF, 0xFE];
+const UTF16BE_BOM: &[u8] = &[0xFE, 0xFF];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LineEnding {
@@ -28,9 +30,22 @@ pub struct NormalizedFile {
     pub text: String,
     pub ending: LineEnding,
     pub bom: bool,
+    pub utf16: Option<bool>,
 }
 
 pub fn decode_bytes(bytes: &[u8]) -> (bool, String) {
+    if bytes.starts_with(UTF16LE_BOM) || bytes.starts_with(UTF16BE_BOM) {
+        let little_endian = bytes.starts_with(UTF16LE_BOM);
+        let body = &bytes[2..bytes.len() - (bytes[2..].len() % 2)];
+        let units = body.chunks_exact(2).map(|pair| {
+            if little_endian {
+                u16::from_le_bytes([pair[0], pair[1]])
+            } else {
+                u16::from_be_bytes([pair[0], pair[1]])
+            }
+        });
+        return (false, String::from_utf16_lossy(&units.collect::<Vec<_>>()));
+    }
     let bom = bytes.starts_with(UTF8_BOM);
     let rest = if bom { &bytes[3..] } else { bytes };
     (bom, String::from_utf8_lossy(rest).into_owned())
@@ -52,11 +67,19 @@ pub fn to_lf(text: &str) -> String {
 
 pub fn normalize_file(bytes: &[u8]) -> NormalizedFile {
     let (bom, decoded) = decode_bytes(bytes);
+    let utf16 = if bytes.starts_with(UTF16LE_BOM) {
+        Some(true)
+    } else if bytes.starts_with(UTF16BE_BOM) {
+        Some(false)
+    } else {
+        None
+    };
     let ending = detect_ending(&decoded);
     NormalizedFile {
         text: to_lf(&decoded),
         ending,
         bom,
+        utf16,
     }
 }
 
@@ -122,11 +145,26 @@ pub fn tag_of_lf_text(lf_text: &str) -> String {
     tag_of_hash_input(&hash_input(lf_text))
 }
 
-pub fn encode_bytes(lf_text: &str, ending: LineEnding, bom: bool) -> Vec<u8> {
+pub fn encode_bytes(lf_text: &str, ending: LineEnding, bom: bool, utf16: Option<bool>) -> Vec<u8> {
     let body = match ending {
         LineEnding::Lf => lf_text.to_string(),
         LineEnding::Crlf => lf_text.replace('\n', "\r\n"),
     };
+    if let Some(little_endian) = utf16 {
+        let mut out = if little_endian {
+            UTF16LE_BOM.to_vec()
+        } else {
+            UTF16BE_BOM.to_vec()
+        };
+        for unit in body.encode_utf16() {
+            out.extend(if little_endian {
+                unit.to_le_bytes()
+            } else {
+                unit.to_be_bytes()
+            });
+        }
+        return out;
+    }
     if !bom {
         return body.into_bytes();
     }
@@ -137,6 +175,19 @@ pub fn encode_bytes(lf_text: &str, ending: LineEnding, bom: bool) -> Vec<u8> {
 }
 
 pub fn looks_binary_bytes(bytes: &[u8]) -> bool {
+    if bytes.starts_with(UTF16LE_BOM) || bytes.starts_with(UTF16BE_BOM) {
+        let little_endian = bytes.starts_with(UTF16LE_BOM);
+        let body = &bytes[2..];
+        return body.len() % 2 != 0
+            || std::char::decode_utf16(body.chunks_exact(2).map(|pair| {
+                if little_endian {
+                    u16::from_le_bytes([pair[0], pair[1]])
+                } else {
+                    u16::from_be_bytes([pair[0], pair[1]])
+                }
+            }))
+            .any(|character| character.is_err() || character.is_ok_and(|c| c == '\0'));
+    }
     let sample = &bytes[..bytes.len().min(4096)];
     if sample.contains(&0) {
         return true;
@@ -230,7 +281,7 @@ mod tests {
         assert!(file.bom);
         assert_eq!(file.text, "hi\n");
         assert_eq!(tag_of_lf_text(&file.text), tag_of_lf_text("hi\n"));
-        assert_eq!(encode_bytes("hi\n", LineEnding::Lf, true), raw);
+        assert_eq!(encode_bytes("hi\n", LineEnding::Lf, true, None), raw);
     }
 
     #[test]

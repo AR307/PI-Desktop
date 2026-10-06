@@ -43,7 +43,9 @@ Three properties are enforced, in this order, before any byte is written:
 
 Before hashing, and before any line is addressed, file text is normalized:
 
-1. A leading UTF-8 BOM is stripped and retained for restoration on write.
+1. A leading UTF-8 or UTF-16 (LE/BE) BOM is stripped and retained with its
+   encoding for restoration on write. BOM-marked UTF-16 text is readable by
+   `Read`; malformed UTF-16 and NUL-bearing binary content remain rejected.
 2. Line endings are detected and normalized to `LF`; the dominant original
    ending is retained for restoration on write.
 3. Trailing `[ \t\r]` is removed from every line, including the last.

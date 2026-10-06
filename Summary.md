@@ -21,6 +21,13 @@
 - Runtime regression tests cover same-file delegates, parent error reporting,
   and the cross-prompt lifecycle.
 
+## 2026-10-06 - Native Read of PowerShell logs
+
+- Host-core file tools now read BOM-marked UTF-16LE/BE text, including
+  PowerShell-generated logs, and preserve the source encoding when edited.
+- Binary content and malformed UTF-16 remain rejected. The focused native
+  Read/Edit regression covers the actual PowerShell log workflow.
+
 ## 2026-10-06 - Mobile account discovery and durable local history
 
 - Adds opt-in account grants and independent per-computer directories without

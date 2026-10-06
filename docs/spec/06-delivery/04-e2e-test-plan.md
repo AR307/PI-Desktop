@@ -6,6 +6,14 @@
 | --- | --- |
 | E2E-DELEGATE-EDIT-01 | Start two writing subagents against one file. Make one submit two malformed Edit operations, then have the other submit its first malformed Edit. Only the first subagent is near its three-failure limit; the second and parent remain able to edit. When the first subagent reaches its third counted failure, it stops without ending the parent turn. A new parent prompt has a fresh budget while a still-running delegate retains its own budget. |
 
+## Native file tools: PowerShell logs
+
+Run a PowerShell command that writes a UTF-16LE BOM log to session scratch,
+then use `Read` on its absolute path. The returned lines must be readable text,
+not `TOOL_BINARY_CONTENT`. Edit one line through the public `Edit` tool and
+confirm the file retains its UTF-16LE BOM and content. A NUL-bearing binary
+file must still be rejected.
+
 ## Mobile companion acceptance
 
 Validate this opt-in post-baseline feature on the dedicated request candidate
