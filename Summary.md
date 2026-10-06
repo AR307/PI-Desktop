@@ -28,6 +28,9 @@
   discovery, 610-row offline restart, exactly three changes after host restart,
   and grant narrowing/revocation. Android system update acceptance passed
   download/cancel/retry, restart, permission consent and covering installation.
+- The final browser flow also keeps paged and expanded 90 KB content across a
+  delayed changes reply and an offline restart. Model catalog failures cannot
+  discard already-received transcript events.
 - Rust 780 tests, fmt, Clippy, mobile 22 tests, mobile-peer 8 tests and affected
   TypeScript checks pass. The prior image sidecar child failure passes all six
   targeted checks after rebuilding the runtime bundle. Final candidate packages

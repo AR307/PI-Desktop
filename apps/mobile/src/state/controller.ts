@@ -184,11 +184,11 @@ export class MobileController {
         if (!valid()) return;
         this.acceptSnapshot(result.snapshot, false);
       }
-      await this.loadCatalog(sessionId);
       if (!valid()) return;
       const buffered = this.connectingEvents ?? []; this.connectingEvents = undefined;
       for (const event of buffered) this.handleEvent(event);
       this.persistCacheSoon();
+      await this.background(() => this.loadCatalog(sessionId));
     });
     if (valid()) { this.connectingEvents = undefined; this.patch({ loading: false }); }
   }
