@@ -9,7 +9,7 @@ import {
 import { builtinWindowBackground } from "@pi-desktop/shared";
 import { suppressLinuxFramelessSystemMenu } from "./frameless-system-menu";
 import { getModuleDirectory } from "./module-path";
-import { PanelSenders, pageGoneWithin, resolvePanelInvocation } from "./plugin-panel-senders";
+import { PanelSenders, panelReadyWithin, pageGoneWithin, resolvePanelInvocation } from "./plugin-panel-senders";
 import { PanelOperationSerializer } from "./plugin-panel-senders";
 import {
   isPluginPanelWindowControlAction,
@@ -557,7 +557,14 @@ export class PluginPanelHost {
       // gone (see the `closed` handler above).
       this.senders.register(webContentsId, request.pluginId);
       try {
-        await win.loadURL(pathToFileURL(request.htmlPath).toString());
+        // The window stays hidden until this settles, so a load that never
+        // settles has to end the request as an error (#998 item 5): the page
+        // that asked for the panel can then show why nothing appeared, and the
+        // `catch` below destroys the hidden window.
+        await panelReadyWithin(
+          win.loadURL(pathToFileURL(request.htmlPath).toString()),
+          request.pluginId,
+        );
         if (!win.isDestroyed()) {
           win.show();
         }
