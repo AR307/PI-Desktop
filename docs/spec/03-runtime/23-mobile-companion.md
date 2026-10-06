@@ -70,17 +70,30 @@ live state and events. Lost send acknowledgements are reconciled through
 are not replayed automatically. Revoking
 access closes mobile streams without stopping an existing desktop task.
 
-The phone keeps a bounded per-session transcript cache (IndexedDB, newest ~500
-rows with the last durable event cursor). Reopening a conversation renders the
-cached tail immediately, attaches with `includeSnapshot: false`, and resumes
-`events/subscribe` from the stored cursor, so a stable session costs deltas
-instead of a full snapshot; within one app run a reconnect resumes from the
-live in-memory transcript the same way. When the cursor left the replay window
-(`replayComplete: false`), when the desktop predates the light path, or when no
-cache exists, the client falls back to the full snapshot and rebuilds the
-cache. Cached transcripts never outlive the share that authorized them: they
-are cleared on logout, on revocation from either side, and whenever a grant
-disappears from the account.
+The phone stores account-scoped computer/project/session indexes and every loaded
+message in IndexedDB. It displays cached directories and a local message page
+before refreshing online. Earlier pages load locally before requesting missing
+history. Downloaded attachments and expanded message content remain available
+offline. There is no 500-row cap and no offline command queue.
+
+Rust schema 22 owns a durable per-session sync revision and change index for
+upserts/deletions. Cached sessions attach with light live state, fetch paged
+`session/changes` since the saved revision, then merge subscribed events.
+A desktop restart or expired live cursor never clears local history. Snapshot
+and history pages carry the revision captured with that page. An older history
+page does not advance the global sync position; only applied change batches do.
+Message batches and positions are committed together. Cache failures are visible
+and do not silently re-download all history. Confirmed authorization loss and
+explicit logout clear the affected account/computer/session data.
+
+Account pairing is independent of a computer. The desktop must explicitly enable
+account sharing before the account grant permits its content. New opted-in
+computers appear automatically; other phones still pair separately. Directories
+include empty projects, archived entries and ungrouped conversations. Project IDs
+and identical paths remain separated by computer. The mobile app holds one relay
+per accessible computer, subscribes only to directory metadata outside the active
+conversation, and refreshes account discovery on notifications/foreground.
+
 
 Process ownership remains renderer/preload/main/Rust+Node. MC owns native login,
 device identity, pairings and online relay only. The runtime exposes an allowed

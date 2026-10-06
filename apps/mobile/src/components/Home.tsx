@@ -13,16 +13,18 @@ export function Home({ controller, view }: { controller: MobileController; view:
     <div className="section-title"><h1>{t("projects")}</h1><button className="icon-button" aria-label={t("refresh")} onClick={() => void controller.action(() => controller.refreshGrants())}><RefreshCw size={18}/></button></div>
     <p className="muted">{t("subtitle")}</p>
     {view.grants.length === 0 && <div className="empty-state"><Monitor size={36}/><h2>{t("empty")}</h2><p>{t("emptyHint")}</p></div>}
-    <div className="grant-list">{view.grants.map((grant) => {
-      const desktop = view.devices.find((device) => device.deviceId === grant.desktopDeviceId);
-      return <article className="grant-card" key={grant.id}>
-        <button className="grant-open" onClick={() => withViewTransition(() => void controller.openGrant(grant))}>
-          <span className="tile-icon">{grant.scope.kind === "project" ? <Folder size={22}/> : <MessageSquare size={22}/>}</span>
-          <span className="grant-content"><strong>{grant.scope.label}</strong><span className="muted"><span className={`status-dot ${desktop?.online ? "online" : ""}`}/>{desktop?.name ?? t("devices")} · {t(desktop?.online ? "online" : "offline")}</span></span><ChevronRight size={18}/>
+    <div className="grant-list">{view.directories.map((directory) => {
+      const grant = directory.grants.find((grant) => grant.scope.kind === "account") ?? directory.grants[0];
+      if (!grant) return null;
+      const online = directory.connection === "connected";
+      return <article className="grant-card" key={directory.desktopDeviceId}>
+        <button className="grant-open" onClick={() => withViewTransition(() => void controller.openGrant(grant, directory.desktopDeviceId))}>
+          <span className="tile-icon"><Monitor size={22}/></span>
+          <span className="grant-content"><strong>{directory.device.name}</strong><span className="muted"><span className={`status-dot ${online ? "online" : ""}`}/>{t(online ? "online" : "offline")} · {directory.projects.length} {t("projects")} · {directory.sessions.length} {t("conversations")}</span></span><ChevronRight size={18}/>
         </button>
-        <button className="icon-button grant-remove" aria-label={t("revoke")} onClick={() => setRevokeId(grant.id)}><Unlink size={15}/></button>
       </article>;
     })}</div>
+    {view.grants.map((grant) => <button className="grant-remove-row" key={grant.id} onClick={() => setRevokeId(grant.id)}><Unlink size={15}/>{t(grant.scope.kind === "account" ? "accountPairing" : "revoke")} · {grant.scope.label}</button>)}
     <button className="pair-button" onClick={() => setPairing(true)}><Plus size={18}/>{t("pair")}</button>
     <Surface open={pairing} title={t("pair")} onClose={() => setPairing(false)} footer={<div className="surface-actions"><button type="button" onClick={() => setPairing(false)}>{t("cancel")}</button><button type="submit" form="pair-form" className="primary" disabled={view.busy || code.length !== 8}>{t(view.busy ? "working" : "pairSubmit")}</button></div>}><p className="muted">{t("pairHint")}</p><form id="pair-form" onSubmit={submit}><label>{t("pairCode")}<input autoFocus inputMode="numeric" autoComplete="off" maxLength={8} pattern="[0-9]{8}" value={code} onChange={(event) => setCode(event.target.value.replace(/\D/g, ""))}/></label></form></Surface>
     <Surface open={Boolean(revokeId)} title={t("revoke")} variant="confirm" onClose={() => setRevokeId(undefined)} footer={<div className="surface-actions"><button type="button" onClick={() => setRevokeId(undefined)}>{t("no")}</button><button type="button" className="danger" onClick={() => { const grant = view.grants.find((entry) => entry.id === revokeId); if (grant) void controller.revoke(grant); setRevokeId(undefined); }}>{t("yes")}</button></div>}><p>{t("revokeConfirm")}</p></Surface>
@@ -31,10 +33,17 @@ export function Home({ controller, view }: { controller: MobileController; view:
 
 export function Sessions({ controller, view }: { controller: MobileController; view: MobileView }) {
   const { t } = useTranslation("translation", { keyPrefix: "mobile" });
-  return <main className="work-list"><h1>{view.grant?.scope.label}</h1><p className="muted">{t("conversations")}</p>
-    {view.sessions.map((session) => <button className="session-card" key={session.id} onClick={() => withViewTransition(() => void controller.selectSession(session.id))}><MessageSquare size={20}/><span><strong>{session.title}</strong><small>{session.modelId} · {t(session.taskMode === "image" ? "imageGeneration" : session.taskMode)}</small></span>{session.activeTurnId ? <span className="status-dot online"/> : <ChevronRight size={17}/>}</button>)}
-    {view.sessions.length === 0 && (view.connection === "connecting" || view.connection === "reconnecting"
-      ? <div className="grant-list" aria-hidden="true"><span className="skeleton" style={{ height: 64 }}/><span className="skeleton" style={{ height: 64 }}/><span className="skeleton" style={{ height: 64 }}/></div>
-      : <p className="empty-state">{t(view.connection === "connected" ? "noConversations" : "offlineHint")}</p>)}
+  const [archived, setArchived] = useState(false);
+  const groups = [...view.projects, { id: "", label: t("ungrouped"), archived: false }];
+  return <main className="work-list"><div className="section-title"><h1>{t("projects")}</h1><button onClick={() => setArchived(!archived)} aria-pressed={archived}>{t(archived ? "hideArchived" : "showArchived")}</button></div>
+    {groups.filter((project) => archived || !project.archived).map((project) => {
+      const sessions = view.sessions.filter((session) => (session.projectId ?? "") === project.id && (archived || !session.archived));
+      if (!project.id && !sessions.length) return null;
+      return <section key={project.id} className="project-section"><h2><Folder size={17}/>{project.label}</h2>
+        {sessions.map((session) => <button className="session-card" key={session.id} onClick={() => withViewTransition(() => void controller.selectSession(session.id))}><MessageSquare size={20}/><span><strong>{session.title}</strong><small>{session.modelId} · {t(session.taskMode === "image" ? "imageGeneration" : session.taskMode)}</small></span>{session.activeTurnId ? <span className="status-dot online"/> : <ChevronRight size={17}/>}</button>)}
+        {sessions.length === 0 && <p className="muted">{t("noConversations")}</p>}
+      </section>;
+    })}
+    {view.projects.length === 0 && view.sessions.length === 0 && <p className="empty-state">{t(view.connection === "connected" ? "noConversations" : "offlineHint")}</p>}
   </main>;
 }

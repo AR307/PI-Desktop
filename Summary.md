@@ -1,5 +1,23 @@
 # PI-Desktop MirrorCoding Edition
 
+## 2026-10-06 - Mobile account discovery and durable local history
+
+- Adds opt-in account grants and independent per-computer directories without
+  expanding existing project/session shares. MC handoff is in
+  docs/mirrorcoding-mobile-account-sync-requirements.md.
+- Rust schema 22 tracks each message's latest revision/tombstone separately
+  from the process-local RACP cursor. No transcript body is duplicated.
+- Mobile IndexedDB stores account-scoped directories, individual loaded messages,
+  paging boundaries and downloaded attachment blobs. It removes the 500-row
+  tail limit; local pages render before network refresh.
+- Account-scoped relays keep directory subscriptions for each computer and a
+  transcript subscription only for the open conversation. Changes update both
+  messages and sync position transactionally.
+- Validation so far: Rust 780 tests, fmt and Clippy; mobile 19 tests and
+  shared/mobile TypeScript compilation. Actual Electron/Android acceptance and
+  preview packages are still pending integration; no production calls or push.
+
+
 ## 2026-10-06 - Upstream 0.16.1, mobile registration and scratch previews
 
 - Refreshed upstream through `924a03a7b` after the initial 0.16.1 integration.

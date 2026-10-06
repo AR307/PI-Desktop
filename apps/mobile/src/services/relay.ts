@@ -1,6 +1,6 @@
 import { RacpClient, type ClientTransport, type RacpClientState } from "@pi-desktop/racp/client";
 import { APP_VERSION } from "@pi-desktop/shared";
-import type { MobileModelCatalog, MobileSession, MobileSessionConfiguration, MobileSessionSnapshot, MobileSessionState, RacpCursor, RacpEventEnvelope, RacpItemSummary, MobileSessionConfigureInput, UiMessage } from "@pi-desktop/shared";
+import type { MobileDirectoryPage, MobileSessionChangesPage, MobileSessionHistoryPage, MobileModelCatalog, MobileSession, MobileSessionConfiguration, MobileSessionSnapshot, MobileSessionState, RacpCursor, RacpEventEnvelope, MobileSessionConfigureInput, UiMessage } from "@pi-desktop/shared";
 import type { MobileAccount } from "./account";
 
 export type RelayObserver = {
@@ -8,12 +8,13 @@ export type RelayObserver = {
   state(state: RacpClientState): void;
   restored(): Promise<void>;
   error(error: unknown): void;
+  directoryChanged?(): void;
+  accountChanged?(): void;
 };
 
 /**
- * How an attach settled: a `state` reply means the cached transcript stands and
- * the gap replays through the event subscription; a `snapshot` reply replaces
- * it (fresh open, stale cursor, or a desktop without the light-state methods).
+ * Cached sessions attach with live state and durable changes. Only an uncached
+ * session downloads its first history page; cursor expiry does not replace it.
  */
 export type MobileAttachResult =
   | { kind: "state"; state: MobileSessionState }
@@ -59,6 +60,10 @@ export class MobileRelay {
         if (event.sequence !== undefined && this.subscriptionId) void this.request("events/ack", { subscriptionId: this.subscriptionId, sequence: event.sequence }).catch(observer.error);
       }, onStateChange: observer.state, onReconnected: async () => { this.subscriptionId = undefined; await observer.restored(); },
       onSubscriptionClosed: () => { void observer.restored().catch(observer.error); },
+      onNotification: (method) => {
+        if (method === "mobile.directoryChanged") observer.directoryChanged?.();
+        else if (method === "mobile.devicesChanged" || method === "mobile.grantsChanged") observer.accountChanged?.();
+      },
     });
   }
   connect() { return this.client.connect(); }
@@ -75,20 +80,34 @@ export class MobileRelay {
     }
   }
   async sessions(grantId: string): Promise<MobileSession[]> { return (await this.request<{ sessions: MobileSession[] }>("session/list", { grantId })).sessions; }
+  async directory(): Promise<MobileDirectoryPage> {
+    const result: MobileDirectoryPage = { desktopDeviceId: "", projects: [], sessions: [], generatedAt: "" };
+    let cursor: string | undefined;
+    do {
+      const page = await this.request<MobileDirectoryPage>("directory/list", { cursor, limit: 100 });
+      result.desktopDeviceId = page.desktopDeviceId;
+      result.projects = page.projects;
+      result.sessions.push(...page.sessions);
+      result.generatedAt = page.generatedAt;
+      cursor = page.nextCursor;
+    } while (cursor);
+    return result;
+  }
+  watchDirectory() { return this.request("directory/subscribe", {}); }
+  async detach(): Promise<void> {
+    if (!this.subscriptionId) return;
+    const subscriptionId = this.subscriptionId;
+    this.subscriptionId = undefined;
+    if (this.client.state === "connected") await this.request("events/unsubscribe", { subscriptionId });
+  }
   attach(sessionId: string, after?: RacpCursor): Promise<MobileAttachResult> {
     const next = this.attaching.then(() => this.attachNow(sessionId, after));
     this.attaching = next.then(() => undefined, () => undefined);
     return next;
   }
   private async attachNow(sessionId: string, after?: RacpCursor): Promise<MobileAttachResult> {
-    if (this.subscriptionId) {
-      await this.request("events/unsubscribe", { subscriptionId: this.subscriptionId });
-      this.subscriptionId = undefined;
-    }
-    // With a cached cursor the transcript page is skipped and the gap replays
-    // through the subscription. A desktop without the light path ignores the
-    // flag and replies with a full snapshot, which simply replaces the cache.
-    const light = after !== undefined && this.supportsSessionState;
+    await this.detach();
+    const light = after !== undefined;
     const reply = await this.request<{ snapshot?: MobileSessionSnapshot; state?: MobileSessionState }>(
       "session/attach",
       { sessionId, includeSnapshot: !light, role: "controller" },
@@ -96,14 +115,12 @@ export class MobileRelay {
     if (reply.state && light) {
       const subscription = await this.request<{ subscriptionId: string; replayComplete?: boolean }>(
         "events/subscribe",
-        { scope: "session", sessionId, after },
+        { scope: "session", sessionId, after: reply.state.cursor },
       );
       this.subscriptionId = subscription.subscriptionId;
-      if (subscription.replayComplete !== false) return { kind: "state", state: reply.state };
-      // The cursor left the replay window: resync from a fresh snapshot on the
-      // same live subscription; the buffered events reconcile by message id.
-      return { kind: "snapshot", snapshot: await this.snapshot(sessionId) };
+      return { kind: "state", state: reply.state };
     }
+    if (light) throw new Error("Mobile sync requires the updated desktop protocol");
     const snapshot = reply.snapshot ?? (await this.snapshot(sessionId));
     const subscription = await this.request<{ subscriptionId: string }>("events/subscribe", { scope: "session", sessionId, after: snapshot.cursor });
     this.subscriptionId = subscription.subscriptionId;
@@ -117,8 +134,9 @@ export class MobileRelay {
     return this.request<{ session: MobileSession & { configuration?: MobileSessionConfiguration } }>("session/configure", { sessionId, ...input, context: { requestId: crypto.randomUUID() } }).then((value) => value.session);
   }
   history(sessionId: string, beforeItemId: string) {
-    return this.request<{ items: RacpItemSummary[]; hasMore: boolean; revision: number }>("session/history", { sessionId, beforeItemId, limit: 50 });
+    return this.request<MobileSessionHistoryPage>("session/history", { sessionId, beforeItemId, limit: 50 });
   }
+  changes(sessionId: string, afterRevision: number) { return this.request<MobileSessionChangesPage>("session/changes", { sessionId, afterRevision, limit: 100 }); }
   /** Reassemble one item's complete JSON from relay-safe chunks. */
   async item(sessionId: string, itemId: string): Promise<UiMessage> {
     const chunks: Uint8Array[] = [];

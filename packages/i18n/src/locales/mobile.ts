@@ -1,4 +1,7 @@
 export const mobileEn = {
+  accountPairing: "Account pairing", ungrouped: "Ungrouped", showArchived: "Show archived", hideArchived: "Hide archived",
+  cacheFailed: "Unable to save offline history. Free some device storage and retry.", cacheBlocked: "Close other PI Mobile windows and retry offline storage.",
+
   RATE_LIMITED: "Account requests are temporarily rate limited. Wait before retrying; your login is kept.",
   RELAY_UNAVAILABLE: "The mobile relay is temporarily unavailable. Your login is kept.",
   DEVICE_IDENTITY_MISSING: "This login has no saved device secret. Sign out and sign in again, then pair again.",
@@ -53,6 +56,8 @@ export const mobileEn = {
 };
 
 export const mobileZhCN: typeof mobileEn = {
+  accountPairing: "账号配对", ungrouped: "未分组", showArchived: "显示归档", hideArchived: "隐藏归档",
+  cacheFailed: "离线历史保存失败，请释放设备存储后重试。", cacheBlocked: "请关闭其他 PI Mobile 窗口后重试离线存储。",
   RATE_LIMITED: "账号请求暂时受限，请等待后重试；现有登录已保留。",
   RELAY_UNAVAILABLE: "移动端转发服务暂不可用，现有登录已保留。",
   DEVICE_IDENTITY_MISSING: "当前登录缺少已保存的设备凭据，请退出并重新登录，再重新配对。",

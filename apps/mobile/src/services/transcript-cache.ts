@@ -1,144 +1,92 @@
-import type { RacpCursor, UiMessage } from "@pi-desktop/shared";
+import type { MobileSessionSnapshot, RacpCursor, UiMessage } from "@pi-desktop/shared";
+import { dbDone, dbRequest, mobileDatabase } from "./mobile-db";
 
-/**
- * On-device transcript cache (IndexedDB).
- *
- * Reopening a conversation renders the cached tail immediately and resumes
- * the event stream from the stored cursor instead of replaying a full
- * snapshot, so a stable session costs deltas only. Entries are cleared on
- * logout, on grant revocation, and when a grant disappears from the account,
- * because cached transcripts must never outlive the share that authorized
- * them. Cache failures degrade to the uncached path and never break the app.
- */
-export type CachedTranscript = {
-  /** `${desktopDeviceId}:${sessionId}` */
+export type TranscriptAddress = { accountId: string; desktopDeviceId: string; sessionId: string };
+export type CachedTranscript = TranscriptAddress & {
   key: string;
-  desktopDeviceId: string;
-  grantId: string;
-  sessionId: string;
   cursor?: RacpCursor;
-  revision: number;
+  syncRevision: number;
   hasMoreHistory: boolean;
-  messages: UiMessage[];
-  updatedAt: number;
+  oldestId?: string;
+  oldestCreatedAt?: string;
+  snapshot: MobileSessionSnapshot;
 };
+type StoredMessage = TranscriptAddress & { key: string; sessionKey: string; id: string; createdAt: string; message: UiMessage };
+export type CachedPage = { entry?: CachedTranscript; messages: UiMessage[]; hasOlderCached: boolean };
 
-export interface TranscriptCache {
-  get(desktopDeviceId: string, sessionId: string): Promise<CachedTranscript | undefined>;
-  put(entry: CachedTranscript): Promise<void>;
-  clearGrant(grantId: string): Promise<void>;
-  clearAll(): Promise<void>;
+export function cacheKey(address: TranscriptAddress): string {
+  return JSON.stringify([address.accountId, address.desktopDeviceId, address.sessionId]);
 }
+const messageKey = (address: TranscriptAddress, id: string) => JSON.stringify([cacheKey(address), id]);
 
-const DB_NAME = "pi.mobile.transcripts";
-const DB_VERSION = 1;
-const STORE = "transcripts";
-const GRANT_INDEX = "grantId";
-
-/** Bound the stored tail so one long session cannot grow the cache unbounded. */
-export const TRANSCRIPT_CACHE_MESSAGE_LIMIT = 500;
-
-export function cacheKey(desktopDeviceId: string, sessionId: string): string {
-  return `${desktopDeviceId}:${sessionId}`;
-}
-
-/** Trim to the newest bounded tail; the rest stays reachable via history paging. */
-export function boundedCacheMessages(messages: readonly UiMessage[]): UiMessage[] {
-  return messages.length > TRANSCRIPT_CACHE_MESSAGE_LIMIT
-    ? messages.slice(messages.length - TRANSCRIPT_CACHE_MESSAGE_LIMIT)
-    : [...messages];
-}
-
-function request<T>(target: IDBRequest<T>): Promise<T> {
-  return new Promise((resolve, reject) => {
-    target.onsuccess = () => resolve(target.result);
-    target.onerror = () => reject(target.error ?? new Error("indexeddb request failed"));
-  });
-}
-
-function transactionDone(transaction: IDBTransaction): Promise<void> {
-  return new Promise((resolve, reject) => {
-    transaction.oncomplete = () => resolve();
-    transaction.onabort = () => reject(transaction.error ?? new Error("indexeddb transaction aborted"));
-    transaction.onerror = () => reject(transaction.error ?? new Error("indexeddb transaction failed"));
-  });
-}
-
-class IndexedDbTranscriptCache implements TranscriptCache {
-  private database?: Promise<IDBDatabase>;
-
-  private open(): Promise<IDBDatabase> {
-    this.database ??= new Promise((resolve, reject) => {
-      const open = indexedDB.open(DB_NAME, DB_VERSION);
-      open.onupgradeneeded = () => {
-        const db = open.result;
-        if (!db.objectStoreNames.contains(STORE)) {
-          const store = db.createObjectStore(STORE, { keyPath: "key" });
-          store.createIndex(GRANT_INDEX, "grantId");
-        }
+/** Each loaded message is retained. Only the visible page is read into memory. */
+export class TranscriptCache {
+  async page(address: TranscriptAddress, before?: UiMessage, limit = 50): Promise<CachedPage> {
+    const db = await mobileDatabase();
+    const transaction = db.transaction(["sessions", "messages"], "readonly");
+    const key = cacheKey(address);
+    const entryPromise = dbRequest<CachedTranscript | undefined>(transaction.objectStore("sessions").get(key));
+    const range = IDBKeyRange.bound([key, "", ""], before ? [key, before.createdAt, before.id] : [key, "\uffff", "\uffff"], false, Boolean(before));
+    const rows = await new Promise<StoredMessage[]>((resolve, reject) => {
+      const rows: StoredMessage[] = [];
+      const cursor = transaction.objectStore("messages").index("order").openCursor(range, "prev");
+      cursor.onerror = () => reject(cursor.error);
+      cursor.onsuccess = () => {
+        if (!cursor.result || rows.length > limit) { resolve(rows); return; }
+        rows.push(cursor.result.value as StoredMessage);
+        cursor.result.continue();
       };
-      open.onsuccess = () => resolve(open.result);
-      open.onerror = () => reject(open.error ?? new Error("indexeddb open failed"));
-      open.onblocked = () => reject(new Error("indexeddb open blocked"));
     });
-    return this.database;
+    return { entry: await entryPromise, messages: rows.slice(0, limit).reverse().map((row) => row.message), hasOlderCached: rows.length > limit };
   }
 
-  async get(desktopDeviceId: string, sessionId: string): Promise<CachedTranscript | undefined> {
-    const db = await this.open();
-    const value = await request(
-      db.transaction(STORE, "readonly").objectStore(STORE).get(cacheKey(desktopDeviceId, sessionId)),
-    );
-    return (value as CachedTranscript | undefined) ?? undefined;
+  async message(address: TranscriptAddress, id: string): Promise<UiMessage | undefined> {
+    const db = await mobileDatabase();
+    const row = await dbRequest<StoredMessage | undefined>(db.transaction("messages").objectStore("messages").get(messageKey(address, id)));
+    return row?.message;
   }
 
-  async put(entry: CachedTranscript): Promise<void> {
-    const db = await this.open();
-    const transaction = db.transaction(STORE, "readwrite");
-    transaction.objectStore(STORE).put({ ...entry, messages: boundedCacheMessages(entry.messages) });
-    await transactionDone(transaction);
-  }
-
-  async clearGrant(grantId: string): Promise<void> {
-    const db = await this.open();
-    const transaction = db.transaction(STORE, "readwrite");
-    const index = transaction.objectStore(STORE).index(GRANT_INDEX);
-    const keys = await request(index.getAllKeys(grantId));
-    for (const key of keys) transaction.objectStore(STORE).delete(key);
-    await transactionDone(transaction);
-  }
-
-  async clearAll(): Promise<void> {
-    const db = await this.open();
-    const transaction = db.transaction(STORE, "readwrite");
-    transaction.objectStore(STORE).clear();
-    await transactionDone(transaction);
-  }
-}
-
-/** In-memory stand-in for environments without IndexedDB (unit tests). */
-export class MemoryTranscriptCache implements TranscriptCache {
-  private readonly entries = new Map<string, CachedTranscript>();
-
-  async get(desktopDeviceId: string, sessionId: string): Promise<CachedTranscript | undefined> {
-    return this.entries.get(cacheKey(desktopDeviceId, sessionId));
-  }
-
-  async put(entry: CachedTranscript): Promise<void> {
-    this.entries.set(entry.key, { ...entry, messages: boundedCacheMessages(entry.messages) });
-  }
-
-  async clearGrant(grantId: string): Promise<void> {
-    for (const [key, entry] of this.entries) {
-      if (entry.grantId === grantId) this.entries.delete(key);
+  /** Contents and both applied positions advance in the same transaction. */
+  async commit(entry: CachedTranscript, messages: readonly UiMessage[], deletedIds: readonly string[] = []): Promise<void> {
+    const db = await mobileDatabase();
+    const transaction = db.transaction(["sessions", "messages", "attachments"], "readwrite");
+    const done = dbDone(transaction);
+    transaction.objectStore("sessions").put(entry);
+    const store = transaction.objectStore("messages");
+    for (const id of deletedIds) store.delete(messageKey(entry, id));
+    if (deletedIds.length) {
+      const removed = new Set(deletedIds);
+      const cursor = transaction.objectStore("attachments").index("sessionKey").openCursor(entry.key);
+      cursor.onsuccess = () => {
+        if (!cursor.result) return;
+        if (removed.has((cursor.result.value as { messageId: string }).messageId)) cursor.result.delete();
+        cursor.result.continue();
+      };
     }
+    for (const message of messages) store.put({
+      key: messageKey(entry, message.id), sessionKey: entry.key,
+      accountId: entry.accountId, desktopDeviceId: entry.desktopDeviceId, sessionId: entry.sessionId,
+      id: message.id, createdAt: message.createdAt, message,
+    } satisfies StoredMessage);
+    await done;
   }
 
-  async clearAll(): Promise<void> {
-    this.entries.clear();
+  async clear(address: TranscriptAddress): Promise<void> {
+    const db = await mobileDatabase();
+    const transaction = db.transaction(["sessions", "messages", "attachments"], "readwrite");
+    const done = dbDone(transaction);
+    const key = cacheKey(address);
+    transaction.objectStore("sessions").delete(key);
+    for (const name of ["messages", "attachments"]) {
+      const cursor = transaction.objectStore(name).index("sessionKey").openKeyCursor(key);
+      cursor.onsuccess = () => {
+        if (!cursor.result) return;
+        transaction.objectStore(name).delete(cursor.result.primaryKey);
+        cursor.result.continue();
+      };
+    }
+    await done;
   }
 }
 
-export function createTranscriptCache(): TranscriptCache {
-  return typeof indexedDB === "undefined" ? new MemoryTranscriptCache() : new IndexedDbTranscriptCache();
-}
+export function createTranscriptCache(): TranscriptCache { return new TranscriptCache(); }

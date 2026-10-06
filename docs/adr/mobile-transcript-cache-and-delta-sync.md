@@ -1,6 +1,6 @@
 # ADR: Mobile transcript cache and delta sync
 
-- Status: Accepted by the implementation request
+- Status: Historical; storage and recovery superseded by mobile-account-sync-offline-history.md
 - Date: 2026-09-26
 - Related: `mobile-companion-relay.md`, ADR 0265, `docs/spec/03-runtime/23-mobile-companion.md`
 

@@ -45,6 +45,7 @@ function QueueBar({ controller }: { controller: MobileController }) {
 export const Conversation = memo(function Conversation({ controller }: { controller: MobileController }) {
   const { t } = useTranslation("translation", { keyPrefix: "mobile" });
   const sessionId = useMobileStore(controller, (view) => view.selectedId) ?? "";
+  const draftKey = controller.draftKey(sessionId);
   const messages = useMobileStore(controller, (view) => view.messages);
   const snapshot = useMobileStore(controller, (view) => view.snapshot);
   const loading = useMobileStore(controller, (view) => view.loading);
@@ -54,8 +55,8 @@ export const Conversation = memo(function Conversation({ controller }: { control
   const uncertainMessageId = useMobileStore(controller, (view) => view.uncertainMessageId);
   const notice = useMobileStore(controller, (view) => view.notice);
   const catalog = useMobileStore(controller, (view) => view.catalog);
-  const [draft, setDraft] = useState(controller.drafts.get(sessionId) ?? "");
-  const [files, setFiles] = useState<PickedAttachment[]>(controller.files.get(sessionId) ?? []);
+  const [draft, setDraft] = useState(controller.drafts.get(draftKey) ?? "");
+  const [files, setFiles] = useState<PickedAttachment[]>(controller.files.get(draftKey) ?? []);
   const [configPanel, setConfigPanel] = useState<"mode" | "model">();
   const [loadingOlder, setLoadingOlder] = useState(false);
   const scroll = useRef<HTMLDivElement>(null); const composerInput = useRef<HTMLTextAreaElement>(null); const stick = useRef(true);
@@ -65,7 +66,7 @@ export const Conversation = memo(function Conversation({ controller }: { control
   const imageRunning = snapshot?.imageJobs.some((job) => job.status === "running") ?? false;
   const running = Boolean(snapshot?.activeTurn) || imageRunning;
   const entries = useMemo(() => buildTranscriptEntries(messages, snapshot?.compactions ?? []), [messages, snapshot?.compactions]);
-  useEffect(() => { if (notice === "deliveryConfirmed") { setDraft(controller.drafts.get(sessionId) ?? ""); setFiles(controller.files.get(sessionId) ?? []); } }, [controller, sessionId, notice]);
+  useEffect(() => { if (notice === "deliveryConfirmed") { setDraft(controller.drafts.get(draftKey) ?? ""); setFiles(controller.files.get(draftKey) ?? []); } }, [controller, draftKey, notice]);
   useEffect(() => { if (stick.current) scroll.current?.scrollTo({ top: scroll.current.scrollHeight }); }, [messages, snapshot?.pendingApprovals.length, snapshot?.pendingInputs.length]);
   // Keep the viewport anchored on the same message while older pages prepend.
   useLayoutEffect(() => {
@@ -93,11 +94,11 @@ export const Conversation = memo(function Conversation({ controller }: { control
     observer.observe(sentinel);
     return () => observer.disconnect();
   }, [snapshot?.hasMoreHistory, loading, loadingOlder, loadOlder]);
-  const updateDraft = (text: string) => { setDraft(text); controller.drafts.set(sessionId, text); };
-  const updateFiles = useCallback((next: PickedAttachment[]) => { setFiles(next); controller.files.set(sessionId, next); }, [controller, sessionId]);
+  const updateDraft = (text: string) => { setDraft(text); controller.drafts.set(draftKey, text); };
+  const updateFiles = useCallback((next: PickedAttachment[]) => { setFiles(next); controller.files.set(draftKey, next); }, [controller, draftKey]);
   const reference = useCallback((file: PickedAttachment) => {
-    setFiles((previous) => { const next = [...previous, file]; controller.files.set(sessionId, next); return next; });
-  }, [controller, sessionId]);
+    setFiles((previous) => { const next = [...previous, file]; controller.files.set(draftKey, next); return next; });
+  }, [controller, draftKey]);
   const submit = async (event: FormEvent) => { event.preventDefault(); const text = draft.trim(); if (!text && !files.length) return; const sent = await controller.send(text, files); if (sent) { updateDraft(""); updateFiles([]); stick.current = true; } };
   const modeLabel = imageMode ? t("imageGeneration") : t(session?.taskMode ?? "agent");
   const modelLabel = session?.modelId ? `${session.modelId}${session.groupName ? ` · ${session.groupName}` : ""}` : t("chooseModel");

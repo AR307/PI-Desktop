@@ -48,6 +48,8 @@ export type RacpClientOptions = {
   /** Answer a server-initiated request (`approval/request`, `input/request`, `tool/execute`). */
   onServerRequest?: (method: string, params: unknown) => Promise<unknown>;
   onEvent?: (envelope: RacpEventEnvelope) => void;
+  /** Profile-specific notifications, already decoded by the common transport. */
+  onNotification?: (method: string, params: unknown) => void;
   onSubscriptionClosed?: (notice: SubscriptionClosedNotice) => void;
   onStateChange?: (state: RacpClientState, error?: RacpError) => void;
   /** Re-establish subscriptions after a reconnect. */
@@ -199,6 +201,8 @@ export class RacpClient {
       this.options.onEvent?.(envelope);
     } else if (message.method === RACP_SUBSCRIPTION_CLOSED_NOTIFICATION) {
       this.options.onSubscriptionClosed?.(message.params as SubscriptionClosedNotice);
+    } else {
+      this.options.onNotification?.(message.method, message.params);
     }
   }
 

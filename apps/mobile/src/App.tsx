@@ -45,14 +45,14 @@ export function App({ controller }: { controller: MobileController }) {
   }, [controller, menu]);
   useEffect(() => { const focus = () => { void controller.resume(); }; window.addEventListener("online", focus); return () => window.removeEventListener("online", focus); }, [controller]);
   const selectedSession = view.snapshot?.session ?? view.sessions.find((session) => session.id === view.selectedId);
-  const desktop = view.grant ? view.devices.find((device) => device.deviceId === view.grant?.desktopDeviceId) : undefined;
+  const desktop = view.grant ? view.devices.find((device) => device.deviceId === view.desktopId) : undefined;
   const connectionLabel = t(view.connection === "connected" ? "online" : view.connection === "connecting" ? "connecting" : view.connection === "reconnecting" ? "reconnecting" : "offline");
   const headerTitle = selectedSession?.title ?? view.grant?.scope.label ?? t("title");
   return <div className="mobile-shell">
     <header className="app-header">{view.grant ? <button className="icon-button" aria-label={t("back")} onClick={() => withViewTransition(() => controller.back())}><ArrowLeft size={21}/></button> : <span className="wordmark">π</span>}<span className="app-heading"><strong>{headerTitle}</strong>{view.grant && <small>{desktop?.name ?? t("unavailable")} · {connectionLabel}</small>}</span><button className="icon-button" aria-label={t("menu")} onClick={() => setMenu(true)}><MoreHorizontal size={22}/></button></header>
     {view.grant && <div className={`connection-bar ${view.connection === "connected" ? "connected" : ""}`} role="status" aria-label={t("connectionStatus")}><span className="status-dot"/>{t(view.connection === "connected" ? "online" : view.connection === "connecting" ? "connecting" : view.connection === "reconnecting" ? "reconnecting" : "offline")}{view.connection === "error" && <button onClick={() => view.grant && void controller.openGrant(view.grant)}>{t("retry")}</button>}</div>}
     {(view.error || view.notice) && <div className={`notice ${view.error ? "error" : ""}`} role={view.error ? "alert" : "status"}><span>{t(view.error ?? view.notice ?? "request_failed", { defaultValue: view.error ?? view.notice })}{view.retryAt && <> {t("retryAt", { time: new Date(view.retryAt).toLocaleTimeString() })}</>}</span><button className="icon-button" aria-label={t("close")} onClick={() => controller.clearError()}><X size={16}/></button></div>}
-    {view.loading && !view.signedIn ? <main className="empty-state">{t("working")}</main> : !view.signedIn ? <Login controller={controller} view={view}/> : view.selectedId ? <Conversation key={`${view.grant?.desktopDeviceId}:${view.selectedId}`} controller={controller}/> : view.grant ? <Sessions controller={controller} view={view}/> : <Home controller={controller} view={view}/>}
+    {view.loading && !view.signedIn ? <main className="empty-state">{t("working")}</main> : !view.signedIn ? <Login controller={controller} view={view}/> : view.selectedId ? <Conversation key={`${view.desktopId}:${view.selectedId}`} controller={controller}/> : view.grant ? <Sessions controller={controller} view={view}/> : <Home controller={controller} view={view}/>}
     <AccountSheet open={menu} close={() => setMenu(false)} controller={controller} theme={theme} setTheme={setTheme}/>
   </div>;
 }

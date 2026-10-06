@@ -13,7 +13,7 @@ export type MobileAuthChallenge = {
   challengeId: string; type: "totp" | "email" | "captcha"; message?: string; url?: string;
 };
 export type LoginResult = { session: MobileAuthSession } | { challenge: MobileAuthChallenge };
-export type MobileDevice = { deviceId: string; name: string; kind: "mobile" | "desktop"; online: boolean };
+export type MobileDevice = { deviceId: string; name: string; kind: "mobile" | "desktop"; online: boolean; accountSyncEnabled?: boolean };
 
 export class AccountError extends Error {
   constructor(public readonly code: string, message: string, public readonly retryAt?: number) { super(message); }
@@ -43,11 +43,9 @@ export class MobileAccount {
     const raw = await this.store.read();
     if (!raw) return false;
     this.current = authSession(JSON.parse(raw));
-    try { await this.ensureFresh(); return true; }
-    catch (error) {
-      if (error instanceof AccountError && error.code === "UNAUTHORIZED") { await this.clear(); return false; }
-      throw error;
-    }
+    // Network validation happens after the cached account has been displayed.
+    // Expired credentials cannot send operations, but do not prevent offline reading.
+    return true;
   }
 
   async login(username: string, password: string): Promise<LoginResult> {
