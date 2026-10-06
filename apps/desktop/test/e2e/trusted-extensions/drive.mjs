@@ -99,6 +99,12 @@ await tool("pi_project_open", { path: project });
 const created = await tool("pi_session_create", { title: "ext e2e", projectPath: project, mode: "agent" });
 const sessionId = created?.session?.id ?? created?.id;
 check("session created", !!sessionId, sessionId);
+const initialSession = await tool("pi_session_get", { id: sessionId });
+const initialProviderId = initialSession?.session?.providerId;
+const initialModelId = initialSession?.session?.modelId;
+if (typeof initialProviderId !== "string" || typeof initialModelId !== "string") {
+  throw new Error("E2E session did not have an initial model binding");
+}
 
 // 1) tool + hooks (E2E-242)
 const firstPrompt = await tool("pi_agent_prompt", { sessionId, content: "please add 20 and 22" });
@@ -281,6 +287,19 @@ const disconnected = await ui.until(
   "plugin OAuth sign-out",
 );
 check("sign-out clears the plugin OAuth credential", disconnected);
+await tool("pi_session_configure", {
+  id: sessionId,
+  mode: "agent",
+  providerId: initialProviderId,
+  modelId: initialModelId,
+  confirm: true,
+});
+const restoredSession = await tool("pi_session_get", { id: sessionId });
+check(
+  "OAuth coverage restores the session's original model binding",
+  restoredSession?.session?.providerId === initialProviderId && restoredSession?.session?.modelId === initialModelId,
+  JSON.stringify([restoredSession?.session?.providerId, restoredSession?.session?.modelId]),
+);
 ui.close();
 
 // 5) commands in palette/composer (E2E-243)
