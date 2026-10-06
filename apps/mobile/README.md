@@ -63,6 +63,12 @@ Confirmed revocation clears only caches no longer covered by another grant.
 Explicit sign-out clears the account cache; disconnected phones learn revocation
 on their next connection.
 
+Offline computers keep their directory and cached conversations; the app waits
+for online discovery before requesting another relay ticket. When MC closes a
+connection after removing an account grant, the phone refreshes grants/devices
+and reconnects with any remaining project/session authorization. Pairing errors
+remain visible beside the entered code and do not discard other pairings.
+
 Conversation controls update only the current shared session. The phone can
 choose Agent, Plan, Goal or Image and select any currently usable desktop chat
 or image model. MirrorCoding selection is model then group; reasoning and image

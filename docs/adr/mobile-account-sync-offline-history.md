@@ -29,6 +29,14 @@ desktop opt-in remains an independent access check. Existing narrower grants
 remain narrower. Online revocation recalculates the union of remaining scopes;
 an offline phone learns revocation only when it reconnects.
 
+The MC handoff closes peers on permission narrowing even if a narrower grant
+remains. Mobile directory ownership therefore disposes that relay, refreshes
+account metadata and opens a new connection with the remaining scopes. Offline
+computers are cached directory entries, not reconnecting transports. Ordinary
+network interruptions still use the existing RACP reconnect policy. Desktop
+sharing publication reuses the existing retry timer and persisted pending flag;
+there is no additional command queue or server-owned transcript storage.
+
 Use Android DownloadManager and the system package installer for updates from
 AR307/Mirrorcoding-APP, preserving application identity and signing. No cloud
 transcript database, background agent, offline command queue or web hot update is

@@ -87,6 +87,12 @@ export class MobileDirectories {
       // A narrower remaining grant must immediately remove cached sibling sessions,
       // even when this computer is currently offline.
       const row = this.rows.get(device.deviceId)!;
+      if (!device.online) {
+        const relay = this.relays.get(device.deviceId);
+        this.relays.delete(device.deviceId);
+        await relay?.close();
+        row.connection = "disconnected";
+      }
       if (!row.grants.some((grant) => grant.scope.kind === "account")) {
         const retained = restrictDirectory(row);
         const cache = new TranscriptCache();
@@ -98,13 +104,14 @@ export class MobileDirectories {
       }
     }
     this.emit();
-    await Promise.allSettled(available.map(async (device) => {
+    await Promise.allSettled(available.filter((device) => device.online).map(async (device) => {
       try { await this.connect(device.deviceId); }
-      catch (error) { if (generation === this.generation) this.observer.error(error); }
+      catch (error) { if (generation === this.generation && this.relays.has(device.deviceId)) this.observer.error(error); }
     }));
   }
 
-  async connect(id: string): Promise<MobileRelay> {
+  async connect(id: string): Promise<MobileRelay | undefined> {
+    if (!this.rows.get(id)?.device.online) return;
     let relay = this.relays.get(id);
     if (!relay) {
       relay = new MobileRelay(this.account, id, {
@@ -117,15 +124,28 @@ export class MobileDirectories {
           if (this.relays.get(id) !== relay) return;
           await relay!.watchDirectory(); await this.refresh(id); await this.observer.restored(id);
         },
-        directoryChanged: () => { void this.refresh(id).catch(this.observer.error); },
+        directoryChanged: () => { void this.refresh(id).catch((error: unknown) => { if (this.relays.get(id) === relay) this.observer.error(error); }); },
         accountChanged: this.observer.accountChanged,
-        error: this.observer.error,
+        unavailable: (reason) => {
+          if (this.relays.get(id) !== relay) return;
+          this.relays.delete(id);
+          void relay!.close();
+          const row = this.rows.get(id);
+          if (row) {
+            row.connection = "disconnected";
+            if (reason === "DESKTOP_OFFLINE") row.device = { ...row.device, online: false };
+            this.emit();
+          }
+          if (reason !== "DESKTOP_OFFLINE") this.observer.accountChanged();
+        },
+        error: (error) => { if (this.relays.get(id) === relay) this.observer.error(error); },
       });
       this.relays.set(id, relay);
     }
     if (relay.client.state === "connected") { await this.refresh(id); return relay; }
     if (relay.client.state === "connecting" || relay.client.state === "reconnecting") return relay;
-    await relay.connect();
+    try { await relay.connect(); }
+    catch (error) { if (this.relays.get(id) !== relay) return; throw error; }
     if (this.relays.get(id) === relay) {
       await relay.watchDirectory(); await this.refresh(id);
       if (this.relays.get(id) === relay) await this.observer.restored(id);

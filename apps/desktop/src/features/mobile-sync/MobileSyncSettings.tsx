@@ -6,6 +6,7 @@ import { Button, SettingsToggle } from "../../components/ui";
 import { api } from "../../lib/api";
 import { MobilePairingDialog, type MobilePairingTarget } from "./MobilePairingDialog";
 import { useMobileSync } from "./useMobileSync";
+import { mobileSyncErrorKey } from "./errors";
 import "./mobile-sync.css";
 
 function pairingTarget(scope: MobileSyncScope): MobilePairingTarget {
@@ -29,14 +30,14 @@ export function MobileSyncSettings() {
       await api.mobileSync.revoke(id);
       setConfirmRevoke(undefined);
       await refresh();
-    } catch { setError("revokeFailed"); }
+    } catch (failure) { setError(mobileSyncErrorKey(failure, "revokeFailed")); }
     finally { setBusy(undefined); }
   };
   const setAccountSharing = async () => {
     if (!state || sharingBusy) return;
     setSharingBusy(true); setError(undefined);
-    try { await api.mobileSync.setAccountSharing(state.accountSyncEnabled !== true); await refresh(); }
-    catch { setError("sharingFailed"); }
+    try { await api.mobileSync.setAccountSharing(state.accountSyncEnabled !== true); }
+    catch (failure) { setError(mobileSyncErrorKey(failure, "sharingFailed")); }
     finally { setSharingBusy(false); }
   };
 
@@ -47,9 +48,10 @@ export function MobileSyncSettings() {
       <div><strong>{t("mobileSync.accountSharing")}</strong><p>{t("mobileSync.accountSharingDescription")}</p></div>
       <SettingsToggle checked={state?.accountSyncEnabled === true} busy={sharingBusy} disabled={!state || state.status === "signed_out"} label={t("mobileSync.accountSharing")} onChange={() => void setAccountSharing()} />
     </div>
-    {state ? <p className="mobile-sync-status" data-status={state.status} role="status">{t(`mobileSync.status.${state.status}`)}</p> : !loadError && <p role="status">{t("common.loading")}</p>}
-    {(error || loadError || state?.error) && <p className="mirrorcoding-error" role="alert">{t(`mobileSync.${error ?? loadError ?? (state?.error === "mobile_revoke_pending" ? "revokePending" : "requestFailed")}`)}</p>}
-    {state?.accountSyncEnabled && <div className="mobile-sync-account-pair"><Button variant="ghost" disabled={Boolean(busy)} onClick={() => setPairing({ target: { scope: { kind: "account" }, label: t("mobileSync.accountScope") } })}>{t("mobileSync.pairAccount")}</Button></div>}
+    {state ? <p className="mobile-sync-status" data-status={state.status} role="status">{t(state.accountSharingPending ? "mobileSync.sharingPending" : `mobileSync.status.${state.status}`)}</p> : !loadError && <p role="status">{t("common.loading")}</p>}
+    {(error || loadError || state?.error) && <p className="mirrorcoding-error" role="alert">{t(`mobileSync.${error ?? loadError ?? mobileSyncErrorKey(state?.error)}`)}</p>}
+    {state?.retryAt && <p role="status">{t("mobileSync.retryAt", { time: new Date(state.retryAt).toLocaleTimeString(i18n.language) })}</p>}
+    {state?.accountSyncEnabled && <div className="mobile-sync-account-pair"><Button variant="ghost" disabled={Boolean(busy) || state.accountSharingPending} onClick={() => setPairing({ target: { scope: { kind: "account" }, label: t("mobileSync.accountScope") } })}>{t("mobileSync.pairAccount")}</Button></div>}
     {state?.pairings.length ? <ul className="mobile-sync-grants">{state.pairings.map((item) => <li className="mobile-sync-grant" key={item.id}>
       <strong>{item.scope.label}</strong><p>{t("mobileSync.pendingPairing")}</p>
       <div className="mirrorcoding-actions"><Button variant="ghost" onClick={() => setPairing({ target: pairingTarget(item.scope), existing: item })}>{t("mobileSync.showCode")}</Button></div>

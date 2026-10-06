@@ -81,7 +81,8 @@ remain effective. Desktop opt-out affects just that computer.
 Ticket creation includes the target desktopDeviceId. At ticket issue and WSS
 connect, require matching account/device identities plus an effective grant.
 Do not rely on a ticket issued before revocation. Desktop `peer.open` includes
-trusted accountId, mobileDeviceId and current applicable grants. PI checks each
+trusted accountId, deviceId (the phone ID) and current applicable grants. Grant
+objects still use mobileDeviceId. PI checks each
 directory, history, change, attachment and mutation request against local scope.
 
 Desktop control connections consume `grants.changed` to refresh authorization.

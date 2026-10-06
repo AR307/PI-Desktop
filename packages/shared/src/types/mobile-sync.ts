@@ -37,6 +37,8 @@ export type MobileSyncStatus = {
   error?: string;
   retryAt?: number;
   accountSyncEnabled?: boolean;
+  /** The local sharing choice has not yet been acknowledged by MC. */
+  accountSharingPending?: boolean;
 };
 /** Persisted through the host settings boundary; secrets remain in Electron main. */
 export type MobileSyncSettings = {

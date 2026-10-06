@@ -34,6 +34,7 @@ export class MobileController {
   private readonly directories: MobileDirectories;
   private syncingHistory = false;
   private accountJob?: Promise<void>;
+  private accountAgain = false;
   private selection = 0;
   private connectingEvents?: RacpEventEnvelope[];
   private stateJob?: Promise<void>;
@@ -109,8 +110,13 @@ export class MobileController {
     await this.refreshGrants();
   }
   async refreshGrants() {
-    if (this.accountJob) return this.accountJob;
-    this.accountJob = this.refreshAccountNow().finally(() => { this.accountJob = undefined; });
+    if (this.accountJob) { this.accountAgain = true; return this.accountJob; }
+    this.accountJob = (async () => {
+      do {
+        this.accountAgain = false;
+        await this.refreshAccountNow();
+      } while (this.accountAgain && this.value.signedIn);
+    })().finally(() => { this.accountJob = undefined; });
     return this.accountJob;
   }
   private async refreshAccountNow() {
@@ -126,7 +132,10 @@ export class MobileController {
     await this.directories.sync(grants, devices);
     const row = this.value.desktopId ? this.directories.row(this.value.desktopId) : undefined;
     if (this.value.desktopId && !row) await this.disconnect();
-    else if (row && this.value.selectedId && !row.sessions.some((session) => session.id === this.value.selectedId)) this.back();
+    else if (row) {
+      if (!row.grants.some((grant) => grant.id === this.value.grant?.id)) this.patch({ grant: row.grants[0] });
+      if (this.value.selectedId && !row.sessions.some((session) => session.id === this.value.selectedId)) this.back();
+    }
   }
   async pair(code: string) { this.patch({ busy: true }); await this.action(async () => { await this.account.pair(code); await this.refreshGrants(); }); this.patch({ busy: false }); }
   async revoke(grant: MobileGrant) { await this.action(async () => { await this.account.revoke(grant.id); await this.refreshGrants(); }); }

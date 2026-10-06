@@ -60,7 +60,7 @@ export class MobileSyncService {
     this.started = true;
     const saved = (await this.deps.host().call<AppSettings>("settings.get")).mobileSync;
     this.active = !!saved?.scopes.length || saved?.accountSyncEnabled === true || saved?.accountSharingPending === true;
-    this.publish({ accountSyncEnabled: saved?.accountSyncEnabled === true });
+    this.publish({ accountSyncEnabled: saved?.accountSyncEnabled === true, accountSharingPending: saved?.accountSharingPending === true });
     if (this.active) void this.refresh(false);
     else this.publish({ status: this.deps.account.snapshot().status === "connected" ? "offline" : "signed_out" });
   }
@@ -69,7 +69,7 @@ export class MobileSyncService {
     const account = this.deps.account.snapshot();
     if (account.status !== "connected" || String(account.account?.id ?? "") !== this.settings?.accountId) {
       this.epoch += 1; this.disconnect(); this.settings = undefined;
-      this.publish({ status: "signed_out", deviceId: undefined, grants: [], pairings: [], accountSyncEnabled: false, error: undefined });
+      this.publish({ status: "signed_out", deviceId: undefined, grants: [], pairings: [], accountSyncEnabled: false, accountSharingPending: false, error: undefined, retryAt: undefined });
     }
     if (account.status === "connected" && account.account && this.active) void this.refresh(false);
   }
@@ -113,19 +113,23 @@ export class MobileSyncService {
       await this.refresh();
       if (!this.settings) throw new Error("mobile_login_required");
     }
+    const epoch = this.epoch;
     await this.write(async () => {
       if (!this.settings) throw new Error("mobile_login_required");
       this.settings.accountSyncEnabled = enabled;
       this.settings.accountSharingPending = true;
       await this.persist();
     });
-    this.publish({ accountSyncEnabled: enabled, error: undefined });
+    this.publish({ accountSyncEnabled: enabled, accountSharingPending: true, error: undefined });
     this.reconcilePeers();
     for (const { peer } of this.peers.values()) peer.directoryChanged();
     try {
       await this.publishSharing();
     } catch (error) {
-      this.publish({ error: error instanceof Error ? error.message : "mobile_connection_failed" });
+      if (epoch === this.epoch && !this.disposed) {
+        this.publish({ error: error instanceof Error ? error.message : "mobile_connection_failed", retryAt: error instanceof MobileServiceError ? error.retryAt : undefined });
+        if (isTransientFailure(error)) this.schedule();
+      }
     }
     return this.status();
   }
@@ -156,7 +160,7 @@ export class MobileSyncService {
         this.settings = saved?.accountId === accountId ? { ...saved, deviceId } : { deviceId, accountId, scopes: [], revokedGrantIds: [], accountSyncEnabled: false };
         await this.persist();
       }
-      this.publish({ status: this.socket?.readyState === WebSocket.OPEN ? "online" : "connecting", deviceId: this.settings.deviceId, accountSyncEnabled: this.settings.accountSyncEnabled === true, error: undefined, retryAt: undefined });
+      this.publish({ status: this.socket?.readyState === WebSocket.OPEN ? "online" : "connecting", deviceId: this.settings.deviceId, accountSyncEnabled: this.settings.accountSyncEnabled === true, accountSharingPending: this.settings.accountSharingPending === true, error: undefined, retryAt: undefined });
       if (deviceId !== this.settings.deviceId) { this.settings.deviceId = deviceId; await this.persist(); }
       if (this.settings.accountSharingPending) await this.publishSharing();
       for (const id of [...this.settings.revokedGrantIds]) {
@@ -196,7 +200,7 @@ export class MobileSyncService {
       if (epoch === this.epoch) {
         const code = error instanceof Error ? error.message : "mobile_connection_failed";
         this.publish({ status: "error", error: code, retryAt: error instanceof MobileServiceError ? error.retryAt : undefined });
-        if (error instanceof MobileServiceError ? error.status === 429 || error.status >= 500 : error instanceof TypeError) this.schedule();
+        if (isTransientFailure(error)) this.schedule();
       }
     }
     return this.status();
@@ -263,6 +267,7 @@ export class MobileSyncService {
       if (!this.settings || this.settings.deviceId !== deviceId || (this.settings.accountSyncEnabled === true) !== enabled) return;
       this.settings.accountSharingPending = false;
       await this.persist();
+      this.publish({ accountSharingPending: false, error: undefined, retryAt: undefined });
     });
   }
   private persist() { return this.deps.host().call("settings.set", { mobileSync: this.settings }); }
@@ -280,12 +285,16 @@ export class MobileSyncService {
     await this.deps.credentials.clear();
     this.settings = undefined;
     await this.deps.host().call("settings.set", { mobileSync: null });
-    this.publish({ status: "signed_out", deviceId: undefined, grants: [], pairings: [], accountSyncEnabled: false, error: undefined, retryAt: undefined });
+    this.publish({ status: "signed_out", deviceId: undefined, grants: [], pairings: [], accountSyncEnabled: false, accountSharingPending: false, error: undefined, retryAt: undefined });
   }
   dispose() { this.stopConfiguration(); this.disposed = true; this.epoch += 1; this.disconnect(); }
 }
 
 const sameScope = (left: MobileSyncScope, right: MobileSyncScope) => left.kind === right.kind && left.id === right.id;
+function isTransientFailure(error: unknown): boolean {
+  return error instanceof MobileServiceError ? error.status === 429 || error.status >= 500
+    : error instanceof TypeError || (error instanceof Error && error.name === "TimeoutError");
+}
 function parseGrant(value: unknown): MobileGrant {
   const row = object(value); const scope = object(row.scope);
   if (scope.kind !== "account" && scope.kind !== "project" && scope.kind !== "session") throw new Error("invalid_mobile_scope");

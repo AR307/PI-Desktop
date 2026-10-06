@@ -6,6 +6,7 @@ import { api } from "../../lib/api";
 import { AccountDialog } from "../account/AccountDialog";
 import { useMirrorCoding } from "../account/state";
 import { useMobileSync } from "./useMobileSync";
+import { mobileSyncErrorKey } from "./errors";
 import "../account/account.css";
 import "./mobile-sync.css";
 
@@ -77,9 +78,7 @@ export function MobilePairingDialog({ target, existing, onClose }: {
       setNow(Date.now());
     } catch (failure) {
       if (mounted.current) {
-        const detail = failure instanceof Error ? failure.message : String(failure);
-        const code = ["RATE_LIMITED", "RELAY_UNAVAILABLE", "DEVICE_MISMATCH", "DEVICE_IDENTITY_MISSING", "mobile_service_unavailable", "secure_storage_unavailable"].find((candidate) => detail.includes(candidate));
-        setError(code ?? "pairingFailed");
+        setError(mobileSyncErrorKey(failure, "pairingFailed"));
       }
     } finally {
       if (mounted.current) setBusy(false);

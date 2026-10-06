@@ -96,6 +96,26 @@ and identical paths remain separated by computer. The mobile app holds one relay
 per accessible computer, subscribes only to directory metadata outside the active
 conversation, and refreshes account discovery on notifications/foreground.
 
+Account-sharing changes remain visibly pending until MC acknowledges them.
+Transient publication failures retry through the existing desktop sync timer,
+respecting `Retry-After`; permanent request errors require correction. Account
+pairing is unavailable while publication is pending. The saved local choice
+continues to control desktop access, including an immediate local opt-out.
+
+Authorized offline computers remain in the directory with their cached history.
+Discovery and reopening cached work do not request relay tickets for a computer
+declared offline. `DESKTOP_OFFLINE` closes its relay without a global error or a
+reconnect loop; later online discovery reconnects it. `GRANT_REVOKED` closes the
+old relay and refreshes grants/devices before requesting another ticket. A
+remaining project/session grant retains only its own cached content and can
+reconnect, without widening access or stopping desktop work. Account/discovery
+notifications received during a refresh trigger a follow-up refresh.
+
+Pairing failures identify wrong accounts, invalid/used/expired codes and revoked
+sharing in English and Chinese. The pairing sheet keeps the code beside its
+error, the login and unrelated grants. Desktop sharing errors preserve the MC
+error code for an actionable explanation instead of a generic connection error.
+
 
 Process ownership remains renderer/preload/main/Rust+Node. MC owns native login,
 device identity, pairings and online relay only. The runtime exposes an allowed

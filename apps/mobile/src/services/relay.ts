@@ -2,6 +2,12 @@ import { RacpClient, type ClientTransport, type RacpClientState } from "@pi-desk
 import { APP_VERSION } from "@pi-desktop/shared";
 import type { MobileDirectoryPage, MobileSessionChangesPage, MobileSessionHistoryPage, MobileModelCatalog, MobileSession, MobileSessionConfiguration, MobileSessionSnapshot, MobileSessionState, RacpCursor, RacpEventEnvelope, MobileSessionConfigureInput, UiMessage } from "@pi-desktop/shared";
 import type { MobileAccount } from "./account";
+import { AccountError } from "./account";
+
+type RelayUnavailableReason = "DESKTOP_OFFLINE" | "GRANT_REVOKED" | "AUTH_EXPIRED";
+function unavailableReason(value: string): RelayUnavailableReason | undefined {
+  return value === "DESKTOP_OFFLINE" || value === "GRANT_REVOKED" || value === "AUTH_EXPIRED" ? value : undefined;
+}
 
 export type RelayObserver = {
   event(event: RacpEventEnvelope): void;
@@ -10,6 +16,7 @@ export type RelayObserver = {
   error(error: unknown): void;
   directoryChanged?(): void;
   accountChanged?(): void;
+  unavailable(reason: RelayUnavailableReason): void;
 };
 
 /**
@@ -41,7 +48,11 @@ async function browserTransport(account: MobileAccount, desktopId: string): Prom
       });
     };
     socket.onerror = () => { clearTimeout(timeout); reject(new Error("Relay connection failed")); };
-    socket.onclose = () => { clearTimeout(timeout); reject(new Error("Desktop offline")); };
+    socket.onclose = (event) => {
+      clearTimeout(timeout);
+      const reason = unavailableReason(event.reason);
+      reject(reason ? new AccountError(reason, reason) : new Error("Relay connection closed"));
+    };
   });
 }
 
@@ -50,9 +61,28 @@ export class MobileRelay {
   private subscriptionId?: string;
   private attaching: Promise<unknown> = Promise.resolve();
   private transport?: ClientTransport;
+  private closed = false;
   constructor(account: MobileAccount, desktopId: string, observer: RelayObserver) {
     this.client = new RacpClient({
-      transport: async () => { const transport = await browserTransport(account, desktopId); this.transport = transport; return transport; },
+      transport: async () => {
+        let transport: ClientTransport;
+        try { transport = await browserTransport(account, desktopId); }
+        catch (error) {
+          const reason = error instanceof AccountError ? unavailableReason(error.code === "UNAUTHORIZED" ? "AUTH_EXPIRED" : error.code) : undefined;
+          if (!this.closed && reason) observer.unavailable(reason);
+          throw error;
+        }
+        if (this.closed) { transport.close(); throw new Error("Mobile relay closed"); }
+        this.transport = transport;
+        return {
+          ...transport,
+          onClose: (handler) => transport.onClose((info) => {
+            const reason = unavailableReason(info.reason);
+            if (!this.closed && reason) observer.unavailable(reason);
+            else handler(info);
+          }),
+        };
+      },
       client: { name: "pi-mobile", version: APP_VERSION },
       reconnect: { enabled: true, baseDelayMs: 800, maxDelayMs: 15_000 },
       onEvent: (event) => {
@@ -67,7 +97,7 @@ export class MobileRelay {
     });
   }
   connect() { return this.client.connect(); }
-  close() { return this.client.close(); }
+  close() { this.closed = true; this.subscriptionId = undefined; return this.client.close(); }
   /** Server capability flags from `connection/initialize`; old desktops omit them. */
   get supportsSessionState(): boolean { return this.client.initialized?.capabilities?.sessionState === true; }
   get supportsItemContent(): boolean { return this.client.initialized?.capabilities?.itemContent === true; }

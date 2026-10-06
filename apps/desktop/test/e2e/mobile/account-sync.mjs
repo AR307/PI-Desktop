@@ -101,6 +101,7 @@ async function close(device) {
   await device.app.close(); device.app = undefined;
 }
 async function settings(device) {
+  if (await device.page.locator('[data-testid="mobile-sync-settings"]').isVisible()) return;
   await device.page.locator('[data-nav="settings"]').click();
   await device.page.getByRole("button", { name: "Account", exact: true }).click();
   await device.page.locator('[data-testid="mobile-sync-settings"]').waitFor();
@@ -114,6 +115,25 @@ async function enable(device) {
   }, `${device.name} opt-in`);
   device.deviceId = status.deviceId;
   fixture.devices.get(status.deviceId).name = device.name;
+}
+async function verifySharingRetry(device) {
+  fixture.control.sharingUnavailable = true;
+  // Enter through public IPC without an extra renderer refresh masking the
+  // service's own retry responsibility.
+  await invoke(device, "mobile-sync/setAccountSharing", false);
+  await until(async () => (await invoke(device, "mobile-sync/status")).error === "RELAY_UNAVAILABLE", "sharing publication failure");
+  check("failed sharing keeps local choice and server state distinct",
+    !(await invoke(device, "mobile-sync/status")).accountSyncEnabled && fixture.devices.get(device.deviceId).accountSyncEnabled);
+  check("desktop exposes pending publication until the server acknowledges it",
+    (await invoke(device, "mobile-sync/status")).accountSharingPending === true &&
+    (await device.page.locator('[data-testid="mobile-sync-settings"]').innerText()).includes("awaiting server confirmation"));
+  await device.page.locator('[data-testid="mobile-sync-settings"] .mobile-sync-status').scrollIntoViewIfNeeded();
+  await screenshot("desktop-sharing-pending", device.page);
+  fixture.control.sharingUnavailable = false;
+  await until(() => fixture.devices.get(device.deviceId).accountSyncEnabled === false, "sharing publication retries without user refresh", 15_000);
+  await until(async () => !(await invoke(device, "mobile-sync/status")).accountSharingPending, "sharing pending status clears");
+  check("sharing publication recovers automatically while relay remains online");
+  await enable(device);
 }
 async function screenshot(name, page = phone) {
   await page.evaluate(async () => {
@@ -169,10 +189,34 @@ async function openSession(device) {
   if ((await view()).grant?.scope.kind !== "session") await phone.locator(".session-card").filter({ hasText: `${device.name} history` }).click();
   await until(async () => (await view()).selectedId === device.session.id && !(await view()).loading, "history opened");
 }
+async function backHome() {
+  if ((await view()).selectedId) {
+    await phone.getByRole("button", { name: "Back", exact: true }).click();
+    await until(async () => !(await view()).selectedId, "back to session list");
+  }
+  if ((await view()).grant) {
+    await phone.getByRole("button", { name: "Back", exact: true }).click();
+    await until(async () => !(await view()).grant, "back to computers");
+  }
+}
 async function pairPhone(code) {
   await phone.getByRole("button", { name: "Pair desktop", exact: true }).click();
   await phone.getByLabel("8-digit pairing code").fill(code);
   await phone.getByRole("button", { name: "Pair and sync", exact: true }).click();
+}
+async function pairingError(code, message, screenshotName) {
+  const before = (await view()).grants.length;
+  await phone.getByRole("button", { name: /^(Pair desktop|配对电脑)$/ }).click();
+  const dialog = phone.getByRole("dialog");
+  await dialog.locator("input").fill(code);
+  await dialog.locator('button[type="submit"]').click();
+  await until(async () => (await dialog.getByRole("alert").textContent().catch(() => ""))?.includes(message), "actionable pairing error");
+  check("pairing refusal retains the entered code, login and existing grants",
+    await dialog.locator("input").inputValue() === code && (await view()).signedIn && (await view()).grants.length === before);
+  await screenshot(screenshotName);
+  await dialog.getByRole("button", { name: /^(Close|关闭)$/ }).click();
+  await dialog.waitFor({ state: "detached" });
+  await phone.evaluate(() => window.__PI_MOBILE_CONTROLLER__.clearError());
 }
 async function revokeGrant(device, grantId) {
   const row = device.page.locator(`[data-grant-id="${grantId}"]`);
@@ -237,6 +281,7 @@ try {
   await android?.prepare();
   const first = await seed("Desktop A", 610), second = await seed("Desktop B", 4), third = await seed("Desktop C", 2);
   await launch(first, true); await enable(first);
+  await verifySharingRetry(first);
   await launch(second, true); await enable(second);
   await first.page.getByRole("button", { name: "Pair account", exact: true }).click();
   const code = (await first.page.locator('[data-testid="mobile-pairing-code"]').textContent()).trim();
@@ -250,7 +295,28 @@ try {
   check("same project path remains isolated per computer", rows[0].desktopDeviceId !== rows[1].desktopDeviceId && rows.every(row => row.projects.some(project => project.label === "Shared project")));
   check("empty projects and ungrouped sessions are included", rows.every(row => row.projects.some(project => project.label === "Empty project") && row.sessions.some(session => !session.projectId)));
   check("directory discovery does not download history", !fixture.relayCalls.some(call => ["session/attach", "session/snapshot", "session/history"].includes(call.method)));
+  await pairingError(code, "already used", "mobile-used-pairing-code");
+  const expired = await invoke(first, "mobile-sync/createPairing", { kind: "session", sessionId: first.session.id });
+  fixture.pairings.get(expired.id).pairing.expiresAt = "2020-01-01T00:00:00Z";
+  await appearance("zh-CN", "Light");
+  await pairingError(expired.code, "配对码已过期", "mobile-expired-pairing-light-zh");
+  await appearance("en", "Dark");
   await screenshot("mobile-two-computers");
+  await openSession(second); await readAllHistory(4);
+  await close(second);
+  await until(async () => (await view()).directories.find(row => row.desktopDeviceId === second.deviceId)?.device.online === false, "sleeping computer remains discoverable");
+  await phone.evaluate(() => window.__PI_MOBILE_CONTROLLER__.clearError());
+  const ticketCount = fixture.calls.filter(call => call.path === "/api/pi-sync/relay/ticket").length;
+  for (let i = 0; i < 3; i++) await phone.evaluate(() => window.__PI_MOBILE_CONTROLLER__.refreshGrants());
+  await backHome();
+  await openSession(second);
+  check("offline computer keeps cached history without repeated ticket requests or alerts",
+    (await view()).messages.length === 4 && !(await view()).error &&
+    fixture.calls.filter(call => call.path === "/api/pi-sync/relay/ticket").length === ticketCount);
+  await screenshot("mobile-computer-offline-history");
+  await launch(second);
+  await until(async () => { const state = await view(); return state.connection === "connected" && !state.loading && state.snapshot?.session.id === second.session.id; }, "computer reconnects after waking");
+  await backHome();
   await openSession(first);
   await readWhileChangesPending(first);
   await readAllHistory(610);
@@ -295,6 +361,7 @@ try {
   await until(async () => (await view()).directories.length === 3, "new computer auto-discovered");
   check("third opted-in computer requires no additional pairing", fixture.grants.size === 1);
   await screenshot("mobile-three-computers");
+  await settings(second);
   await second.page.getByRole("switch", { name: "Share this computer's projects", exact: true }).click();
   await until(async () => !(await view()).directories.some(row => row.desktopDeviceId === second.deviceId), "one computer opted out");
   check("opt-out removes only that computer", (await view()).directories.length === 2 && fixture.grants.size === 1);
@@ -320,6 +387,7 @@ try {
   check("account directory cached both previously authorized sessions", broadDirectory.sessions.length === 2);
   await openSession(third); await readAllHistory(2);
   await settings(first);
+  const oldPeer = [...fixture.peers].find(([, peer]) => peer.desktopDeviceId === first.deviceId)?.[0];
   await revokeGrant(first, accountGrant.id);
   await until(async () => {
     const state = await view();
@@ -328,6 +396,10 @@ try {
       state.directories[0].sessions[0].id === first.session.id && !state.selectedId && !state.messages.length;
   }, "account revocation narrows access to the remaining session");
   check("account revocation closes removed content and retains the independent session grant");
+  await until(() => [...fixture.peers].some(([id, peer]) => id !== oldPeer && peer.desktopDeviceId === first.deviceId &&
+    peer.grants.length === 1 && peer.grants[0].id === sessionGrant.id), "remaining scope reconnects with a fresh ticket");
+  check("MC permission narrowing closes the old peer and reconnects with the remaining session grant",
+    fixture.closedPeers.some(peer => peer.peerId === oldPeer && peer.reason === "GRANT_REVOKED"));
   const scopedHistoryRequests = fixture.relayCalls.filter(call => call.method === "session/history").length;
   await offline(true);
   // Emulate a process stopping after new grants were saved but before the old

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { MobileSyncStatus } from "@pi-desktop/shared";
 import { api } from "../../lib/api";
+import { mobileSyncErrorKey } from "./errors";
 
 /** Subscribe before reading so a late initial read cannot replace a newer event. */
 export function useMobileSync(activate = false) {
@@ -20,8 +21,8 @@ export function useMobileSync(activate = false) {
     });
     void (activate ? api.mobileSync.refresh() : api.mobileSync.status()).then((value) => {
       if (mounted.current && observedRevision === revision.current) setState(value);
-    }).catch(() => {
-      if (mounted.current && observedRevision === revision.current) setError("requestFailed");
+    }).catch((failure: unknown) => {
+      if (mounted.current && observedRevision === revision.current) setError(mobileSyncErrorKey(failure));
     });
     return () => { mounted.current = false; unsubscribe(); };
   }, [activate]);
@@ -34,8 +35,8 @@ export function useMobileSync(activate = false) {
     try {
       const value = await api.mobileSync.refresh();
       if (mounted.current && observedRevision === revision.current) setState(value);
-    } catch {
-      if (mounted.current) setError("requestFailed");
+    } catch (failure) {
+      if (mounted.current) setError(mobileSyncErrorKey(failure));
     } finally {
       if (mounted.current) setRefreshing(false);
     }

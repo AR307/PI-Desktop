@@ -1,5 +1,21 @@
 # PI-Desktop MirrorCoding Edition
 
+## 2026-10-07 - Align account sync with the MC server handoff
+
+- Desktop account sharing exposes its existing persisted pending state and
+  retries transient publication failures without a manual refresh. Account
+  pairing waits for server acknowledgement; local opt-out still applies at once.
+- Mobile keeps offline computer indexes/history without repeatedly requesting
+  relay tickets. Permission narrowing refreshes account metadata and reconnects
+  with only the remaining grants. Changes arriving during discovery are retained.
+- Both surfaces explain MC account/pairing errors in English and Chinese; the
+  mobile pairing sheet preserves the entered code and existing authorization.
+- The controlled MC fixture now uses the handoff response/status codes and
+  closes peers when any previously effective grant is removed. E2E covers
+  sharing retries, sleeping computers, scoped reconnection and pairing errors.
+- Corrected the peer.open phone identity field in the MC increment document.
+  This client work does not deploy MC or claim production joint acceptance.
+
 ## 2026-10-06 - Session error review acceptance
 
 - Confirmed client fixes cover delegate mutation recovery ownership, failed
