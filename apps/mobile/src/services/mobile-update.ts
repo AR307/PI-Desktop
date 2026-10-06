@@ -57,14 +57,20 @@ export class MobileUpdater {
 
   async installed(): Promise<InstalledVersion> { return this.transport.getInstalledInfo(); }
   async downloadState(): Promise<DownloadState> { return this.transport.getDownload(); }
+  async savedUpdate(): Promise<MobileUpdateManifest | null> {
+    const saved = this.storage.getItem(LAST_MANIFEST_KEY);
+    if (!saved) return null;
+    try {
+      const manifest = parseManifest(JSON.parse(saved), import.meta.env.MODE === "acceptance");
+      return isNewerUpdate(manifest, await this.installed()) ? manifest : null;
+    } catch { return null; }
+  }
 
   async check(manual = false): Promise<{ installed: InstalledVersion; manifest: MobileUpdateManifest | null; checked: boolean }> {
     const installed = await this.installed();
     const lastCheck = Number(this.storage.getItem(LAST_CHECK_KEY) ?? 0);
     if (!manual && lastCheck > 0 && Date.now() - lastCheck < CHECK_INTERVAL_MS) {
-      const saved = this.storage.getItem(LAST_MANIFEST_KEY);
-      let cached: MobileUpdateManifest | null = null;
-      try { cached = saved ? parseManifest(JSON.parse(saved), import.meta.env.MODE === "acceptance") : null; } catch { /* A malformed cached update never blocks fresh checks. */ }
+      const cached = await this.savedUpdate();
       return { installed, manifest: cached && isNewerUpdate(cached, installed) ? cached : null, checked: false };
     }
     const fixtureUrl = import.meta.env.MODE === "acceptance" ? import.meta.env.VITE_MOBILE_UPDATE_MANIFEST_URL : undefined;

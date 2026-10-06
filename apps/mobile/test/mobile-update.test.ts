@@ -30,6 +30,8 @@ describe("mobile update user path", () => {
     const storage = { getItem: (key: string) => values.get(key) ?? null, setItem: (key: string, value: string) => { values.set(key, value); } };
     const updater = new MobileUpdater(transport, storage);
     expect((await updater.check()).manifest?.versionName).toBe("0.16.2");
+    const restarted = new MobileUpdater(transport, storage);
+    expect((await restarted.savedUpdate())?.versionName).toBe("0.16.2");
     expect((await updater.check()).manifest?.versionName).toBe("0.16.2");
     expect(checks).toBe(1);
     expect((await updater.check(true)).manifest?.versionName).toBe("0.16.2");

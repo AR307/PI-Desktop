@@ -50,6 +50,7 @@ export function useMobileUpdate(): MobileUpdateView {
   useEffect(() => {
     if (!updater) return;
     void updater.installed().then((value) => setVersion(value.versionName)).catch((cause: unknown) => setError(String(cause)));
+    void updater.savedUpdate().then((value) => { if (value) { setManifest(value); setLastResult("available"); } });
     void refreshDownload();
     void check();
     const listener = NativeApp.addListener("appStateChange", ({ isActive }) => {
