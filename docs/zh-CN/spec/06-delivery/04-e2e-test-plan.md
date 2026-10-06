@@ -3765,9 +3765,10 @@ IPC 请求无法关闭。
   1. 启动Agent模式对话并提交root覆盖的任务
      指示。
   2. 让代理读取或编辑 `packages/api/handler.ts`。
-  3. 添加 `packages/api/AGENTS.override.md`，然后让代理访问另一个
+  3. 让代理读取项目根目录之外的附件。
+  4. 添加 `packages/api/AGENTS.override.md`，然后让代理访问另一个
      该目录中的文件。
-  4. 在会话空闲时编辑 root 指令，然后提交
+  5. 在会话空闲时编辑 root 指令，然后提交
      后续任务。
 - **预期**：初始运行时接收根链。文件之前
   工具执行时，嵌套指令将附加在其根源之后，并且
@@ -3775,7 +3776,11 @@ IPC 请求无法关闭。
   `AGENTS.md`； `CLAUDE.md` 和 `.claude/CLAUDE.md` 是后备名称。闲着的
   后续使用更改的根内容而不是重用之前的运行时。
   空的、不可读的、过大的和超出根的指令文件不会阻塞
-  转牌圈；组合的 UTF-8 内容上限为 32 KiB。如果路径特定
+  转牌圈；组合的 UTF-8 内容上限为 32 KiB。目标路径位于项目根之外，
+  或目标就是项目根本身时，文件工具会保留根链，而不是清空项目指令；
+  指令文件仍然只从项目根内部读取。fixture sidecar 场景验证嵌套读取应用
+  嵌套规则，而后续附件读取会恢复根规则且不会载入根目录外的 `AGENTS.md`。
+  如果路径特定
   分辨率超过其两秒期限或主机不可用，则
   文件工具继续使用基础链并且不保留同级链
   目录的规则。同一目录中的重复文件工具一次
@@ -3786,9 +3791,9 @@ IPC 请求无法关闭。
 - **链接规格**：`03-runtime/02-agent-runtime.md`
 - **接受**：C (chat/stream)，F（持久）
 - **里程碑**：M5
-- **状态**：部分自动化（`project-instructions.test.ts`，
-  `runtime.test.ts`);满
-  provider/UI 旅程草案
+- **状态**：解析器与运行时由 `project-instructions.test.ts` 和
+  `runtime.test.ts` 自动化；fixture sidecar 场景通过
+  `pnpm test:e2e:hosted-search` 运行。完整 provider/UI 旅程仍为草案。
 
 #### E2E-AGENTS-002：全局设置和项目菜单管理指令文件
 

@@ -2,6 +2,9 @@
 
 ## 2026-10-06 - Upstream 0.16.1, mobile registration and scratch previews
 
+- Refreshed upstream through `924a03a7b` after the initial 0.16.1 integration.
+  This also includes the project-instruction root correction for external tool
+  paths and its runtime/hosted-search coverage. Fork origin remains `920b12b8e`.
 - Integrates upstream 0.16.1 while retaining MC catalogs, native model settings,
   Android sync, Fast, Ultra, subagent controls and ReturnToParent presentation.
   Resolves overlapping browser capture logic and recent-model selection.
