@@ -33,9 +33,12 @@
   delayed changes reply and an offline restart. Model catalog failures cannot
   discard already-received transcript events.
 - Rust 780 tests, fmt, Clippy, mobile 22 tests, mobile-peer 8 tests and affected
-  TypeScript checks pass. The prior image sidecar child failure passes all six
-  targeted checks after rebuilding the runtime bundle. Final candidate packages
-  and long-message concurrency acceptance follow; no production calls or push.
+  TypeScript checks pass. The rebuilt host-runtime suite passed 120 tests with
+  three declared skips. Browser account acceptance passed 32 checks and actual
+  PiMobileQA acceptance passed 36, including interrupted scope pruning before
+  an offline restart. Windows installer and Portable previews were built; their
+  packaged application boot checks passed. Final delivery details follow in the
+  acceptance record; no production calls, push or release were performed.
 
 
 ## 2026-10-06 - Upstream 0.16.1, mobile registration and scratch previews

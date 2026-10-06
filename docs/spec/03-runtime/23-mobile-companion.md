@@ -131,7 +131,9 @@ Transcript reads on the mobile profile apply a per-field presentation cap
 (`MOBILE_ITEM_CONTENT_LIMIT`, 64 KiB — the desktop renderer's window), so one
 oversized message can no longer burst the relay frame limit and make a long
 session unopenable. host-core marks a capped field by appending its display
-truncation marker; the phone shows the full content on demand through
+truncation marker. Whole items and pages are also bounded so many individually
+small tool blocks cannot exceed the relay frame. Omitted older rows remain
+available through backward paging. The phone shows the full content on demand through
 `session/item`, which streams the complete item JSON in relay-safe chunks like
 `attachment/read`. The uncapped transcript remains desktop-owned.
 
@@ -167,3 +169,16 @@ selections; current is captured at desktop launch, not from next-turn settings.
 Image mode sends no Fast, and returning to chat restores its saved choice.
 Running chat edits affect the next turn only; image and auxiliary requests do not
 inherit it. MC transports these existing RACP payloads without new server state.
+
+
+## Android application updates
+
+Account settings show the installed Android version, manual update check,
+release notes and native download/install actions, including while signed out.
+Startup/foreground checks run at most daily; failures affect only updates.
+`AR307/Mirrorcoding-APP` is the sole release source. Build metadata generates
+`mobile-update.json` alongside the APK. DownloadManager keeps tasks across
+process restarts; explicit installation uses FileProvider and Android's system
+installer with the unknown-source permission flow. Application ID/signing stay
+the same and `versionCode` increases. No silent installation or web-resource hot
+update is supported. The first updater APK is installed manually.

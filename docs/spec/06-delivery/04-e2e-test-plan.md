@@ -17162,7 +17162,7 @@ host-created files. The full app's file-preview viewer is covered separately.
 
 ## E2E-Mobile-account-offline-20261006
 
-Use pps/desktop/test/e2e/mobile/account-sync.mjs with isolated Electron/Rust
+Use `apps/desktop/test/e2e/mobile/account-sync.mjs` with isolated Electron/Rust
 profiles, the controlled MC fixture and the real mobile browser application.
 Never use production accounts or paid models for these scenarios.
 

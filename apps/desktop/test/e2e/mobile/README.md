@@ -234,3 +234,28 @@ Use the existing PiMobileQA device with a normal keyboard, not the keyboard
 handwriting tutorial. The acceptance run may use local dependency junctions;
 keep generated Capacitor dependency paths out of source commits. These checks
 prove controlled client behavior, not production MC deployment or speed.
+
+
+## Account sharing and durable offline history (2026-10-06)
+
+Run `node apps/desktop/test/e2e/mobile/account-sync.mjs` after shared, host-runtime,
+RACP, i18n, sidecar and desktop builds. The browser flow uses three isolated real
+Electron/Rust instances and the controlled MC relay. It checks initial discovery,
+610 loaded messages, concurrent expansion/paging while changes are delayed,
+offline restart, only three changed rows after a desktop restart, automatic third
+computer discovery and account-grant revocation with a remaining session grant.
+
+For PiMobileQA, run the same script with `PI_TEST_ANDROID=1`, `ANDROID_HOME`,
+`JAVA_HOME` (JDK 21) and `PI_TEST_PLAYWRIGHT`. It builds/installs a separate
+`xyz.mirrorcoding.pi.mobile.accountqa` APK and exercises the native secure store,
+Capacitor WebView, process force-stop/relaunch and dark-English/light-Chinese
+screenshots. It never replaces the normal mobile application. Optional
+`PI_TEST_DESKTOP_ROOT` points at an already built candidate; both revisions are
+recorded in the report. `PI_ANDROID_SKIP_BUILD=1` reuses an unchanged QA APK.
+
+Controlled APK updater acceptance is separate:
+`node apps/mobile/test/android-update-e2e.mjs`, using the two QA packages and
+local manifest instructions in the mobile README. It verifies DownloadManager,
+cancel/retry, process restart, unknown-source permission and system installation.
+The first updater build needs manual installation; these tests do not publish a
+GitHub release or prove production MC account-grant support.
