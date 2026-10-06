@@ -10,6 +10,7 @@ import {
   applyNetworkProxyFromAppSettings,
   currentNetworkProxy,
   disposeSystemProxyRelay,
+  ensureSystemProxyRelay,
   testNetworkProxy,
 } from "./network-proxy";
 import { installInsecureEndpointNotice } from "./network-notice";
@@ -775,6 +776,7 @@ const { startHost } = createHostRuntime({
   importLegacyScheduled,
   superviseRestart,
   isQuitting: () => mainState.quitting,
+  ensureSystemProxyRelay,
 });
 
 runtimeLifecycle = createRuntimeLifecycle({

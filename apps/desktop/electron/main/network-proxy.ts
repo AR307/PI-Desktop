@@ -29,7 +29,7 @@ import { applyUserEndpointPolicyFromAppSettings } from "./endpoint-policy";
 import {
   startSystemProxyRelay,
   type SystemProxyRelay,
-} from "./system-proxy-relay";
+} from "@pi-desktop/agent-runtime/system-proxy-relay";
 
 const originalEnv = snapshotProxyEnv(process.env);
 let applied: NetworkProxySettings = { mode: "system" };

@@ -13082,9 +13082,10 @@ are withdrawn with ADR 0165.
   `node-proxy.test.ts`, `authenticated-proxy-relay.test.ts`,
   `settings-general.test.mjs`, host-core `network_proxy` tests); malformed
   credentials and unsupported SOCKS4 schemes are covered by shared parser
-  tests. The System/PAC relay path does not yet have automated regression
-  coverage. Full UI journey Draft (run only in a capable environment when
-  this surface changes).
+  tests. `system-proxy-relay.test.ts` covers authenticated provider traffic,
+  PAC proxy fallback, HTTP proxy forwarding, and scheme detection on
+  non-default ports. Full UI journey Draft (run only in a capable environment
+  when this surface changes).
 
 #### E2E-191: Newly emitted AppError codes stay registered
 

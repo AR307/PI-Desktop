@@ -195,6 +195,9 @@ pub fn curl_proxy_args() -> Vec<String> {
 mod tests {
     use super::*;
     use serde_json::json;
+    use std::sync::Mutex;
+
+    static TEST_STATE_LOCK: Mutex<()> = Mutex::new(());
 
     #[test]
     fn parse_accepts_http_and_socks5() {
@@ -223,6 +226,7 @@ mod tests {
 
     #[test]
     fn curl_args_follow_applied_settings() {
+        let _guard = TEST_STATE_LOCK.lock().unwrap();
         apply_from_settings(Some(&json!({
             "networkProxy": { "mode": "custom", "url": "socks5://127.0.0.1:1080" }
         })));
@@ -238,5 +242,36 @@ mod tests {
 
         apply_from_settings(Some(&json!({})));
         assert!(curl_proxy_args().is_empty());
+    }
+
+    #[test]
+    fn system_relay_requires_authenticated_loopback_and_routes_curl() {
+        let _guard = TEST_STATE_LOCK.lock().unwrap();
+        let token = "a".repeat(64);
+        let relay_url = format!("socks5://system-auto:{token}@127.0.0.1:43210");
+
+        for invalid in [
+            "socks5://system-http:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa@127.0.0.1:43210",
+            "socks5://system-auto:short@127.0.0.1:43210",
+            "socks5://system-auto:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa@0.0.0.0:43210",
+            "socks5://system-auto:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa@127.0.0.1:0",
+        ] {
+            assert!(set_system_proxy_relay(invalid).is_err());
+        }
+
+        set_system_proxy_relay(&relay_url).unwrap();
+        apply_from_settings(Some(&json!({})));
+        let args = curl_proxy_args();
+        if let Ok(mut relay) = SYSTEM_PROXY_RELAY.write() {
+            *relay = None;
+        }
+
+        assert_eq!(
+            args,
+            vec![
+                "--proxy".to_string(),
+                format!("socks5h://system-auto:{token}@127.0.0.1:43210")
+            ]
+        );
     }
 }

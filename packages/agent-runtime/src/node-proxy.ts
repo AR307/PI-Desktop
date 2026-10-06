@@ -185,7 +185,7 @@ function createSystemProxyDispatcher(
   const parsed = parseProxyUrl(relayUrl);
   if (!parsed.ok || !parsed.value.isSocks) return null;
   const dispatcher: Dispatcher = new Agent({
-    connect: socksConnector(parsed.value, true),
+    connect: socksConnector(parsed.value),
   });
   return {
     dispatcher,
@@ -399,20 +399,11 @@ export function proxyBypassMatcher(bypass: string): ProxyBypassMatcher {
   };
 }
 
-function socksConnector(
-  proxy: ParsedProxyUrl,
-  relayResolvesSystemRoute = false,
-): buildConnector.connector {
+function socksConnector(proxy: ParsedProxyUrl): buildConnector.connector {
   return (options, callback) => {
     const hostname = options.hostname || options.host || "";
     const port = Number(options.port) || (options.protocol === "http:" ? 80 : 443);
-    const auth = relayResolvesSystemRoute
-      ? {
-          username: `system-${options.protocol === "https:" ? "https" : "http"}`,
-          password: proxy.password,
-        }
-      : undefined;
-    void socks5Connect(proxy, hostname, port, auth)
+    void socks5Connect(proxy, hostname, port)
       .then((socket) => {
         if (options.protocol === "https:") {
           const tlsSocket = tlsConnect({

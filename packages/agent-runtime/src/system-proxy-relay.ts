@@ -1,13 +1,16 @@
 import { randomBytes, timingSafeEqual } from "node:crypto";
 import { createServer, type Server, type Socket } from "node:net";
+import { connect as tlsConnect } from "node:tls";
 import { parseProxyUrl, type ParsedProxyUrl } from "@pi-desktop/shared";
 import {
   connectTcp,
   connectViaProxy,
+  proxyListenPort,
   SocketReader,
-} from "@pi-desktop/agent-runtime/proxy-tunnel";
+} from "./socks5.js";
 
 const MAX_PROXY_RESOLUTION_LENGTH = 8_192;
+const MAX_HTTP_REQUEST_LINE_LENGTH = 16_384;
 
 export type SystemProxyRelay = {
   url: string;
@@ -15,11 +18,14 @@ export type SystemProxyRelay = {
 };
 
 type ProxyRoute = { kind: "direct" } | { kind: "proxy"; proxy: ParsedProxyUrl };
+type ConnectedRoute =
+  | { socket: Socket; kind: "tunnel" }
+  | { socket: Socket; kind: "http-forward"; proxy: ParsedProxyUrl };
 
 /**
  * Resolve each destination through Electron's active system/PAC configuration,
- * then tunnel the connection through that route. The listener is loopback-only
- * and requires a per-process SOCKS credential before it will resolve a route.
+ * then route traffic through that decision. The listener is loopback-only and
+ * requires a per-process SOCKS credential before it will resolve a route.
  */
 export async function startSystemProxyRelay(
   resolveProxy: (url: string) => Promise<string>,
@@ -81,31 +87,67 @@ async function handleClient(
   resolveProxy: (url: string) => Promise<string>,
 ): Promise<void> {
   const reader = new SocketReader(client);
+  let connectReplySent = false;
+  let guardClientError: ((error: Error) => void) | null = null;
   try {
-    const { host, port, scheme } = await acceptAuthenticatedConnect(
-      reader,
-      client,
-      expectedPassword,
-    );
+    const { host, port } = await acceptAuthenticatedConnect(reader, client, expectedPassword);
+    client.write(Buffer.from([0x05, 0x00, 0x00, 0x01, 127, 0, 0, 1, 0, 0]));
+    connectReplySent = true;
+
+    // SOCKS CONNECT carries no URL scheme. Wait for the first application byte
+    // so PAC decisions remain correct on non-default HTTP and HTTPS ports.
+    const firstByte = await reader.readExact(1);
+    client.pause();
+    const buffered = reader.takeBuffered();
+    reader.dispose();
+    guardClientError = () => client.destroy();
+    client.on("error", guardClientError);
+    const scheme = schemeFromFirstByte(firstByte[0]);
+    const applicationData = Buffer.concat([firstByte, buffered]);
+    const initialData =
+      scheme === "http"
+        ? await readHttpRequestPrefix(client, applicationData)
+        : applicationData;
     const destination = new URL(`${scheme}://${formatHost(host)}:${port}/`);
     const resolution = await resolveProxy(destination.href);
-    const remote = await connectByResolvedRoute(
+    const route = await connectByResolvedRoute(
       parseProxyRoutes(resolution),
       host,
       port,
+      scheme,
     );
-    reader.dispose();
-    client.write(Buffer.from([0x05, 0x00, 0x00, 0x01, 127, 0, 0, 1, 0, 0]));
-    pipeSockets(client, remote);
-  } catch {
+    if (client.destroyed) {
+      if (guardClientError) client.off("error", guardClientError);
+      guardClientError = null;
+      route.socket.destroy();
+      return;
+    }
+    client.off("error", guardClientError);
+    guardClientError = null;
+    const forwardedData =
+      route.kind === "http-forward"
+        ? rewriteHttpRequestPrefix(initialData, host, port, route.proxy)
+        : initialData;
+    route.socket.write(forwardedData);
+    pipeSockets(client, route.socket);
+  } catch (error) {
+    if (guardClientError) client.off("error", guardClientError);
     reader.dispose();
     if (!client.destroyed) {
-      try {
-        client.write(
-          Buffer.from([0x05, 0x01, 0x00, 0x01, 0, 0, 0, 0, 0, 0]),
-        );
-      } catch {
-        // The client may have closed while the route was being resolved.
+      if (connectReplySent) {
+        const message = (error instanceof Error ? error.message : "unknown failure")
+          .replace(/[\r\n\x00-\x1f\x7f]/g, " ")
+          .slice(0, 240);
+        process.stderr.write(`[system-proxy-relay] connection failed: ${message}\n`);
+      }
+      if (!connectReplySent) {
+        try {
+          client.write(
+            Buffer.from([0x05, 0x01, 0x00, 0x01, 0, 0, 0, 0, 0, 0]),
+          );
+        } catch {
+          // The client may have closed before the SOCKS reply was sent.
+        }
       }
       client.destroy();
     }
@@ -116,7 +158,7 @@ async function acceptAuthenticatedConnect(
   reader: SocketReader,
   client: Socket,
   expectedPassword: string,
-): Promise<{ host: string; port: number; scheme: "http" | "https" }> {
+): Promise<{ host: string; port: number }> {
   const hello = await reader.readExact(2);
   if (hello[0] !== 0x05 || hello[1] === 0) {
     throw new Error("invalid SOCKS5 greeting");
@@ -139,10 +181,7 @@ async function acceptAuthenticatedConnect(
   const username = usernameBytes.toString("utf8");
   const suppliedPassword = passwordBytes.toString("utf8");
   const passwordMatches = secureEqual(suppliedPassword, expectedPassword);
-  const usernameAllowed =
-    username === "system-auto" ||
-    username === "system-http" ||
-    username === "system-https";
+  const usernameAllowed = username === "system-auto";
   client.write(Buffer.from([0x01, passwordMatches && usernameAllowed ? 0x00 : 0x01]));
   if (!passwordMatches || !usernameAllowed) {
     throw new Error("SOCKS5 authentication failed");
@@ -156,12 +195,13 @@ async function acceptAuthenticatedConnect(
   const portBytes = await reader.readExact(2);
   const port = portBytes.readUInt16BE(0);
   if (port === 0) throw new Error("invalid SOCKS5 destination port");
-  const scheme =
-    username === "system-http" ||
-    (username === "system-auto" && port === 80)
-      ? "http"
-      : "https";
-  return { host, port, scheme };
+  return { host, port };
+}
+
+function schemeFromFirstByte(firstByte: number): "http" | "https" {
+  if (firstByte === 0x16) return "https";
+  if (firstByte >= 0x41 && firstByte <= 0x5a) return "http";
+  throw new Error("unsupported application protocol for system proxy routing");
 }
 
 function secureEqual(left: string, right: string): boolean {
@@ -232,13 +272,25 @@ async function connectByResolvedRoute(
   routes: ProxyRoute[],
   host: string,
   port: number,
-): Promise<Socket> {
+  scheme: "http" | "https",
+): Promise<ConnectedRoute> {
   let lastError: unknown;
   for (const route of routes) {
     try {
-      return route.kind === "direct"
-        ? await connectTcp(host, port)
-        : await connectViaProxy(route.proxy, host, port);
+      if (route.kind === "direct") {
+        return { socket: await connectTcp(host, port), kind: "tunnel" };
+      }
+      if (route.proxy.isSocks || scheme === "https") {
+        return {
+          socket: await connectViaProxy(route.proxy, host, port),
+          kind: "tunnel",
+        };
+      }
+      return {
+        socket: await connectHttpProxyTransport(route.proxy),
+        kind: "http-forward",
+        proxy: route.proxy,
+      };
     } catch (error) {
       if (isProxyPolicyRejection(error)) throw error;
       lastError = error;
@@ -247,6 +299,98 @@ async function connectByResolvedRoute(
   throw lastError instanceof Error
     ? lastError
     : new Error("system proxy routes could not connect");
+}
+
+async function connectHttpProxyTransport(proxy: ParsedProxyUrl): Promise<Socket> {
+  const socket = await connectTcp(proxy.host, proxyListenPort(proxy));
+  if (proxy.scheme !== "https") return socket;
+  return new Promise((resolve, reject) => {
+    const secureSocket = tlsConnect({
+      socket,
+      host: proxy.host,
+      servername: proxy.host,
+    });
+    const fail = (error: Error) => {
+      secureSocket.destroy();
+      reject(error);
+    };
+    secureSocket.once("error", fail);
+    secureSocket.once("secureConnect", () => {
+      secureSocket.off("error", fail);
+      resolve(secureSocket);
+    });
+  });
+}
+
+async function readHttpRequestPrefix(
+  client: Socket,
+  initialData: Buffer,
+): Promise<Buffer> {
+  let data = initialData;
+  while (data.indexOf(Buffer.from("\r\n")) < 0) {
+    if (data.length > MAX_HTTP_REQUEST_LINE_LENGTH) {
+      throw new Error("HTTP request line is too large");
+    }
+    data = Buffer.concat([data, await readSocketChunk(client)]);
+  }
+  const lineLength = data.indexOf(Buffer.from("\r\n"));
+  if (lineLength > MAX_HTTP_REQUEST_LINE_LENGTH) {
+    throw new Error("HTTP request line is too large");
+  }
+  return data;
+}
+
+function readSocketChunk(socket: Socket): Promise<Buffer> {
+  return new Promise((resolve, reject) => {
+    const cleanup = () => {
+      socket.off("data", onData);
+      socket.off("error", onError);
+      socket.off("close", onClose);
+    };
+    const onData = (chunk: Buffer) => {
+      cleanup();
+      socket.pause();
+      resolve(chunk);
+    };
+    const onError = (error: Error) => {
+      cleanup();
+      reject(error);
+    };
+    const onClose = () => {
+      cleanup();
+      reject(new Error("HTTP client closed before sending a request line"));
+    };
+    socket.once("data", onData);
+    socket.once("error", onError);
+    socket.once("close", onClose);
+    socket.resume();
+  });
+}
+
+function rewriteHttpRequestPrefix(
+  data: Buffer,
+  host: string,
+  port: number,
+  proxy: ParsedProxyUrl,
+): Buffer {
+  const delimiter = Buffer.from("\r\n");
+  const lineEnd = data.indexOf(delimiter);
+  if (lineEnd < 0) throw new Error("HTTP request line is incomplete");
+  const line = data.subarray(0, lineEnd).toString("latin1");
+  const match = line.match(/^(\S+)\s+(\S+)\s+(HTTP\/\d(?:\.\d)?)$/i);
+  if (!match) throw new Error("HTTP request line is invalid");
+  const [, method, target, version] = match;
+  const absoluteTarget = /^https?:\/\//i.test(target)
+    ? target
+    : `http://${formatHost(host)}:${port}${target.startsWith("/") ? target : `/${target}`}`;
+  const authorization =
+    proxy.username || proxy.password
+      ? `Proxy-Authorization: Basic ${Buffer.from(`${proxy.username ?? ""}:${proxy.password ?? ""}`, "utf8").toString("base64")}\r\n`
+      : "";
+  return Buffer.concat([
+    Buffer.from(`${method} ${absoluteTarget} ${version}\r\n${authorization}`, "latin1"),
+    data.subarray(lineEnd + delimiter.length),
+  ]);
 }
 
 function isProxyPolicyRejection(error: unknown): boolean {
