@@ -15846,7 +15846,8 @@ plugin-form fixtures in an isolated temporary directory at runtime.
 - **Acceptance**: B (model config), E (tools & permissions), F (persistence),
   G (plugins), Security, Quality
 - **Milestone**: Post-MVP (R7 v1)
-- **Status**: Automated scenario (`pnpm test:e2e:trusted-extensions`) with local
+- **Status**: Runs in the Linux CI integration candidate through
+  `pnpm test:e2e:trusted-extensions` under Xvfb, using local
   synthetic OAuth credentials: the API-key and OAuth declared rows, permission
   projection, Settings sign-in picker, Host-rendered device-code and secret
   prompt, encrypted-credential handoff, refresh, model request auth,

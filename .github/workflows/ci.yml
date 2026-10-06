@@ -78,3 +78,41 @@ jobs:
 
       - name: Test
         run: cargo test -p host-core --locked
+
+  trusted-extensions-e2e:
+    name: Trusted extensions Electron E2E
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: pnpm/action-setup@v6
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Install virtual display
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends --yes xvfb
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build workspace packages
+        run: pnpm build:js
+
+      - name: Build Desktop bundle
+        run: pnpm --filter @pi-desktop/desktop build
+
+      - name: Build host-core
+        run: cargo build -p host-core --locked
+
+      - name: Run trusted extensions E2E
+        run: xvfb-run --auto-servernum pnpm test:e2e:trusted-extensions
