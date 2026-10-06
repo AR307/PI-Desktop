@@ -15842,12 +15842,14 @@ plugin-form fixtures in an isolated temporary directory at runtime.
 - **Acceptance**: B (model config), E (tools & permissions), F (persistence),
   G (plugins), Security, Quality
 - **Milestone**: Post-MVP (R7 v1)
-- **Status**: Partially automated (`pnpm test:e2e:trusted-extensions`): the
-  API-key declared row materializing with its endpoint, models, and thinking
-  binding passes. Ownership refusal, disable/enable, cleanup, and manifest
-  validation are covered by host-core checks. OAuth callback, prompt, token
-  refresh, cancellation, sign-out, permission presentation, and the renderer's
-  provider/account interaction require task-candidate E2E coverage.
+- **Status**: Automated scenario (`pnpm test:e2e:trusted-extensions`) with local
+  synthetic OAuth credentials: the API-key and OAuth declared rows, permission
+  projection, Settings sign-in picker, Host-rendered device-code and secret
+  prompt, encrypted-credential handoff, refresh, model request auth,
+  cancellation, and sign-out are exercised through the real Electron renderer
+  and plugin process. Ownership refusal, disable/enable, cleanup, and malformed
+  manifest cases remain covered by host-core checks. No live identity provider
+  is used.
 
 #### E2E-CHAT-disclosure-toggle-keeps-reading-position
 
