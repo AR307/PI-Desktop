@@ -58,6 +58,19 @@
 .parameter-heading { display: flex; align-items: center; gap: 6px; margin-top: 0; }
 .image-parameters .muted { display: block; margin-top: 8px; }
 .config-change-note { display: block; margin-top: 10px; }
+.mobile-update-section { margin-top: 14px; border-top: 1px solid var(--ds-border-default); padding-top: 6px; }
+.update-version { border-bottom: 0; }
+.update-version small { margin-left: auto; }
+.update-notes { white-space: pre-wrap; margin: 4px 0 10px; line-height: 1.45; }
+.update-actions { justify-content: stretch; margin: 0 0 8px; }
+.update-actions button { flex: 1; display: inline-flex; align-items: center; justify-content: center; gap: 6px; }
+.update-progress { display: flex; align-items: center; gap: 8px; margin: 8px 0; }
+.update-progress progress { min-width: 0; flex: 1; height: 6px; accent-color: var(--ds-accent); }
+.update-progress span { min-width: 42px; text-align: right; font-size: 11px; }
+.update-check { width: 100%; border: 0; background: transparent; justify-content: flex-start; }
+.update-check .spin { animation: spin .8s linear infinite; }
+.error-text { color: var(--ds-error); font-size: 12px; }
+@keyframes spin { to { transform: rotate(360deg); } }
 @keyframes surface-slide-in { from { opacity: 0; transform: translateY(24px); } to { opacity: 1; transform: translateY(0); } }
 @keyframes surface-slide-out { from { opacity: 1; transform: translateY(0); } to { opacity: 0; transform: translateY(18px); } }
 @keyframes surface-fade-in { from { opacity: 0; } to { opacity: 1; } }

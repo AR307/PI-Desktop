@@ -1,6 +1,6 @@
 {
   "name": "@pi-desktop/mobile",
-  "version": "0.16.1",
+  "version": "0.16.2",
   "private": true,
   "type": "module",
   "scripts": {
@@ -9,7 +9,8 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "android:sync": "cap sync android",
-    "android:open": "cap open android"
+    "android:open": "cap open android",
+    "update:manifest": "node scripts/generate-mobile-update.mjs"
   },
   "dependencies": {
     "@aparajita/capacitor-secure-storage": "8.0.0",

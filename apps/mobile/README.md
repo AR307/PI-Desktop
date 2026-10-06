@@ -57,6 +57,18 @@ parameters follow capabilities returned by desktop. Chat and image choices are
 remembered separately. A model/reasoning change saved during a running chat
 applies to the next turn; mode changes wait until work and approvals are idle.
 
+## In-app updates
+
+Android checks `AR307/Mirrorcoding-APP`'s `mobile-update.json` once per day on
+startup or foreground, or immediately from Account. A newer compatible APK can
+be downloaded with Android DownloadManager, cancelled and retried, then handed
+to the system installer through the app's FileProvider. The first APK that
+contains this updater must still be installed manually; later releases can be
+installed from Account. Generate the release manifest with
+`pnpm --filter @pi-desktop/mobile update:manifest <output-file> [notes-file]`.
+The app never installs silently and GitHub or download failures do not block
+normal account and transcript use.
+
 ## Controlled acceptance environment
 
 Use `vite --mode acceptance` with `VITE_MC_ORIGIN` set to the controlled local MC
