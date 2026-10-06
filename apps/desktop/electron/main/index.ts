@@ -9,6 +9,7 @@ import { join } from "node:path";
 import {
   applyNetworkProxyFromAppSettings,
   currentNetworkProxy,
+  disposeSystemProxyRelay,
   testNetworkProxy,
 } from "./network-proxy";
 import { installInsecureEndpointNotice } from "./network-notice";
@@ -1041,6 +1042,7 @@ registerShutdownHandlers({
   confirmQuitDialog,
   disposePowerSaveBlockers,
   liveCallService,
+  disposeSystemProxyRelay,
 });
 
 registerApplicationActivation({

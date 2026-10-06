@@ -74,16 +74,18 @@ ordered shutdown as the Quit menu item.
 
 After host-core is up, Electron main reads `AppSettings.networkProxy` and
 applies it before spawning the agent sidecar (D340). Chromium sessions use
-`session.setProxy`; main-process `fetch` is `net.fetch`; the sidecar receives
-the same config through `sidecar.configure` and `PI_DESKTOP_PROXY_JSON`.
-HTTP(S) provider requests use undici's proxy dispatcher; SOCKS5 provider
-requests use a buffered CONNECT tunnel so a proxy may coalesce the SOCKS
-handshake response without stalling the request. Custom URLs with userinfo
-keep credentials for Node and curl; Chromium is pointed at a loopback SOCKS5
-relay that injects them, because `proxyRules` cannot carry userinfo (issue
-#490).
-host-core marketplace `curl` gets `--proxy` from the stored settings and does
-**not** inherit proxy env, so workspace Bash cannot see proxy credentials.
+`session.setProxy`; main-process `fetch` is `net.fetch`. In System mode, the
+sidecar provider dispatcher and host-core marketplace `curl` use an
+authenticated, loopback-only SOCKS5 relay. Electron resolves each destination
+with `session.defaultSession.resolveProxy`, including PAC rules and their
+ordered fallbacks. The relay's random credential is runtime-only and is sent
+over sidecar configuration / host RPC, never through process environment.
+Custom URLs with userinfo keep credentials for Node and curl; Chromium is
+pointed at a loopback SOCKS5 relay that injects them, because `proxyRules`
+cannot carry userinfo (issue #490). host-core marketplace `curl` gets explicit
+proxy arguments and does **not** inherit proxy env, so workspace Bash cannot
+see proxy credentials. Direct mode bypasses the System relay. TLS certificate
+verification remains enabled on every route.
 Marketplace curl diagnostics prefer UTF-8 and fall back to the active Windows
 ANSI code page before crossing the UTF-8 RPC boundary, so localized Schannel
 errors remain readable instead of becoming replacement characters.

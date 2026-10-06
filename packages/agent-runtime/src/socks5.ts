@@ -33,12 +33,15 @@ export async function socks5Connect(
   proxy: ParsedProxyUrl,
   destHost: string,
   destPort: number,
+  auth?: { username: string; password: string },
 ): Promise<Socket> {
   const socket = await connectTcp(proxy.host, proxyListenPort(proxy));
   const reader = new SocketReader(socket);
   try {
+    const username = auth?.username ?? proxy.username;
+    const password = auth?.password ?? proxy.password;
     const methods =
-      proxy.username || proxy.password
+      username || password
         ? Buffer.from([0x05, 0x02, 0x00, 0x02])
         : Buffer.from([0x05, 0x01, 0x00]);
     socket.write(methods);
@@ -47,8 +50,8 @@ export async function socks5Connect(
       throw new Error("SOCKS5: invalid version");
     }
     if (choice[1] === 0x02) {
-      const user = Buffer.from(proxy.username ?? "", "utf8");
-      const pass = Buffer.from(proxy.password ?? "", "utf8");
+      const user = Buffer.from(username, "utf8");
+      const pass = Buffer.from(password, "utf8");
       if (user.length > 255 || pass.length > 255) {
         throw new Error("SOCKS5: credentials too long");
       }
