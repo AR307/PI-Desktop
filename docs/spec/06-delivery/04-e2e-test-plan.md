@@ -7817,7 +7817,8 @@ must keep splitting are covered by `markdown-blocks.test.mjs`.
   2. Confirm the import, then open the imported stdio server and press Test
      connection.
   3. Leave the server at **Everywhere** and ask the agent in each project to
-     list its available tools.
+     list its available tools. Have the stdio fixture report its working
+     directory and process id; open a second session in `~/work/api` as well.
   4. Set the server to **These projects**, with only `~/work/api` picked.
   5. Ask again in each project.
   6. In the already-open `~/personal/site` session — assembled while the server
@@ -7849,6 +7850,9 @@ must keep splitting are covered by `markdown-blocks.test.mjs`.
   - Test reports connected with the tool names it found, and the row's glyph
      turns from connecting to ready.
   - While global, both sessions see `mcp_<serverId>_<tool>` names.
+  - The stdio fixture runs from each session's project directory. Sessions in
+    `~/work/api` share one process, while `~/personal/site` uses a separate
+    process. A projectless session uses the user's home directory.
   - After narrowing, only the `~/work/api` session sees them; the summary chip
      reads "1 project" and names it.
   - The stale call from step 6 fails with `TOOL_NOT_FOUND` and "not active for
