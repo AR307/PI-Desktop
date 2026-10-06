@@ -10,6 +10,17 @@
 - A real outbox/quit-handler regression reproduces the previous disposal race
   and covers successful persistence, storage errors and an unresponsive host.
 
+## 2026-10-06 - Delegate Edit recovery isolation
+
+- The Agent runtime now tracks Edit and shell-patch recovery per parent or
+  individual subagent, so concurrent work on one file cannot exhaust another
+  agent's three-failure budget.
+- A subagent's exhausted mutation budget stops that subagent without reporting
+  a parent-turn mutation error. New parent prompts reset only the parent's
+  budget; detached subagents retain theirs until completion.
+- Runtime regression tests cover same-file delegates, parent error reporting,
+  and the cross-prompt lifecycle.
+
 ## 2026-10-06 - Mobile account discovery and durable local history
 
 - Adds opt-in account grants and independent per-computer directories without

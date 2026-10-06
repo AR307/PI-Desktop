@@ -1,5 +1,11 @@
 # 04. E2E Test Plan
 
+## Delegate mutation recovery
+
+| ID | User sequence and expected result |
+| --- | --- |
+| E2E-DELEGATE-EDIT-01 | Start two writing subagents against one file. Make one submit two malformed Edit operations, then have the other submit its first malformed Edit. Only the first subagent is near its three-failure limit; the second and parent remain able to edit. When the first subagent reaches its third counted failure, it stops without ending the parent turn. A new parent prompt has a fresh budget while a still-running delegate retains its own budget. |
+
 ## Mobile companion acceptance
 
 Validate this opt-in post-baseline feature on the dedicated request candidate

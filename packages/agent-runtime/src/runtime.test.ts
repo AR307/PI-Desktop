@@ -784,6 +784,95 @@ describe("DesktopAgentRuntime configuration matching", () => {
     await runtime.dispose();
   });
 
+  it("keeps same-path Edit recovery separate for each delegate and the parent", async () => {
+    const onEvent = vi.fn();
+    const host = {
+      call: vi.fn(async (method: string) => method === "tools.execute"
+        ? { ok: false, isError: true, errorCode: "EDIT_PARSE_FAILED", content: { error: "bad ops" } }
+        : undefined),
+    };
+    const runtime = createRuntime({ host, onEvent });
+    const agent = (runtime as any).agent;
+    const edit = agent.state.tools.find((tool: any) => tool.name === "Edit");
+    const definition = { permission: "accept-edits" };
+    const delegateA = (runtime as any).scopeDelegateTools([edit], definition)[0];
+    const delegateB = (runtime as any).scopeDelegateTools([edit], definition)[0];
+    const args = { path: "src/example.ts", tag: "ABCD", ops: "PUT 1.=1:" };
+
+    expect((await delegateA.execute("delegate-a-1", args)).terminate).toBeUndefined();
+    expect((await delegateA.execute("delegate-a-2", args)).terminate).toBeUndefined();
+    expect((await delegateB.execute("delegate-b-1", args)).terminate).toBeUndefined();
+    expect((await edit.execute("parent-1", args)).terminate).toBeUndefined();
+    expect((await delegateA.execute("delegate-a-3", args)).terminate).toBe(true);
+    expect((runtime as any).pendingMutationTermination).toBeUndefined();
+    expect((await delegateB.execute("delegate-b-2", args)).terminate).toBeUndefined();
+    expect((await edit.execute("parent-2", args)).terminate).toBeUndefined();
+    await (runtime as any).handleAgentEvent({ type: "agent_end", messages: [] });
+    expect(onEvent.mock.calls.map(([envelope]) => envelope.event.type)).not.toContain("error");
+
+    await runtime.dispose();
+  });
+
+  it("resets only the parent's Edit budget on a new prompt while a delegate continues", async () => {
+    const host = {
+      call: vi.fn(async (method: string) => method === "tools.execute"
+        ? { ok: false, isError: true, errorCode: "EDIT_PARSE_FAILED", content: { error: "bad ops" } }
+        : undefined),
+    };
+    const runtime = createRuntime({ host });
+    const edit = (runtime as any).agent.state.tools.find((tool: any) => tool.name === "Edit");
+    const delegate = (runtime as any).scopeDelegateTools([edit], {})[0];
+    const args = { path: "src/example.ts", tag: "ABCD", ops: "PUT 1.=1:" };
+
+    expect((await delegate.execute("delegate-1", args)).terminate).toBeUndefined();
+    expect((await delegate.execute("delegate-2", args)).terminate).toBeUndefined();
+    expect((await edit.execute("parent-1", args)).terminate).toBeUndefined();
+    (runtime as any).resetRunRecoveryState();
+
+    expect((await delegate.execute("delegate-3", args)).terminate).toBe(true);
+    expect((runtime as any).pendingMutationTermination).toBeUndefined();
+    expect((await edit.execute("parent-2", args)).terminate).toBeUndefined();
+    expect((runtime as any).mutationFailureCounts.get("parent\0src/example.ts")).toBe(1);
+
+    await runtime.dispose();
+  });
+
+  it("isolates Edit failures for subagents started through Task", async () => {
+    const host = {
+      call: vi.fn(async (method: string) => method === "tools.execute"
+        ? { ok: false, isError: true, errorCode: "EDIT_PARSE_FAILED", content: { error: "bad ops" } }
+        : undefined),
+    };
+    const runtime = createRuntime({
+      host,
+      subagents: [{
+        name: "writer", description: "Edits files.", tools: ["Edit"],
+        prompt: "Edit the requested file.", source: "user", permission: "accept-edits",
+      }],
+    });
+    subagentRuns.calls.length = 0;
+    subagentRuns.instances.length = 0;
+    subagentRuns.deferred = true;
+    try {
+      const task = (runtime as any).agent.state.tools.find((tool: any) => tool.name === "Task");
+      await task.execute("task-a", { agent: "writer", task: "Edit src/example.ts." });
+      await task.execute("task-b", { agent: "writer", task: "Edit src/example.ts." });
+      expect(subagentRuns.calls).toHaveLength(2);
+      const [first, second] = subagentRuns.calls.map((call) =>
+        call.tools.find((tool: any) => tool.name === "Edit"));
+      const args = { path: "src/example.ts", tag: "ABCD", ops: "PUT 1.=1:" };
+      expect((await first.execute("task-a-edit-1", args)).terminate).toBeUndefined();
+      expect((await first.execute("task-a-edit-2", args)).terminate).toBeUndefined();
+      expect((await second.execute("task-b-edit-1", args)).terminate).toBeUndefined();
+      expect((await first.execute("task-a-edit-3", args)).terminate).toBe(true);
+      expect((await second.execute("task-b-edit-2", args)).terminate).toBeUndefined();
+      expect((runtime as any).pendingMutationTermination).toBeUndefined();
+    } finally {
+      await runtime.dispose();
+      subagentRuns.deferred = false;
+    }
+  });
+
   it("clears the mutation strike once an edit on that path lands", async () => {
     const results = [
       { ok: false, isError: true, errorCode: "EDIT_PARSE_FAILED", content: {} },
@@ -810,7 +899,7 @@ describe("DesktopAgentRuntime configuration matching", () => {
     // Without the reset this failure would be strike three and end the turn.
     const afterSuccess = await edit.execute("edit-3", args);
     expect(afterSuccess.terminate).toBeUndefined();
-    expect((runtime as any).mutationFailureCounts.get("src/example.ts")).toBe(1);
+    expect((runtime as any).mutationFailureCounts.get("parent\0src/example.ts")).toBe(1);
 
     await runtime.dispose();
   });

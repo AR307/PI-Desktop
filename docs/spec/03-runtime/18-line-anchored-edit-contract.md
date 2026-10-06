@@ -452,7 +452,7 @@ warning is emitted. Requirements:
 An apply that produces text identical to the input is `EDIT_NO_CHANGE`, not
 success.
 
-§4d's repeat guard still stops a prompt that keeps failing on one path, but it
+§4d's repeat guard still stops an agent that keeps failing on one path, but it
 does not count every failure the same way. The three recoverable codes —
 `EDIT_TAG_MISMATCH`, `EDIT_TAG_UNKNOWN`, `EDIT_LINES_UNSEEN` — each hand back
 what the retry needs: the live tag, or the content of the lines the host refused
@@ -468,11 +468,14 @@ occurrence, because repeating one of those means the model is guessing.
 | `EDIT_PARSE_FAILED` three times | Attempt 3 — the turn stops |
 | A failure, then a successful `Edit`, then a failure | Attempt 1 — a write that landed clears that path's history |
 
-Counting a grace is per code, not per call, so a stale tag followed by unseen
-lines is two distinct honest failures while the same code twice is not.
+Counting a grace is per code and per agent run, not per call. A stale tag followed
+by unseen lines is two distinct honest failures while the same code twice is
+not. Parent and delegated runs have independent budgets even when editing the
+same file. A delegate's exhausted budget stops only that delegate; a new parent
+prompt resets the parent's budget without resetting a still-running delegate.
 
 When the count does reach the limit the tool result carries `terminate: true`
-and the agent loop stops after that batch. Stopping there must not leave a turn
+and that agent loop stops after that batch. For a parent run, stopping there must not leave a turn
 that merely ends: the runtime finalizes the assistant row with
 `MUTATION_RETRY_BUDGET_EXHAUSTED` — retriable, `details.kind` of `edit` or
 `patch-command`, plus the last error code and a class-specific `details.recovery`
