@@ -1,7 +1,7 @@
 # Decisions Log
 
 > Baseline delta: `0.3.0` → `0.4.20`
-> Date: `2026-10-02`
+> Date: `2026-10-06`
 > Status: Accepted for implementation
 
 This log freezes previously open questions into concrete decisions.
@@ -40,6 +40,8 @@ This log freezes previously open questions into concrete decisions.
 | D643 | Cloud sync ships without an Experimental badge | **Amend D642: the Settings `sync` destination drops `experimentalBadgeKey`, and `settings.configSync.experimental` is removed from every bundled locale. Cloud sync stays available to every user in every build. Remote Hosts keeps its own badge and both gates. Sync behavior, protocol, host schema, and persisted data are unchanged. See `04-ux/06-settings-ia.md` and E2E-CONFIG-SYNC-webdav-portable-configuration.** | Cloud sync is the app's shipped multi-device path, so an Experimental label no longer described it and only made the destination look unfinished. |
 | D644 | Portable instruction files have no size cap | **Remove the 32 KiB per-file cap Host enforced on portable instruction files. Global and project instruction content is bounded only by the same portable-entity payload bound every other domain already has, checked when a revision is uploaded and when a remote one is validated. UTF-8 validation, symlink rejection, scope selection, mapping, and approval rules are unchanged. See `03-runtime/22-config-sync.md` §2.** | A 33 KiB project `AGENTS.md` failed the entire capture with `CONFIG_SYNC_LIMIT_EXCEEDED: instruction file is too large`, which the Settings page could only show as a generic backup-size error. |
 | D450 | Signed macOS GitHub Releases | **Amend D078 / ADR 0022: GitHub tag releases Developer ID-sign, notarize (`notarytool` via electron-builder 26), staple, and Gatekeeper-verify macOS DMG/ZIP before upload, using identity `Developer ID Application: XingYu Liu (DUV63RKYTW)` / team `DUV63RKYTW` from Actions secrets (`CSC_LINK`, `CSC_KEY_PASSWORD`, `APPLE_ID`, `APPLE_APP_SPECIFIC_PASSWORD`, `APPLE_TEAM_ID`). Missing secrets fail the job. Local unsigned packaging without a certificate remains. `workflow_dispatch` may set `sign_macos: false` only for unsigned debug artifacts. Packaged macOS uses in-app `electron-updater` (ZIP + merged `latest-mac.yml`); Linux deb/rpm and Windows portable ZIP stay notify-and-link. No afterPack/afterSign adhoc codesign (ADR 0278).** | Production DMGs must open without a Gatekeeper warning, and signed macOS installs can download and restart into a new tag. See ADR 0289, E2E-196c, E2E-067A. |
+
+| D648 | Skill Market pins an acceptable address for mixed direct DNS answers | **Amend ADR 0272: on a direct route, when DNS includes both rejected and acceptable answers, Skill Market selects and pins one acceptable address instead of letting Chromium choose among them. Third-party content prefers a public answer; the benchmark fake-IP is eligible only under the existing opt-in. ULA-only and other non-public-only answers remain blocked. Proxied and unreadable routes keep the existing policy. See ADR 0321 and E2E-SKILL-MARKET-NET-BOUNDARY.** | Dual-stack and transparent-proxy DNS can include an unused synthetic ULA answer beside an address the request can safely use; pinning prevents the rejected address from being dialed while avoiding the false refusal. |
 
 ## B. Secondary implementation defaults
 
@@ -7501,3 +7503,17 @@ must keep splitting are covered by `markdown-blocks.test.mjs`.
   provider OAuth scenario in E2E-PLUGIN-declared-provider-appears-in-the-native-provider-list.
   See ADR 0320, the plugin OAuth API and permission specs, and
   `03-runtime/14-secrets-storage.md`.
+
+## 2026-10-06 — Skill Market pins an acceptable address for mixed direct DNS answers (D648)
+
+- On a direct route, the Skill Market selects and pins an acceptable address
+  when a DNS response mixes acceptable and rejected addresses. A public
+  third-party address is preferred; the existing `benchmark` fake-IP opt-in is
+  the only non-public choice. ULA-only results remain blocked, and proxied or
+  unreadable routes keep the ADR 0272 policy.
+- The pinned direct request preserves the requested hostname for TLS SNI and
+  `Host`, and every redirect receives its own DNS check and connection pin.
+- Covered by the direct transport integration test and the mixed public/ULA and
+  benchmark/ULA cases in `apps/desktop/test/public-https-fetch-route.test.mjs`.
+  See ADR 0321, `05-security/01-security.md` §4.1, and
+  E2E-SKILL-MARKET-NET-BOUNDARY.

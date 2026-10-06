@@ -15528,32 +15528,31 @@ plugin-form fixtures in an isolated temporary directory at runtime.
   is `https://127.0.0.1/`. 4) Report a proxied route and a TUN fake-IP answer
   (`198.18.0.1`), the same answer on a `DIRECT` route, on an unreadable route,
   and on a route list that offers `DIRECT`. 5) Let a first hop be proxied and
-  its redirect target direct.
+  its redirect target direct. 6) On a direct route, return both a public address
+  and a ULA address, then return a TUN `benchmark` fake-IP with a ULA address
+  under the existing fake-IP opt-in. 7) Return a ULA address without any
+  acceptable companion address.
 - **Expected**: A source URL the user typed may be a loopback or LAN catalog —
   `https` always, `http` only under
   `networkPolicy.allowInsecureUserEndpoints` — while the same address as a
-  *document* URL inside a catalog, or as a redirect target, is rejected; cloud
-  metadata, `unspecified`, multicast and reserved addresses are rejected on every
-  input. A public CDN URL is accepted. A source that resolves to a private
-  address is fetched rather than refused, and a third-party hop that resolves to
-  one throws a policy error without fetching the private target.
-  retried; a local resolver that answered nothing is, and is reported as
-  `NETWORK_RESOLVE_FAILED` (`kind` `unresolved`) rather than as an address-check
-  refusal — the guard reached no verdict, so nothing may claim it did. An address
-  in a proxy's fake-IP range (`198.18.0.0/15`, Clash's default) is refused and not
-  retried where the guard judged it — a direct or unreadable route — and is
-  accepted on the proxied one, and is reported as `kind` `fake-ip` with
-  `addressKind` `benchmark` and `reason` `non-public-address` — distinct from a
-  real private target (`kind` `policy`, `addressKind` `private`), because the guard
-  judged the target in the second case and only the proxy's placeholder in the
-  first. Every other refusal carries `NETWORK_POLICY_BLOCKED` (spec 08 §3.1) with
-  its `reason`, the address it resolved to, the class of that address, and the
-  route it was judged on, so the install sheet can name the reason and offer a
-  retry instead of leaving the install button disabled with no explanation, and the
-  market list can tell a refused source apart from a merely unreachable one. Every
-  other non-public class still refuses on all routes, and each redirect hop is
-  judged on its own route (ADR 0272).
-- **Specs linked**: `05-security/01-security.md`, ADR 0243, ADR 0272,
+  *document* URL inside a catalog, or as a redirect target, is rejected. Cloud
+  metadata, `unspecified`, multicast, and reserved addresses are rejected on
+  every input. A user-supplied source resolving to a private address is fetched;
+  a third-party hop resolving only to a private address throws a policy error
+  without fetching that target. A local resolver with no answer is retried and
+  reported as `NETWORK_RESOLVE_FAILED` (`kind` `unresolved`), not as an
+  address-check refusal. A direct request with an acceptable address beside a
+  rejected ULA pins the acceptable address; a ULA-only answer stays refused. An
+  address in a proxy's fake-IP range (`198.18.0.0/15`, Clash's default) is
+  accepted on a proxied route. On a direct route it is refused unless the
+  existing fake-IP opt-in allows Main to pin that benchmark address; unreadable
+  routes remain strict. A refusal for a benchmark address is reported as `kind`
+  `fake-ip`, `addressKind` `benchmark`, and `reason` `non-public-address`;
+  refusals for real private targets remain `kind` `policy`, `addressKind`
+  `private`. Every refusal carries the host, reason, address class, and route so
+  the install sheet and market list can distinguish policy blocks from network
+  failures. Every redirect hop is judged on its own route (ADR 0272, ADR 0321).
+- **Specs linked**: `05-security/01-security.md`, ADR 0243, ADR 0272, ADR 0321,
   `03-runtime/01-ipc-protocol.md` §12b
 - **Acceptance**: Security, Quality
 - **Milestone**: M6+
