@@ -518,6 +518,7 @@ Recovery warnings distinguish cause, because the corrective action differs:
 | code | retriable | meaning |
 |---|---|---|
 | `EDIT_TAG_REQUIRED` | no | `tag` missing or not 4 hex |
+| `EDIT_LEGACY_MATCH_FAILED` | yes after a `Read` | legacy `old_string` was not found or matched multiple times |
 | `EDIT_TAG_MISMATCH` | yes after a `Read` | tag does not hash the live file and recovery declined; carries the live tag and current content at the anchors |
 | `EDIT_TAG_UNKNOWN` | yes after a `Read` | tag is well-formed but this session recorded no such content for the path |
 | `EDIT_LINES_UNSEEN` | yes | anchors reference lines never displayed; carries the revealed content |
@@ -535,6 +536,18 @@ All of these are `Edit`-scoped and additive to
 `TOOL_DENIED`, `PATH_OUTSIDE_WORKSPACE`, and `TOOL_FAILED` semantics are
 unchanged; `Edit` no longer reports version or provenance problems as the generic
 `TOOL_FAILED`, because both are recoverable with a specific next action.
+
+A legacy `old_string` / `new_string` call without `tag` and `ops` is a
+compatibility input, not a second contract. Host core requires `old_string` to
+match exactly once in the normalized file (`EDIT_LEGACY_MATCH_FAILED`
+otherwise) and replaces exactly the matched text: text before the match on its
+first line and after the match on its last line is kept. The substring result
+is lowered to one line-anchored op over only the lines that change and applied
+against the live tag, so line-ending and BOM preservation and the provenance
+check behave as for any other `Edit`. A replacement identical to `old_string`
+fails with `EDIT_NO_CHANGE`. A replacement whose only effect would be toggling
+the file's terminal newline also fails with `EDIT_NO_CHANGE`, because line-
+anchored operations preserve that newline state.
 
 `MUTATION_RETRY_BUDGET_EXHAUSTED` is not in this table because it is not an
 `Edit` result: the tool call already failed with one of the codes above, and the

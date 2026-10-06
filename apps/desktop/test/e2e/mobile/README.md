@@ -37,6 +37,12 @@ desktop, shared, runtime or Rust changes. The browser suite also accepts
 
 ## Electron and mobile browser flow
 
+`sync-preview.mjs` is the focused account/sync regression flow: empty HTTP 429
+responses with Retry-After, server-issued installation identities, pairing,
+restart without registration, token refresh preserving device secrets, history,
+and an interactive temporary-session HTML link in the native browser view.
+It makes no model requests and records both renderer and native-window captures.
+
 ```powershell
 $env:PI_TEST_OUTPUT = Join-Path $PWD ('.artifacts/mobile-' + (Get-Date -Format 'yyyyMMdd-HHmmss'))
 node apps/desktop/test/e2e/mobile/acceptance.mjs

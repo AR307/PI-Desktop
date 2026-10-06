@@ -38,6 +38,13 @@ changes remain gated by active work and approvals.
 
 ## Alternatives and consequences
 
+The 2026-10-06 integration correction keeps the MC-issued installation secret in
+the existing secure stores. Registration is associated with the desktop OAuth
+authorization, not with each grant refresh. Android retains the device ID/secret
+when rotating its login tokens. HTTP Retry-After belongs to account/sync transport
+and does not alter model retry policy. No new MC endpoints or database tables are
+introduced; login also follows the existing encryption-key contract.
+
 Forking Happy (Expo) or HAPI (Kotlin/Hub) would introduce a separate UI and
 execution protocol. A generic remote desktop/terminal would not preserve PI's
 structured messages and approval semantics. Directly exposing the existing full

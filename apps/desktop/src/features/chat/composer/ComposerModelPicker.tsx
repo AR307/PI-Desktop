@@ -46,14 +46,16 @@ export function ComposerModelPicker({
   const thinkingLevel = controller.ultra ? "ultra" : nativeThinkingLevel;
   const {
     task,
+    view, showView, rootMenuRef,
     open,
     setOpen,
-    view,
+    otherModelsExpanded,
+    setOtherModelsExpanded,
+    hasOtherModels,
     query,
     setQuery,
     modelHighlight,
     setModelHighlight,
-    rootMenuRef,
     modelSearchRef,
     modelListRef,
     groupListRef,
@@ -61,8 +63,8 @@ export function ComposerModelPicker({
     mirrorGroups,
     mirrorCodingSelected,
     modelGroups,
+    recentEntries,
     thinkingMenuLevels,
-    showView,
     selectModel,
     commitThinkingLevel,
     onMenuKeyDown,
@@ -80,7 +82,7 @@ export function ComposerModelPicker({
       role="menu"
       align="end"
       side="top"
-      initialFocus="none"
+      initialFocus="input"
       onMenuKeyDown={onMenuKeyDown}
       trigger={(ref) => (
         <TooltipButton
@@ -95,7 +97,7 @@ export function ComposerModelPicker({
           onClick={() => {
             onCloseOtherMenus();
             if (!open) {
-              showView("root");
+              setOtherModelsExpanded(false);
               setQuery("");
               setModelHighlight(-1);
             }
@@ -170,6 +172,8 @@ export function ComposerModelPicker({
                 modelGroups={modelGroups} modelHighlight={modelHighlight}
                 setModelHighlight={setModelHighlight} selectModel={selectModel}
                 selectedProviderId={selectedProviderId} selectedModelId={selectedModelId}
+                recentEntries={recentEntries} hasOtherModels={hasOtherModels}
+                otherModelsExpanded={otherModelsExpanded} setOtherModelsExpanded={setOtherModelsExpanded}
                 accountSelected={mirrorCodingSelected}
               />
             </>

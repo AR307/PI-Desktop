@@ -6,6 +6,7 @@ import type {
 } from "@pi-desktop/shared";
 import { addUsage, hostedSearchRounds, isReturnToParent } from "@pi-desktop/shared";
 import { isDelegationStartTool } from "./tool-display";
+import { messageContentFacts } from "./transcript-summary";
 
 export type AssistantActivityItem =
   | { kind: "thinking"; message: UiMessage }
@@ -74,9 +75,10 @@ export function messageThinking(message: UiMessage): string {
 }
 
 function isVisibleMessage(message: UiMessage): boolean {
+  if (message.role === "system" && message.modelSystem) return false;
   return !(
     message.role === "assistant" &&
-    !(message.content || "").trim() &&
+    !messageContentFacts(message).hasContent &&
     !messageThinking(message) &&
     !message.hostedSearch &&
     !message.error &&
@@ -114,7 +116,7 @@ function collectSubagentRuns(
     // showing: the text is the only place its narration and report exist.
     const thinking = messageThinking(message);
     if (thinking) run.items.push({ kind: "thinking", message });
-    if ((message.content || "").trim() || message.error || message.imageGeneration) {
+    if (messageContentFacts(message).hasContent || message.error || message.imageGeneration) {
       run.items.push({ kind: "answer", message });
     }
   }
@@ -277,9 +279,10 @@ export function buildTranscriptEntries(
     for (const round of hostedSearchRounds(message.hostedSearch)) {
       pushActivity({ kind: "hostedSearch", message, round });
     }
-    if ((message.content || "").trim() || !thinking || message.error || message.imageGeneration) {
+    const hasContent = messageContentFacts(message).hasContent;
+    if (hasContent || !thinking || message.error || message.imageGeneration) {
       current.parts.push({ kind: "message", message });
-      if (!current.anchorId && (message.content || "").trim()) {
+      if (!current.anchorId && hasContent) {
         current.anchorId = message.id;
       }
     }

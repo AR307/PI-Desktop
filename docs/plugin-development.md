@@ -529,17 +529,49 @@ Declare a CSS file and `ui.theme`:
         "id": "midnight",
         "label": "Midnight",
         "path": "themes/midnight.css",
-        "base": "dark"
+        "base": "dark",
+        "assets": ["themes/background.svg"]
       }
-    ]
+    ],
+    "windowAppearance": {
+      "backgroundColor": { "dark": "#141a24", "light": "#f5f7fa" }
+    }
   },
-  "permissions": ["ui.theme"]
+  "permissions": ["ui.theme", "ui.window.appearance"]
 }
 ```
 
-Override PI-Desktop design tokens in that CSS. The host sanitizes contributed
-CSS, refuses imports and non-data URLs, caps each file at 256 KiB, and allows up
-to eight themes per plugin. The user selects the theme in Settings.
+`base` selects the built-in `light` or `dark` palette underneath the overrides;
+omitting it defaults to `dark`. The user selects the contributed theme in Settings.
+
+Match the base palette's selector when overriding design tokens:
+
+```css
+:root[data-theme="dark"] { --ds-bg-primary: #141a24; }
+:root[data-theme="light"] { --ds-bg-primary: #f5f7fa; }
+```
+
+The theme stylesheet is appended after the host styles, but later source order
+wins only when selector specificity is equal. The host palette selectors are
+`:root[data-theme="dark"]` and `:root[data-theme="light"]`; a bare `:root`
+has lower specificity and is not sufficient to override those declarations.
+For a light-base theme, explicitly use `:root[data-theme="light"]`.
+
+The host sanitizes CSS, rejects `@import` and `url()` targets other than `data:`
+URIs or declared theme assets,
+caps each stylesheet at 256 KiB, and allows eight themes per plugin. Optional
+`assets` accepts `png`, `jpg`, `jpeg`, `webp`, `avif`, `svg`, and `woff2` files,
+with a summed limit of 4 MiB. Paths may be package-relative (inside the plugin
+root, without traversal or `node_modules`) or absolute. Matching CSS URLs are
+rewritten to registered, read-only `plugin-asset://` URLs; unloading the plugin
+revokes them. The renderer never receives the raw filesystem path.
+
+Optional `contributes.windowAppearance.backgroundColor` supplies `light`/`dark`
+colors in `#rrggbb` or `#rrggbbaa` form and requires `ui.window.appearance` in
+addition to `ui.theme`. It applies only while that plugin's theme is selected;
+switching away restores the host background. macOS retains its vibrancy.
+See the [manifest contract](spec/07-plugins/02-plugin-manifest-schema.md) for
+all theme and window-appearance fields.
 
 ### 6.8 Work panel view
 

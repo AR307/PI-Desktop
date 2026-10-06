@@ -29,6 +29,7 @@ import {
   sessionArchived,
   sessionPinned,
 } from "../lib/sidebar-session-groups";
+import { listableSessions } from "../lib/session-origin";
 import {
   composerDropItems,
   hasComposerFileDrag,
@@ -43,7 +44,7 @@ import {
   sidebarSessionStatus,
   type SidebarSessionStatus,
 } from "../lib/sidebar-session-status";
-import { ErrorCodes } from "@pi-desktop/shared";
+import { ErrorCodes, formatSessionLink } from "@pi-desktop/shared";
 import type { SessionSummary } from "@pi-desktop/shared";
 import type {
   ProjectMeta,
@@ -635,11 +636,13 @@ export function Sidebar({
   }, [t]);
 
   const filtered = useMemo(() => {
-    const candidates = showArchived
-      ? sessions
-      : sessions.filter(
-          (session) => !sessionArchived(session, sessionMeta[session.id]),
-        );
+    // A scheduled run's transcript belongs to the Scheduled page, not to the
+    // project groups: that page's task column and run history are its entry
+    // point (issue #1291). The session stays in the store so the chat surface
+    // can still resolve its title, source, and capabilities when it is opened
+    // from there.
+    const candidates = listableSessions(sessions)
+      .filter((session) => showArchived || !sessionArchived(session, sessionMeta[session.id]));
     // Empty sessions are durable sidebar rows now. Their message count, not
     // their title, controls New Task reuse, so a manual rename never changes
     // the empty-slot behavior.
@@ -1177,7 +1180,10 @@ export function Sidebar({
       // session that really exists.
       const known = useAppStore.getState().sessions.some((session) => session.id === sessionId);
       if (!known) {
-        const detail = await api.getSession(sessionId);
+        // Only presence is read from this reply, so ask for the smallest window
+        // the host accepts. The uncapped read moved every message of the
+        // session over IPC to answer one boolean.
+        const detail = await api.getSession(sessionId, { messageLimit: 1 });
         if (!detail.session) {
           reportError(new Error(t("sessionCollaboration.sessionMissing")));
           return;
@@ -1443,6 +1449,20 @@ export function Sidebar({
   const copyConversationId = async (session: SessionSummary) => {
     try {
       await api.writeClipboardText(session.id);
+      showToast(t("chat.copied"));
+    } catch (error) {
+      reportError(error);
+    }
+    closeMenus();
+  };
+
+  /**
+   * The link another conversation references: pasting it into a Composer draft
+   * carries a bounded excerpt of this conversation into that turn (issue #1324).
+   */
+  const copySessionLink = async (session: SessionSummary) => {
+    try {
+      await api.writeClipboardText(formatSessionLink(session.id));
       showToast(t("chat.copied"));
     } catch (error) {
       reportError(error);
@@ -2202,6 +2222,13 @@ export function Sidebar({
             >
               <IconCopy size={14} />
               {t("nav.copyConversationId")}
+            </button>
+            <button type="button" role="menuitem"
+              data-action="copy-session-link"
+              onClick={() => void copySessionLink(session)}
+            >
+              <IconCopy size={14} />
+              {t("nav.copySessionLink")}
             </button>
             {settings?.developerMode === true ? (
               <>

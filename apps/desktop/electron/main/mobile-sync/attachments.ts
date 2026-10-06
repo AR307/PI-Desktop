@@ -55,6 +55,7 @@ export class MobileAttachments {
       if (complete?.sessionId === sessionId) return complete.attachment;
       // Historical references must explicitly identify the owning message.
       const found = await this.find(sessionId, string(ref.messageId, "message_id"), id);
+      if (found.attachment.kind === "session") throw new RacpError("INVALID_ARGUMENT", "invalid_attachment_kind");
       return { path: found.path, name: found.attachment.name, kind: found.attachment.kind, mimeType: found.attachment.mimeType, size: found.attachment.size };
     }));
   }

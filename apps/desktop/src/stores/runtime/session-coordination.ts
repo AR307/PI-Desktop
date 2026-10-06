@@ -19,7 +19,7 @@ import {
   FORKED_SESSION_WINDOW,
 } from "../../lib/session-fork";
 import { EMPTY_SESSION_WINDOW } from "../../lib/session-create";
-import { newConversationModelBinding } from "../../lib/session-model";
+import { inheritedSessionModelBinding } from "../../lib/session-model";
 import {
   clearSessionPanes,
   retainSessionPane,
@@ -139,6 +139,7 @@ export function createSessionCoordination({
     });
     rememberSessionCompactions(summary.id, session);
     void get().restorePendingPlan(summary.id);
+    void get().restorePendingInteractive(summary.id);
   }
 
   function revealEmptyCreatingSession(intent: number): void {
@@ -217,15 +218,11 @@ export function createSessionCoordination({
       options && "draftConfiguration" in options
         ? options.draftConfiguration
         : state.draftConfiguration;
-    const inherited = newConversationModelBinding({
+    const inherited = inheritedSessionModelBinding({
       draft: draftConfig,
-      latestSession: runtime.latestSessionInScope(
-        state.sessions,
-        projectPath,
-        state.sessionMeta,
-      ),
       settings,
       providers: state.providers,
+      recentModels: state.recentModels,
     });
     const defaultProvider = state.providers.find(
       (provider) => provider.id === inherited.providerId,

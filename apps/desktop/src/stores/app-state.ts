@@ -1,3 +1,4 @@
+import type { RecentModel } from "../lib/recent-models";
 import type {
   AgentEventEnvelope,
   BrowserState,
@@ -157,6 +158,8 @@ export type AppState = {
   /** Every checkpoint a session has installed, oldest first. */
   sessionCompactions: Record<string, (ContextCompactionMark & { summary?: string })[]>;
   providers: ProviderPublic[];
+  recentModels: RecentModel[];
+  rememberModel: (model: { providerId?: string; modelId?: string }) => void;
   /** Discovered model lists per provider id (composer model menu). */
   providerModels: Record<string, ModelInfo[]>;
   workspace?: ProjectWorkspace | null;
@@ -341,6 +344,8 @@ export type AppState = {
   /** Drop a session's sidebar outcome badge and read its task notifications. */
   acknowledgeSessionOutcome: (sessionId: string) => Promise<void>;
   restorePendingPlan: (sessionId: string) => Promise<PendingPlanRefreshResult>;
+  /** Re-read a session's open ask / permission cards from Main (reload recovery). */
+  restorePendingInteractive: (sessionId: string) => Promise<void>;
   refreshPlanCheckpoints: () => Promise<void>;
   handleAgentEvent: (envelope: AgentEventEnvelope) => void;
   handlePlansChanged: (event: PlanningStateEvent) => void;
@@ -372,7 +377,13 @@ export type AppState = {
   workPanelContexts: Record<string, WorkPanelContext>;
   workPanelWidth: number;
   /** Chat-initiated "preview this file" request consumed by the files viewer. */
-  workPanelFileRequest: { path: string; seq: number; mimeType?: string } | null;
+  workPanelFileRequest: {
+    path: string;
+    seq: number;
+    mimeType?: string;
+    line?: number;
+    column?: number;
+  } | null;
   /** Open (or activate) the transcript tab of one delegated subagent. */
   openSubagentTab: (delegationId: string, agentName?: string) => void;
   /** Abort one session's running turn, visible or not. */
@@ -396,7 +407,11 @@ export type AppState = {
   /** Hide the visible panel while retaining its session-owned context. */
   resetWorkPanelContext: () => void;
   setWorkPanelWidth: (width: number) => void;
-  openFileInWorkPanel: (path: string, mimeType?: string) => void;
+  openFileInWorkPanel: (
+    path: string,
+    mimeType?: string,
+    position?: { line?: number; column?: number },
+  ) => void;
   openUrlInWorkPanel: (url: string) => void;
   updateBrowserWorkPanelTab: (state: BrowserState) => void;
 };

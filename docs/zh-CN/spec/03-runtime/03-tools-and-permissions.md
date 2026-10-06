@@ -51,7 +51,7 @@
 
 按照 pi 的编码代理默认值，第一个 Agent 请求仅激活
 `Read`、`Bash`、`Edit` 和 `Write`； `Glob` 和 `Grep` 按需加载。
-Plan 和 Goal 保留其 read/inspection 核心。`Skill` 有意不作延迟：`/skill-id`
+Plan 和 Goal 保留其 read/inspection 核心。`Skill` 有意不作延迟：`/skill:<skill-id>`
 调用会指示模型调用它，而模式中不存在的工具根本无法被调用，因此只要技能目录非空，
 它就会随第一个请求一起发送（D404、ADR 0230）。运行时还注册功能
 无需预先发送其完整模式：
@@ -366,6 +366,13 @@ tool/protocol 名称，请求中单独携带固定的 shell ID。
 | 低 | 会话根目录内的 Read/Glob/Grep | 自动允许 |
 | 中等 | 低风险 network/metadata | 政策确认或允许 |
 | 高 | Write/Edit/Bash | 默认确认 |
+
+用户配置的 MCP 服务器提供的工具（`mcp_<serverId>_<tool>`）归类为 `medium`，
+与未声明有效风险的插件工具相同。MCP 服务器自行声明的风险级别不被信任，
+这与用户已接受的插件 manifest 中的风险不同。在 `ask` 和 `accept-edits` 下，
+MCP 工具调用会显示审批卡片，原因为 "MCP server tool requires approval"；
+`allow-session` 授权会在该会话内对该工具名不再提示（授权仅保存在内存中）。
+`auto` 自动允许，Plan/Goal 合约模式的硬拒绝仍然生效（D640，ADR `mcp-tool-approval-risk`）。
 
 ### 决策类型
 

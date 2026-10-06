@@ -53,9 +53,14 @@ Permission prompts do not consume an execution slot. A full queue returns
 `HOST_OVERLOADED` with retryable semantics in the tool result instead of
 waiting indefinitely or spawning more work. The limits are host-owned so
 Electron and the sidecar cannot independently over-admit the same resources.
-The per-session mutation permit is acquired before the global mutation slot;
-queued `Write`/`Edit` calls therefore do not hold global capacity while waiting
-for an earlier mutation in the same session.
+Admission reserves total, tool-class, session, and session-mutation capacity
+atomically. A queued call holds no execution capacity. When capacity returns,
+the oldest runnable request is admitted; a request blocked by one class or
+session does not block unrelated runnable work. Calls wait at most 30 seconds.
+Dropping a waiting admission future or letting it time out removes its queue
+entry and releases any reservation made before the caller receives its permit. The health counters report only
+fully admitted reservations, including those awaiting delivery to the caller;
+`queued` counts only requests still waiting for capacity.
 
 Electron's `HostProcess` treats an explicit `HOST_OVERLOADED` response as
 retryable backpressure for renderer-facing calls. It waits 50, 100, 200, and
@@ -217,10 +222,13 @@ type ToolBudgetHealth = {
   every session attached to it, removing those sessions' transcript, scratch,
   and review files and the project's durable memory, and never touching the
   project folder on disk. Idempotent: an unknown path returns
-  `{ removed: false, sessionsRemoved: 0 }`. A path that is a root of a stored
-  multi-folder project group is refused so the group keeps a valid primary root,
-  and the call is refused (1008 / `CONFLICT`) while any attached session has a
-  running turn, so a live turn never loses the transcript it is writing.
+  `{ removed: false, sessionsRemoved: 0 }`. If the path belongs to a stored
+  project group, deletion detaches that root in the same flow; deleting the
+  primary promotes the first remaining root, and deleting the last root also
+  removes the group record. The call is refused (1008 / `CONFLICT`) while any
+  attached session has a running turn, before changing group membership, so a
+  live turn never loses the transcript it is writing and a rejected delete
+  leaves the project group unchanged.
 - `project.memory.get({ path })` — returns the durable memory for the canonical
   project path, or an empty record when no memory has been saved
 - `project.memory.set({ path, entries })` — normalizes and stores visual memory

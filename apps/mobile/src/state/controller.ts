@@ -10,6 +10,7 @@ import { applyTranscriptEvent, itemMessage, mergeMessages, snapshotMessages } fr
 
 export type MobileView = {
   signedIn: boolean; loading: boolean; error?: string; notice?: string; challenge?: MobileAuthChallenge;
+  retryAt?: number;
   grants: MobileGrant[]; devices: MobileDevice[]; grant?: MobileGrant; sessions: MobileSession[];
   selectedId?: string; snapshot?: MobileSessionSnapshot; messages: UiMessage[]; catalog?: MobileModelCatalog;
   connection: RacpClientState; busy: boolean; configuring: boolean; uncertainMessageId?: string;
@@ -43,26 +44,29 @@ export class MobileController {
   private patch(patch: Partial<MobileView>) { this.value = { ...this.value, ...patch }; for (const listener of this.listeners) listener(); }
   private report(error: unknown) {
     if (error instanceof AccountError && error.code === "UNAUTHORIZED") { this.drafts.clear(); this.files.clear(); this.uncertain.clear(); void this.cache.clearAll().catch(() => undefined); this.patch({ signedIn: false, grants: [], devices: [] }); void this.disconnect(); }
-    this.patch({ error: error instanceof Error ? error.message : String(error) });
+    this.patch({ error: error instanceof Error ? error.message : String(error), retryAt: error instanceof AccountError ? error.retryAt : undefined });
   }
-  async action(action: () => Promise<void>) { this.patch({ error: undefined, notice: undefined }); await this.background(action); }
+  async action(action: () => Promise<void>) { this.patch({ error: undefined, notice: undefined, retryAt: undefined }); await this.background(action); }
   private async background(action: () => Promise<void>) { try { await action(); } catch (error) { this.report(error); } }
   clearError() { this.patch({ error: undefined, notice: undefined }); }
   cancelChallenge() { if (!this.value.busy) this.patch({ challenge: undefined, error: undefined }); }
   async start() { await this.action(async () => { if (await this.account.restore()) await this.loadAccount(); }); this.patch({ loading: false }); }
   async login(username: string, password: string) {
+    if (this.value.busy) return;
     this.patch({ busy: true });
     await this.action(async () => { const result = await this.account.login(username, password); if ("challenge" in result) this.patch({ challenge: result.challenge }); else await this.loadAccount(); });
     this.patch({ busy: false });
   }
   async challenge(code: string) {
+    if (this.value.busy) return;
     const challenge = this.value.challenge; if (!challenge) return;
     this.patch({ busy: true });
     await this.action(async () => { const result = await this.account.challenge(challenge.challengeId, code); if ("challenge" in result) this.patch({ challenge: result.challenge }); else await this.loadAccount(); });
     this.patch({ busy: false });
   }
-  private async loadAccount() { await this.account.register(); this.patch({ signedIn: true, challenge: undefined }); await this.refreshGrants(); }
+  private async loadAccount() { this.patch({ signedIn: true, challenge: undefined }); await this.refreshGrants(); }
   async refreshGrants() {
+    await this.account.register();
     const [grants, devices] = await Promise.all([this.account.grants(), this.account.devices()]);
     if (!this.account.session) return;
     // A share revoked elsewhere must not leave its transcript on this device.

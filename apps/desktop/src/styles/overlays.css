@@ -179,6 +179,9 @@
   Same floating-surface family as the elevated menus: elevated-opaque plate,
   subtle 1px ring, dialog shadow. Variants tint the leading icon only —
   surfaces stay neutral (restraint principle).
+  The stack is hosted on the body (Toast.tsx), so `z-toast` outranks the
+  `z-dialog` (40) overlay host the dialogs are portaled into; inside the shell
+  it would paint under their scrim.
 */
 .toast-viewport {
   position: fixed;
@@ -647,7 +650,7 @@
 }
 .backend-banner.warn .backend-dot {
   background: var(--ds-warning);
-  animation: pulse-soft 1.2s ease-in-out infinite;
+  animation: pulse-soft 1.2s ease-in-out 2;
 }
 .backend-banner.fatal .backend-dot {
   background: var(--ds-error);
@@ -687,6 +690,9 @@
   .provider-dialog-overlay,
   .provider-dialog {
     animation-duration: 0.01ms !important;
+  }
+  .backend-banner.warn .backend-dot {
+    animation: none;
   }
   .working-indicator-mark > span,
   .tool-row-name.running::after,

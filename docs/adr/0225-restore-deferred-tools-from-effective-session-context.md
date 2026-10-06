@@ -17,7 +17,11 @@ request omitted its schema. The same mismatch occurred after a mode switch.
 
 Before each new prompt and after a mode switch, the sidecar clears its in-memory
 deferred activation set and restores it from the effective `buildSessionContext`
-projection. A successful `ToolSearch` result contributes its `addedToolNames`;
+projection. When system declarations exist, their replayed active set is the
+baseline; only successful results after the last declaration can add a newly
+activated tool. This prevents an earlier success from resurrecting a subsequent
+removal and preserves the set across a compaction checkpoint. For older histories
+without declarations, a successful `ToolSearch` result contributes its `addedToolNames`;
 a successful result from a deferred tool contributes that tool's name. A name
 is restored only when it remains in the current mode's deferred catalog. Failed,
 interrupted, or missing-result placeholder rows are ignored, and assistant/user

@@ -62,7 +62,10 @@ function loadComponent(name, extras = {}) {
 }
 
 const origin = loadComponent("SessionMessageOrigin");
-const { MessageRow } = loadComponent("MessageRow", { "./SessionMessageOrigin": origin });
+const { MessageRow } = loadComponent("MessageRow", {
+  "./SessionMessageOrigin": origin,
+  "./extra-attachments": { getExtraMessageAttachments: () => [] },
+});
 const userMessage = {
   id: "incoming-row",
   role: "user",

@@ -1,4 +1,5 @@
 import { useTranslation } from "react-i18next";
+import { sameRecentModel } from "../../../../lib/recent-models";
 import type {
   Mode,
   ProviderPublic,
@@ -27,11 +28,11 @@ import {
 import { providerThinkingLevels } from "../../../../lib/session-thinking";
 import { useAppStore } from "../../../../stores/app-store";
 import {
-  type ComposerMenuView,
   sessionThinkingMenuLevels,
   thinkingLevelForProvider,
   thinkingProviderForModel,
   type ComposerTask,
+  type ComposerMenuView,
 } from "../model";
 import { createLatestCommitQueue } from "../thinking-commit-queue";
 import { collapseMirrorCodingGroups, mirrorGroupsForModel } from "../mirror-model-menu";
@@ -72,6 +73,7 @@ export function useComposerModelMenu({
   const fastAvailable = task !== "image" && !!provider?.enabled && !!modelId && mirrorCodingFastAvailable(provider.mirrorCoding, modelId, provider.models.find((entry) => entry.id === modelId)?.mirrorCodingGroupId);
   const [fastBusy, setFastBusy] = useState(false);
   const providers = useAppStore((s) => s.providers);
+  const recentModels = useAppStore((s) => s.recentModels);
   const imageGeneration = useAppStore((s) => s.settings?.imageGeneration);
   const imageGenerationModels = useAppStore((s) => s.settings?.imageGenerationModels);
   const imageGenerationCandidates = useMemo(
@@ -83,6 +85,7 @@ export function useComposerModelMenu({
   const showToast = useAppStore((s) => s.showToast);
   const [open, setOpen] = useState(false);
   const [view, setView] = useState<ComposerMenuView>("root");
+  const [otherModelsExpanded, setOtherModelsExpanded] = useState(false);
   const [query, setQuery] = useState("");
   const [modelHighlight, setModelHighlight] = useState(-1);
   const [pendingMirrorModel, setPendingMirrorModel] = useState<string>();
@@ -169,6 +172,15 @@ export function useComposerModelMenu({
     () => collapseMirrorCodingGroups(modelGroups),
     [modelGroups],
   );
+  const recentEntries = useMemo(() => {
+    const entries = modelGroups.flatMap(group => group.models.map(model => ({ provider: group.provider, model })));
+    return (recentModels ?? []).flatMap(recent => {
+      const entry = entries.find(entry => sameRecentModel(recent, {
+        providerId: entry.provider.id, modelId: entry.model.modelId,
+      }));
+      return entry ? [entry] : [];
+    }).slice(0, 3);
+  }, [modelGroups, recentModels]);
   const queryNeedle = query.trim().toLowerCase();
   const filteredModelGroups = useMemo(
     () =>
@@ -217,12 +229,19 @@ export function useComposerModelMenu({
         };
       });
   }, [imageGenerationCandidates, modelGroups, pendingMirrorModel, providerModels, providers, task]);
+  const showRecents = !queryNeedle && recentEntries.length > 0;
+  const remainingGroups = showRecents ? filteredModelGroups.map(group => ({
+    ...group,
+    models: group.models.filter(model => !recentEntries.some(entry =>
+      entry.provider.id === group.provider.id && sameComposerModelId(entry.model.modelId, model.modelId))),
+  })).filter(group => group.models.length > 0) : filteredModelGroups;
+  const visibleGroups = !showRecents || otherModelsExpanded ? remainingGroups : [];
   const flatModels = useMemo(
     () =>
-      filteredModelGroups.flatMap((group) =>
+      [...(showRecents ? recentEntries : []), ...visibleGroups.flatMap((group) =>
         group.models.map((model) => ({ provider: group.provider, model })),
-      ),
-    [filteredModelGroups],
+      )],
+    [visibleGroups, showRecents, recentEntries],
   );
   const flatModelsKey = useMemo(
     () => flatModels.map((entry) => `${entry.provider.id}:${entry.model.modelId}`).join("|"),
@@ -242,9 +261,9 @@ export function useComposerModelMenu({
   );
 
   useEffect(() => {
-    if (!open || view !== "model") return;
+    if (!open) return;
     setModelHighlight(queryNeedle ? (flatModels.length ? 0 : -1) : activeFlatIndex);
-  }, [activeFlatIndex, flatModels.length, flatModelsKey, open, queryNeedle, view]);
+  }, [activeFlatIndex, flatModels.length, flatModelsKey, open, queryNeedle]);
 
   useEffect(() => {
     if (!open) return;
@@ -260,6 +279,7 @@ export function useComposerModelMenu({
   useEffect(() => {
     if (open) return;
     setView("root");
+    setOtherModelsExpanded(false);
     setQuery("");
     setModelHighlight(-1);
   }, [open]);
@@ -363,6 +383,7 @@ export function useComposerModelMenu({
       });
       if (fast && (selectionChanged || !nextFastAvailable)) showToast(t(selectionChanged ? "mirrorCoding.fastReset" : "mirrorCoding.fastDisabled"));
       setQuery("");
+      setOtherModelsExpanded(false);
       setView("root");
       setModelHighlight(-1);
     } catch (error) {
@@ -397,7 +418,7 @@ export function useComposerModelMenu({
       return;
     }
     if (event.key !== "ArrowDown" && event.key !== "ArrowUp") {
-      if (event.key === "Enter" && view === "model" && event.target instanceof HTMLInputElement) {
+      if (event.key === "Enter" && event.target instanceof HTMLInputElement) {
         const entry = flatModels[modelHighlight];
         if (entry) {
           event.preventDefault();
@@ -406,7 +427,7 @@ export function useComposerModelMenu({
       }
       return;
     }
-    if (view === "root") return;
+    if (!(event.target instanceof HTMLInputElement)) return;
     event.preventDefault();
     if (view === "model") {
       if (!flatModels.length) return;
@@ -432,24 +453,26 @@ export function useComposerModelMenu({
     fast, fastAvailable, fastBusy, toggleFast,
     task,
     selectedImage: imageSelection,
+    view, showView, rootMenuRef,
     pendingMirrorModel,
     mirrorGroups,
     groupListRef,
     mirrorCodingSelected: Boolean(provider?.mirrorCoding),
     open,
     setOpen,
-    view,
+    otherModelsExpanded,
+    setOtherModelsExpanded,
     query,
     setQuery,
     modelHighlight,
     setModelHighlight,
-    rootMenuRef,
     modelSearchRef,
     modelListRef,
-    modelGroups: filteredModelGroups,
+    modelGroups: visibleGroups,
+    recentEntries: showRecents ? recentEntries : [],
+    hasOtherModels: showRecents && remainingGroups.length > 0,
     flatModels,
     thinkingMenuLevels,
-    showView,
     selectModel,
     commitThinkingLevel,
     onMenuKeyDown,

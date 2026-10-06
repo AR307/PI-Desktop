@@ -4,6 +4,10 @@ import { delegationGuidance, delegationHandoffGuidance, delegationSystemPrompt, 
 import { assertMirrorCodingFast, withMirrorCodingFast } from "./mirrorcoding-fast.js";
 import { assistantReplay, canRestorePartialResponse, responseContentFacts, responseDiagnostics, responseOutcome, responseOutcomeError, restoredAssistantBlocks } from "./response-outcome.js";
 import { upstreamRequestDiagnostics, type RequestDiagnostics } from "./request-diagnostics.js";
+import { resolveMcpToolSelection } from "./mcp-tool-selection.js";
+import { TOOL_ACTIVATION_SECTION, toolDeclarationPolicy, toolActivationSection, restoredToolActivation, syncToolActivation, type ToolDeclarationPolicy } from "./fixed-tool-declarations.js";
+import { orderSystemRows, SystemTranscriptJournal } from "./system-transcript-journal.js";
+import { planWorkspaceRequiredResult } from "./plan-workspace-error.js";
 import { accountModelStream } from "./request-usage.js";
 import { modeToolDenial, retainModeToolDeclaration, withModeExecutionGuard } from "./mode-tool-access.js";
 import { restoreHostedSearchReplay } from "./hosted-search-replay.js";
@@ -21,13 +25,6 @@ import {
 } from "./delegation-message.js";
 import {
   Agent,
-  BACKGROUND_CONTEXT,
-  compact,
-  convertToLlm,
-  estimateContextTokens,
-  estimateTokens,
-  prepareCompaction,
-  withAbortSignal,
   type AgentContext,
   type AgentEvent,
   type AgentLoopTurnUpdate,
@@ -36,17 +33,15 @@ import {
   type AgentToolResult,
   type AfterToolCallContext,
   type AfterToolCallResult,
-  type CompactionPreparation,
-  type CompactionEntry,
-  type CompactionSettings,
   type BeforeToolCallContext,
   type BeforeToolCallResult,
-  type Entry,
-  type MessageEntry,
   type PrepareNextTurnContext,
 } from "@earendil-works/pi-agent-core";
 import {
   isContextOverflow,
+  getCurrentTools,
+  getToolStateChanges,
+  toToolDeclaration,
   Type,
   type Api,
   type AssistantMessage,
@@ -66,10 +61,10 @@ import {
   type TrustedExtensionSpec,
   type TrustedExtensionUiResponse,
 } from "@pi-desktop/shared";
-import {
+import type {
   TrustedExtensionRunner,
-  type RegisteredTrustedExtensionAgent,
-  type TrustedExtensionBridge,
+  RegisteredTrustedExtensionAgent,
+  TrustedExtensionBridge,
 } from "./extensions/runner.js";
 import type {
   AgentActivity,
@@ -141,11 +136,28 @@ import {
 } from "./agent-messages.js";
 import { withExplicitRequired } from "./tool-schema.js";
 import { buildSessionContext } from "./session-context.js";
+import { prepareCompaction } from "./pi-runtime-compaction-plan.js";
+import { compact } from "./pi-runtime-compaction-summary.js";
+import {
+  estimateContextTokens,
+  estimateTokens,
+} from "./pi-runtime-estimates.js";
+import { convertToLlm } from "./pi-runtime-messages.js";
+import type {
+  CompactionEntry,
+  CompactionPreparation,
+  CompactionSettings,
+  Entry,
+  MessageEntry,
+} from "./pi-runtime-types.js";
 import {
   initialSystemTranscript,
+  CONTEXT_BUDGET_SECTION,
+  syncSystemSections,
+  systemTranscriptCheckpoint,
+  removeTrailingAssistantMessages,
   rebuildSystemTranscript,
   replaceSystemPrompt,
-  syncSystemTools,
   systemPromptContent,
 } from "./system-transcript.js";
 import {
@@ -188,6 +200,7 @@ import {
 } from "./output-cap.js";
 import {
   composeSubagentSystemPrompt,
+  MAX_SUBAGENT_REPORT_CHARS,
   SubagentRun,
   SUBAGENT_LIST_TOOL_NAME,
   SUBAGENT_STOP_TOOL_NAME,
@@ -212,6 +225,7 @@ import type { CustomSystemPrompt } from "./custom-system-prompt.js";
 import { projectMemoryPrompt } from "./project-memory-prompt.js";
 import {
   pluginSkillsPrompt,
+  pluginSkillsPromptSections,
   SKILL_TOOL_NAME,
   type PluginSkillDef,
 } from "./plugin-skills-prompt.js";
@@ -221,6 +235,7 @@ import {
   withOpenCodeSessionHeaders,
 } from "./opencode-session-headers.js";
 import { withCompactionRequestHeaders } from "./compaction-request.js";
+import type { CompactionRequestShape } from "./compaction-diagnostics.js";
 import {
   addSummaryUsage,
   compactionSummaryInputLimit,
@@ -272,22 +287,47 @@ import {
 
 export type { RuntimeProviderConfig } from "./provider-binding.js";
 
-export type RuntimePromptAttachment = AgentPromptAttachment & {
+export type RuntimePromptAttachment = Omit<AgentPromptAttachment, "kind"> & {
+  /**
+   * `session` is written by Electron main for a resolved
+   * `pi-desktop://session/<id>` reference; the renderer never sends it.
+   */
+  kind: AgentPromptAttachment["kind"] | "session";
   /** Base64 payload is transient and only crosses the sidecar for this turn. */
   data?: string;
+  /** Bounded excerpt of a referenced conversation (`kind: "session"`). */
+  text?: string;
 };
 
 export type RuntimePrompt = {
   /** Supplied only by the host-owned notification queue. */
   delegationNotification?: boolean;
   text: string;
+  /** Explicit user selection, resolved against the host-provided tool catalog. */
+  mcpServerIds?: string[];
+  mcpToolNames?: string[];
   sessionMessage?: SessionMessageOrigin;
   attachments?: RuntimePromptAttachment[];
 };
 
+/**
+ * The user's own words plus one quoted block per referenced conversation. The
+ * visible prompt is never rewritten: references are additive, and the model
+ * must receive this text — a reference accounted for by compaction but absent
+ * from the provider request would be context the user never got.
+ */
+function promptText(input: RuntimePrompt): string {
+  const references = (input.attachments ?? [])
+    .map((attachment) => sessionReferenceBlock(attachment))
+    .filter((block): block is string => block !== null);
+  return references.length
+    ? `${input.text}\n\n${references.join("\n\n")}`.trim()
+    : input.text;
+}
+
 function promptContent(input: string | RuntimePrompt): UserMessage["content"] {
   if (typeof input === "string") return input;
-  const text = input.text;
+  const text = promptText(input);
   const images = (input.attachments ?? []).filter(
     (attachment) =>
       attachment.kind === "image" &&
@@ -330,8 +370,30 @@ function runtimeAttachmentFromMessage(
     kind: attachment.kind,
     ...(attachment.mimeType ? { mimeType: attachment.mimeType } : {}),
     ...(attachment.size !== undefined ? { size: attachment.size } : {}),
+    ...(attachment.text ? { text: attachment.text } : {}),
     ...(data ? { data } : {}),
   };
+}
+
+/** Attribute-safe text: a session title may contain quotes or angle brackets. */
+function escapeAttribute(value: string): string {
+  return value
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;");
+}
+
+/**
+ * A referenced conversation travels with the user's message as one delimited
+ * block: it is quoted context, not the user's own words (a session link in the
+ * draft produced it), so the model reads it as reference material.
+ */
+export function sessionReferenceBlock(attachment: RuntimePromptAttachment): string | null {
+  const text = attachment.text?.trim();
+  if (!text) return null;
+  const title = escapeAttribute(attachment.name || attachment.path);
+  return `<session_reference name="${title}" session="${escapeAttribute(attachment.path)}">\n${text}\n</session_reference>`;
 }
 
 // pi-ai's adapter retry is disabled here so setup and mid-stream 429s share
@@ -445,6 +507,10 @@ export const ASK_TOOL_NAME = "asktool";
  * be re-read by id without re-running it.
  */
 const MAX_RETAINED_DELEGATIONS = 100;
+const DELEGATION_MODEL_OPT_IN_GUIDANCE =
+  'To authorize a model override, open Settings → Models, edit the service or account, expand its model Advanced settings, enable "Available for AI delegation", and save. Use an exact key from the delegation catalog; never guess a provider/model key.';
+const DELEGATION_DEFAULT_MODEL_GUIDANCE =
+  "Omit the `model` parameter on Task to use the definition's default model, or inherit the parent conversation's selected model when no default is pinned. Repeating the definition's own Default model key is the same as omitting `model`.";
 /**
  * `TaskWait` blocks the turn, and the model picks the timeout, so the ceiling
  * is what bounds how long a session can look hung with no way to intervene.
@@ -490,6 +556,8 @@ export type DelegationRecord = {
   /** True when `TaskStop` asked for this stop, so an aborted run reads as
    * `stopped` rather than `aborted`. */
   stopRequested: boolean;
+  /** System interruption preserves resume eligibility; explicit Stop wins. */
+  parentErrorInterrupted?: boolean;
   turns: number;
   toolCalls: number;
   lastToolName?: string;
@@ -711,7 +779,7 @@ const AGENT_CORE_TOOL_NAMES = new Set([
   "Edit",
   "Bash",
   ASK_TOOL_NAME,
-  // The slash menu answers a user-invoked `/skill-id` with an instruction to
+  // The slash menu answers a user-invoked `/skill:<skill-id>` with an instruction to
   // call `Skill { id }` on the first turn (ADR 0219), and a capability the
   // model has to go looking for is one it will not use. Registration keeps its
   // own gate: the tool only exists when the catalog is non-empty.
@@ -914,6 +982,8 @@ function contextFallbackReminder(): string {
 
 
 export type PluginToolDef = {
+  /** Present only on tools resolved from a user MCP server by Electron main. */
+  mcpServerId?: string;
   /** Full exposed name (`plugin_<pluginIdSafe>_<toolName>`, D015). */
   name: string;
   description?: string;
@@ -974,6 +1044,8 @@ export type AgentRuntimeOptions = {
    * a second containment root. */
   scratchDir?: string;
   onEvent: (envelope: AgentEventEnvelope) => void;
+  /** Bounded diagnostics routed to the Electron logger, never the transcript. */
+  onDiagnostic?: (diagnostic: AgentRuntimeDiagnostic) => void;
   /**
    * Subagent definitions this session may delegate to (ADR 0062), already
    * merged and capped by Electron main. Empty means no `Task` tool at all.
@@ -988,6 +1060,14 @@ export type AgentRuntimeOptions = {
   subagentProviders?: Record<string, RuntimeProviderConfig>;
   /** Resolved keys explicitly opted into Task.model selection; pins alone grant no override. */
   subagentModelKeys?: string[];
+};
+
+export type AgentRuntimeDiagnostic = {
+  kind: "compaction_failure" | "compaction_shape";
+  sessionId: string;
+  turnId?: string;
+  requestId: string;
+  data: Record<string, unknown>;
 };
 
 export type RuntimeMatchConfig = {
@@ -1480,16 +1560,12 @@ function selectRetainedUserMessages(
 
 /** Rebuild a pi-ai tool result from a persisted tool row. Rows that never
  * finished (app quit / abort mid-tool) restore as errored results so the
- * model knows the call produced nothing. */
-function toolResultFromUi(
+ * model knows the call produced nothing. Exported for tests. */
+export function toolResultFromUi(
   m: UiMessage,
   timestamp: number,
 ): ToolResultMessage {
-  const raw = m.toolResult as
-    | { content?: unknown; details?: unknown }
-    | string
-    | null
-    | undefined;
+  const raw: unknown = m.toolResult;
   const blocks: ToolResultMessage["content"] = [];
   const rawBlocks =
     isRecord(raw) && Array.isArray(raw.content) ? raw.content : undefined;
@@ -1506,10 +1582,45 @@ function toolResultFromUi(
         blocks.push({ type: "image", data: b.data, mimeType: b.mimeType });
       }
     }
+  } else if (Array.isArray(raw)) {
+    // Plugin tools may return a bare content-block array; restore its text
+    // and image blocks so a restart does not flatten them into JSON (#1360).
+    for (const b of raw) {
+      if (!isRecord(b)) continue;
+      if (b.type === "text" && typeof b.text === "string") {
+        blocks.push({ type: "text", text: b.text });
+      } else if (
+        b.type === "image" &&
+        typeof b.data === "string" &&
+        typeof b.mimeType === "string"
+      ) {
+        blocks.push({ type: "image", data: b.data, mimeType: b.mimeType });
+      }
+    }
   } else if (typeof raw === "string" && raw.trim()) {
     blocks.push({ type: "text", text: raw });
   } else if (raw !== undefined && raw !== null) {
-    blocks.push({ type: "text", text: safeJson(raw) });
+    // A host Read of an image file returns a top-level `images` array rather
+    // than content blocks; restore those as real image content so the model
+    // sees the picture across a restart, not just the JSON text (#1073).
+    const rawObject = isRecord(raw) ? raw : undefined;
+    const images = rawObject?.images;
+    if (rawObject && Array.isArray(images)) {
+      const rest = { ...rawObject };
+      delete rest.images;
+      blocks.push({ type: "text", text: safeJson(rest) });
+      for (const image of images) {
+        if (
+          isRecord(image) &&
+          typeof image.data === "string" &&
+          typeof image.mimeType === "string"
+        ) {
+          blocks.push({ type: "image", data: image.data, mimeType: image.mimeType });
+        }
+      }
+    } else {
+      blocks.push({ type: "text", text: safeJson(raw) });
+    }
   }
   const interrupted = m.toolStatus === "running";
   const rawRecord: Record<string, unknown> | undefined = isRecord(raw)
@@ -1620,6 +1731,7 @@ export class DesktopAgentRuntime {
   private ultra = false;
   private host: RuntimeHost;
   private onEvent: (envelope: AgentEventEnvelope) => void;
+  private onDiagnostic: (diagnostic: AgentRuntimeDiagnostic) => void;
   private streamSink: StreamCoalescer;
   private baseSystemPrompt: string;
   private customSystemPrompt?: CustomSystemPrompt;
@@ -1630,6 +1742,7 @@ export class DesktopAgentRuntime {
   private pluginSkills: PluginSkillDef[];
   private trustedExtensionSpecs: TrustedExtensionSpec[];
   private extensionRunner?: TrustedExtensionRunner;
+  private trustedExtensionLoad?: Promise<void>;
   private extensionSessionName?: string;
   private extensionTurnIndex = 0;
   /** Headers an extension edited in `before_provider_headers` for the current turn. */
@@ -1690,8 +1803,11 @@ export class DesktopAgentRuntime {
   private toolCatalog = new Map<string, AgentTool>();
   /** Tools intentionally omitted from the initial provider request. */
   private deferredToolNames = new Set<string>();
-  /** Deferred tools loaded for the current user prompt. */
+  /** Deferred tools activated for this runtime and declaration epoch. */
   private activeDeferredToolNames = new Set<string>();
+  private declarationPolicy?: ToolDeclarationPolicy;
+  private trackToolActivation = false;
+  private activationHydrated = false;
   private scratchDir?: string;
   private projectPath?: string;
   private commandShell: CommandShellOption;
@@ -1803,6 +1919,8 @@ export class DesktopAgentRuntime {
   };
   private terminatingToolCalls = new Set<string>();
   private fullEntries: MessageEntry[];
+  private readonly systemJournal = new SystemTranscriptJournal();
+  private composedSections: Record<string, string> = {};
   private activeCompaction?: ContextCompactionRecord;
   private compactionEnabled: boolean;
   private readonly compactionStrategy: CompactionStrategy;
@@ -1810,9 +1928,10 @@ export class DesktopAgentRuntime {
   private acceptingSteering = false;
   private steeringContinuation = false;
   private steeringWaitAbort?: AbortController;
-  private pendingSteering = new Map<AgentMessage, string>();
+  private pendingSteering = new Map<AgentMessage, { id: string; toolNames: string[] }>();
   private pendingOverflow = false;
   private overflowRecoveryAttempted = false;
+  private overflowRecoveryInProgress = false;
   private suppressOverflowRunEnd = false;
   private turnHadError = false;
   /** Bumped at the start of each parent `prompt()` / `executeApprovedPlan()`. */
@@ -1831,6 +1950,13 @@ export class DesktopAgentRuntime {
   private activeToolProgressCleanups = new Set<(flush: boolean) => void>();
   private hostCloseUnsubscribe?: () => void;
   private turnSubagentUsage?: MessageUsage;
+  private compactionRequestShape?: CompactionRequestShape;
+  private compactionShapeLogged = false;
+  private compactionDiagnosticBudget?: {
+    hardLimit: number;
+    outputBudget: number;
+    plannedChunks: number;
+  };
 
   constructor(opts: AgentRuntimeOptions) {
     this.sessionId = opts.sessionId;
@@ -1842,13 +1968,14 @@ export class DesktopAgentRuntime {
     this.thinkingLevel = this.ultra ? highestThinkingLevel(opts.provider) : clampThinkingLevel(opts.provider, opts.thinkingLevel);
     this.infiniteProviderRetry = opts.infiniteProviderRetry === true;
     this.host = opts.host;
+    this.onDiagnostic = opts.onDiagnostic ?? (() => undefined);
     this.hostCloseUnsubscribe = this.host.onClose?.(() => {
       this.cleanupActiveToolProgress();
     });
     this.streamSink = createStreamCoalescer(opts.onEvent);
     this.onEvent = (envelope) => this.streamSink.push(envelope);
     this.pluginTools = opts.pluginTools ?? [];
-    this.pluginSkills = opts.pluginSkills ?? [];
+    this.pluginSkills = [...(opts.pluginSkills ?? [])].sort((left, right) => left.id.localeCompare(right.id));
     this.trustedExtensionSpecs = opts.trustedExtensions ?? [];
     this.subagents = opts.subagents ?? [];
     this.subagentProviders = opts.subagentProviders ?? {};
@@ -1872,7 +1999,6 @@ export class DesktopAgentRuntime {
     this.rebuildToolCatalog();
     const model = buildProviderModel(this.provider);
     this.model = model;
-    const tools = this.activeTools();
     const models = createProviderModels(this.provider, model);
     this.models = models;
 
@@ -1882,7 +2008,6 @@ export class DesktopAgentRuntime {
     this.delegationChains.hydrate(
       rebuildChainsFromTranscript(this.transcriptHistory),
     );
-    const skillsPrompt = pluginSkillsPrompt(this.pluginSkills);
     // Parts: [0] is the product persona; [1:] are operational rules a custom
     // SYSTEM.md must not remove (tool guidance, delegation, scratch, skills).
     const defaultSystemPromptParts = [
@@ -1902,8 +2027,6 @@ export class DesktopAgentRuntime {
             `Your scratch directory for this session is \`${formatScratchDirForShell(this.commandShell, this.scratchDir)}\` (in Bash: ${shellScratchVariable(this.commandShell)}). Store ad-hoc temporary and intermediate files there using absolute paths. Workspace writes must be task-related project files or required toolchain outputs. Scratch persists across turns and is deleted with the session.`,
           ]
         : []),
-      // Plugin skills (D174).
-      ...(skillsPrompt ? [skillsPrompt] : []),
     ];
     // A custom SYSTEM.md replaces only the product persona line, never the
     // operational rules in the default parts: tool guidance, delegation
@@ -1916,6 +2039,9 @@ export class DesktopAgentRuntime {
       ).trim(),
       ...defaultSystemPromptParts.slice(1),
     ].join("\n\n");
+    this.refreshToolDeclarationPolicy();
+    this.restoreDeferredToolsFromContext();
+    const tools = this.declaredTools();
     this.agent = new Agent({
       streamFn: (m, context, options) => {
         this.setAgentActivity({ phase: "waiting-model", since: Date.now() });
@@ -2056,19 +2182,25 @@ export class DesktopAgentRuntime {
       // The provider's rule that a tool-call id is unique is enforced here, on
       // the last view before the wire: the request is the only place it can be
       // guaranteed for both a rebuilt context and one that grew in this process.
-      convertToLlm: (messages) =>
-        alignRetainedReasoningIdentity(
-          convertToLlm(this.dropDuplicateToolCalls(messages)),
-          this.reasoningReplayIdentity(),
-        ),
+      convertToLlm: async (messages) => {
+        await this.systemJournal.persist(messages, this.fullEntries, async (message) => {
+          await this.host.call("session.appendMessage", {
+            sessionId: this.sessionId, turnId: this.turnId, message,
+          });
+        });
+        return alignRetainedReasoningIdentity(
+          convertToLlm(this.dropDuplicateToolCalls(messages)), this.reasoningReplayIdentity(),
+        );
+      },
+      prepareRequest: ({ context }) => this.prepareToolDeclarations(context),
       prepareNextTurnWithContext: (context, signal) =>
         this.prepareNextTurn(context, signal),
       afterToolCall: async (context) => this.afterToolCall(context),
       initialState: {
         model,
-        tools,
+        tools: [],
         thinkingLevel: agentThinkingLevel(this.thinkingLevel),
-        messages: initialSystemTranscript(this.composeSystemPrompt(), tools, this.liveSessionContext().messages),
+        messages: initialSystemTranscript(this.composeSystemPrompt(), tools, this.liveSessionContext().messages, this.composedSections),
       },
       // Plan transitions must be the only tool call in an assistant batch.
       // Sequential execution also makes the host-confirmed mode change visible
@@ -2095,6 +2227,9 @@ export class DesktopAgentRuntime {
       },
     });
 
+    // Avoid Pi inserting a tool-only baseline ahead of restored legacy rows.
+    this.setAgentTools(tools);
+
     // pi awaits every listener, so a throw here would reject the run in
     // progress and, with nothing awaiting that rejection, could take the whole
     // sidecar down. Contain it: log with the session attached and let the
@@ -2120,6 +2255,18 @@ export class DesktopAgentRuntime {
   setInfiniteProviderRetry(enabled: boolean): void {
     if (this.disposed) throw new Error("runtime disposed");
     this.infiniteProviderRetry = enabled;
+  }
+
+  /** Refresh catalog instructions without changing the running session owner. */
+  setPluginSkills(skills: PluginSkillDef[]): void {
+    if (this.disposed) throw new Error("runtime disposed");
+    if (this.getStatus().isRunning) throw new Error("cannot update skills during an active turn");
+    const sorted = [...skills].sort((left, right) => left.id.localeCompare(right.id));
+    if (pluginSkillsDigest(this.pluginSkills) === pluginSkillsDigest(sorted)) return;
+    this.pluginSkills = sorted;
+    this.rebuildToolCatalog();
+    this.setAgentTools(this.activeTools());
+    this.setAgentSystemPrompt(this.composeSystemPrompt());
   }
 
   /** Switch the planning state on this Agent without creating another Agent. */
@@ -2193,7 +2340,9 @@ export class DesktopAgentRuntime {
       (this.agent.state as unknown as { systemPrompt: string }).systemPrompt = prompt;
       return;
     }
-    this.agent.state.messages = replaceSystemPrompt(this.agent.state.messages, prompt);
+    this.agent.state.messages = prompt === this.composedSystemPrompt
+      ? syncSystemSections(this.agent.state.messages, this.composedSections)
+      : replaceSystemPrompt(this.agent.state.messages, prompt);
   }
 
   private setAgentMessages(messages: AgentMessage[]): void {
@@ -2201,16 +2350,39 @@ export class DesktopAgentRuntime {
       this.agent.state.messages = messages;
       return;
     }
-    this.agent.state.messages = syncSystemTools(
-      rebuildSystemTranscript(this.agent.state.messages, messages),
-      this.agent.state.tools,
+    this.agent.state.messages = rebuildSystemTranscript(
+      this.agent.state.messages.filter((message) => message.role !== "system" || !this.systemJournal.isPersisted(message)), messages,
     );
   }
 
+  /** Steering is consumed after next-turn preparation; sync before dispatch. */
+  private prepareToolDeclarations(context: AgentContext): AgentLoopTurnUpdate {
+    const tools = this.declaredTools();
+    let messages = context.messages;
+    const changes = getToolStateChanges(getCurrentTools(messages), tools.map(toToolDeclaration));
+    if (changes.toolsAdded.length || changes.toolsRemoved.length) {
+      messages = [...messages, {
+        role: "system", content: "", ...changes, timestamp: Date.now(),
+      }];
+    }
+    if (this.trackToolActivation && this.declarationPolicy) {
+      messages = syncToolActivation(messages, toolActivationSection(
+        this.declarationPolicy.key, this.activeDeferredToolNames,
+      ));
+    }
+    for (const message of messages.slice(context.messages.length)) {
+      this.agent.state.messages.push(message);
+    }
+    return { context: { ...context, messages, tools } };
+  }
+
   private setAgentTools(tools: AgentTool[]): void {
-    this.agent.state.tools = tools;
-    if (this.agentUsesTranscriptSystemMessages()) {
-      this.agent.state.messages = syncSystemTools(this.agent.state.messages, tools);
+    this.agent.state.tools = this.declarationPolicy?.tools ?? tools;
+    if (this.trackToolActivation && this.declarationPolicy) {
+      const section = toolActivationSection(this.declarationPolicy.key, this.activeDeferredToolNames);
+      this.composedSections = { ...this.composedSections, [TOOL_ACTIVATION_SECTION]: section };
+      this.composedSystemPrompt = Object.values(this.composedSections).filter(Boolean).join("\n\n");
+      this.agent.state.messages = syncToolActivation(this.agent.state.messages, section);
     }
   }
 
@@ -2230,18 +2402,22 @@ export class DesktopAgentRuntime {
             runningDelegationIds: this.runningDelegationIds(),
           })
         : "";
-    const composed = composeModeSystemPrompt(
-      this.mode,
-      [
-        this.baseSystemPrompt,
+    this.composedSections = {
+      runtime: this.baseSystemPrompt,
+      ...(this.trackToolActivation && this.declarationPolicy ? {
+        [TOOL_ACTIVATION_SECTION]: toolActivationSection(this.declarationPolicy.key, this.activeDeferredToolNames),
+      } : {}),
+      ...pluginSkillsPromptSections(this.pluginSkills),
+      context: composeModeSystemPrompt(this.mode, [
         ...(this.subagents.length ? [delegationSystemPrompt(this.ultra && this.mode === "agent"), this.subagentModelSummary() ?? ""] : []),
         ...(this.customSystemPrompt?.append ? [this.customSystemPrompt.append] : []),
         ...(optionalToolsPrompt ? [optionalToolsPrompt] : []),
         ...(projectPrompt ? [projectPrompt] : []),
         ...(memoryPrompt ? [memoryPrompt] : []),
         ...(resumablePrompt ? [resumablePrompt] : []),
-      ].join("\n\n"),
-    );
+      ].join("\n\n")),
+    };
+    const composed = Object.values(this.composedSections).filter(Boolean).join("\n\n");
     this.composedSystemPrompt = composed;
     return composed;
   }
@@ -2392,6 +2568,9 @@ export class DesktopAgentRuntime {
   private async beforeToolCall(
     context: BeforeToolCallContext,
   ): Promise<BeforeToolCallResult | undefined> {
+    if (this.deferredToolNames.has(context.toolCall.name) && !this.activeDeferredToolNames.has(context.toolCall.name)) {
+      return { block: true, reason: `Call ${TOOL_SEARCH_NAME} to activate ${context.toolCall.name} before using it. A tool declaration does not grant execution permission.` };
+    }
     const toolCalls = (context.assistantMessage.content as Array<{ type?: string }>).filter(
       (block) => block.type === "toolCall",
     );
@@ -2454,9 +2633,8 @@ export class DesktopAgentRuntime {
   /** True when this runtime can be reused for a prompt with the given config. */
   matches(config: RuntimeMatchConfig): boolean {
     const requestedPluginTools = config.pluginTools ?? [];
-    const requestedPluginSkills = config.pluginSkills ?? [];
-    const current = this.pluginTools.map((t) => t.name).sort().join(",");
-    const next = requestedPluginTools.map((t) => t.name).sort().join(",");
+    const current = safeJson([...this.pluginTools].sort((a, b) => a.name.localeCompare(b.name)));
+    const next = safeJson([...requestedPluginTools].sort((a, b) => a.name.localeCompare(b.name)));
     const currentThinkingLevels = [
       ...(this.provider.supportedThinkingLevels ?? ["off"]),
     ]
@@ -2499,10 +2677,6 @@ export class DesktopAgentRuntime {
         safeJson(config.customSystemPrompt ?? null) &&
       (this.projectMemory ?? "") === (config.projectMemory?.trim() ?? "") &&
       (this.projectPath ?? "") === (config.projectPath?.trim() ?? "") &&
-      // Enabling a plugin, revoking agent.prompt.inject or renaming a skill
-      // changes the catalog digest, which retires the runtime and its stale
-      // prompt. Bodies are excluded: the Skill tool always reads them fresh.
-      pluginSkillsDigest(this.pluginSkills) === pluginSkillsDigest(requestedPluginSkills) &&
       // Editing `~/.agents/subagents/*.md` must reach the next prompt. Definition
       // bodies are part of the `Task` tool's behavior, so unlike skills they
       // are compared in full.
@@ -2523,6 +2697,19 @@ export class DesktopAgentRuntime {
    * never fails the session.
    */
   async loadTrustedExtensions(): Promise<void> {
+    if (this.disposed || this.extensionRunner || this.trustedExtensionSpecs.length === 0) return;
+    if (this.trustedExtensionLoad) return this.trustedExtensionLoad;
+    const loading = this.loadTrustedExtensionsForSession();
+    this.trustedExtensionLoad = loading;
+    try {
+      await loading;
+    } finally {
+      if (this.trustedExtensionLoad === loading) this.trustedExtensionLoad = undefined;
+    }
+  }
+
+  private async loadTrustedExtensionsForSession(): Promise<void> {
+    const { TrustedExtensionRunner } = await import("./extensions/runner.js");
     if (this.disposed || this.extensionRunner || this.trustedExtensionSpecs.length === 0) return;
     const runner = new TrustedExtensionRunner({
       specs: this.trustedExtensionSpecs,
@@ -2612,6 +2799,10 @@ export class DesktopAgentRuntime {
   private extensionModelRegistry(): Record<string, unknown> {
     const getRunner = () => this.extensionRunner;
     const models = () => [this.model, ...(getRunner()?.getAgentModels() ?? [])];
+    const hasConfiguredProvider = (providerId: string) =>
+      providerId === this.provider.id ||
+      providerId === this.model.provider ||
+      (getRunner()?.getAgents().some((agent) => agent.providerId === providerId) ?? false);
     return {
       getAll: () => [...new Map(models().map((model) => [`${model.provider}/${model.id}`, model])).values()],
       getAvailable: () => [...new Map(models().map((model) => [`${model.provider}/${model.id}`, model])).values()],
@@ -2621,12 +2812,11 @@ export class DesktopAgentRuntime {
         getRunner()?.getAgents().find((agent) => agent.providerId === providerId)?.name ??
         (providerId === this.provider.id ? this.provider.name : providerId),
       getProviderAuthStatus: (providerId: string) => ({
-        configured: [this.provider.id, ...(getRunner()?.getAgents().map((agent) => agent.providerId) ?? [])].includes(providerId),
+        configured: hasConfiguredProvider(providerId),
         source: "plugin",
       }),
       hasConfiguredAuth: (model: { provider?: string }) =>
-        typeof model.provider === "string" &&
-        [this.provider.id, ...(getRunner()?.getAgents().map((agent) => agent.providerId) ?? [])].includes(model.provider),
+        typeof model.provider === "string" && hasConfiguredProvider(model.provider),
     };
   }
 
@@ -2790,7 +2980,7 @@ export class DesktopAgentRuntime {
     // (the nearest one above), keeping each call adjacent to its result as
     // the provider APIs require.
     let toolCarrier: AssistantMessage | undefined;
-    for (const m of history) {
+    for (const m of orderSystemRows(history)) {
       // Subagent rows belong to the transcript and to review, never to the
       // parent's model context (ADR 0062): the parent only ever saw the `Task`
       // report, and replaying a delegate's messages would both contradict that
@@ -2799,7 +2989,10 @@ export class DesktopAgentRuntime {
       // Its report is restored through the settled Task result exactly once.
       if (m.parentToolCallId || isReturnToParent(m)) continue;
       const timestamp = Date.parse(m.createdAt) || Date.now();
-      if (m.role === "user") {
+      if (m.role === "system" && m.modelSystem) {
+        toolCarrier = undefined;
+        append(m.id, this.systemJournal.restore(m));
+      } else if (m.role === "user") {
         toolCarrier = undefined;
         const attachments = (m.attachments ?? []).map((attachment) =>
           runtimeAttachmentFromMessage(
@@ -2848,8 +3041,8 @@ export class DesktopAgentRuntime {
           role: "assistant",
           content,
           api: m.assistantReplay?.api ?? api,
-          provider: m.assistantReplay?.provider ?? this.provider.id,
-          model: m.assistantReplay?.model ?? this.provider.modelId,
+          provider: m.assistantReplay?.provider ?? (!m.providerId || m.providerId === this.provider.id ? this.model.provider : m.providerId),
+          model: m.assistantReplay?.model ?? m.modelId ?? this.model.id,
           ...(m.assistantReplay?.providerThinkingLevel ? { providerThinkingLevel: m.assistantReplay.providerThinkingLevel } : {}),
           usage: usageToPi(m.usage),
           stopReason: "stop",
@@ -2866,8 +3059,8 @@ export class DesktopAgentRuntime {
             role: "assistant",
             content: [],
             api,
-            provider: this.provider.id,
-            model: this.provider.modelId,
+            provider: this.model.provider,
+            model: this.model.id,
             usage: usageToPi(undefined),
             stopReason: "toolUse",
             timestamp,
@@ -2918,6 +3111,9 @@ export class DesktopAgentRuntime {
   ): Entry[] {
     const entries: Entry[] = [...this.fullEntries];
     if (!checkpoint) return entries;
+    if (isRecord(checkpoint.details) && checkpoint.details.systemMessageJson) {
+      this.systemJournal.rememberCheckpoint(checkpoint.details.systemMessageJson);
+    }
     const throughIndex = entries.findIndex(
       (entry) => entry.id === checkpoint.throughMessageId,
     );
@@ -3091,14 +3287,30 @@ export class DesktopAgentRuntime {
       Edit: {
         path: pathParam("File to edit; workspace-relative."),
         file_path: aliasParam("path"),
-        tag: Type.String({
-          description:
-            "4 uppercase hex from the latest Read, Grep, Write, or Edit for this path.",
-        }),
-        ops: Type.String({
-          description:
-            "One or more operation headers with + body rows, newline separated. A PUT with body rows must end its header with `:` (for example, `PUT 48.=48:`); `PUT 48.=48` followed by + rows is invalid. A colonless PUT is only for a register paste such as `PUT <1 @name`.",
-        }),
+        tag: Type.Optional(
+          Type.String({
+            description:
+              "4 uppercase hex from the latest Read, Grep, Write, or Edit for this path. Required unless legacy old_string/new_string is used.",
+          }),
+        ),
+        ops: Type.Optional(
+          Type.String({
+            description:
+              "One or more operation headers with + body rows, newline separated. A PUT with body rows must end its header with `:` (for example, `PUT 48.=48:`); `PUT 48.=48` followed by + rows is invalid. A colonless PUT is only for a register paste such as `PUT <1 @name`. Required unless legacy old_string/new_string is used.",
+          }),
+        ),
+        old_string: Type.Optional(
+          Type.String({
+            description:
+              "Legacy text replacement: exact text to be replaced (must match exactly once in the target file).",
+          }),
+        ),
+        new_string: Type.Optional(
+          Type.String({
+            description:
+              "Legacy text replacement: new text to replace old_string with.",
+          }),
+        ),
       },
       Bash: {
         command: Type.String(),
@@ -3360,10 +3572,56 @@ export class DesktopAgentRuntime {
         const imageBlocks: Array<{ type: "image"; data: string; mimeType: string }> = [];
         let text: string;
         let details: unknown = rawContent;
+        const vision = visionFromModelConfig(this.provider.modelConfig);
+        // Collect image blocks from a content-block array; only well-formed
+        // image entries ({ type, data, mimeType }) are accepted.
+        const collectImageBlocks = (blocks: unknown[]): void => {
+          for (const block of blocks) {
+            if (
+              isRecord(block) &&
+              block.type === "image" &&
+              typeof block.data === "string" &&
+              typeof block.mimeType === "string"
+            ) {
+              if (vision) {
+                imageBlocks.push({
+                  type: "image",
+                  data: block.data,
+                  mimeType: block.mimeType,
+                });
+              }
+            }
+          }
+        };
         if (typeof rawContent === "string") {
           text = rawContent;
         } else if (isRecord(rawContent) && rawContent.kind === "image-generation") {
           text = JSON.stringify(rawContent);
+        } else if (Array.isArray(rawContent)) {
+          // Plugin tools may return a bare content-block array
+          // ([{ type: "text" }, { type: "image" }]); render the text blocks
+          // and hand images to the model instead of stringifying (#1360).
+          const textParts: string[] = [];
+          for (const block of rawContent) {
+            if (isRecord(block) && block.type === "text" && typeof block.text === "string") {
+              textParts.push(block.text);
+            }
+          }
+          collectImageBlocks(rawContent);
+          text = textParts.join("\n") || JSON.stringify(rawContent, null, 2);
+          details = { blocks: rawContent, imageCount: imageBlocks.length };
+        } else if (isRecord(rawContent) && Array.isArray(rawContent.content)) {
+          // MCP tools return `content: [{ type: "image" | "text", ... }]`.
+          const contentBlocks = rawContent.content;
+          const textParts: string[] = [];
+          for (const block of contentBlocks) {
+            if (isRecord(block) && block.type === "text" && typeof block.text === "string") {
+              textParts.push(block.text);
+            }
+          }
+          collectImageBlocks(contentBlocks);
+          text = textParts.join("\n") || JSON.stringify(rawContent, null, 2);
+          details = { ...rawContent, imageCount: imageBlocks.length };
         } else if (isRecord(rawContent) && Array.isArray(rawContent.images)) {
           text =
             typeof rawContent.text === "string"
@@ -3373,7 +3631,6 @@ export class DesktopAgentRuntime {
                   null,
                   2,
                 );
-          const vision = visionFromModelConfig(this.provider.modelConfig);
           for (const image of rawContent.images) {
             if (
               !isRecord(image) ||
@@ -3592,9 +3849,9 @@ export class DesktopAgentRuntime {
   }
 
   /**
-   * Build the complete registry once, then expose only the core subset to the
-   * first provider request. This mirrors pi's active-tool model while keeping
-   * the host tool implementation and permission path unchanged.
+   * Build the complete registry before selecting fixed or on-demand
+   * declarations. Execution activation and Host permissions remain separate
+   * from the provider-visible schemas.
    */
   private rebuildToolCatalog(): void {
     const catalog = new Map<string, AgentTool>();
@@ -3639,6 +3896,25 @@ export class DesktopAgentRuntime {
         }),
       );
     }
+    if (this.model) this.refreshToolDeclarationPolicy();
+  }
+
+  private refreshToolDeclarationPolicy(): void {
+    const previous = this.declarationPolicy;
+    const policy = toolDeclarationPolicy(this.model, [...this.toolCatalog.values()], this.deferredToolNames, this.composeSystemPrompt(), this.provider.id);
+    if (previous && previous.key !== policy.key && this.trackToolActivation) {
+      this.activeDeferredToolNames.clear();
+      this.activationHydrated = true;
+    }
+    this.declarationPolicy = policy;
+    this.trackToolActivation ||= Boolean(policy.tools || policy.fallback);
+    if (policy.fallback && (previous?.key !== policy.key || previous.fallback !== policy.fallback)) {
+      process.stderr.write(`[agent-runtime] fixed tool declarations unavailable (${policy.fallback}); using on-demand declarations; ToolSearch cache stability is not guaranteed.\n`);
+    }
+  }
+
+  private declaredTools(): AgentTool[] {
+    return this.declarationPolicy?.tools ?? this.activeTools();
   }
 
   private isPlanSafePluginTool(name: string): boolean {
@@ -3728,7 +4004,7 @@ export class DesktopAgentRuntime {
     }
     return [
       "# On-demand tools",
-      `The following capabilities are available on demand. Call ${TOOL_SEARCH_NAME} with an exact tool name or a short capability description before using one that is not in the current tool list.`,
+      `The following capabilities are available on demand. Call ${TOOL_SEARCH_NAME} with an exact tool name or a short capability description before using an on-demand tool that has not been activated. A visible schema is not activation; the tool_activation section, when present, records active names.`,
       ...lines,
     ].join("\n");
   }
@@ -3758,7 +4034,7 @@ export class DesktopAgentRuntime {
       name: TOOL_SEARCH_NAME,
       label: "Tool Search",
       description:
-        "Find and activate an on-demand tool by exact name or capability. Use this before calling any tool listed under On-demand tools that is not already in the current tool list.",
+        "Find and activate an on-demand tool by exact name or capability. Use this before calling an inactive tool listed under On-demand tools, even when its schema is already visible. Activation does not bypass approval or mode restrictions.",
       parameters: Type.Object({
         query: Type.String({
           description:
@@ -3771,12 +4047,7 @@ export class DesktopAgentRuntime {
             ? params.query.trim()
             : "";
         const matches = this.findDeferredTools(query);
-        const activated = matches.filter(
-          (name) => !this.activeDeferredToolNames.has(name),
-        );
-        for (const name of activated) {
-          this.activeDeferredToolNames.add(name);
-        }
+        const activated = this.activateDeferredTools(matches);
         const available = [...this.deferredToolNames];
         const availablePreview = available.slice(0, MAX_TOOL_SEARCH_RESULT_NAMES);
         const remaining = available.length - availablePreview.length;
@@ -3945,7 +4216,10 @@ export class DesktopAgentRuntime {
         return provider;
       }
     } catch (error) {
-      throw new Error(`Model/channel "${key}" is not available for delegation: ${error instanceof Error ? error.message : String(error)}`);
+      const available = this.availableSubagentModelKeys();
+      const hint = available.length ? ` Available: ${available.join(", ")}.`
+        : ` ${DELEGATION_DEFAULT_MODEL_GUIDANCE} ${DELEGATION_MODEL_OPT_IN_GUIDANCE}`;
+      throw new Error(`Model/channel "${key}" is not available for delegation: ${error instanceof Error ? error.message : String(error)}.${hint}`);
     }
     return undefined;
   }
@@ -3974,8 +4248,8 @@ export class DesktopAgentRuntime {
     if (keys.length === 0) {
       return [
         "No delegation model overrides are configured.",
-        "Omit the `model` parameter on Task to use the definition's default model, or inherit the parent conversation's selected model when no default is pinned.",
-        "Repeating a definition's own Default model key is the same as omitting `model`. Never invent a provider/model key.",
+        DELEGATION_DEFAULT_MODEL_GUIDANCE,
+        DELEGATION_MODEL_OPT_IN_GUIDANCE,
       ].join(" ");
     }
     const lines: string[] = [
@@ -4245,7 +4519,7 @@ export class DesktopAgentRuntime {
               "Use the exact listed provider/model key to select both model and channel. Never drop an explicitly requested model/channel after a failure or claim that an inherited model is the requested one. Read the actual binding returned by Task. Only pass `model` when deliberately overriding the definition default with a listed delegation model; otherwise omit it. Repeating the definition's own Default model key, or the exact parent provider/model, selects that binding explicitly without model fallback.",
             ]
           : [
-              "No delegation model overrides are configured. Omit `model` to use the definition's default, or the parent model when no default is pinned. Repeating a definition's own Default model key is the same as omitting `model`; never invent a provider/model key.",
+              `No delegation model overrides are configured. ${DELEGATION_DEFAULT_MODEL_GUIDANCE} ${DELEGATION_MODEL_OPT_IN_GUIDANCE}`,
             ]),
         "`task` is the delegate's only instruction. It cannot see this conversation, and you cannot correct it while it runs, so state the goal, the paths and facts it cannot infer, and exactly what to report back.",
         "To run delegates concurrently, emit several Task calls in one assistant message. A message that mixes Task with any other tool runs one call at a time. Call TaskStop only to cancel.",
@@ -4351,7 +4625,7 @@ export class DesktopAgentRuntime {
             const available = this.availableSubagentModelKeys();
             const hint = available.length
               ? ` Available: ${available.join(", ")}.`
-              : " No models are configured for delegation.";
+              : ` No delegation model overrides are configured. ${DELEGATION_DEFAULT_MODEL_GUIDANCE} ${DELEGATION_MODEL_OPT_IN_GUIDANCE}`;
             return this.subagentToolError(
               toolCallId,
               `Model "${modelOverride}" is not available for delegation.${hint}`,
@@ -4655,6 +4929,15 @@ export class DesktopAgentRuntime {
     result: SubagentRunResult,
   ): void {
     if (record.status !== "running") return;
+    if (result.status === "aborted" && record.parentErrorInterrupted && !record.stopRequested) {
+      const message = `The parent turn failed and interrupted this delegation. Continue it with Task(resume: "${record.delegationId}").`;
+      result = {
+        ...result,
+        status: "failed",
+        report: truncateTextWithMarker(`${message}\n\n${result.report}`, MAX_SUBAGENT_REPORT_CHARS, "\n[report truncated]\n"),
+        error: { code: "SUBAGENT_PARENT_FAILED", message, resumeId: record.delegationId },
+      };
+    }
     record.status =
       record.stopRequested && result.status === "aborted"
         ? "stopped"
@@ -5399,6 +5682,22 @@ export class DesktopAgentRuntime {
     };
   }
 
+  private selectedMcpTools(input: string | RuntimePrompt): string[] {
+    return resolveMcpToolSelection(
+      typeof input === "string" ? undefined : input.mcpServerIds,
+      this.pluginTools,
+      name => this.toolCatalog.has(name) && this.isToolAllowedInMode(name),
+      typeof input === "string" ? undefined : input.mcpToolNames,
+    );
+  }
+
+  private activateDeferredTools(names: readonly string[]): string[] {
+    const activated = names.filter(name => this.deferredToolNames.has(name)
+      && !this.activeDeferredToolNames.has(name));
+    for (const name of activated) this.activeDeferredToolNames.add(name);
+    return activated;
+  }
+
   private findDeferredTools(query: string): string[] {
     const normalizedQuery = query.toLowerCase();
     if (!normalizedQuery) return [];
@@ -5424,7 +5723,14 @@ export class DesktopAgentRuntime {
   }
 
   private resetDeferredToolsForPrompt(): void {
-    this.activeDeferredToolNames.clear();
+    // Sticky activation (#1225): on-demand tools stay active for the whole
+    // session instead of being reset at every prompt. A context-only restore
+    // drops the activation whenever the announcing rows fall out of the window
+    // (compaction, long turns), and the next direct call then fails with
+    // "Tool <name> not found" at name resolution — the intermittent 0 ms
+    // rejection on Windows. `rebuildToolCatalog` still prunes names that left
+    // the catalog (mode switches, extension reloads), so the set cannot
+    // outlive the tools it names.
     this.restoreDeferredToolsFromContext();
     this.setAgentTools(this.activeTools());
   }
@@ -5440,8 +5746,26 @@ export class DesktopAgentRuntime {
    */
   private restoreDeferredToolsFromContext(): void {
     if (this.deferredToolNames.size === 0) return;
+    if (this.trackToolActivation && this.activationHydrated) return;
     const { messages } = this.liveSessionContext();
-    for (const message of messages) {
+    const restored = this.declarationPolicy && restoredToolActivation(messages, this.declarationPolicy.key);
+    if (restored !== undefined) {
+      this.trackToolActivation = true;
+      for (const name of restored.active) {
+        if (this.deferredToolNames.has(name)) this.activeDeferredToolNames.add(name);
+      }
+    }
+    this.activationHydrated = true;
+    const lastSystem = restored ? restored.replayFrom - 1 : messages.map((message) => message.role).lastIndexOf("system");
+    if (!restored && lastSystem >= 0) {
+      for (const tool of getCurrentTools(messages)) {
+        if (this.deferredToolNames.has(tool.name)) this.activeDeferredToolNames.add(tool.name);
+      }
+    }
+    // Legacy histories lack declarations. For current histories, only results
+    // after the last declaration can represent an activation not yet declared.
+    for (const message of messages.slice(lastSystem + 1)) {
+      if (restored && (message.role !== "toolResult" || message.toolName !== TOOL_SEARCH_NAME)) continue;
       if (message.role !== "toolResult" || message.isError) continue;
       if (isMissingToolResultPlaceholder(message.content)) continue;
       const names =
@@ -5528,6 +5852,8 @@ export class DesktopAgentRuntime {
             question,
           });
         } catch (error) {
+          const recovery = planWorkspaceRequiredResult(error);
+          if (recovery) return recovery;
           const errorCode =
             (error as { data?: { errorCode?: string } })?.data?.errorCode ??
             "PLAN_SUBMIT_FAILED";
@@ -5950,6 +6276,7 @@ export class DesktopAgentRuntime {
   private resetRunRecoveryState(): void {
     this.pendingOverflow = false;
     this.overflowRecoveryAttempted = false;
+    this.overflowRecoveryInProgress = false;
     this.suppressOverflowRunEnd = false;
     this.pendingProviderRetry = undefined;
     this.providerTransientRetryAttempt = 0;
@@ -6063,8 +6390,9 @@ export class DesktopAgentRuntime {
     // agentLoopContinue refuses a transcript ending in an assistant message,
     // and this one carries nothing worth resending anyway.
     const messages = [...this.agent.state.messages];
-    const last = messages.at(-1);
-    if (last?.role === "assistant" && !responseContentFacts(last).meaningful) messages.pop();
+    const lastIndex = messages.findLastIndex((message) => message.role !== "system");
+    const last = messages[lastIndex];
+    if (last?.role === "assistant" && !responseContentFacts(last).meaningful) messages.splice(lastIndex, 1);
     this.setAgentMessages(messages);
 
     const promptBefore = this.agentSystemPromptContent();
@@ -6114,39 +6442,42 @@ export class DesktopAgentRuntime {
         this.pendingOverflow = false;
         this.suppressOverflowRunEnd = false;
         this.overflowRecoveryAttempted = true;
-        const messages = [...this.agent.state.messages];
-        while (messages.at(-1)?.role === "assistant") messages.pop();
-        this.setAgentMessages(messages);
-        const compacted = await this.runCompaction(
-          "overflow",
-          true,
-          "active_turn",
-        );
-        if (!compacted) {
-          this.terminateParentTurn();
-          if (this.compactionAborted) {
-            // The user stopped the turn while the checkpoint was being written.
-            // That is an aborted turn, not a compaction failure: close it the
-            // way a stopped stream closes, with no error row.
-            this.finalizeCurrentAssistant("aborted");
-            this.emit({ type: "turn_end" });
-            this.emit({ type: "agent_end", messageIds: [] });
-            return false;
-          }
-          this.emit({
-            type: "error",
-            error: {
+        this.overflowRecoveryInProgress = true;
+        try {
+          const messages = removeTrailingAssistantMessages(this.agent.state.messages);
+          this.setAgentMessages(messages);
+          const compacted = await this.runCompaction(
+            "overflow",
+            true,
+            "active_turn",
+          );
+          if (!compacted) {
+            this.terminateParentTurn();
+            if (this.compactionAborted) {
+              // The user stopped the turn while the checkpoint was being written.
+              // That is an aborted turn, not a compaction failure: close it the
+              // way a stopped stream closes, with no error row.
+              this.finalizeCurrentAssistant("aborted");
+              this.emit({ type: "turn_end" });
+              this.emit({ type: "agent_end", messageIds: [] });
+              return false;
+            }
+            const error = {
               code: "CONTEXT_COMPACTION_FAILED",
               message: "Context overflow recovery could not create a checkpoint",
               retriable: false,
-            },
-          });
-          return false;
+            } satisfies ReturnType<typeof classifyAgentError>;
+            this.finalizeCurrentAssistant("error", error);
+            this.emit({ type: "error", error });
+            return false;
+          }
+          this.turnHadError = false;
+          this.requestStartedAt = Date.now();
+          await this.agent.continue();
+          await this.waitForIdleAndSteering();
+        } finally {
+          this.overflowRecoveryInProgress = false;
         }
-        this.turnHadError = false;
-        this.requestStartedAt = Date.now();
-        await this.agent.continue();
-        await this.waitForIdleAndSteering();
         continue;
       }
       if (this.pendingSilentTurnRerun) {
@@ -6171,8 +6502,7 @@ export class DesktopAgentRuntime {
     // pi-agent-core refuses `continue()` when the transcript ends in an
     // assistant message. The progress text is already visible in the reused
     // bubble, so it must not be sent back as model context.
-    const messages = [...this.agent.state.messages];
-    while (messages.at(-1)?.role === "assistant") messages.pop();
+    const messages = removeTrailingAssistantMessages(this.agent.state.messages);
     this.setAgentMessages(messages);
 
     const promptBefore = this.agentSystemPromptContent();
@@ -6227,7 +6557,7 @@ export class DesktopAgentRuntime {
         ...(typeof this.agent.state.systemPrompt === "string"
           ? { systemPrompt: this.agent.state.systemPrompt }
           : {}),
-        tools: this.activeTools(),
+        tools: this.declaredTools(),
       },
       this.model,
     );
@@ -6400,7 +6730,7 @@ export class DesktopAgentRuntime {
 
   private rebuiltAgentContext(): AgentContext {
     const messages = this.liveSessionContext().messages;
-    const tools = this.activeTools();
+    const tools = this.declaredTools();
     this.setAgentMessages(messages);
     this.setAgentTools(tools);
     return {
@@ -6498,12 +6828,7 @@ export class DesktopAgentRuntime {
     return { context };
   }
 
-  /**
-   * Codex's two-tier `maybe_record`, as a system-prompt append for this turn
-   * only. Codex writes its reminders into conversation history; we have no
-   * channel for a synthetic message that stays out of the transcript, and the
-   * append is equivalent without persisting anything.
-   */
+  /** A replaceable reminder section expires when compaction opens a new window. */
   private withContextBudgetReminder(
     context: AgentContext,
     budget: ContextBudget,
@@ -6521,7 +6846,7 @@ export class DesktopAgentRuntime {
       ...(systemPrompt ? { systemPrompt } : {}),
       messages: [
         ...context.messages,
-        { role: "system", content: reminder, timestamp: Date.now() },
+        { role: "system", content: "", sections: { [CONTEXT_BUDGET_SECTION]: reminder }, timestamp: Date.now() },
       ],
     } as AgentContext;
   }
@@ -6614,6 +6939,55 @@ export class DesktopAgentRuntime {
       error: aborted
         ? { code: "TURN_ABORTED", message: "Context compaction was stopped" }
         : { code: "CONTEXT_COMPACTION_FAILED", message },
+    });
+  }
+
+  private emitCompactionDiagnostic(
+    kind: AgentRuntimeDiagnostic["kind"],
+    requestId: string,
+    data: Record<string, unknown>,
+  ): void {
+    this.onDiagnostic({
+      kind,
+      sessionId: this.sessionId,
+      ...(this.turnId ? { turnId: this.turnId } : {}),
+      requestId,
+      data,
+    });
+  }
+
+  private emitCompactionFailureDiagnostic(
+    requestId: string,
+    reason: CompactionFailureReason,
+    tokensBefore: number | undefined,
+    error: unknown,
+    extra: Record<string, unknown> = {},
+  ): void {
+    if (!this.compactionShapeLogged) {
+      this.emitCompactionDiagnostic("compaction_shape", requestId, {
+        requestShape: extra.requestShape ?? "unobserved",
+        ...(this.compactionRequestShape ?? {}),
+      });
+      this.compactionShapeLogged = true;
+    }
+    const candidate = error as {
+      code?: unknown;
+      details?: { providerStatus?: unknown; requestId?: unknown };
+    };
+    this.emitCompactionDiagnostic("compaction_failure", requestId, {
+      provider: this.provider.id,
+      model: this.provider.modelId,
+      reason,
+      ...(typeof candidate.code === "string" ? { errorCode: candidate.code } : {}),
+      ...(typeof candidate.details?.providerStatus === "number"
+        ? { httpStatus: candidate.details.providerStatus }
+        : {}),
+      ...(typeof candidate.details?.requestId === "string"
+        ? { upstreamRequestId: candidate.details.requestId }
+        : {}),
+      ...(tokensBefore !== undefined ? { tokensBefore } : {}),
+      ...(this.compactionDiagnosticBudget ?? {}),
+      ...extra,
     });
   }
 
@@ -6919,6 +7293,11 @@ export class DesktopAgentRuntime {
     mustFitSafeBudget: boolean,
     fallback?: ContextCompactionFallback,
   ): Promise<CheckpointPersistResult> {
+    const systemMessage = systemTranscriptCheckpoint(this.agent.state.messages);
+    checkpoint = {
+      ...checkpoint,
+      details: { ...(isRecord(checkpoint.details) ? checkpoint.details : {}), ...(systemMessage ? { systemMessageJson: JSON.stringify(systemMessage) } : {}) },
+    };
     const compactedBudget = this.contextBudget(
       this.liveSessionContext(checkpoint).messages,
     );
@@ -6944,7 +7323,10 @@ export class DesktopAgentRuntime {
     // resetting its `claim_*` flags when the context window turns over.
     this.contextReminderClaimed = false;
     this.contextFallbackReminderClaimed = false;
-    this.setAgentMessages(this.liveSessionContext().messages);
+    this.agent.state.messages = this.liveSessionContext().messages;
+    for (const message of this.agent.state.messages) {
+      if (message.role === "system") this.systemJournal.remember(message, checkpoint.id);
+    }
     this.emit({
       type: "compaction_end",
       reason,
@@ -7070,23 +7452,53 @@ export class DesktopAgentRuntime {
     signal: AbortSignal,
   ): Promise<Awaited<ReturnType<typeof compact>>> {
     const usageTurnId = this.turnId;
-    return compact(
-      preparation,
-      // The summary is a provider request like any other turn, but
-      // pi-agent-core builds its options itself and never reaches `streamFn`,
-      // so the headers have to ride on the collection.
-      withCompactionRequestHeaders(this.models, this.provider, this.sessionId,
-        usage => this.emit({ type: "usage", usage }, usageTurnId)),
-      this.model,
-      undefined,
-      agentThinkingLevel(this.thinkingLevel),
-      // Without a policy pi-ai returns the first failed response as-is, which
-      // made a single dropped stream or 503 discard the whole summary (#543).
-      // pi's classifier decides what is transient; the waits honour `signal`.
-      COMPACTION_SUMMARY_RETRY_POLICY,
-      undefined,
-      withAbortSignal(signal, BACKGROUND_CONTEXT),
+    const requestId = randomUUID();
+    this.compactionRequestShape = undefined;
+    this.compactionShapeLogged = false;
+    const models = withCompactionRequestHeaders(
+      this.models,
+      this.provider,
+      this.sessionId,
+      (usage) => this.emit({ type: "usage", usage }, usageTurnId),
+      (shape) => {
+        this.compactionRequestShape = shape;
+        this.compactionShapeLogged = true;
+        this.emitCompactionDiagnostic("compaction_shape", requestId, {
+          requestShape: "observed",
+          ...shape,
+        });
+      },
     );
+    try {
+      const result = await compact(
+        preparation,
+        // The summary is a provider request like any other turn. The desktop
+        // compaction adapter calls `completeSimple` directly instead of
+        // `streamFn`, so headers have to ride on the collection.
+        models,
+        this.model,
+        undefined,
+        agentThinkingLevel(this.thinkingLevel),
+        // Without a policy pi-ai returns the first failed response as-is, which
+        // made a single dropped stream or 503 discard the whole summary (#543).
+        // pi's classifier decides what is transient; the waits honour `signal`.
+        COMPACTION_SUMMARY_RETRY_POLICY,
+        undefined,
+        signal,
+      );
+      if (!result.ok) {
+        this.emitCompactionFailureDiagnostic(
+          requestId,
+          "summary_provider",
+          preparation.tokensBefore,
+          result.error,
+        );
+      }
+      return result;
+    } catch (error) {
+      this.emitCompactionFailureDiagnostic(requestId, "summary_provider", preparation.tokensBefore, error);
+      throw error;
+    }
   }
 
   /**
@@ -7146,6 +7558,7 @@ export class DesktopAgentRuntime {
     signal: AbortSignal,
     retentionMode: CompactionRetentionMode,
   ): Promise<CheckpointBuild> {
+    this.compactionDiagnosticBudget = undefined;
     const entries = this.entriesWithCompaction();
     const context = buildSessionContext(entries, this.reasoningReplayIdentity());
     const budget = this.contextBudget(context.messages);
@@ -7156,6 +7569,21 @@ export class DesktopAgentRuntime {
       retentionMode,
     );
     if (!preparation.ok || !preparation.value) {
+      this.emitCompactionFailureDiagnostic(
+        randomUUID(),
+        preparation.ok ? "no_new_history" : "summary_budget",
+        undefined,
+        preparation.ok ? "No new context is available to compact" : preparation.error,
+        {
+          requestShape: "not_sent",
+          hardLimit: budget.hardLimit,
+          outputBudget: compactionSummaryOutputBudget({
+            requestHeadroom: budget.requestHeadroom,
+            modelMaxTokens: this.model.maxTokens,
+          }),
+          plannedChunks: 0,
+        },
+      );
       return {
         ok: false,
         entries,
@@ -7179,7 +7607,30 @@ export class DesktopAgentRuntime {
     const chunks = summaryInput
       ? undefined
       : this.planSummaryRequests(preparation.value, budget);
+    this.compactionDiagnosticBudget = {
+      hardLimit: budget.hardLimit,
+      outputBudget: compactionSummaryOutputBudget({
+        requestHeadroom: budget.requestHeadroom,
+        modelMaxTokens: this.model.maxTokens,
+      }),
+      plannedChunks: chunks?.length ?? 1,
+    };
     if (!summaryInput && !chunks) {
+      this.emitCompactionFailureDiagnostic(
+        randomUUID(),
+        "summary_budget",
+        preparation.value.tokensBefore,
+        "Compaction summary input exceeds the safe model budget",
+        {
+          requestShape: "not_sent",
+          hardLimit: budget.hardLimit,
+          outputBudget: compactionSummaryOutputBudget({
+            requestHeadroom: budget.requestHeadroom,
+            modelMaxTokens: this.model.maxTokens,
+          }),
+          plannedChunks: 0,
+        },
+      );
       return {
         ok: false,
         entries,
@@ -7420,6 +7871,7 @@ export class DesktopAgentRuntime {
         if (this.steeringContinuation) break;
         if (
           this.providerRetryInProgress ||
+          this.overflowRecoveryInProgress ||
           this.silentTurnRerunInProgress ||
           this.progressTurnRerunInProgress
         ) {
@@ -7430,6 +7882,7 @@ export class DesktopAgentRuntime {
       case "turn_start":
         if (
           this.providerRetryInProgress ||
+          this.overflowRecoveryInProgress ||
           this.silentTurnRerunInProgress ||
           this.progressTurnRerunInProgress
         ) {
@@ -7445,6 +7898,7 @@ export class DesktopAgentRuntime {
           const content = assistantContent((event.message as any).content);
           const retryingAssistant =
             this.providerRetryInProgress ||
+            this.overflowRecoveryInProgress ||
             this.silentTurnRerunInProgress ||
             this.progressTurnRerunInProgress
               ? this.currentAssistant
@@ -7452,7 +7906,7 @@ export class DesktopAgentRuntime {
           const initialText =
             content.hasText && content.text.length > 0
               ? content.text
-              : this.progressTurnRerunInProgress
+              : this.progressTurnRerunInProgress || this.overflowRecoveryInProgress
                 ? retryingAssistant?.content ?? ""
                 : content.text;
           this.currentAssistant = {
@@ -7473,6 +7927,7 @@ export class DesktopAgentRuntime {
             // duplicate error row when the second request succeeds. The same
             // applies to a silent-turn re-run: one bubble, no empty row.
             this.providerRetryInProgress = false;
+            this.overflowRecoveryInProgress = false;
             this.silentTurnRerunInProgress = false;
             this.progressTurnRerunInProgress = false;
             this.emit({ type: "message_update", message: this.currentAssistant });
@@ -7533,9 +7988,13 @@ export class DesktopAgentRuntime {
       }
       case "message_end": {
         if (event.message.role === "user") {
-          const steeringId = this.pendingSteering.get(event.message);
-          const id = steeringId ?? this.pendingUserMessageId ?? randomUUID();
-          if (steeringId) {
+          const steering = this.pendingSteering.get(event.message);
+          const id = steering?.id ?? this.pendingUserMessageId ?? randomUUID();
+          if (steering) {
+            if (steering.toolNames.length) {
+              this.activateDeferredTools(steering.toolNames);
+              this.setAgentTools(this.activeTools());
+            }
             this.pendingSteering.delete(event.message);
             // User input is now part of the model context: whatever the model
             // says next answers the user, not a completion notice, so the
@@ -7746,6 +8205,33 @@ export class DesktopAgentRuntime {
             this.streamStartedAt = undefined;
             break;
           }
+          const canRecoverOverflow =
+            this.compactionEnabled &&
+            overflow &&
+            !this.overflowRecoveryAttempted;
+          if (canRecoverOverflow) {
+            // Keep the failed response inside the same visible assistant bubble
+            // while compaction prepares the retry. A provider overflow is an
+            // internal recovery transition, not a terminal user-facing error.
+            this.currentAssistant = {
+              ...this.currentAssistant,
+              content: nextText,
+              ...(nextThinking
+                ? { thinking: nextThinking }
+                : content.hasThinking
+                  ? { thinking: undefined }
+                  : {}),
+              status: "streaming",
+              modelId: this.provider.modelId,
+              providerId: this.provider.id,
+              ...(usage ? { usage } : {}),
+            };
+            this.emit({ type: "message_update", message: this.currentAssistant });
+            this.streamStartedAt = undefined;
+            this.pendingOverflow = true;
+            this.suppressOverflowRunEnd = true;
+            break;
+          }
           const emptyResponse = silentTurn;
           const diagnosticError = classifiedError;
           const retryProviderAttempt =
@@ -7826,11 +8312,6 @@ export class DesktopAgentRuntime {
           this.activeProviderRetryAttempt = 0;
           this.streamStartedAt = undefined;
           this.currentAssistant = undefined;
-          const canRecoverOverflow =
-            this.compactionEnabled &&
-            overflow &&
-            !this.providerHasContent &&
-            !this.overflowRecoveryAttempted;
           if (exemptSilence) {
             // Accepted silence is still nothing worth resending: keep it out
             // of the runtime entries, exactly as a restored transcript would,
@@ -7855,10 +8336,7 @@ export class DesktopAgentRuntime {
               this.setAgentMessages(this.agent.state.messages.map(message => message === event.message ? retained : message));
             }
           }
-          if (canRecoverOverflow) {
-            this.pendingOverflow = true;
-            this.suppressOverflowRunEnd = true;
-          } else if (diagnosticError) {
+          if (diagnosticError) {
             this.terminateParentTurn();
             this.emit({ type: "error", error: diagnosticError });
           }
@@ -8250,6 +8728,7 @@ export class DesktopAgentRuntime {
   ): Promise<{ turnId: string }> {
     if (this.disposed) throw new Error("runtime disposed");
     this.assertNotRunning();
+    const selectedTools = this.selectedMcpTools(input);
     let modelInput = typeof input !== "string" && input.sessionMessage
       ? { ...input, text: formatSessionMessage(input.text, input.sessionMessage), sessionMessage: undefined }
       : input;
@@ -8262,6 +8741,10 @@ export class DesktopAgentRuntime {
     // Capabilities and path-scoped instruction claims belong to one prompt.
     this.subagentOverrideProviders = {};
     this.resetDeferredToolsForPrompt();
+    if (selectedTools.length) {
+      this.activateDeferredTools(selectedTools);
+      this.setAgentTools(this.activeTools());
+    }
     this.refreshResumablePrompt();
     this.pathInstructionClaims.clear();
     this.pendingUserMessageId = userMessageId;
@@ -8346,7 +8829,7 @@ export class DesktopAgentRuntime {
       if (typeof modelInput === "string") {
         await this.agent.prompt(modelInput);
       } else {
-        await this.agent.prompt(modelInput.text, promptImages(modelInput));
+        await this.agent.prompt(promptText(modelInput), promptImages(modelInput));
       }
       await this.waitForIdleAndSteering();
       void this.extensionRunner?.emit("agent_settled", { type: "agent_settled" });
@@ -8476,7 +8959,8 @@ export class DesktopAgentRuntime {
   steer(input: RuntimePrompt, expectedTurnId: string, message: UiMessage): { accepted: boolean; turnId: string } {
     this.steeringContext(expectedTurnId);
     const queued: AgentMessage = { role: "user", content: promptContent(input), timestamp: Date.now() };
-    this.pendingSteering.set(queued, message.id);
+    const toolNames = this.selectedMcpTools(input);
+    this.pendingSteering.set(queued, { id: message.id, toolNames });
     this.agent.steer(queued);
     this.steeringWaitAbort?.abort();
     // Main persists this echo through the same outbox as assistant messages.
@@ -8491,9 +8975,9 @@ export class DesktopAgentRuntime {
 
   private retainPendingSteering(): void {
     this.agent.clearSteeringQueue();
-    for (const [message, id] of this.pendingSteering) {
+    for (const [message, pending] of this.pendingSteering) {
       if (!this.agent.state.messages.includes(message)) this.setAgentMessages([...this.agent.state.messages, message]);
-      this.appendLiveEntry(id, message);
+      this.appendLiveEntry(pending.id, message);
     }
     this.pendingSteering.clear();
 

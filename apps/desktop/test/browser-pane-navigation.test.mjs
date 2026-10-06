@@ -68,6 +68,25 @@ test("address-bar host and port inputs normalize to HTTP without accepting other
   assert.equal(normalizeUrl("custom:8080"), null);
 });
 
+test("a scratch HTML preview loads, while a sibling session remains outside the allowed roots", async () => {
+  const root = mkdtempSync(join(tmpdir(), "pi-scratch-preview-"));
+  const own = join(root, "session-one"), other = join(root, "session-two");
+  mkdirSync(own); mkdirSync(other);
+  const page = join(own, "pelican.html"), sibling = join(other, "private.html");
+  writeFileSync(page, "<!doctype html><title>Pelican</title>");
+  writeFileSync(sibling, "<!doctype html><title>Other task</title>");
+  const pane = new BrowserPane(() => {});
+  const request = pane.navigateAndWait(page, [own]);
+  const wc = WebContentsView.instances.at(-1).webContents;
+  assert.equal(wc.pendingLoads[0].url, pathToFileURL(realpathSync(page)).href);
+  wc.url = wc.pendingLoads[0].url;
+  wc.pendingLoads.shift().resolve();
+  assert.equal((await request).url, wc.url);
+  assert.equal(await pane.navigateAndWait(sibling, [own]), null);
+  assert.equal(pane.getState().loadError, "LOCAL_FILE_NOT_ALLOWED");
+  pane.dispose();
+});
+
 test("submitting a localhost address with a workspace root loads and publishes the HTTP URL", async (t) => {
   const { mkdtempSync, rmSync } = await import("node:fs");
   const root = mkdtempSync(join(tmpdir(), "browser-host-port-"));

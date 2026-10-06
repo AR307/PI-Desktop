@@ -78,6 +78,11 @@ export type UpdateState = {
   error?: string;
   /** True when the transition came from a user-initiated check. */
   manual?: boolean;
+  /**
+   * True when the user dismissed the notice for `availableVersion`. Stays
+   * dismissed across restarts until a newer version is detected (#1317).
+   */
+  dismissed?: boolean;
   releasesUrl: string;
 };
 
@@ -92,7 +97,7 @@ export type OnboardingState = {
 };
 
 
-export type ScheduledTaskCadence = "manual" | "hourly" | "daily" | "weekly";
+export type ScheduledTaskCadence = "manual" | "hourly" | "interval" | "daily" | "weekly";
 export type ScheduledTaskSchedule = {
   hour: number;
   minute: number;
@@ -100,12 +105,22 @@ export type ScheduledTaskSchedule = {
   weekday: number;
   /** Selected days, Monday = 0. When present, must be nonempty and unique. */
   weekdays?: number[];
+  /**
+   * Elapsed minutes between runs of an `interval` task. That cadence requires
+   * it and no other cadence reads it, so switching back to a calendar keeps
+   * the value for the way back. 5–1440, mirroring `INTERVAL_MIN_MINUTES` and
+   * `INTERVAL_MAX_MINUTES` in `crates/host-core/src/scheduled/timing.rs`.
+   */
+  intervalMinutes?: number;
 };
 export type ScheduledTaskRun = {
   id: string; taskId: string; sessionId: string | null;
   status: "running" | "completed" | "aborted" | "error";
   errorCode: string | null; startedAt: string; endedAt: string | null;
 };
+
+/** How a scheduled run relates to the task's conversations. */
+export type ScheduledSessionMode = "perRun" | "reuse";
 
 export type ScheduledTask = {
   id: string;
@@ -123,6 +138,11 @@ export type ScheduledTask = {
   /** Explicit task-owned execution settings. Missing fields preserve legacy behavior. */
   permissionMode?: GlobalPermissionMode;
   thinkingLevel?: SessionThinkingLevel;
+  /**
+   * Whether each run opens its own conversation (`perRun`, the default) or
+   * continues the conversation its previous run used (`reuse`).
+   */
+  sessionMode?: ScheduledSessionMode;
   providerId?: string;
   modelId?: string;
 };

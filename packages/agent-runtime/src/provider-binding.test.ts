@@ -209,6 +209,67 @@ describe("Anthropic runtime endpoint", () => {
     expect(request?.headers.get("Authorization")).toBeNull();
   });
 
+  it("does not send the mid-conversation tool-change beta for a models.dev Claude gateway", async () => {
+    const provider: RuntimeProviderConfig = {
+      ...keyedProvider,
+      id: "sub2api-anthropic-gateway",
+      vendorKey: "custom",
+      name: "sub2api",
+      baseUrl: "https://relay.example/v1",
+      modelId: "claude-opus-5-5",
+      apiStyle: "anthropic_messages",
+      supportsReasoning: true,
+      supportedThinkingLevels: ["off", "medium"],
+      modelConfig: {
+        source: "models.dev",
+        name: "Claude Opus 5.5",
+        baseUrl: "https://relay.example/v1",
+        reasoning: true,
+        reasoningOptions: [{ type: "effort", values: ["low", "medium", "high"] }],
+        thinkingProtocol: "adaptive",
+        input: ["text"],
+        contextWindow: 200_000,
+        maxTokens: 16_000,
+      },
+    };
+    const model = buildProviderModel(provider);
+    let request: Request | undefined;
+    const fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      request = new Request(input, init);
+      return new Response(
+        JSON.stringify({ type: "error", error: { type: "invalid_request_error", message: "test response" } }),
+        { status: 400, headers: { "content-type": "application/json" } },
+      );
+    });
+    const readTool = {
+      name: "Read",
+      description: "Read a file",
+      parameters: { type: "object", properties: { path: { type: "string" } } },
+    };
+
+    const result = await createProviderModels(provider, model)
+      .streamSimple(
+        model,
+        {
+          messages: [
+            { role: "system", content: "system", toolsAdded: [readTool], timestamp: 1 },
+            { role: "user", content: "hello", timestamp: 2 },
+          ],
+          tools: [],
+        },
+        { fetch, maxRetries: 0 },
+      )
+      .result();
+
+    expect(result.stopReason).toBe("error");
+    expect(model.compat).toMatchObject({
+      supportsMidConvoSystemMessages: false, supportsMidConvoToolChanges: false,
+    });
+    expect(request?.headers.get("anthropic-beta") ?? "").not.toMatch(
+      /mid-conversation-tool-changes|inline-tools/,
+    );
+  });
+
   it("uses adaptive thinking for models explicitly marked adaptive", async () => {
     const provider: RuntimeProviderConfig = {
       ...keyedProvider,
@@ -348,6 +409,34 @@ describe("Anthropic adaptive thinking from models.dev reasoning options", () => 
     return requests[0];
   }
 
+  function genericAnthropicProvider(
+    modelId: string,
+    overrides: Partial<
+      Pick<ModelConfig, "reasoningOptions" | "thinkingProtocol" | "compat">
+    > = {},
+  ): RuntimeProviderConfig {
+    const baseUrl = "https://gateway.example";
+    const modelConfig = modelConfigWithBinding(
+      {
+        ...genericModelConfig(modelId, baseUrl),
+        ...overrides,
+      },
+      {
+        contextWindow: 200_000,
+        maxTokens: 16_000,
+        thinkingLevels: ["off", "medium"],
+        ...(overrides.thinkingProtocol
+          ? { thinkingProtocol: overrides.thinkingProtocol }
+          : {}),
+      },
+    );
+    return {
+      ...anthropicProvider(modelId, overrides.reasoningOptions ?? []),
+      baseUrl,
+      modelConfig,
+    };
+  }
+
   it("sends adaptive thinking to effort-only Claude models such as Opus 5.5", async () => {
     const request = await thinkingRequest(
       anthropicProvider("claude-opus-5-5", [
@@ -416,6 +505,90 @@ describe("Anthropic adaptive thinking from models.dev reasoning options", () => 
     expect(buildProviderModel(provider).compat).toMatchObject({
       forceAdaptiveThinking: true,
     });
+  });
+
+  // #926: a catalog miss still arrives as a generic model config in sessions.
+  // Without protocol or reasoning options, a Claude id on the Anthropic wire
+  // defaults to adaptive thinking.
+  it("defaults adaptive thinking for a catalog-less Claude id on the Anthropic wire", async () => {
+    const provider = genericAnthropicProvider("claude-opus-5-5");
+    expect(provider.modelConfig?.source).toBe("generic");
+
+    const request = await thinkingRequest(provider);
+
+    expect(request?.thinking).toMatchObject({ type: "adaptive" });
+    expect(request?.thinking).not.toHaveProperty("budget_tokens");
+  });
+
+  it("keeps budget thinking when a generic model carries budget metadata", async () => {
+    const request = await thinkingRequest(
+      genericAnthropicProvider("claude-relay-model", {
+        reasoningOptions: [{ type: "budget_tokens", min: 1024 }],
+      }),
+    );
+
+    expect(request?.thinking).toMatchObject({ type: "enabled" });
+    expect(request?.thinking).toHaveProperty("budget_tokens");
+  });
+
+  it("keeps the legacy default for live-only OAuth Claude ids", async () => {
+    const provider = genericAnthropicProvider("claude-sonnet-99");
+    provider.authKind = "oauth";
+    provider.vendorKey = "github-copilot";
+    const request = await thinkingRequest(provider);
+
+    expect(request?.thinking).toMatchObject({ type: "enabled" });
+    expect(request?.thinking).toHaveProperty("budget_tokens");
+  });
+
+  it("honors an explicit legacy protocol on a generic Claude model", async () => {
+    const request = await thinkingRequest(
+      genericAnthropicProvider("claude-relay-model", {
+        thinkingProtocol: "legacy",
+      }),
+    );
+
+    expect(request?.thinking).toMatchObject({ type: "enabled" });
+    expect(request?.thinking).toHaveProperty("budget_tokens");
+  });
+
+  it("prioritizes an explicit protocol over a conflicting generic compat value", async () => {
+    const provider = genericAnthropicProvider("claude-relay-model", {
+      thinkingProtocol: "adaptive",
+    });
+    provider.modelConfig = {
+      ...provider.modelConfig!,
+      compat: { forceAdaptiveThinking: false },
+    };
+    const request = await thinkingRequest(provider);
+
+    expect(request?.thinking).toMatchObject({ type: "adaptive" });
+    expect(request?.thinking).not.toHaveProperty("budget_tokens");
+  });
+
+  it("lets a per-model compat record opt a custom Claude id out of adaptive thinking", async () => {
+    const optedOut = genericAnthropicProvider("claude-opus-5-5", {
+      compat: { forceAdaptiveThinking: false },
+    });
+    const model = buildProviderModel(optedOut);
+    expect(model.compat).toMatchObject({ forceAdaptiveThinking: false });
+    const request = await thinkingRequest(optedOut);
+    expect(request?.thinking).toMatchObject({ type: "enabled" });
+    expect(request?.thinking).toHaveProperty("budget_tokens");
+
+    // Precedence also holds when catalog reasoning options would derive the
+    // flag: the explicit record wins.
+    const effortOnly = anthropicProvider("claude-opus-5-5", [
+      { type: "effort", values: ["low", "medium", "high"] },
+    ]);
+    const derived = buildProviderModel({
+      ...effortOnly,
+      modelConfig: {
+        ...effortOnly.modelConfig!,
+        compat: { forceAdaptiveThinking: false },
+      },
+    });
+    expect(derived.compat).toMatchObject({ forceAdaptiveThinking: false });
   });
 });
 
@@ -836,6 +1009,73 @@ describe("buildProviderModel model-level wire API", () => {
     expect(model.api).toBe("openai-completions");
   });
 
+  it("honors the API format selected for a custom endpoint over a model catalog API", () => {
+    const provider: RuntimeProviderConfig = {
+      ...keyedProvider,
+      id: "zhipu-custom-endpoint",
+      name: "Zhipu Responses endpoint",
+      vendorKey: "custom",
+      baseUrl: "https://open.bigmodel.cn/api/v1",
+      modelId: "glm-5.3-flash",
+      apiStyle: "responses",
+      modelConfig: {
+        source: "models.dev",
+        name: "GLM 5.3 Flash",
+        baseUrl: "https://open.bigmodel.cn/api/v1",
+        api: "openai-completions",
+        reasoning: true,
+        input: ["text"],
+        contextWindow: 200_000,
+        maxTokens: 32_000,
+      },
+    };
+
+    expect(buildProviderModel(provider).api).toBe("openai-responses");
+  });
+
+  it("posts a custom endpoint model to the explicitly selected Responses route", async () => {
+    const provider: RuntimeProviderConfig = {
+      ...keyedProvider,
+      id: "zhipu-custom-endpoint",
+      name: "Zhipu Responses endpoint",
+      vendorKey: "custom",
+      baseUrl: "https://open.bigmodel.cn/api/v1",
+      modelId: "glm-5.3-flash",
+      apiStyle: "responses",
+      modelConfig: {
+        source: "models.dev",
+        name: "GLM 5.3 Flash",
+        baseUrl: "https://open.bigmodel.cn/api/v1",
+        api: "openai-completions",
+        reasoning: true,
+        input: ["text"],
+        contextWindow: 200_000,
+        maxTokens: 32_000,
+      },
+    };
+    const model = buildProviderModel(provider);
+    const urls: string[] = [];
+    const fetch = vi.fn(async (input: RequestInfo | URL) => {
+      urls.push(input instanceof Request ? input.url : String(input));
+      return new Response("bad gateway", { status: 502 });
+    });
+
+    const result = await createProviderModels(provider, model)
+      .streamSimple(
+        model,
+        {
+          systemPrompt: "system",
+          messages: [{ role: "user", content: "hello", timestamp: Date.now() }],
+          tools: [],
+        },
+        { fetch },
+      )
+      .result();
+
+    expect(result.stopReason).toBe("error");
+    expect(urls).toEqual(["https://open.bigmodel.cn/api/v1/responses"]);
+  });
+
   it("leaves the same model on completions under other providers (issue #105)", () => {
     const model = buildProviderModel({
       ...responsesCatalogProvider,
@@ -855,6 +1095,48 @@ describe("buildProviderModel model-level wire API", () => {
       },
     }) as any;
     expect(model.api).toBe("openai-completions");
+  });
+
+  it("does not overwrite OpenAI completions with foreign catalog APIs such as Google or Anthropic (issue #1310)", () => {
+    const geminiRelay = buildProviderModel({
+      ...keyedProvider,
+      id: "cliproxy",
+      name: "CliProxy",
+      baseUrl: "http://127.0.0.1:8317/v1",
+      modelId: "gemini-3.8-flash",
+      apiStyle: "chat_completions",
+      modelConfig: {
+        source: "models.dev",
+        name: "Gemini 3.8 Flash",
+        baseUrl: "http://127.0.0.1:8317/v1",
+        api: "google-generative-ai",
+        reasoning: true,
+        input: ["text", "image"],
+        contextWindow: 1048576,
+        maxTokens: 65536,
+      },
+    }) as any;
+    expect(geminiRelay.api).toBe("openai-completions");
+
+    const claudeRelay = buildProviderModel({
+      ...keyedProvider,
+      id: "openai-proxy",
+      name: "OpenAI Proxy",
+      baseUrl: "http://127.0.0.1:8317/v1",
+      modelId: "claude-sonnet-4-6",
+      apiStyle: "chat_completions",
+      modelConfig: {
+        source: "models.dev",
+        name: "Claude Sonnet 4.6",
+        baseUrl: "http://127.0.0.1:8317/v1",
+        api: "anthropic-messages",
+        reasoning: true,
+        input: ["text", "image"],
+        contextWindow: 200000,
+        maxTokens: 64000,
+      },
+    }) as any;
+    expect(claudeRelay.api).toBe("openai-completions");
   });
 
   it("posts responses models to the responses endpoint", async () => {

@@ -12,9 +12,9 @@ main-owned account authorization and group providers without a database schema
 change. See [MirrorCoding account](03-runtime/21-mirrorcoding-account.md) and
 ADR 0299. Historical baseline version references below describe their releases.
 
-- Baseline Version: `0.4.19`
-- Date: `2026-09-29`
-- Status: `Frozen for implementation details (indefinite local permission approvals + Plan checkpoint artifact + approval/execution startup fence + protocol v11 + schema v16 + host-owned plugin session import/read/update/delete P0/P1 + selectable shell catalog + icon-free composer prompt row + turn-boundary context checkpoint compaction + session-scoped work panel + edge-specific work-panel/chat resize ownership + account-scoped Pi model catalog + provider/runtime safety + M5 hardening + settings IA + project archive + sidebar organization + app update delivery + three-platform release + Extensions page density and theme-readable actions + custom global UI font + ChatGPT-style logical project groups)`
+- Baseline Version: `0.4.21`
+- Date: `2026-10-04`
+- Status: `Frozen for implementation details (indefinite local permission approvals + Plan checkpoint artifact + approval/execution startup fence + protocol v11 + schema v16 + host-owned plugin session import/read/update/delete P0/P1 + selectable shell catalog + icon-free composer prompt row + turn-boundary context checkpoint compaction + session-scoped work panel + edge-specific work-panel/chat resize ownership + models.dev chat model catalog + provider/runtime safety + M5 hardening + settings IA + project archive + sidebar organization + app update delivery + three-platform release + Extensions page density and theme-readable actions + custom global UI font + ChatGPT-style logical project groups)`
 - Language policy: **English-first**
 - Backend policy: **Rust host core + pi agent sidecar**
 
@@ -33,7 +33,7 @@ ADR 0299. Historical baseline version references below describe their releases.
 > packaged application update modes in D120 / ADR 0022 while preserving D010.
 > `0.4.7` lifts D010's macOS-only release scope through D126: tag builds
 > publish installers and electron-updater feeds for macOS arm64, Windows x64,
-> and Linux x64.
+> and Linux x64 and arm64.
 > D285 adds a native macOS Intel x64 tag lane alongside the arm64 lane; both
 > macOS architectures publish DMG/ZIP artifacts from their matching runners.
 > `0.4.8` moves the durable Projects index out of the home sidebar and into
@@ -43,6 +43,16 @@ ADR 0299. Historical baseline version references below describe their releases.
 > ADR 0133 / D266 and ADR 0134 describe the historical models.dev source.
 > [Pi 0.99.1 authority](../adr/pi-ai-core-0991-authority.md) supersedes that
 > source with account-scoped Pi Models, preserving explicit Desktop bindings.
+> `0.4.20` restores models.dev as the published chat-model metadata authority
+> through ADR `models-dev-catalog-authority`: the bundled snapshot supplies
+> limits and capabilities, with selected official publishers preferred and
+> safe unanimous third-party matches as fallback. Pi remains the OAuth,
+> transport and typed non-chat operation layer; it no longer supplies sibling
+> chat-model limits.
+> `0.4.21` removes the standalone Settings Import destination. Model, skill,
+> and MCP scans live inside their owning settings pages, while session import
+> remains available to plugins through the existing plugin API (D645 / ADR
+> 0319).
 > `0.4.10` replaces destructive work-panel clearing on conversation switches
 > with runtime session-scoped contexts through D142 / ADR 0028.
 > `0.4.11` adopts turn-boundary model-context checkpoint compaction through
@@ -157,7 +167,7 @@ ADR 0299. Historical baseline version references below describe their releases.
 26. Plugin trust first step: **sha256 checksum; signature later**
 27. First release platform: **macOS arm64 only** — lifted in `0.4.7`/D126;
     tag builds now publish native macOS arm64 and Intel x64, Windows x64, and
-    Linux x64 AppImage, deb, and rpm artifacts
+    Linux x64 and arm64 AppImage, deb, and rpm artifacts
 28. TS schema library: **typebox**
 29. i18n library: **i18next**
 30. Bash: **non-interactive, streamed, and resolved from the selectable shell
@@ -166,12 +176,14 @@ ADR 0299. Historical baseline version references below describe their releases.
 32. Observability MVP: **local logs only**
 33. Error model: **shared AppError code registry**
 34. Provider coverage: **universal via pi-ai native + OpenAI-compatible + custom**
-35. Model policy: **no closed allowlist; account-scoped Pi catalog, generic unknown IDs, and free-form model IDs**
+35. Model policy: **no closed allowlist; models.dev chat metadata, live account IDs, generic unknown IDs, and free-form model IDs**
 36. Provider storage: **Rust SQLite configs + OS secret store references**
 37. Secrets backend: **safeStorage primary + encrypted file fallback**
 38. Workspace ignore: **denylist + defaults + `.pi-desktopignore`**
 39. Tool result limits: **per-tool budgets (128KB / 4000 lines search, 96KB / 4000 lines shell); `truncated` only when a result is cut short**
-40. Settings directory: **Basics / Model configuration / Import / Project archive / Info**;
+40. Settings directory: **General / AI / Shortcuts / Instructions / Models / Skills / MCP / Subagents / Project archive / Cloud sync / Remote Hosts / Info**;
+    external model, skill, and MCP scans live in their owning pages; session
+    import is plugin-owned;
     the project archive owns durable project discovery, archive, restore, and
     reopen workflows;
     plugin management remains the app shell's independent **Plugins** destination

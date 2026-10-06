@@ -28,7 +28,7 @@ use crate::scratch;
 use crate::sessions::{self, UiMessage};
 use crate::state::{AppState, HOST_VERSION, PROTOCOL_VERSION};
 use crate::tools::{self, ToolsExecuteParams};
-use crate::transcripts::CompactionRecord;
+use crate::transcripts::{self, CompactionRecord};
 use crate::turn_queue;
 use crate::workspace;
 
@@ -419,25 +419,18 @@ pub async fn serve(state: Arc<Mutex<AppState>>) -> Result<()> {
                 request_tasks.spawn(async move {
                     let _permit = permit;
                     let budget = request_budget_ms(&method, &params);
-                    let out = match with_request_budget(
-                        budget,
-                        handle_request(state, &method, params, tx.clone()),
+                    // Deferred checkpoint writes are committed after the
+                    // handler releases the state lock and before the response
+                    // leaves. Transcript appends are synced inside their write
+                    // path before derived SQLite rows are committed.
+                    let (handled, committed) = transcripts::commit_writes_of(
+                        with_request_budget(
+                            budget,
+                            handle_request(state, &method, params, tx.clone()),
+                        ),
                     )
-                    .await
-                    {
-                        Ok(result) => JsonRpcResponse {
-                            jsonrpc: "2.0",
-                            id,
-                            result: Some(result),
-                            error: None,
-                        },
-                        Err(err) => JsonRpcResponse {
-                            jsonrpc: "2.0",
-                            id,
-                            result: None,
-                            error: Some(err),
-                        },
-                    };
+                    .await;
+                    let out = response_for(id, handled, committed);
                     if let Ok(raw) = serde_json::to_string(&out) {
                         let _ = tx.send(format!("{raw}\n"));
                     }
@@ -579,6 +572,45 @@ fn rpc_err(code: i64, message: impl Into<String>, error_code: &str) -> JsonRpcEr
         code,
         message: message.into(),
         data: Some(json!({ "errorCode": error_code })),
+    }
+}
+
+/// The response for one handled request, given the handler's own outcome and
+/// the outcome of committing deferred checkpoint writes.
+///
+/// Transcript append failures reach the client directly from the handler,
+/// before the SQLite index update. A deferred checkpoint failure is returned
+/// here. If the handler already failed, its error remains the response and the
+/// checkpoint failure is logged because a response carries one error.
+fn response_for(
+    id: Value,
+    handled: Result<Value, JsonRpcError>,
+    committed: anyhow::Result<()>,
+) -> JsonRpcResponse {
+    let error = match (handled, committed) {
+        (Ok(result), Ok(())) => {
+            return JsonRpcResponse {
+                jsonrpc: "2.0",
+                id,
+                result: Some(result),
+                error: None,
+            }
+        }
+        (Ok(_), Err(device)) => rpc_err(1000, device.to_string(), "INTERNAL"),
+        (Err(error), Ok(())) => error,
+        (Err(error), Err(device)) => {
+            tracing::error!(
+                error = %device,
+                "transcript device flush failed behind a request that failed anyway"
+            );
+            error
+        }
+    };
+    JsonRpcResponse {
+        jsonrpc: "2.0",
+        id,
+        result: None,
+        error: Some(error),
     }
 }
 
@@ -1013,6 +1045,27 @@ fn validate_settings_value(value: &Value) -> Result<(), JsonRpcError> {
             ));
         }
     }
+    if let Some(version) = object.get("updateDismissedVersion") {
+        match version {
+            serde_json::Value::Null => {}
+            serde_json::Value::String(version) => {
+                if version.trim().is_empty() || version.len() > 128 {
+                    return Err(rpc_err(
+                        1002,
+                        "updateDismissedVersion must contain 1 to 128 characters",
+                        "INVALID_PARAMS",
+                    ));
+                }
+            }
+            _ => {
+                return Err(rpc_err(
+                    1002,
+                    "updateDismissedVersion must be a string or null",
+                    "INVALID_PARAMS",
+                ));
+            }
+        }
+    }
     if let Some(infinite_retry) = object.get("infiniteProviderRetry") {
         if !infinite_retry.is_boolean() {
             return Err(rpc_err(
@@ -1198,8 +1251,8 @@ fn resolve_persisted_project_workspace(
     state: &AppState,
     session_id: &str,
 ) -> Result<Option<String>, JsonRpcError> {
-    match sessions::get_session(&state.db, session_id) {
-        Ok(Some(detail)) => Ok(detail.summary.project_path),
+    match sessions::session_summary(&state.db, session_id) {
+        Ok(Some(summary)) => Ok(summary.project_path),
         // A tool request must name a persisted session: an unknown id never
         // inherits the mutable global workspace.
         Ok(None) => Err(rpc_err(1007, "session not found", "SESSION_NOT_FOUND")),
@@ -1211,9 +1264,9 @@ fn resolve_tool_workspace(
     state: &AppState,
     session_id: &str,
 ) -> Result<Option<String>, JsonRpcError> {
-    match sessions::get_session(&state.db, session_id) {
-        Ok(Some(detail)) => {
-            if let Some(project_path) = detail.summary.project_path {
+    match sessions::session_summary(&state.db, session_id) {
+        Ok(Some(summary)) => {
+            if let Some(project_path) = summary.project_path {
                 return Ok(Some(project_path));
             }
             let scratch = scratch::session_dir(&state.data_dir, session_id)
@@ -1303,7 +1356,7 @@ fn requires_external_path_permission(
 /// tool compatibility resolver, a plan submission never inherits the mutable
 /// global workspace or accepts a session-less request.
 fn resolve_plan_workspace(state: &AppState, session_id: &str) -> Result<PathBuf, JsonRpcError> {
-    match sessions::get_session(&state.db, session_id) {
+    match sessions::session_summary(&state.db, session_id) {
         Ok(Some(_)) => {}
         Ok(None) => return Err(plan_rpc_err("PLAN_SESSION_NOT_FOUND")),
         Err(error) => return Err(rpc_err(1000, error.to_string(), "INTERNAL")),
@@ -1317,7 +1370,7 @@ fn resolve_plan_workspace_if_available(
     state: &AppState,
     session_id: &str,
 ) -> Result<Option<PathBuf>, JsonRpcError> {
-    match sessions::get_session(&state.db, session_id) {
+    match sessions::session_summary(&state.db, session_id) {
         Ok(Some(_)) => {}
         Ok(None) => return Err(plan_rpc_err("PLAN_SESSION_NOT_FOUND")),
         Err(error) => return Err(rpc_err(1000, error.to_string(), "INTERNAL")),
@@ -1967,27 +2020,6 @@ async fn handle_request(
                     "CONFLICT",
                 ));
             }
-            // A path that belongs to a multi-folder project group must stay put:
-            // deleting one root would orphan the rest of the group, so callers
-            // remove the folder from the group first. A single-folder stored
-            // group is just a wrapper around one project, so removing that
-            // project also removes the now-empty group record.
-            if let Some(group) = st
-                .db
-                .stored_project_group_for_path(&path)
-                .map_err(|e| rpc_err(1000, e.to_string(), "INTERNAL"))?
-            {
-                if group.roots.len() > 1 {
-                    return Err(rpc_err(
-                        1002,
-                        "project belongs to a multi-folder project group; remove the folder from the group first",
-                        "INVALID_PARAMS",
-                    ));
-                }
-                st.db
-                    .delete_project_group_record(&group.id)
-                    .map_err(|e| rpc_err(1000, e.to_string(), "INTERNAL"))?;
-            }
             let session_ids = st
                 .db
                 .project_session_ids(&path)
@@ -2000,6 +2032,29 @@ async fn handle_request(
                     .map_err(|e| rpc_err(1000, e.to_string(), "INTERNAL"))?
                 {
                     return Err(rpc_err(1008, "project has running sessions", "CONFLICT"));
+                }
+            }
+            // Check for a running session before changing group membership.
+            // A busy project must remain in its original group.
+            // Once the project is known to be idle, detach its root as part of
+            // this delete because the group editor keeps its primary root
+            // fixed and preserves chats on detached non-primary roots (#1358).
+            // If the primary is removed, the first remaining root becomes primary. A
+            // single-folder group is just a wrapper around one project, so
+            // deleting that project also removes the now-empty group record.
+            if let Some(group) = st
+                .db
+                .stored_project_group_for_path(&path)
+                .map_err(|e| rpc_err(1000, e.to_string(), "INTERNAL"))?
+            {
+                if group.roots.len() > 1 {
+                    st.db
+                        .remove_project_from_group(&group.id, &path)
+                        .map_err(|e| rpc_err(1000, e.to_string(), "INTERNAL"))?;
+                } else {
+                    st.db
+                        .delete_project_group_record(&group.id)
+                        .map_err(|e| rpc_err(1000, e.to_string(), "INTERNAL"))?;
                 }
             }
             crate::scheduled::project::pause(&st.db, &path)
@@ -3146,8 +3201,17 @@ async fn handle_request(
                 ));
             }
             let offset = params.get("offset").and_then(|v| v.as_i64()).unwrap_or(0);
+            // The desktop merges this cursor with the sidecar's cursorless
+            // native catalog, so it asks for the whole prefix in one reply
+            // instead of walking the query from the beginning once per page.
+            // The default keeps the thirty-row contract for every other
+            // caller, and host-core clamps the request to a bounded maximum.
+            let limit = params
+                .get("limit")
+                .and_then(|v| v.as_i64())
+                .unwrap_or(crate::session_search::SEARCH_PAGE_SIZE);
             let st = state.lock().await;
-            let page = crate::session_search::search(&st.db, query, offset)
+            let page = crate::session_search::search(&st.db, query, offset, limit)
                 .map_err(|e| rpc_err(1000, e.to_string(), "INTERNAL"))?;
             Ok(json!(page))
         }
@@ -4983,8 +5047,8 @@ mod tests {
     use super::{
         capability_err, handle_request, parse_capability_query, parse_capability_target,
         peek_jsonrpc_id, provider_rpc_err, request_budget_ms, resolve_plan_workspace,
-        resolve_tool_workspace, resolve_tool_workspace_for_call, scope_err, skill_err,
-        with_request_budget, JsonRpcError, RPC_REQUEST_BUDGET_MS,
+        resolve_tool_workspace, resolve_tool_workspace_for_call, response_for, rpc_err, scope_err,
+        skill_err, with_request_budget, JsonRpcError, RPC_REQUEST_BUDGET_MS,
     };
     use crate::agent_capabilities::CapabilityLevel;
     use crate::plans::{PlanResolveParams, PlanSubmitParams};
@@ -5154,7 +5218,7 @@ mod tests {
 
         // First: a wedged holder starves one budgeted request.
         {
-            let guard = holder.lock().await;
+            let _guard = holder.lock().await;
             let waiter_state = state.clone();
             let error = with_request_budget(Some(40), async move {
                 let _st = waiter_state.lock().await;
@@ -5226,6 +5290,39 @@ mod tests {
             capability_err("missing project").data.unwrap()["errorCode"],
             "CAPABILITY_INVALID"
         );
+    }
+
+    /// A request whose transcript lines never reached the device must not answer
+    /// success, and a handler that failed anyway keeps its own error.
+    #[test]
+    fn a_request_that_could_not_flush_its_transcript_does_not_answer_success() {
+        let device = Err(anyhow::anyhow!(
+            "flush /data/sessions/s1.jsonl: Input/output error"
+        ));
+        let unflushed = response_for(Value::Null, Ok(json!({ "ok": true })), device);
+        assert!(
+            unflushed.result.is_none(),
+            "a request whose bytes never reached the device cannot succeed"
+        );
+        assert_eq!(unflushed.error.unwrap().code, 1000);
+
+        let handler_error = || rpc_err(1000, "db is locked", "INTERNAL");
+        let handler_failed = response_for(Value::Null, Err(handler_error()), Ok(()));
+        assert_eq!(handler_failed.error.unwrap().message, "db is locked");
+
+        // Only one error fits in a response; the device error is logged rather
+        // than answered, and the request still does not report success.
+        let both_failed = response_for(
+            Value::Null,
+            Err(handler_error()),
+            Err(anyhow::anyhow!("flush failed")),
+        );
+        assert!(both_failed.result.is_none());
+        assert_eq!(both_failed.error.unwrap().message, "db is locked");
+
+        let answered = response_for(Value::Null, Ok(json!({ "ok": true })), Ok(()));
+        assert!(answered.error.is_none());
+        assert_eq!(answered.result.unwrap()["ok"], true);
     }
 
     #[test]
@@ -5365,6 +5462,118 @@ mod tests {
         .unwrap();
         assert_eq!(updated["group"]["name"], "Adjusted");
         assert_eq!(updated["group"]["roots"].as_array().unwrap().len(), 2);
+    }
+
+    #[tokio::test]
+    async fn grouped_folder_with_chats_can_be_detached_and_deleted_separately() {
+        let data_dir = tempfile::tempdir().unwrap();
+        let primary = data_dir.path().join("primary");
+        let member = data_dir.path().join("member");
+        fs::create_dir_all(&primary).unwrap();
+        fs::create_dir_all(&member).unwrap();
+        let primary_input = primary.to_string_lossy().to_string();
+        let member_input = member.to_string_lossy().to_string();
+        let mut app_state = AppState::open(data_dir.path()).unwrap();
+        app_state.handshook = true;
+        let state = Arc::new(Mutex::new(app_state));
+
+        let group_response = handle_request(
+            state.clone(),
+            "project.group.create",
+            json!({ "name": "Grouped", "folders": [primary_input, member_input] }),
+            mpsc::unbounded_channel().0,
+        )
+        .await
+        .unwrap();
+        let group_id = group_response["group"]["id"].as_str().unwrap().to_string();
+        let primary_path = group_response["group"]["primaryPath"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        let member_path = group_response["group"]["roots"][1]["path"]
+            .as_str()
+            .unwrap()
+            .to_string();
+
+        // This chat predates removing the member from the group.
+        let session_id = {
+            let st = state.lock().await;
+            sessions::create_session_with_options(
+                &st.db,
+                sessions::SessionCreateOptions {
+                    project_path: Some(member_path.clone()),
+                    ..Default::default()
+                },
+            )
+            .unwrap()
+            .id
+        };
+
+        let updated = handle_request(
+            state.clone(),
+            "project.group.update",
+            json!({ "groupId": group_id, "name": "Grouped", "folders": [primary_path] }),
+            mpsc::unbounded_channel().0,
+        )
+        .await
+        .expect("a member with chats can be detached from the group");
+        assert_eq!(updated["group"]["roots"].as_array().unwrap().len(), 1);
+
+        let detached_groups = handle_request(
+            state.clone(),
+            "project.groups.list",
+            json!({}),
+            mpsc::unbounded_channel().0,
+        )
+        .await
+        .unwrap();
+        assert!(detached_groups["groups"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|group| {
+                group["legacy"] == json!(true) && group["roots"][0]["path"] == json!(member_path)
+            }));
+
+        let removed = handle_request(
+            state.clone(),
+            "projects.remove",
+            json!({ "path": member_path }),
+            mpsc::unbounded_channel().0,
+        )
+        .await
+        .expect("the detached project can then be deleted through the project action");
+        assert_eq!(removed["removed"], json!(true));
+        assert_eq!(removed["sessionsRemoved"], json!(1));
+        assert!(member.exists());
+
+        let groups_after_delete = handle_request(
+            state.clone(),
+            "project.groups.list",
+            json!({}),
+            mpsc::unbounded_channel().0,
+        )
+        .await
+        .unwrap();
+        assert_eq!(groups_after_delete["groups"].as_array().unwrap().len(), 1);
+        assert_eq!(
+            groups_after_delete["groups"][0]["roots"][0]["path"],
+            json!(primary_path)
+        );
+
+        let sessions_after_delete = handle_request(
+            state,
+            "session.list",
+            json!({}),
+            mpsc::unbounded_channel().0,
+        )
+        .await
+        .unwrap();
+        assert!(sessions_after_delete["sessions"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|session| session["id"] != json!(session_id)));
     }
 
     #[tokio::test]
@@ -5703,7 +5912,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn projects_remove_refuses_stored_group_root() {
+    async fn projects_remove_detaches_stored_group_root_and_promotes_next_root() {
         let data_dir = tempfile::tempdir().unwrap();
         let grouped_dir = data_dir.path().join("grouped");
         let extra_dir = data_dir.path().join("extra");
@@ -5712,47 +5921,57 @@ mod tests {
         let mut app_state = AppState::open(data_dir.path()).unwrap();
         app_state.handshook = true;
         let grouped_path = grouped_dir.to_string_lossy().to_string();
+        let extra_path = extra_dir.to_string_lossy().to_string();
         app_state
             .db
-            .create_project_group(
-                "Grouped",
-                &[
-                    grouped_path.clone(),
-                    extra_dir.to_string_lossy().to_string(),
-                ],
-            )
+            .create_project_group("Grouped", &[grouped_path.clone(), extra_path.clone()])
             .unwrap();
         let state = Arc::new(Mutex::new(app_state));
 
-        let error = handle_request(
+        let removed = handle_request(
             state.clone(),
             "projects.remove",
-            json!({ "path": grouped_path }),
+            json!({ "path": grouped_path.clone() }),
             mpsc::unbounded_channel().0,
         )
         .await
-        .expect_err("a stored project group root must not be removed");
-        assert_eq!(error.code, 1002);
-        assert_eq!(
-            error.data.as_ref().and_then(|data| data.get("errorCode")),
-            Some(&json!("INVALID_PARAMS"))
-        );
+        .expect("deleting a grouped project root also detaches it");
+        assert_eq!(removed["removed"], json!(true));
 
-        let canonical =
-            crate::db::canonical_project_path(&grouped_path).expect("canonical project path");
+        let canonical_grouped =
+            crate::db::canonical_project_path(&grouped_path).expect("deleted project path");
+        let canonical_extra =
+            crate::db::canonical_project_path(&extra_path).expect("remaining project path");
         let projects = handle_request(
-            state,
+            state.clone(),
             "projects.list",
             json!({}),
             mpsc::unbounded_channel().0,
         )
         .await
         .unwrap();
+        assert!(!projects["projects"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|project| project["path"].as_str() == Some(canonical_grouped.as_str())));
         assert!(projects["projects"]
             .as_array()
             .unwrap()
             .iter()
-            .any(|project| project["path"].as_str() == Some(canonical.as_str())));
+            .any(|project| project["path"].as_str() == Some(canonical_extra.as_str())));
+
+        let groups = handle_request(
+            state,
+            "project.groups.list",
+            json!({}),
+            mpsc::unbounded_channel().0,
+        )
+        .await
+        .unwrap();
+        assert_eq!(groups["groups"].as_array().unwrap().len(), 1);
+        assert_eq!(groups["groups"][0]["primaryPath"], json!(canonical_extra));
+        assert_eq!(groups["groups"][0]["roots"].as_array().unwrap().len(), 1);
     }
 
     /// A single-folder stored project group is just a wrapper around one
@@ -5803,13 +6022,23 @@ mod tests {
     /// A running turn owns its session's tools, working directory, and
     /// transcript writes, so the bulk delete waits until the project is idle.
     #[tokio::test]
-    async fn projects_remove_refuses_while_a_session_is_running() {
+    async fn projects_remove_refuses_while_a_session_is_running_without_detaching_group() {
         let data_dir = tempfile::tempdir().unwrap();
         let project_dir = data_dir.path().join("busy-project");
+        let remaining_dir = data_dir.path().join("remaining-project");
         fs::create_dir_all(&project_dir).unwrap();
+        fs::create_dir_all(&remaining_dir).unwrap();
         let mut app_state = AppState::open(data_dir.path()).unwrap();
         app_state.handshook = true;
         let project_path = project_dir.to_string_lossy().to_string();
+        let remaining_path = remaining_dir.to_string_lossy().to_string();
+        app_state
+            .db
+            .create_project_group(
+                "Busy group",
+                &[project_path.clone(), remaining_path.clone()],
+            )
+            .unwrap();
         let session_id = sessions::create_session_with_options(
             &app_state.db,
             sessions::SessionCreateOptions {
@@ -5860,6 +6089,25 @@ mod tests {
             .unwrap()
             .iter()
             .any(|project| project["path"].as_str() == Some(canonical.as_str())));
+        let groups_while_busy = handle_request(
+            state.clone(),
+            "project.groups.list",
+            json!({}),
+            mpsc::unbounded_channel().0,
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            groups_while_busy["groups"][0]["roots"]
+                .as_array()
+                .unwrap()
+                .len(),
+            2
+        );
+        assert_eq!(
+            groups_while_busy["groups"][0]["primaryPath"],
+            json!(canonical)
+        );
         let listed = handle_request(
             state.clone(),
             "session.list",
@@ -5883,7 +6131,7 @@ mod tests {
         .await
         .unwrap();
         let removed = handle_request(
-            state,
+            state.clone(),
             "projects.remove",
             json!({ "path": project_path }),
             mpsc::unbounded_channel().0,
@@ -5892,6 +6140,28 @@ mod tests {
         .unwrap();
         assert_eq!(removed["removed"], json!(true));
         assert_eq!(removed["sessionsRemoved"], json!(1));
+        let groups_after_delete = handle_request(
+            state,
+            "project.groups.list",
+            json!({}),
+            mpsc::unbounded_channel().0,
+        )
+        .await
+        .unwrap();
+        let remaining_canonical =
+            crate::db::canonical_project_path(&remaining_path).expect("remaining project path");
+        assert_eq!(groups_after_delete["groups"].as_array().unwrap().len(), 1);
+        assert_eq!(
+            groups_after_delete["groups"][0]["roots"]
+                .as_array()
+                .unwrap()
+                .len(),
+            1
+        );
+        assert_eq!(
+            groups_after_delete["groups"][0]["primaryPath"],
+            json!(remaining_canonical)
+        );
     }
 
     #[tokio::test]
@@ -9515,6 +9785,8 @@ mod update_settings_tests {
             json!({"updatePreference": "automatic"}),
             json!({"updatePreference": "manual"}),
             json!({"lastNotifiedUpdateVersion": "0.15.9"}),
+            json!({"updateDismissedVersion": "0.15.9"}),
+            json!({"updateDismissedVersion": null}),
         ] {
             assert!(validate_settings_value(&value).is_ok(), "{value}");
         }
@@ -9524,6 +9796,9 @@ mod update_settings_tests {
             json!({"lastNotifiedUpdateVersion": "  "}),
             json!({"lastNotifiedUpdateVersion": 12}),
             json!({"lastNotifiedUpdateVersion": "x".repeat(129)}),
+            json!({"updateDismissedVersion": "  "}),
+            json!({"updateDismissedVersion": 12}),
+            json!({"updateDismissedVersion": "x".repeat(129)}),
         ] {
             assert!(validate_settings_value(&value).is_err(), "{value}");
         }

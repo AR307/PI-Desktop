@@ -27,8 +27,8 @@ try {
     outfile: join(temp, "fixture.js"), bundle: true, format: "esm", platform: "browser", jsx: "automatic",
     // Reused node_modules may link a primary-checkout dist; test candidate sources.
     alias: {
-      "@pi-desktop/i18n": join(root, "packages/i18n/src/index.ts"),
-      "@pi-desktop/shared": join(root, "packages/shared/src/index.ts"),
+      "@pi-desktop/i18n": join(root, "packages/i18n/src"),
+      "@pi-desktop/shared": join(root, "packages/shared/src"),
       "@pi-desktop/voice-runtime/live": join(root, "packages/voice-runtime/src/live/index.ts"),
     },
     define: { "import.meta.env.DEV": "false", "process.env.NODE_ENV": '"production"' },

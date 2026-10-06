@@ -123,7 +123,7 @@ export function modelMetadata(catalog: ModelsDevCatalog, modelId: string): Model
     ["google", "google-generative-ai"],
   ] as const) {
     const native = catalog.findModel({ vendorKey, modelId });
-    if (native?.provider === vendorKey) return { ...modelConfigFromModelsDev(native), api };
+    if (native?.providerKey === vendorKey) return { ...modelConfigFromModelsDev(native), api };
   }
   const known = catalog.findModel({ modelId });
   return known ? modelConfigFromModelsDev(known) : genericModelConfig(modelId, "");

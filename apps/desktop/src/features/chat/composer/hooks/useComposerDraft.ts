@@ -37,6 +37,7 @@ import {
   isEditableTextReference,
   isPersistedScratchReference,
   isPluginMark,
+  nextChipToken,
   paintEditorValue,
   readEditorValue,
   setEditorCaret,
@@ -45,7 +46,7 @@ import {
 import type { ComposerPrefill } from "../model";
 import { useComposerImagePreview, type ComposerImagePreviewController } from "./useComposerImagePreview";
 
-import { detachImageTokens, isImageReference } from "../image-attachments";
+import { attachImageTokens } from "../image-attachments";
 
 type ComposerSession = { id: string };
 
@@ -134,13 +135,19 @@ export function useComposerDraft({
   const draftKey = draftKeyForSession(activeSessionId);
   const referenceSessionId = activeSessionId ?? "";
   const initialDraft = readComposerDraft(draftKey);
-  const [value, setValue] = useState(() => initialDraft?.text ?? "");
-  const [fileReferences, setFileReferences] = useState<ComposerFileReference[]>(() =>
-    (initialDraft?.fileReferences ?? []).map((fileReference) =>
+  // Images are inline chips, so a draft cached by an older build regains one
+  // token per attachment instead of dropping its chip.
+  const [initialDraftState] = useState(() => {
+    const references = (initialDraft?.fileReferences ?? []).map((fileReference) =>
       createFileReferenceFromSnapshot(fileReference, referenceSessionId),
-    ),
+    );
+    return attachImageTokens(initialDraft?.text ?? "", references, nextChipToken);
+  });
+  const [value, setValue] = useState(initialDraftState.text);
+  const [fileReferences, setFileReferences] = useState<ComposerFileReference[]>(
+    initialDraftState.references,
   );
-  const [cursor, setCursor] = useState(() => initialDraft?.text.length ?? 0);
+  const [cursor, setCursor] = useState(initialDraftState.text.length);
   // `onSelect` fires on every caret move; avoid re-rendering for an unchanged
   // cursor so autocomplete trigger detection stays quiet.
   const updateCursor = (next: number) =>
@@ -236,6 +243,17 @@ export function useComposerDraft({
   const imagePreview = useComposerImagePreview({ references: fileReferences, value, sessionId: referenceSessionId, editorRef: ref });
   const removeChipByTokenRef = useRef<(token: string) => void>(() => {});
   const expandTextReferenceRef = useRef<(token: string) => void>(() => {});
+  const openImageReferenceRef = useRef<(token: string) => void>(() => {});
+  openImageReferenceRef.current = (token) => {
+    const reference = referenceByTokenRef.current.get(token);
+    if (reference) imagePreview.open(reference);
+  };
+  const openSessionReferenceRef = useRef<(token: string) => void>(() => {});
+  openSessionReferenceRef.current = (token) => {
+    const reference = referenceByTokenRef.current.get(token);
+    if (!reference || reference.kind !== "session") return;
+    void useAppStore.getState().selectSession(reference.path).catch(() => undefined);
+  };
   const pendingEditorCaretRef = useRef<number | null>(
     initialDraft?.text ? initialDraft.text.length : null,
   );
@@ -265,6 +283,8 @@ export function useComposerDraft({
         }),
       (token) => removeChipByTokenRef.current(token),
       (token) => expandTextReferenceRef.current(token),
+      (token) => openImageReferenceRef.current(token),
+      (token) => openSessionReferenceRef.current(token),
     );
     editorValueRef.current = nextValue;
   };
@@ -272,17 +292,6 @@ export function useComposerDraft({
   useLayoutEffect(() => {
     const element = ref.current;
     if (!element) return;
-    if (fileReferences.some((reference) => isImageReference(reference) && reference.token)) {
-      const detached = detachImageTokens(value, fileReferences, pendingEditorCaretRef.current ?? cursor);
-      valueRef.current = detached.text;
-      fileReferencesRef.current = detached.references;
-      pendingEditorCaretRef.current = detached.caret;
-      editorValueRef.current = null;
-      setValue(detached.text);
-      setCursor(detached.caret);
-      setFileReferences(detached.references);
-      return;
-    }
     if (editorValueRef.current === value) return;
     paintCurrentDraft(element, value);
     const pendingCaret = pendingEditorCaretRef.current;
@@ -392,13 +401,13 @@ export function useComposerDraft({
       if (previousKey === HOME_DRAFT_KEY) flushScheduledHomeDraftAdopt(draftKey);
       draftKeyRef.current = draftKey;
       const nextDraft = readComposerDraft(draftKey);
-      setValue(nextDraft?.text ?? "");
-      setFileReferences(
-        nextDraft?.fileReferences.map((fileReference) =>
-          createFileReferenceFromSnapshot(fileReference, referenceSessionId),
-        ) ?? [],
+      const nextReferences = (nextDraft?.fileReferences ?? []).map((fileReference) =>
+        createFileReferenceFromSnapshot(fileReference, referenceSessionId),
       );
-      setCursor(nextDraft?.text.length ?? 0);
+      const nextDraftState = attachImageTokens(nextDraft?.text ?? "", nextReferences, nextChipToken);
+      setValue(nextDraftState.text);
+      setFileReferences(nextDraftState.references);
+      setCursor(nextDraftState.text.length);
       return;
     }
     // Current drafts are serialized lazily on switch, unmount, blur, or a
@@ -464,9 +473,12 @@ export function useComposerDraft({
     if (previousWorkspacePathRef.current === workspacePath) return;
     previousWorkspacePathRef.current = workspacePath;
     const current = fileReferencesRef.current;
-    // Plugin marks carry their text, not a workspace path.
+    // Plugin marks carry their text, not a workspace path, and a session
+    // reference names a conversation rather than a file in this project.
     const survives = (fileReference: ComposerFileReference) =>
-      Boolean(fileReference.plugin) || isPersistedScratchReference(fileReference.path);
+      Boolean(fileReference.plugin) ||
+      fileReference.kind === "session" ||
+      isPersistedScratchReference(fileReference.path);
     const kept = current.filter(survives);
     if (kept.length === current.length) return;
     markComposerDraftEdited(draftKeyRef.current);
@@ -503,14 +515,16 @@ export function useComposerDraft({
   useEffect(() => {
     if (!composerPrefill || composerPrefill.sessionId !== activeSessionId) return;
     markComposerDraftEdited(draftKeyForSession(composerPrefill.sessionId));
-    setValue(composerPrefill.text);
+    const prefilledReferences = composerPrefill.fileReferences.map((fileReference) =>
+      createFileReferenceFromSnapshot(fileReference, composerPrefill.sessionId),
+    );
+    const prefilled = attachImageTokens(composerPrefill.text, prefilledReferences, nextChipToken);
+    setValue(prefilled.text);
     setFileReferences((current) => [
       ...current.filter(
         (fileReference) => fileReference.sessionId !== composerPrefill.sessionId,
       ),
-      ...composerPrefill.fileReferences.map((fileReference) =>
-        createFileReferenceFromSnapshot(fileReference, composerPrefill.sessionId),
-      ),
+      ...prefilled.references,
     ]);
     clearComposerPrefill();
     requestAnimationFrame(() => {
@@ -540,10 +554,9 @@ export function useComposerDraft({
     caret: number,
     focus = true,
   ) => {
-    const detached = detachImageTokens(nextText, nextReferences, caret);
-    nextText = detached.text;
-    nextReferences = detached.references;
-    caret = detached.caret;
+    const entered = attachImageTokens(nextText, nextReferences, nextChipToken);
+    nextText = entered.text;
+    nextReferences = entered.references;
     markComposerDraftEdited(draftKeyRef.current);
     // A token may now refer to a different attachment even when text is equal.
     editorValueRef.current = null;
@@ -664,14 +677,16 @@ export function useComposerDraft({
     if (fileReferencesRef.current.some((reference) => reference.sessionId === (currentActiveSessionId ?? ""))) return;
     markComposerDraftEdited(key);
     const sessionId = currentActiveSessionId ?? "";
-    setValue(snapshot.text);
+    const restoredReferences = snapshot.fileReferences.map((fileReference) =>
+      createFileReferenceFromSnapshot(fileReference, sessionId),
+    );
+    const restored = attachImageTokens(snapshot.text, restoredReferences, nextChipToken);
+    setValue(restored.text);
     setFileReferences((current) => [
       ...current.filter((fileReference) => fileReference.sessionId !== sessionId),
-      ...snapshot.fileReferences.map((fileReference) =>
-        createFileReferenceFromSnapshot(fileReference, sessionId),
-      ),
+      ...restored.references,
     ]);
-    setCursor(snapshot.text.length);
+    setCursor(restored.text.length);
   };
 
   const draftSnapshot = (text: string): ComposerDraftSnapshot => ({

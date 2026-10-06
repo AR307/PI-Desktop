@@ -33,6 +33,7 @@ export function MobilePairingDialog({ target, existing, onClose }: {
   const previousGrants = useRef(new Set<string>());
   const connected = account?.status === "connected";
   const expired = Boolean(pairing && Date.parse(pairing.expiresAt) <= now);
+  const coolingDown = (state?.retryAt ?? 0) > now;
 
   useEffect(() => {
     mounted.current = true;
@@ -74,8 +75,12 @@ export function MobilePairingDialog({ target, existing, onClose }: {
       activePairing.current = next;
       setPairing(next);
       setNow(Date.now());
-    } catch {
-      if (mounted.current) setError("pairingFailed");
+    } catch (failure) {
+      if (mounted.current) {
+        const detail = failure instanceof Error ? failure.message : String(failure);
+        const code = ["RATE_LIMITED", "RELAY_UNAVAILABLE", "DEVICE_MISMATCH", "DEVICE_IDENTITY_MISSING", "mobile_service_unavailable", "secure_storage_unavailable"].find((candidate) => detail.includes(candidate));
+        setError(code ?? "pairingFailed");
+      }
     } finally {
       if (mounted.current) setBusy(false);
     }
@@ -136,9 +141,10 @@ export function MobilePairingDialog({ target, existing, onClose }: {
           <p className="mobile-sync-expiry">{t("mobileSync.expires", { time: new Date(pairing.expiresAt).toLocaleTimeString(i18n.language, { hour: "2-digit", minute: "2-digit" }) })}</p>
           <Button variant="ghost" disabled={busy} onClick={() => void navigator.clipboard.writeText(pairing.code).then(() => setCopied(true)).catch(() => setError("copyFailed"))}>{t(copied ? "mobileSync.copied" : "mobileSync.copyCode")}</Button>
         </> : <p role="status">{t(expired ? "mobileSync.expired" : busy ? "mobileSync.creating" : "mobileSync.noCode")}</p>}
-        {!busy && <Button variant="ghost" data-action="regenerate-mobile-pairing" onClick={() => void generate()}>{t(pairing ? "mobileSync.regenerate" : "mobileSync.retry")}</Button>}
+        {!busy && <Button variant="ghost" disabled={coolingDown} data-action="regenerate-mobile-pairing" onClick={() => void generate()}>{t(pairing ? "mobileSync.regenerate" : "mobileSync.retry")}</Button>}
       </>}
       {error && <p role="alert" className="mirrorcoding-error">{t(`mobileSync.${error}`)}</p>}
+      {coolingDown && <p role="status">{t("mobileSync.retryAt", { time: new Date(state!.retryAt!).toLocaleTimeString(i18n.language) })}</p>}
       <p className="mobile-sync-note">{t("mobileSync.onlineNote")}</p>
       <div className="mirrorcoding-actions"><Button variant="ghost" disabled={busy} data-action="close-mobile-pairing" onClick={() => void close()}>{t(pairing && !paired ? "mobileSync.cancelPairing" : "common.close")}</Button></div>
     </div>

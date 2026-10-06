@@ -1,3 +1,4 @@
+import type { PlanHistoryEntry } from "./plans.js";
 /** Shared public types grouped by the owning application domain. */
 import type { SessionMessageOrigin } from "../session-collaboration.js";
 import type { AppError } from "../errors.js";
@@ -83,15 +84,28 @@ export type UsageOperation = Omit<MessageUsage, "operations" | "aggregation"> & 
 export { addUsage, withUsageIdentity } from "../message-usage.js";
 
 export type MessageAttachment = {
-  kind: "image" | "file";
+  kind: "image" | "file" | "session";
   name: string;
-  /** Workspace-relative path or session-scratch absolute path. */
+  /** Workspace-relative path, session-scratch absolute path, or a session id. */
   ref: string;
   mimeType?: string;
   size?: number;
+  /**
+   * Bounded excerpt of a referenced conversation, written by Electron main when
+   * the prompt carries a `pi-desktop://session/<id>` link. The model reads it
+   * with the user's message; other attachment kinds never carry it.
+   */
+  text?: string;
   /** Sidecar-only hydrated image data; never persisted or sent by the host. */
   data?: string;
 };
+
+/** Whether an attachment is a renderer-resolvable file or image reference. */
+export function isRenderableAttachment(
+  attachment: MessageAttachment,
+): attachment is MessageAttachment & { kind: "image" | "file" } {
+  return attachment.kind !== "session";
+}
 
 /** Estimated context footprint for one tool call and its returned result. */
 export type ToolTokenUsage = {
@@ -105,6 +119,15 @@ export type UiMessage = {
   id: string;
   role: UiMessageRole;
   content: string;
+  /** Internal model instructions/tool declarations; never a visible chat row. */
+  modelSystem?: {
+    version: 1;
+    /** The following user input can have been persisted before runtime admission. */
+    beforeMessageId?: string;
+    afterMessageId?: string;
+    /** Opaque JSON preserves section and schema key order across Host storage. */
+    messageJson: string;
+  };
   /** Authenticated agent-to-agent provenance; never inferred from message text. */
   sessionMessage?: SessionMessageOrigin;
   /** Present only on the durable user row created by a Live Voice operation. */
@@ -149,6 +172,8 @@ export type UiMessage = {
   toolStatus?: "running" | "success" | "error" | "denied";
   toolArgs?: unknown;
   toolResult?: unknown;
+  /** Renderer projection; never written back into canonical model evidence. */
+  planHistory?: PlanHistoryEntry;
   /** Estimated tokens occupied by this tool call and its result. */
   toolUsage?: ToolTokenUsage;
   toolCompletedAt?: string;

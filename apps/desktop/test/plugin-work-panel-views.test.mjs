@@ -170,7 +170,10 @@ test("a docked view is as isolated as a detached panel window", () => {
   assert.match(viewHostSource, /contextIsolation: true/);
   assert.match(viewHostSource, /nodeIntegration: false/);
   assert.match(viewHostSource, /webviewTag: false/);
-  assert.match(viewHostSource, /preload: join\(__dirname, "\.\.\/preload\/plugin-panel\.js"\)/);
+  assert.match(
+    viewHostSource,
+    /preload: join\(\s*getModuleDirectory\(import\.meta\.url\),\s*"\.\.\/preload\/plugin-panel\.js",?\s*\)/,
+  );
   // `window.open` would mint a chromeless window outside that policy.
   assert.match(viewHostSource, /setWindowOpenHandler\(\(\{ url \}\) =>/);
   assert.match(viewHostSource, /action: "deny"/);
@@ -197,6 +200,10 @@ test("an embedded view drops the window-control chrome", () => {
     preloadSource,
     /if \(isEmbeddedPanel\(\)\) \{[\s\S]*--pi-plugin-titlebar-height", "0px"[\s\S]*return;/,
   );
+  assert.match(preloadSource, /resetEmbeddedSurfaceChrome\(\)/);
+  assert.match(preloadSource, /element\.style\.setProperty\("margin", "0"\)/);
+  assert.match(preloadSource, /element\.style\.setProperty\("border", "0"\)/);
+  assert.match(preloadSource, /element\.style\.setProperty\("background", "transparent"\)/);
   // The bridge is identical either way, so one HTML entry works in both.
   assert.match(preloadSource, /contextBridge\.exposeInMainWorld\("pluginBridge", bridge\)/);
 });

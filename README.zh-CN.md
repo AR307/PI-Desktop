@@ -105,7 +105,7 @@ Subagent 与 Worker Session 可以承担独立任务并行工作。
 > [!NOTE]
 > **PI-Desktop 目前仍处于 Early Preview。** 已可用于真实开发工作流，部分 API、插件接口与桌面能力仍在持续演进。
 
-> **当前发布线：0.15.x（Early Preview）。**
+> **当前发布线：0.16.x（Early Preview）。**
 
 ---
 
@@ -579,7 +579,7 @@ Agent / Plan / Goal
 | macOS    | Apple Silicon | `.dmg` / `.zip`                         |
 | macOS    | Intel         | `.dmg` / `.zip`                         |
 | Windows  | x64           | 安装程序 / `.zip`                       |
-| Linux    | x64           | `.AppImage` / `.deb` / `.rpm` / `.asar` |
+| Linux    | x64 / ARM64   | `.AppImage` / `.deb` / `.rpm` / `.asar` |
 
 macOS Release 使用 Developer ID 签名并经过 Apple Notarization。
 
@@ -588,7 +588,7 @@ macOS Release 使用 Developer ID 签名并经过 Apple Notarization。
 
 <br />
 
-Linux x64 需要 **glibc 2.35+**。
+Linux 软件包（x64 与 arm64）需要 **glibc 2.35+**。
 
 常见支持版本：
 
@@ -614,6 +614,7 @@ Agent Runtime 使用：
 
 * `pi-ai`
 * `pi-agent-core`
+* `pi-coding-agent`
 
 > **Pi 提供 Agent Engine，PI-Desktop 在其上构建 Desktop Workspace、Session、权限、插件与 Agent 编排。**
 

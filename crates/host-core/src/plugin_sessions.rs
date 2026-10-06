@@ -263,6 +263,7 @@ fn parse_message(
         assistant_replay: None,
         hosted_search: None,
         image_generation: None,
+        model_system: None,
         session_message: None,
     })
 }

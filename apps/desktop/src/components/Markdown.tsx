@@ -3,6 +3,7 @@ import {
   Fragment,
   isValidElement,
   memo,
+  Profiler,
   useCallback,
   useContext,
   useEffect,
@@ -25,6 +26,14 @@ import {
   emptyMarkdownBlockCache,
   markdownRemarkPlugins,
 } from "../lib/markdown-blocks";
+import {
+  MAX_STREAMING_MARKDOWN_TAIL_CODE_UNITS,
+  MAX_SYNC_MARKDOWN_CODE_UNITS,
+} from "../lib/render-content-limits";
+import {
+  beginRenderDiagnostic,
+  recordRenderDiagnostic,
+} from "../lib/render-diagnostics";
 import { useTranslation } from "react-i18next";
 import type { ThemedToken } from "shiki";
 import "katex/dist/katex.min.css";
@@ -532,11 +541,17 @@ function InlineCode({
       type="button"
       className="chat-code-link"
       title={target.kind === "file" ? fileTitle : urlTitle}
-      onClick={() =>
-        target.kind === "file"
-          ? openFileRef(text ?? target.path, baseDir)
-          : openHttpUrl(target.url)
-      }
+      onClick={() => {
+        if (target.kind === "file") {
+          openFileRef(text ?? target.path, baseDir);
+          return;
+        }
+        if (target.kind === "session") {
+          void useAppStore.getState().selectSession(target.sessionId).catch(() => undefined);
+          return;
+        }
+        openHttpUrl(target.url);
+      }}
       onContextMenu={
         target.kind === "file" && openFileMenu
           ? (event) =>
@@ -854,12 +869,16 @@ const rehypePlugins = [rehypeRaw, [rehypeSanitize, sanitizeSchema], rehypeKatex]
  * Splitting and its streaming reuse live in `markdown-blocks`, which owns the
  * rules a slice has to satisfy before it can be parsed on its own.
  */
-function useBlocks(source: string): string[] {
+function useBlocks(source: string, maxTailCodeUnits: number): string[] {
   const cacheRef = useRef(emptyMarkdownBlockCache);
   return useMemo(() => {
-    cacheRef.current = advanceMarkdownBlocks(cacheRef.current, source);
+    cacheRef.current = advanceMarkdownBlocks(
+      cacheRef.current,
+      source,
+      maxTailCodeUnits,
+    );
     return cacheRef.current.blocks;
-  }, [source]);
+  }, [source, maxTailCodeUnits]);
 }
 
 const Block = memo(function MarkdownBlock({
@@ -901,15 +920,29 @@ const Block = memo(function MarkdownBlock({
     [sourceOffset],
   );
   return (
-    <MarkdownBlockContext.Provider value={context}>
-      <ReactMarkdown
-        remarkPlugins={remarkPlugins}
-        rehypePlugins={positionedRehypePlugins}
-        components={markdownComponents}
-      >
-        {raw}
-      </ReactMarkdown>
-    </MarkdownBlockContext.Provider>
+    <Profiler
+      id="transcript-markdown-block"
+      onRender={(_id, phase, actualDuration, baseDuration, startTime, commitTime) => {
+        recordRenderDiagnostic("markdown-react-render", {
+          sourceLength: raw.length,
+          durationMs: actualDuration,
+          baseDurationMs: baseDuration,
+          startTime,
+          commitTime,
+          renderPhase: phase,
+        });
+      }}
+    >
+      <MarkdownBlockContext.Provider value={context}>
+        <ReactMarkdown
+          remarkPlugins={remarkPlugins}
+          rehypePlugins={positionedRehypePlugins}
+          components={markdownComponents}
+        >
+          {raw}
+        </ReactMarkdown>
+      </MarkdownBlockContext.Provider>
+    </Profiler>
   );
 });
 
@@ -917,9 +950,12 @@ export const Markdown = memo(function Markdown({
   source,
   renderDiagrams = true,
   baseDir,
+  streaming = false,
 }: {
   source: string;
   renderDiagrams?: boolean;
+  /** True only while an assistant message is still receiving text. */
+  streaming?: boolean;
   /** Workspace-relative directory of the source file, for `./` / `../` links. */
   baseDir?: string;
 }) {
@@ -941,22 +977,64 @@ export const Markdown = memo(function Markdown({
     (event, target) => openFileMenu(event, { items: fileMenuItems(target) }),
     [fileMenuItems, openFileMenu],
   );
+  const { t } = useTranslation();
+  const fullSourceTooLarge = source.length > MAX_SYNC_MARKDOWN_CODE_UNITS;
+  const markdownTailLimit = streaming
+    ? MAX_STREAMING_MARKDOWN_TAIL_CODE_UNITS
+    : MAX_SYNC_MARKDOWN_CODE_UNITS;
   // Keep normalization length-preserving so source anchors and the bracket
   // display plugin still address the original text. Block splitting uses the
   // same math grammar as rendering, including unclosed streaming math blocks.
   const normalizedSource = useMemo(
-    () => normalizeLatexMathDelimiters(source),
-    [source],
+    () => {
+      const finishDiagnostic = beginRenderDiagnostic("markdown-normalize", {
+        sourceLength: source.length,
+      });
+      if (fullSourceTooLarge) {
+        finishDiagnostic({ reason: "source-limit" });
+        return "";
+      }
+      const normalized = normalizeLatexMathDelimiters(source);
+      finishDiagnostic();
+      return normalized;
+    },
+    [fullSourceTooLarge, source],
   );
-  const blocks = useBlocks(normalizedSource);
+  const blocks = useBlocks(
+    fullSourceTooLarge ? "" : normalizedSource,
+    markdownTailLimit,
+  );
   let sourceOffset = 0;
   return (
     <MarkdownFileMenuContext.Provider value={openMarkdownFileMenu}>
       <MarkdownBaseDirContext.Provider value={baseDir ?? ""}>
-        {blocks.map((raw, i) => {
+        {fullSourceTooLarge ? (
+          <div
+            className="markdown-plain-fallback"
+            data-source-start={0}
+            data-source-end={source.length}
+          >
+            <div role="status">{t("chat.markdownPlainTextFallback")}</div>
+            <pre>{source}</pre>
+          </div>
+        ) : blocks.map((raw, i) => {
           const start = sourceOffset;
           sourceOffset = start + raw.length;
           const originalRaw = source.slice(start, start + raw.length);
+          const tailTooLarge = streaming && raw.length > markdownTailLimit;
+          if (tailTooLarge) {
+            return (
+              <div
+                className="markdown-plain-fallback"
+                key={i}
+                data-source-start={start}
+                data-source-end={start + raw.length}
+              >
+                <div role="status">{t("chat.markdownPlainTextFallback")}</div>
+                <pre>{originalRaw}</pre>
+              </div>
+            );
+          }
           return (
             <Block
               key={i}

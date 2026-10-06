@@ -51,8 +51,6 @@ export default defineConfig({
     // kills the whole Main bundle before the app starts, so state the documented
     // "no native accelerator" input to that branch at build time instead.
     define: {
-      // Resolve extracted Main resource paths at the emitted ESM module.
-      __dirname: "import.meta.dirname",
       "process.env.WS_NO_BUFFER_UTIL": "\"1\"",
       "process.env.WS_NO_UTF_8_VALIDATE": "\"1\"",
     },
@@ -72,7 +70,7 @@ export default defineConfig({
           "transcribe-cpp",
         ],
         input: {
-          index: resolve(__dirname, "electron/main/index.ts"),
+          index: resolve(__dirname, "electron/main/entry.ts"),
           // Forked per plugin by PluginRuntime (ADR 0008); must stay a
           // standalone entry so utilityProcess can point at a real file.
           "plugin-host-process": resolve(__dirname, "electron/main/plugin-host-process.mjs"),
@@ -113,11 +111,28 @@ export default defineConfig({
     },
     plugins: [react(), tailwindcss(), tightenCsp(), dropLegacyFontFallbacks()],
     resolve: {
-      alias: {
-        "@renderer": resolve("src"),
+      alias: [
+        { find: "@renderer", replacement: resolve("src") },
+        {
+          find: /^@pi-desktop\/i18n\/locales\/([^/]+)$/,
+          replacement: resolve(
+            __dirname,
+            "../../packages/i18n/src/locales/$1/index.ts",
+          ),
+        },
+        {
+          find: "@pi-desktop/i18n/locale-info",
+          replacement: resolve(
+            __dirname,
+            "../../packages/i18n/src/locale-info.ts",
+          ),
+        },
         // Always read locale source so new keys work without a stale packages/*/dist.
-        "@pi-desktop/i18n": resolve(__dirname, "../../packages/i18n/src/index.ts"),
-      },
+        {
+          find: "@pi-desktop/i18n",
+          replacement: resolve(__dirname, "../../packages/i18n/src/index.ts"),
+        },
+      ],
     },
   },
 });

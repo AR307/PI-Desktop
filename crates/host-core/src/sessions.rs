@@ -13,6 +13,7 @@ use crate::transcripts::{self, CompactionRecord, MessageRecord, RevisionRecord};
 
 mod delegation_updates;
 mod fork_files;
+mod model_system;
 mod usage;
 pub use usage::record_usage;
 
@@ -120,6 +121,13 @@ pub struct SessionSummary {
     pub permission_mode: String,
     pub updated_at: String,
     pub created_at: String,
+    /// True when this session is the transcript owned by a scheduled-task run.
+    /// Automation transcripts are entered from the Scheduled page, so the
+    /// sidebar and session search hide them (issue #1291). The value is derived
+    /// from `task_runs.session_id` on read; no session column stores it, and
+    /// deleting the task frees its sessions back into the ordinary lists.
+    #[serde(default)]
+    pub scheduled_run: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -151,6 +159,11 @@ pub struct MessageAttachment {
     pub mime_type: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub size: Option<i64>,
+    /// Bounded excerpt of a referenced conversation (`kind: "session"`), written
+    /// by Electron main when the prompt carried a `pi-desktop://session/<id>`
+    /// link. Travels with the user message so the model keeps reading it.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub text: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -243,6 +256,9 @@ pub struct UiMessage {
     /// Durable image results and pending anonymous downloads.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub image_generation: Option<Value>,
+    /// Internal model-context state, preserved outside visible message text.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model_system: Option<Value>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -259,6 +275,8 @@ pub struct SessionDetail {
     #[serde(flatten)]
     pub summary: SessionSummary,
     pub messages: Vec<UiMessage>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub plan_history: Vec<crate::plans::PlanHistoryEntry>,
     /// Owning Task for a nested messageAround target, outside the page cursors.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub navigation_parent: Option<UiMessage>,
@@ -322,6 +340,9 @@ fn is_default_title(title: &str) -> bool {
 /// the search index row (None for tool rows, matching the FTS triggers).
 pub(crate) fn ui_to_record(message: &UiMessage) -> (MessageRecord, Option<String>) {
     let mut meta_obj = serde_json::Map::new();
+    if let Some(system) = &message.model_system {
+        meta_obj.insert("modelSystem".into(), system.clone());
+    }
     if let Some(command) = &message.command {
         meta_obj.insert("command".into(), json!(command));
     }
@@ -454,6 +475,9 @@ pub(crate) fn ui_to_record(message: &UiMessage) -> (MessageRecord, Option<String
                 if let Some(size) = attachment.size {
                     block.insert("size".into(), json!(size));
                 }
+                if let Some(text) = &attachment.text {
+                    block.insert("text".into(), json!(text));
+                }
                 blocks.push(Value::Object(block));
             }
         }
@@ -480,6 +504,7 @@ pub(crate) fn record_to_ui(record: MessageRecord) -> UiMessage {
         _ => Vec::new(),
     };
     let meta = record.meta.unwrap_or(Value::Null);
+    let model_system = meta.get("modelSystem").cloned();
     let command = meta
         .get("command")
         .and_then(Value::as_str)
@@ -597,6 +622,10 @@ pub(crate) fn record_to_ui(record: MessageRecord) -> UiMessage {
                     .and_then(|v| v.as_str())
                     .map(str::to_string),
                 size: block.get("size").and_then(|v| v.as_i64()),
+                text: block
+                    .get("text")
+                    .and_then(|v| v.as_str())
+                    .map(str::to_string),
             })
         })
         .collect::<Vec<_>>();
@@ -659,6 +688,7 @@ pub(crate) fn record_to_ui(record: MessageRecord) -> UiMessage {
             response_diagnostics: response_diagnostics.clone(),
             assistant_replay: assistant_replay.clone(),
             image_generation: image_generation.clone(),
+            model_system: None,
         }
     } else {
         let content = blocks
@@ -706,6 +736,7 @@ pub(crate) fn record_to_ui(record: MessageRecord) -> UiMessage {
             response_diagnostics,
             assistant_replay,
             image_generation,
+            model_system,
         }
     }
 }
@@ -925,6 +956,19 @@ fn clone_records_for_fork(
                 .cloned()
                 .unwrap_or_else(|| Uuid::new_v4().to_string());
             if let Some(meta) = record.meta.as_mut().and_then(Value::as_object_mut) {
+                if let Some(system) = meta.get_mut("modelSystem").and_then(Value::as_object_mut) {
+                    for key in ["beforeMessageId", "afterMessageId"] {
+                        if let Some(new_id) = system
+                            .get(key)
+                            .and_then(Value::as_str)
+                            .and_then(|id| message_ids.get(id))
+                        {
+                            system.insert(key.into(), json!(new_id));
+                        } else {
+                            system.remove(key);
+                        }
+                    }
+                }
                 meta.remove("revisionRootId");
                 meta.remove("revisionCount");
                 meta.remove("activeRevision");
@@ -1022,8 +1066,9 @@ pub(crate) fn insert_index_row(
 ) -> Result<()> {
     let mut stmt = conn.prepare_cached(
         "INSERT INTO messages (
-            id, session_id, turn_id, seq, role, tool_name, is_error, text, created_at
-         ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+            id, session_id, turn_id, seq, role, tool_name, is_error, text, created_at,
+            streaming
+         ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
     )?;
     stmt.execute(params![
         record.id,
@@ -1035,8 +1080,25 @@ pub(crate) fn insert_index_row(
         record.is_error,
         text,
         ts_to_ms(&record.created_at),
+        i64::from(record_is_streaming(record)),
     ])?;
     Ok(())
+}
+
+/// Whether a record's own metadata marks it as a provisional, streaming
+/// assistant row.
+///
+/// The index stores this answer so the write path can ask "is this message still
+/// streaming?" with one indexed lookup. The transcript remains the source of
+/// truth: a rebuild recomputes the column from the file.
+fn record_is_streaming(record: &MessageRecord) -> bool {
+    record.role == "assistant"
+        && record
+            .meta
+            .as_ref()
+            .and_then(|meta| meta.get("status"))
+            .and_then(Value::as_str)
+            == Some("streaming")
 }
 
 fn recovered_session_title(records: &[MessageRecord]) -> String {
@@ -1212,7 +1274,8 @@ const SUMMARY_SELECT: &str =
     "SELECT s.id, s.title, s.last_seq, p.path, s.model_id, s.provider_id, s.mode,
             s.thinking_level, s.permission_mode, s.updated_at, s.created_at,
             COALESCE((SELECT value_json = 'true' FROM kv WHERE ns = 'app' AND key = 'session-fast:' || s.id), 0) AS fast,
-            COALESCE((SELECT value_json = 'true' FROM kv WHERE ns = 'app' AND key = 'session-ultra:' || s.id), 0) AS ultra
+            COALESCE((SELECT value_json = 'true' FROM kv WHERE ns = 'app' AND key = 'session-ultra:' || s.id), 0) AS ultra,
+            EXISTS (SELECT 1 FROM task_runs r WHERE r.session_id = s.id) AS scheduled_run
      FROM sessions s LEFT JOIN projects p ON p.id = s.project_id
      WHERE s.deleted_at IS NULL";
 
@@ -1231,6 +1294,9 @@ pub(crate) fn summary_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Sess
         permission_mode: row.get(8)?,
         updated_at: ms_to_ts(row.get(9)?),
         created_at: ms_to_ts(row.get(10)?),
+        // Read by name: search and listing build their own column lists, so the
+        // alias keeps this mapper independent of any one query's column order.
+        scheduled_run: row.get("scheduled_run")?,
     })
 }
 
@@ -1277,7 +1343,12 @@ pub fn list_sessions(db: &Database) -> Result<Vec<SessionSummary>> {
         let mut session = row?;
         if is_default_title(&session.title) {
             if let Some(title) = first_user_title(db, &session.id)? {
-                // Persist so Recents stays stable across restarts.
+                // Persist so Recents stays stable across restarts. Each write is
+                // its own commit, which looks like an obvious batching win —
+                // batching them into one transaction measured 0.114 ms -> 0.022 ms
+                // for forty sessions, and was left out anyway: a
+                // session stops having a default title the first time this runs,
+                // so the extra commits happen once per session, not per read.
                 let _ = rename_session(db, &session.id, &title);
                 session.title = title;
             }
@@ -1406,6 +1477,8 @@ pub fn create_session_with_options(
         permission_mode,
         updated_at: ms_to_ts(now),
         created_at: ms_to_ts(now),
+        // The run row that owns this transcript is written after creation.
+        scheduled_run: false,
     })
 }
 
@@ -1472,6 +1545,23 @@ pub fn get_session(db: &Database, id: &str) -> Result<Option<SessionDetail>> {
     get_session_with_options(db, id, SessionReadOptions::default())
 }
 
+/// The session's index row, without touching the transcript.
+///
+/// `get_session` materializes every message to answer the same question, which
+/// made a plain index lookup cost O(transcript bytes). The workspace resolvers
+/// ran a full JSONL parse per tool call and per permission evaluation — twice
+/// per plan submission — only to read `project_path`, and two of them ran it
+/// just to check that the session exists. Everything they need is in
+/// `SUMMARY_SELECT`, so this is one indexed row.
+pub fn session_summary(db: &Database, id: &str) -> Result<Option<SessionSummary>> {
+    let sql = format!("{SUMMARY_SELECT} AND s.id = ?1");
+    Ok(db
+        .conn()
+        .prepare_cached(&sql)?
+        .query_row(params![id], summary_from_row)
+        .optional()?)
+}
+
 /// Load a session detail with an optional renderer-facing message window.
 /// The uncapped default is intentionally retained for the sidecar and for
 /// mutation paths that need the canonical transcript. Renderer callers should
@@ -1481,13 +1571,7 @@ pub fn get_session_with_options(
     id: &str,
     options: SessionReadOptions,
 ) -> Result<Option<SessionDetail>> {
-    let sql = format!("{SUMMARY_SELECT} AND s.id = ?1");
-    let summary = db
-        .conn()
-        .prepare_cached(&sql)?
-        .query_row(params![id], summary_from_row)
-        .optional()?;
-    let Some(summary) = summary else {
+    let Some(summary) = session_summary(db, id)? else {
         return Ok(None);
     };
 
@@ -1564,6 +1648,17 @@ pub fn get_session_with_options(
             .collect(),
         None => records.into_iter().map(record_to_ui).collect(),
     };
+    let plan_calls: Vec<&str> = messages
+        .iter()
+        .filter(|message| {
+            matches!(
+                message.tool_name.as_deref(),
+                Some("SubmitPlan" | "SubmitGoal")
+            )
+        })
+        .filter_map(|message| message.tool_call_id.as_deref())
+        .collect();
+    let plan_history = crate::plans::history_for_tool_calls(db, id, &plan_calls)?;
     let parent_call_id = options.message_around.as_deref().and_then(|target| {
         messages
             .iter()
@@ -1583,6 +1678,7 @@ pub fn get_session_with_options(
     };
     Ok(Some(SessionDetail {
         summary,
+        plan_history,
         navigation_parent,
         message_start,
         message_end,
@@ -1768,10 +1864,13 @@ pub fn fork_session_through(
         permission_mode: source.summary.permission_mode,
         updated_at: created_at.clone(),
         created_at,
+        // A fork is the user's own conversation, not the automation's transcript.
+        scheduled_run: false,
     };
     let messages = records.into_iter().map(record_to_ui).collect();
     Ok(ForkSessionResult::Created(Box::new(SessionDetail {
         summary,
+        plan_history: Vec::new(),
         navigation_parent: None,
         message_start: None,
         message_end: None,
@@ -1971,6 +2070,7 @@ pub fn append_message(
     message: &UiMessage,
     turn_id: Option<&str>,
 ) -> Result<()> {
+    model_system::validate(message)?;
     let message = crate::session_collaboration::prepare_append(db, session_id, message, turn_id)?;
     let session_created = ensure_session_for_append(db, session_id)?;
     let (mut record, text) = ui_to_record(&message);
@@ -1988,16 +2088,25 @@ pub fn append_message(
             && message.status.as_deref() != Some("streaming")
             && streaming_assistant_indexed(db, session_id, &record.id)?
         {
-            invalidate_transcript_layout(session_id);
-            if !transcripts::update_message(db.data_dir(), session_id, &record)? {
-                return Err(anyhow!(
-                    "streaming assistant is missing from its transcript"
-                ));
+            let stamped = "UPDATE messages SET text = ?3, is_error = ?4, streaming = 0
+                 WHERE session_id = ?1 AND id = ?2";
+            if transcripts::update_message(db.data_dir(), session_id, &record)? {
+                db.conn().execute(
+                    stamped,
+                    params![session_id, record.id, text, record.is_error],
+                )?;
+            } else {
+                // The index knows this id but the transcript does not. A device
+                // that lost a provisional row's bytes leaves exactly this shape,
+                // and the caller is delivering the settled row for it: appending
+                // keeps the file the source of truth instead of failing a reply
+                // whose only other copy is the checkpoint.
+                transcripts::append_message(db.data_dir(), session_id, &session_created, &record)?;
+                db.conn().execute(
+                    stamped,
+                    params![session_id, record.id, text, record.is_error],
+                )?;
             }
-            db.conn().execute(
-                "UPDATE messages SET text = ?3, is_error = ?4 WHERE session_id = ?1 AND id = ?2",
-                params![session_id, record.id, text, record.is_error],
-            )?;
         } else {
             delegation_updates::refresh_task(db, session_id, &message, &record, text.as_deref())?;
             return Ok(());
@@ -2070,11 +2179,8 @@ pub fn append_message(
 fn message_indexed(db: &Database, session_id: &str, message_id: &str) -> Result<bool> {
     let existing: Option<i64> = db
         .conn()
-        .query_row(
-            "SELECT mid FROM messages WHERE id = ?1 AND session_id = ?2",
-            params![message_id, session_id],
-            |row| row.get(0),
-        )
+        .prepare_cached("SELECT mid FROM messages WHERE id = ?1 AND session_id = ?2")?
+        .query_row(params![message_id, session_id], |row| row.get(0))
         .optional()?;
     Ok(existing.is_some())
 }
@@ -2083,11 +2189,8 @@ fn message_indexed(db: &Database, session_id: &str, message_id: &str) -> Result<
 fn message_owner(db: &Database, message_id: &str) -> Result<Option<String>> {
     let owner: Option<String> = db
         .conn()
-        .query_row(
-            "SELECT session_id FROM messages WHERE id = ?1",
-            params![message_id],
-            |row| row.get(0),
-        )
+        .prepare_cached("SELECT session_id FROM messages WHERE id = ?1")?
+        .query_row(params![message_id], |row| row.get(0))
         .optional()?;
     Ok(owner)
 }
@@ -2096,10 +2199,13 @@ fn namespaced_message_id(session_id: &str, message_id: &str) -> String {
     format!("{session_id}:{message_id}")
 }
 
+/// Whether this session's transcript already holds `message_id`.
+///
+/// This used to read the whole transcript, which parses every record's block
+/// tree to answer a presence question; the transcript store answers it from the
+/// id field alone.
 fn transcript_contains_id(db: &Database, session_id: &str, message_id: &str) -> Result<bool> {
-    Ok(transcripts::read_transcript(db.data_dir(), session_id)?
-        .iter()
-        .any(|record| record.id == message_id))
+    transcripts::transcript_contains_id(db.data_dir(), session_id, message_id)
 }
 
 fn valid_turn_reference(
@@ -2112,11 +2218,8 @@ fn valid_turn_reference(
     };
     let owner: Option<String> = db
         .conn()
-        .query_row(
-            "SELECT session_id FROM turns WHERE id = ?1",
-            params![turn_id],
-            |row| row.get(0),
-        )
+        .prepare_cached("SELECT session_id FROM turns WHERE id = ?1")?
+        .query_row(params![turn_id], |row| row.get(0))
         .optional()?;
     if owner.as_deref() == Some(session_id) {
         return Ok(Some(turn_id.to_string()));
@@ -2212,7 +2315,44 @@ fn rebuild_session_message_index(
     Ok(())
 }
 
+/// Whether the last copy of `message_id` is a provisional, streaming assistant
+/// row.
+///
+/// The index row mirrors that copy: it is inserted with the row, the append that
+/// lands the terminal snapshot re-stamps it, and an index rebuild recomputes it
+/// from the transcript. So this is one indexed lookup instead of a backwards walk
+/// over the transcript's message lines, 64 lines per window — the shape that cost
+/// 46 ms on a 104 MB transcript once the target sat 512 lines from the tail, and
+/// a read of every byte of the file when it sat further, twice per turn.
+///
+/// A NULL row is a message written before the column existed; those still answer
+/// from the transcript, which is why an unrebuilt database behaves exactly as it
+/// did before the cache. No row at all means the id has no index entry, which
+/// agrees with the transcript's own "the id is not in the file" answer.
 fn streaming_assistant_indexed(db: &Database, session_id: &str, message_id: &str) -> Result<bool> {
+    let indexed: Option<(String, Option<i64>)> = db
+        .conn()
+        .prepare_cached("SELECT role, streaming FROM messages WHERE id = ?1 AND session_id = ?2")?
+        .query_row(params![message_id, session_id], |row| {
+            Ok((row.get(0)?, row.get(1)?))
+        })
+        .optional()?;
+    match indexed {
+        Some((role, Some(streaming))) => Ok(role == "assistant" && streaming != 0),
+        Some((_, None)) => streaming_assistant_in_transcript(db, session_id, message_id),
+        None => Ok(false),
+    }
+}
+
+/// The same question answered from the transcript: walk backwards from the tail
+/// 64 message lines at a time and stop at the last copy of the id. This is the
+/// fallback for a message the index cannot answer for, which is a row written
+/// before the cached column existed.
+fn streaming_assistant_in_transcript(
+    db: &Database,
+    session_id: &str,
+    message_id: &str,
+) -> Result<bool> {
     let layout = session_layout(db, session_id)?;
     let mut end = layout.message_count();
     while end > 0 {
@@ -2230,13 +2370,7 @@ fn streaming_assistant_indexed(db: &Database, session_id: &str, message_id: &str
             .rev()
             .find(|record| record.id == message_id)
         {
-            return Ok(record.role == "assistant"
-                && record
-                    .meta
-                    .as_ref()
-                    .and_then(|meta| meta.get("status"))
-                    .and_then(Value::as_str)
-                    == Some("streaming"));
+            return Ok(record_is_streaming(record));
         }
         end = start;
     }
@@ -2341,10 +2475,26 @@ pub fn recover_inflight_message(
             return Ok(None);
         }
     };
+    // The file decides here, not the index. A device that lost a settled row's
+    // bytes can leave the index claiming the reply is finished while the
+    // transcript still holds the provisional row -- and that provisional row is
+    // what makes the checkpoint the durable copy of the reply. An index row whose
+    // transcript row is gone counts as provisional too, because the checkpoint is
+    // then the only copy left.
     let indexed = message_indexed(db, session_id, &inflight.message.id)?;
-    if indexed && !streaming_assistant_indexed(db, session_id, &inflight.message.id)? {
+    let provisional = streaming_assistant_in_transcript(db, session_id, &inflight.message.id)?
+        || (indexed && streaming_assistant_indexed(db, session_id, &inflight.message.id)?);
+    if indexed && !provisional {
         transcripts::remove_inflight(db.data_dir(), session_id)?;
         return Ok(None);
+    }
+    if indexed && provisional {
+        // Line the cache up with the file before the promotion below, which asks
+        // the index whether this id is still the provisional row.
+        db.conn().execute(
+            "UPDATE messages SET streaming = 1 WHERE session_id = ?1 AND id = ?2",
+            params![session_id, inflight.message.id],
+        )?;
     }
     // A leftover checkpoint whose final row never landed is the durable
     // reply. Boot skips `completed` turns so the outbox can still append the
@@ -2678,11 +2828,8 @@ pub fn truncate_from(
 fn abort_running_turn(db: &Database, session_id: &str) -> Result<Option<String>> {
     let turn_id: Option<String> = db
         .conn()
-        .query_row(
-            "SELECT id FROM turns WHERE session_id = ?1 AND status = 'running'",
-            params![session_id],
-            |row| row.get(0),
-        )
+        .prepare_cached("SELECT id FROM turns WHERE session_id = ?1 AND status = 'running'")?
+        .query_row(params![session_id], |row| row.get(0))
         .optional()?;
     let Some(turn_id) = turn_id else {
         return Ok(None);
@@ -3667,14 +3814,35 @@ pub fn search_messages(db: &Database, query: &str, limit: i64) -> Result<Vec<Sea
     // trigram FTS needs >= 3 chars; shorter queries fall back to LIKE.
     if query.chars().count() >= 3 {
         let quoted = format!("\"{}\"", query.replace('"', "\"\""));
+        // `snippet()` is an FTS5 auxiliary function, and the planner evaluates
+        // it while it walks the FTS matches — that is, before the ORDER BY and
+        // the LIMIT have reduced the set. It re-reads and re-tokenizes the
+        // whole document on every call, so on a 40k-message corpus the 800
+        // matches that produced 20 rows cost 5.24 of the statement's 6.00 ms.
+        // The CTE moves the limit in front of it, leaving 20 calls.
+        //
+        // The inner subquery must repeat `MATCH ?1`: an FTS5 auxiliary function
+        // reads the phrase list of the MATCH that positioned its cursor, so a
+        // lookup by `rowid` alone has none and returns the head of the document
+        // instead of the window around the hit. The two forms were compared row
+        // for row: with the repeated MATCH, id, order and snippet
+        // text are identical; without it, 0 of 20 snippets match.
         let mut stmt = db.conn().prepare_cached(
-            "SELECT m.id, m.session_id, s.title, m.role, m.created_at,
-                    snippet(messages_fts, 0, '', '', '…', 16)
-             FROM messages_fts
-             JOIN messages m ON m.mid = messages_fts.rowid
-             JOIN sessions s ON s.id = m.session_id
-             WHERE messages_fts MATCH ?1
-             ORDER BY m.created_at DESC LIMIT ?2",
+            "WITH hits AS (
+               SELECT m.id, m.mid, m.session_id, s.title, m.role, m.created_at
+               FROM messages_fts
+               JOIN messages m ON m.mid = messages_fts.rowid
+               JOIN sessions s ON s.id = m.session_id
+               WHERE messages_fts MATCH ?1
+               ORDER BY m.created_at DESC LIMIT ?2
+             )
+             SELECT hits.id, hits.session_id, hits.title, hits.role,
+                    hits.created_at,
+                    (SELECT snippet(messages_fts, 0, '', '', '…', 16)
+                     FROM messages_fts
+                     WHERE messages_fts MATCH ?1
+                       AND messages_fts.rowid = hits.mid)
+             FROM hits",
         )?;
         let rows = stmt.query_map(params![quoted, limit], |row| {
             Ok(SearchHit {
@@ -4030,8 +4198,66 @@ mod tests {
             response_diagnostics: None,
             assistant_replay: None,
             hosted_search: None,
+            model_system: None,
             session_message: None,
         }
+    }
+
+    /// A failed transcript device flush must not leave an index row that makes
+    /// replay of the same append a no-op.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn a_failed_transcript_flush_can_be_retried_without_a_phantom_index() {
+        use std::os::unix::fs::symlink;
+
+        let db = test_db();
+        let session = create_session(&db, None, None, None, None, None).unwrap();
+        let transcript_path = transcripts::transcript_path(db.data_dir(), &session.id).unwrap();
+        if transcript_path.exists() {
+            std::fs::remove_file(&transcript_path).unwrap();
+        }
+        std::fs::create_dir_all(transcript_path.parent().unwrap()).unwrap();
+        symlink("/dev/null", &transcript_path).unwrap();
+
+        let message = user_msg("retry-after-flush-failure", "body", "2025-05-01T00:00:00Z");
+        let (written, committed) = transcripts::commit_writes_of(async {
+            append_message(&db, &session.id, &message, None)
+        })
+        .await;
+        assert!(
+            written.is_err() || committed.is_err(),
+            "the append must report the device flush failure"
+        );
+
+        std::fs::remove_file(&transcript_path).unwrap();
+        let (retried, committed) = transcripts::commit_writes_of(async {
+            append_message(&db, &session.id, &message, None)
+        })
+        .await;
+        retried.expect("retry should append after the device recovers");
+        committed.expect("retry should commit its durable transcript line");
+
+        let records = transcripts::read_transcript(db.data_dir(), &session.id).unwrap();
+        let index_count: i64 = db
+            .conn()
+            .query_row(
+                "SELECT COUNT(*) FROM messages WHERE session_id = ?1 AND id = ?2",
+                params![session.id, message.id],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(
+            records
+                .iter()
+                .filter(|record| record.id == message.id)
+                .count(),
+            1,
+            "the canonical transcript should hold the retried message once"
+        );
+        assert_eq!(
+            index_count, 1,
+            "the index should hold the retried message once"
+        );
     }
 
     fn checkpoint(first: &str, through: &str) -> CompactionRecord {
@@ -4526,6 +4752,8 @@ mod tests {
             mode: "agent".into(),
             thinking_level: "off".into(),
             permission_mode: "inherit".into(),
+            // Ownership is derived from `task_runs`, so an import is never one.
+            scheduled_run: false,
             created_at: "2025-01-01T00:00:00Z".into(),
             updated_at: "2025-01-02T00:00:00Z".into(),
         };
@@ -4578,6 +4806,8 @@ mod tests {
             mode: "agent".into(),
             thinking_level: "off".into(),
             permission_mode: "inherit".into(),
+            // Ownership is derived from `task_runs`, so an import is never one.
+            scheduled_run: false,
             created_at: "2025-01-01T00:00:00Z".into(),
             updated_at: "2025-01-01T00:00:00Z".into(),
         };
@@ -4691,6 +4921,7 @@ mod tests {
             response_diagnostics: None,
             assistant_replay: None,
             hosted_search: None,
+            model_system: None,
             session_message: None,
         };
         append_message(&db, &session.id, &tool, None).unwrap();
@@ -4866,6 +5097,7 @@ mod tests {
             reference: "attachments/abc123".into(),
             mime_type: Some("image/png".into()),
             size: Some(42),
+            text: None,
         }]);
 
         append_message(&db, &session.id, &user, None).unwrap();
@@ -5047,6 +5279,78 @@ mod tests {
     }
 
     #[test]
+    fn a_replaced_message_keeps_its_position_for_an_around_window() {
+        // A branch stamp and a terminal steering snapshot both rewrite one
+        // existing message through `transcripts::update_message`. That call
+        // splices the line where it stands. Writing the replacement at the end
+        // of the file instead would still resolve the *content* — reads dedupe
+        // keep-last — but it would move the line, and an `around` window is
+        // centred on a physical position, so a search jump to an updated message
+        // would open on the tail of the session. This pins the geometry, not
+        // just the text.
+        let db = test_db();
+        let session = create_session(&db, None, None, None, None, None).unwrap();
+        for index in 0..12 {
+            append_message(
+                &db,
+                &session.id,
+                &user_msg(
+                    &format!("m{index}"),
+                    &format!("body {index}"),
+                    "2025-05-01T00:00:00Z",
+                ),
+                None,
+            )
+            .unwrap();
+        }
+        let replaced = user_msg("m5", "body 5 newest snapshot", "2025-05-01T00:00:00Z");
+        let (record, _) = ui_to_record(&replaced);
+        assert!(transcripts::update_message(db.data_dir(), &session.id, &record).unwrap());
+
+        let page = get_session_with_options(
+            &db,
+            &session.id,
+            SessionReadOptions {
+                message_around: Some("m5".to_string()),
+                message_before: None,
+                message_limit: Some(4),
+                content_limit: None,
+            },
+        )
+        .unwrap()
+        .unwrap();
+        let ids: Vec<&str> = page.messages.iter().map(|m| m.id.as_str()).collect();
+        assert!(
+            ids.contains(&"m5"),
+            "the anchor must be inside its own window: {ids:?}"
+        );
+        // Numeric, not lexicographic: "m10" < "m5" as strings, which would let
+        // a tail-window regression through.
+        let index_of = |id: &str| id.strip_prefix('m').and_then(|n| n.parse::<usize>().ok());
+        assert!(
+            ids.iter().any(|id| index_of(id).is_some_and(|n| n < 5)),
+            "messages before the anchor must stay reachable: {ids:?}"
+        );
+        assert!(
+            ids.iter().any(|id| index_of(id).is_some_and(|n| n > 5)),
+            "messages after the anchor must stay reachable: {ids:?}"
+        );
+        assert_eq!(
+            page.has_more_after,
+            Some(true),
+            "an anchor in the middle of the history is not the end of the session"
+        );
+        assert_eq!(
+            page.messages
+                .iter()
+                .find(|message| message.id == "m5")
+                .unwrap()
+                .content,
+            "body 5 newest snapshot"
+        );
+    }
+
+    #[test]
     fn bounded_session_reads_page_history_and_cap_display_content() {
         let db = test_db();
         let session = create_session(&db, None, None, None, None, None).unwrap();
@@ -5208,6 +5512,7 @@ mod tests {
             response_diagnostics: None,
             assistant_replay: None,
             hosted_search: None,
+            model_system: None,
             session_message: None,
         };
         append_message(&db, &session.id, &assistant, None).unwrap();
@@ -5309,6 +5614,7 @@ mod tests {
             image_generation: None,
             response_diagnostics: None,
             assistant_replay: None,
+            model_system: None,
             hosted_search: Some(json!({
                 "status": "completed",
                 "rounds": [
@@ -5433,6 +5739,8 @@ mod tests {
             mode: "agent".into(),
             thinking_level: "medium".into(),
             permission_mode: "inherit".into(),
+            // Ownership is derived from `task_runs`, so an import is never one.
+            scheduled_run: false,
             created_at: "2025-01-01T00:00:00Z".into(),
             updated_at: "2025-01-01T00:00:00Z".into(),
         };
@@ -6225,6 +6533,108 @@ mod tests {
         // Deleting the session clears the index (cascade + FTS trigger).
         delete_session(&db, &session.id).unwrap();
         assert!(search_messages(&db, "数据库", 10).unwrap().is_empty());
+    }
+
+    /// The search snippets must show the window around the match. FTS5's
+    /// `snippet()` reads the phrase list of the MATCH that positioned its
+    /// cursor, so a reformulation that reaches a document by rowid alone
+    /// silently degrades to the head of the document — which still looks like a
+    /// plausible preview. This pins the observable property.
+    #[test]
+    fn search_snippets_center_on_the_match_not_the_document_head() {
+        let db = test_db();
+        let session = create_session(&db, None, None, None, None, None).unwrap();
+        let filler = "lorem ipsum dolor sit amet ".repeat(60);
+        append_message(
+            &db,
+            &session.id,
+            &user_msg(
+                "m1",
+                &format!("{filler}needle-window-tail"),
+                "2025-05-01T00:00:00Z",
+            ),
+            None,
+        )
+        .unwrap();
+        let hits = search_messages(&db, "needle-window-tail", 10).unwrap();
+        assert_eq!(hits.len(), 1);
+        assert!(
+            hits[0].snippet.contains("needle-window-tail"),
+            "snippet is not the window around the match: {:?}",
+            hits[0].snippet
+        );
+        assert!(
+            hits[0].snippet.len() < filler.len(),
+            "snippet returned the whole body: {} bytes",
+            hits[0].snippet.len()
+        );
+    }
+
+    /// The ordering indexes are a plan change and must not be a result change.
+    /// Both branches of `search_messages` are compared with the indexes present
+    /// and dropped, on the same rows.
+    #[test]
+    fn search_results_do_not_depend_on_the_ordering_indexes() {
+        let db = test_db();
+        let session = create_session(&db, None, None, None, None, None).unwrap();
+        for index in 0..40 {
+            append_message(
+                &db,
+                &session.id,
+                &user_msg(
+                    &format!("m{index:02}"),
+                    &format!("needle body {index}"),
+                    &format!("2025-05-01T00:00:{index:02}Z"),
+                ),
+                None,
+            )
+            .unwrap();
+        }
+        let project = |hits: Vec<SearchHit>| {
+            hits.into_iter()
+                .map(|hit| (hit.message_id, hit.snippet))
+                .collect::<Vec<_>>()
+        };
+        let indexed_fts = project(search_messages(&db, "needle body", 10).unwrap());
+        let indexed_like = project(search_messages(&db, "ne", 10).unwrap());
+        assert_eq!(indexed_fts.len(), 10);
+        assert_eq!(indexed_like.len(), 10);
+        // Newest first: the query must rank by created_at, not by row order.
+        assert_eq!(indexed_fts[0].0, "m39");
+
+        db.conn()
+            .execute_batch(
+                "DROP INDEX idx_messages_created;
+                 DROP INDEX idx_messages_session_created;",
+            )
+            .unwrap();
+        assert_eq!(
+            project(search_messages(&db, "needle body", 10).unwrap()),
+            indexed_fts
+        );
+        assert_eq!(
+            project(search_messages(&db, "ne", 10).unwrap()),
+            indexed_like
+        );
+    }
+
+    /// `boot_maintenance` adds the ordering indexes to an existing database
+    /// without a schema-version bump, the same way it has always added
+    /// `idx_turns_ended_at`.
+    #[test]
+    fn opening_a_database_creates_the_message_ordering_indexes() {
+        let db = test_db();
+        for name in ["idx_messages_created", "idx_messages_session_created"] {
+            let present: i64 = db
+                .conn()
+                .query_row(
+                    "SELECT COUNT(*) FROM sqlite_master WHERE type = 'index' AND name = ?1",
+                    params![name],
+                    |row| row.get(0),
+                )
+                .unwrap();
+            assert_eq!(present, 1, "{name} was not created");
+        }
     }
 
     #[test]
@@ -7043,6 +7453,322 @@ mod tests {
         message.status = Some("streaming".into());
         message.thinking = Some("still thinking".into());
         message
+    }
+
+    fn streaming_flag(db: &Database, id: &str) -> Option<i64> {
+        db.conn()
+            .query_row(
+                "SELECT streaming FROM messages WHERE id = ?1",
+                params![id],
+                |row| row.get(0),
+            )
+            .unwrap()
+    }
+
+    fn messages_have_streaming_column(db: &Database) -> bool {
+        db.conn()
+            .query_row(
+                "SELECT EXISTS(
+                   SELECT 1 FROM pragma_table_info('messages') WHERE name = 'streaming'
+                 )",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap()
+    }
+
+    /// Randomized differential check of the one fact this change caches. A
+    /// session is driven through provisional appends, settled snapshots, retried
+    /// duplicates of the same id and checkpoint recovery, and after every step the
+    /// index's `streaming` bit and the guard's answer have to agree with the
+    /// transcript itself.
+    #[test]
+    fn the_streaming_bit_matches_the_transcript_under_random_appends() {
+        let db = test_db();
+        let session = create_session(&db, None, None, None, None, None).unwrap();
+        let mut seed = 0x2545_F491_4F6C_DD1Du64;
+        let mut next = move || {
+            seed ^= seed << 13;
+            seed ^= seed >> 7;
+            seed ^= seed << 17;
+            seed
+        };
+        for step in 0..80 {
+            let id = format!("m{}", next() % 6);
+            let mut message = user_msg(&id, &format!("body {step}"), "2025-05-01T00:00:00Z");
+            message.role = if next() % 4 == 0 {
+                "user".into()
+            } else {
+                "assistant".into()
+            };
+            if message.role == "assistant" {
+                message.status = Some(
+                    if next() % 2 == 0 {
+                        "streaming"
+                    } else {
+                        "complete"
+                    }
+                    .into(),
+                );
+            }
+            let appended = append_message(&db, &session.id, &message, None);
+            assert!(
+                !format!("{appended:?}").contains("missing from its transcript"),
+                "step {step}: the settled row could not reach the transcript: {appended:?}"
+            );
+            if next() % 3 == 0 {
+                let _ = save_inflight_message(&db, &session.id, None, &message);
+            }
+            if next() % 7 == 0 {
+                let _ = recover_inflight_message(&db, &session.id, next() % 2 == 0);
+            }
+            let records =
+                dedupe_records(transcripts::read_transcript(db.data_dir(), &session.id).unwrap());
+            for record in &records {
+                assert_eq!(
+                    streaming_flag(&db, &record.id),
+                    Some(i64::from(record_is_streaming(record))),
+                    "step {step}: the index disagrees with the transcript for {}",
+                    record.id
+                );
+                assert_eq!(
+                    streaming_assistant_indexed(&db, &session.id, &record.id).unwrap(),
+                    record_is_streaming(record),
+                    "step {step}: the guard disagrees with the transcript for {}",
+                    record.id
+                );
+            }
+        }
+    }
+
+    /// The guard reads the index, not the transcript: a live streaming row keeps
+    /// its checkpoint even when the transcript file is gone.
+    #[test]
+    fn the_streaming_guard_answers_from_the_index_not_from_the_transcript() {
+        let db = test_db();
+        let session = create_session(&db, None, None, None, None, None).unwrap();
+        append_message(
+            &db,
+            &session.id,
+            &streaming_assistant("a1", "partial"),
+            None,
+        )
+        .unwrap();
+        let transcript = transcripts::transcript_path(db.data_dir(), &session.id).unwrap();
+        assert!(transcript.exists());
+        std::fs::remove_file(&transcript).unwrap();
+
+        assert!(save_inflight_message(
+            &db,
+            &session.id,
+            None,
+            &streaming_assistant("a1", "partial")
+        )
+        .unwrap());
+        assert!(transcripts::inflight_path(db.data_dir(), &session.id)
+            .unwrap()
+            .exists());
+    }
+
+    /// The mirror image: a row the index cannot answer for is resolved from the
+    /// transcript, which is what makes an unrebuilt database behave exactly as it
+    /// did before the cache existed. Clearing the column *and* deleting the file
+    /// makes the two sources disagree, so the answer says which one was read.
+    #[test]
+    fn a_message_written_before_the_streaming_column_answers_from_the_transcript() {
+        let db = test_db();
+        let session = create_session(&db, None, None, None, None, None).unwrap();
+        append_message(
+            &db,
+            &session.id,
+            &streaming_assistant("a1", "partial"),
+            None,
+        )
+        .unwrap();
+        db.conn()
+            .execute("UPDATE messages SET streaming = NULL WHERE id = 'a1'", [])
+            .unwrap();
+
+        // The transcript has the streaming row, and the fallback finds it.
+        assert!(save_inflight_message(
+            &db,
+            &session.id,
+            None,
+            &streaming_assistant("a1", "partial")
+        )
+        .unwrap());
+
+        // Now only the column could answer "streaming"; the file cannot. The
+        // checkpoint is dropped, so the file is the source that answered.
+        let transcript = transcripts::transcript_path(db.data_dir(), &session.id).unwrap();
+        std::fs::remove_file(&transcript).unwrap();
+        assert!(!save_inflight_message(
+            &db,
+            &session.id,
+            None,
+            &streaming_assistant("a1", "partial")
+        )
+        .unwrap());
+        assert!(!transcripts::inflight_path(db.data_dir(), &session.id)
+            .unwrap()
+            .exists());
+    }
+
+    /// The column is a cache of the transcript's last copy, so landing a terminal
+    /// snapshot has to re-stamp it. A stale row would keep answering "still
+    /// streaming", refuse the terminal row and lose the reply.
+    #[test]
+    fn the_streaming_column_tracks_the_last_copy_of_a_message() {
+        let db = test_db();
+        let session = create_session(&db, None, None, None, None, None).unwrap();
+        let settled = |id: &str, text: &str| {
+            let mut message = streaming_assistant(id, text);
+            message.status = Some("complete".into());
+            message
+        };
+
+        append_message(
+            &db,
+            &session.id,
+            &streaming_assistant("a1", "partial"),
+            None,
+        )
+        .unwrap();
+        assert_eq!(streaming_flag(&db, "a1"), Some(1));
+        append_message(
+            &db,
+            &session.id,
+            &settled("a1", "partial and complete"),
+            None,
+        )
+        .unwrap();
+        assert_eq!(streaming_flag(&db, "a1"), Some(0));
+        append_message(&db, &session.id, &streaming_assistant("a2", "second"), None).unwrap();
+        assert_eq!(streaming_flag(&db, "a2"), Some(1));
+
+        // Every row agrees with the transcript's own last copy of its id.
+        let records =
+            dedupe_records(transcripts::read_transcript(db.data_dir(), &session.id).unwrap());
+        assert_eq!(records.len(), 2);
+        for record in records {
+            assert_eq!(
+                streaming_flag(&db, &record.id),
+                Some(i64::from(record_is_streaming(&record))),
+                "the index disagrees with the transcript for {}",
+                record.id
+            );
+        }
+    }
+
+    /// The column arrives through boot maintenance, not a versioned migration: no
+    /// row is rewritten and no backup is taken, so a database that predates it
+    /// keeps working and simply answers from the transcript until its rows are
+    /// rewritten by an append.
+    #[test]
+    fn opening_a_database_adds_the_streaming_column() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("pi.sqlite");
+        let db = Database::open(&path).unwrap();
+        let session = create_session(&db, None, None, None, None, None).unwrap();
+        append_message(
+            &db,
+            &session.id,
+            &streaming_assistant("a1", "partial"),
+            None,
+        )
+        .unwrap();
+        assert!(messages_have_streaming_column(&db));
+        db.conn()
+            .execute_batch("ALTER TABLE messages DROP COLUMN streaming")
+            .unwrap();
+        drop(db);
+
+        let db = Database::open(&path).unwrap();
+        assert!(messages_have_streaming_column(&db));
+        assert_eq!(streaming_flag(&db, "a1"), None);
+        assert!(save_inflight_message(
+            &db,
+            &session.id,
+            None,
+            &streaming_assistant("a1", "partial")
+        )
+        .unwrap());
+    }
+    /// A device that lost a settled row's bytes leaves the index claiming the
+    /// reply is finished while the transcript still ends on the provisional row.
+    /// The checkpoint is then the durable copy, so recovery has to promote it —
+    /// and re-stamp the index — instead of dropping it as a settled duplicate.
+    #[test]
+    fn a_settled_index_row_over_a_provisional_transcript_row_still_recovers() {
+        let db = test_db();
+        let session = create_session(&db, None, None, None, None, None).unwrap();
+        append_message(
+            &db,
+            &session.id,
+            &streaming_assistant("a1", "partial"),
+            None,
+        )
+        .unwrap();
+        assert!(save_inflight_message(
+            &db,
+            &session.id,
+            None,
+            &streaming_assistant("a1", "partial reply")
+        )
+        .unwrap());
+        // The crash window: the index was re-stamped, the row's bytes never were.
+        db.conn()
+            .execute("UPDATE messages SET streaming = 0 WHERE id = 'a1'", [])
+            .unwrap();
+
+        let recovered = recover_inflight_messages(&db, false).unwrap();
+        assert_eq!(recovered.len(), 1, "the reply was dropped as a duplicate");
+        assert_eq!(recovered[0].1.content, "partial reply");
+        assert_eq!(streaming_flag(&db, "a1"), Some(0));
+        let records =
+            dedupe_records(transcripts::read_transcript(db.data_dir(), &session.id).unwrap());
+        assert_eq!(records.len(), 1);
+        assert_eq!(
+            record_index_text(&records[0]).as_deref(),
+            Some("partial reply")
+        );
+    }
+
+    /// The mirror window: the transcript lost the provisional row while the index
+    /// kept it. The checkpoint is again the only copy, and the promotion has to
+    /// append the row back instead of failing because the file does not have it.
+    #[test]
+    fn a_reply_whose_transcript_row_was_lost_is_appended_back_on_recovery() {
+        let db = test_db();
+        let session = create_session(&db, None, None, None, None, None).unwrap();
+        append_message(
+            &db,
+            &session.id,
+            &streaming_assistant("a1", "partial"),
+            None,
+        )
+        .unwrap();
+        assert!(save_inflight_message(
+            &db,
+            &session.id,
+            None,
+            &streaming_assistant("a1", "partial reply")
+        )
+        .unwrap());
+        // The transcript lost the row's bytes; only the index still has it.
+        let transcript = transcripts::transcript_path(db.data_dir(), &session.id).unwrap();
+        std::fs::write(&transcript, "").unwrap();
+
+        let recovered = recover_inflight_messages(&db, false).unwrap();
+        assert_eq!(recovered.len(), 1);
+        assert_eq!(streaming_flag(&db, "a1"), Some(0));
+        let records =
+            dedupe_records(transcripts::read_transcript(db.data_dir(), &session.id).unwrap());
+        assert_eq!(records.len(), 1, "the promoted row never reached the file");
+        assert_eq!(
+            record_index_text(&records[0]).as_deref(),
+            Some("partial reply")
+        );
     }
 
     #[test]

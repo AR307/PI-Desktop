@@ -29,6 +29,8 @@ export class MirrorCodingAccount {
 
   snapshot(): MirrorCodingAccountState { return structuredClone(this.state); }
   get origin(): string { return this.deps.origin; }
+  /** Main-process installation binding; never exposed in renderer snapshots. */
+  get authorizationId(): string | undefined { return this.saved.active?.authorizationId; }
   private restoredStatus(): MirrorCodingAccountState["status"] {
     if (!this.saved.active) return "signed_out";
     return this.saved.active.authorizationExpiresAt > Date.now() ? "connected" : "reauthorize";

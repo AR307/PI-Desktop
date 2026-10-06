@@ -246,7 +246,8 @@ export class BrowserHost {
     try {
       const root = await this.deps.getFileRoot(page.sessionId || undefined);
       if (!current()) return null;
-      state = await page.pane.navigateAndWait(target, root);
+      const scratch = this.deps.getScratchDir?.(page.sessionId || undefined);
+      state = await page.pane.navigateAndWait(target, [root, scratch].filter((value): value is string => !!value));
     } catch (error) {
       if (!current()) return null;
       page.navigating = false;
@@ -324,7 +325,9 @@ export class BrowserHost {
   }
   async cdpCommand(method: string, params?: unknown): Promise<unknown> {
     const page = this.currentPage();
-    if (method.trim() === "Page.captureScreenshot") return page.pane.captureScreenshot((wc) => page.cdp.send(wc, method, params));
+    if (method === "Page.captureScreenshot") {
+      return page.pane.captureScreenshot((wc) => page.cdp.send(wc, method, params));
+    }
     return page.cdp.send(this.requireWebContents(), method, params);
   }
 

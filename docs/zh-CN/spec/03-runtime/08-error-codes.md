@@ -115,6 +115,7 @@ stdio 与 Tokio 的动态阻塞池隔离，因此后一种情况
 | `SUBAGENT_DURATION_TIMEOUT` | 不 | 已撤回（D328）：时长看门狗不再武装；代码仅为已存储结果保留 |
 | `SUBAGENT_CONTEXT_OVERFLOW` | 不 | 委派自身的模型上下文超出其安全预算，自动的回合边界压缩与仅保留任务简报和最近消息的降级重试都没能把它带回限制以内；该失败给出可执行的恢复方式，而不是提供商的溢出文本 |
 | `SUBAGENT_OUTPUT_TRUNCATED` | 不 | 委派报告在模型输出 token 上限处结束；保留部分报告用于诊断，但该运行报告为失败，不会被呈现为已完成的委派 |
+| `SUBAGENT_PARENT_FAILED` | 不 | 父级失败中断了运行中的委托；可通过 Task 手动恢复，仍受现有历史与读取预算限制 |
 
 ### 3. 3 工作空间/工具/权限
 
@@ -196,6 +197,7 @@ stdio 与 Tokio 的动态阻塞池隔离，因此后一种情况
 | 代码 | 可重试 | 含义 |
 |---|---|---|
 | `EDIT_TAG_REQUIRED` | 否 | `tag` 缺失或不是 4 位十六进制 |
+| `EDIT_LEGACY_MATCH_FAILED` | `Read` 之后可以 | 旧版兼容参数 `old_string` 未找到或出现多次 |
 | `EDIT_TAG_MISMATCH` | `Read` 之后可以 | tag 无法哈希出实时文件且漂移恢复拒绝；携带实时 tag 与锚点处的当前内容 |
 | `EDIT_TAG_UNKNOWN` | `Read` 之后可以 | tag 格式正确，但本会话没有为该路径记录过对应内容 |
 | `EDIT_LINES_UNSEEN` | 是 | 锚点引用了会话从未显示过的行；携带被揭示的内容 |

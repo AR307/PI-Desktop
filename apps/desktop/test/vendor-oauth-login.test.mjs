@@ -11,6 +11,9 @@ import {
   buildProviderModel,
   createProviderModels,
 } from "../../../packages/agent-runtime/dist/provider-binding.js";
+import { InMemoryModelsStore } from "@earendil-works/pi-ai";
+import { registerBunOAuthFlows } from "@earendil-works/pi-ai/bun-oauth";
+import { builtinModels } from "@earendil-works/pi-ai/providers/all";
 
 import {
   VendorOAuth,
@@ -183,7 +186,7 @@ function harness(options = {}) {
     },
     createModels: (store) => {
       stores.push(store);
-      return fakeModels(store, options);
+      return options.createModels ? options.createModels(store) : fakeModels(store, options);
     },
     modelConfigFor: options.modelConfigFor,
     onAccountModels: options.onAccountModels,
@@ -213,6 +216,15 @@ async function waitFor(events, kind, maxAttempts = 200) {
     await new Promise((resolve) => setTimeout(resolve, 5));
   }
   throw new Error(`no ${kind} event; saw ${events.map((e) => e.kind).join(", ")}`);
+}
+
+async function waitForPromptType(events, type, maxAttempts = 200) {
+  for (let attempt = 0; attempt < maxAttempts; attempt++) {
+    const found = events.find((event) => event.kind === "prompt" && event.request.type === type);
+    if (found) return found;
+    await new Promise((resolve) => setTimeout(resolve, 5));
+  }
+  throw new Error(`no ${type} prompt; saw ${events.filter((e) => e.kind === "prompt").map((e) => e.request.type).join(", ")}`);
 }
 
 test("wire apis map to the provider row's api style and protocol", () => {
@@ -294,6 +306,69 @@ test("a completed login stores the credential and configures the row", async () 
       connected: true,
     },
   ]);
+});
+
+test("the pi-ai 1.0 Anthropic copy-code flow uses the select and manual-code bridge", async () => {
+  const requests = [];
+  const previousFetch = globalThis.fetch;
+  globalThis.fetch = async (input, init = {}) => {
+    const url = String(input);
+    requests.push({ url, init });
+    assert.equal(url, "https://platform.claude.com/v1/oauth/token");
+    return new Response(JSON.stringify({
+      access_token: "fixture-access-token",
+      refresh_token: "fixture-refresh-token",
+      expires_in: 3600,
+    }), { status: 200, headers: { "content-type": "application/json" } });
+  };
+
+  let registered = false;
+  const { host, events, opened, oauth } = harness({
+    createModels: (credentials) => {
+      if (!registered) {
+        registerBunOAuthFlows();
+        registered = true;
+      }
+      return builtinModels({
+        credentials,
+        authContext: { env: async () => undefined, fileExists: async () => false },
+        modelsStore: new InMemoryModelsStore(),
+      });
+    },
+  });
+
+  try {
+    const { loginId } = await oauth.start("anthropic");
+    const selection = await waitForPromptType(events, "select");
+    assert.deepEqual(selection.request.options.map(({ id }) => id), ["browser", "copy_code"]);
+    assert.equal(oauth.respond({ loginId, promptId: selection.request.promptId, value: "copy_code" }), true);
+
+    const authUrl = await waitFor(events, "authUrl");
+    assert.deepEqual(opened, [authUrl.url]);
+    const redirect = new URL(authUrl.url).searchParams.get("redirect_uri");
+    assert.equal(redirect, "https://platform.claude.com/oauth/code/callback");
+
+    const manualCode = await waitForPromptType(events, "manual_code");
+    const state = new URL(authUrl.url).searchParams.get("state");
+    assert.ok(state);
+    assert.equal(oauth.respond({
+      loginId,
+      promptId: manualCode.request.promptId,
+      value: `fixture-auth-code#${state}`,
+    }), true);
+
+    const done = await waitFor(events, "done");
+    const row = host.providers.get(done.providerId);
+    const stored = JSON.parse(host.secrets.get(secretRefForProviderOauth(row.id)));
+    assert.equal(stored.refresh, "fixture-refresh-token");
+    assert.equal(stored.access, "fixture-access-token");
+    assert.equal(host.secrets.has(`secret:provider:${row.id}:api_key`), false);
+    assert.deepEqual(await oauth.resolveAuth(row.id), { apiKey: "fixture-access-token" });
+    assert.equal(requests.length, 1);
+    assert.equal(JSON.parse(requests[0].init.body).grant_type, "authorization_code");
+  } finally {
+    globalThis.fetch = previousFetch;
+  }
 });
 
 test("OAuth model configuration comes from the supplied models.dev snapshot", async () => {
@@ -585,7 +660,7 @@ test("the ChatGPT OAuth catalog includes GPT-6 Astra", async () => {
   assert.equal(model.api, "openai-codex-responses");
 });
 
-test("the pi-ai 0.99.1 OAuth catalogs include the stable model wires", async () => {
+test("the pi-ai OAuth catalog supplies wire identities, not model limits", async () => {
   const { OPENAI_CODEX_MODELS } = await import(
     "@earendil-works/pi-ai/providers/openai-codex.models"
   );
@@ -593,10 +668,7 @@ test("the pi-ai 0.99.1 OAuth catalogs include the stable model wires", async () 
     const model = OPENAI_CODEX_MODELS[modelId];
     assert.ok(model, `openai-codex catalog must include ${modelId}`);
     assert.equal(model.api, "openai-codex-responses");
-    assert.equal(model.reasoning, true);
-    assert.equal(model.contextWindow, 272_000);
-    assert.equal(model.maxTokens, 128_000);
-    assert.ok(model.input.includes("image"));
+    assert.equal(model.provider, "openai-codex");
   }
 
   const { GITHUB_COPILOT_MODELS } = await import(
@@ -607,23 +679,16 @@ test("the pi-ai 0.99.1 OAuth catalogs include the stable model wires", async () 
     const model = GITHUB_COPILOT_MODELS[modelId];
     assert.ok(model, `github-copilot catalog must include ${modelId}`);
     assert.equal(model.api, "openai-responses");
-    assert.ok(model.input.includes("image"));
+    assert.equal(model.provider, "github-copilot");
   }
 
   const { ANTHROPIC_MODELS } = await import(
     "@earendil-works/pi-ai/providers/anthropic.models"
   );
   assert.equal(ANTHROPIC_MODELS["claude-opus-5"]?.api, "anthropic-messages");
-  assert.equal(ANTHROPIC_MODELS["claude-opus-5"]?.contextWindow, 1_000_000);
 
   const { XAI_MODELS } = await import("@earendil-works/pi-ai/providers/xai.models");
   assert.equal(XAI_MODELS["grok-4.6"]?.api, "openai-responses");
-  const thinkingLevels = Object.entries(XAI_MODELS["grok-4.6"]?.thinkingLevelMap ?? {})
-    .filter(([, value]) => typeof value === "string")
-    .map(([level]) => level);
-  for (const level of ["low", "medium", "high", "xhigh"]) {
-    assert.ok(thinkingLevels.includes(level), `xAI catalog must include ${level} thinking`);
-  }
 });
 
 test("credential writes for one account run one at a time", async () => {
@@ -731,8 +796,8 @@ test("an xAI account offers the chat models its /models endpoint returns", async
     const row = host.providers.get(done.providerId);
     assert.deepEqual(row.models.map((model) => model.id), ["grok-4.6", "grok-4.7"]);
     const offered = row.models.find((model) => model.id === "grok-4.7");
-    assert.equal(offered.contextWindow, 500_000);
-    assert.deepEqual(offered.thinkingLevels, ["low", "medium", "high", "xhigh"]);
+    assert.equal(offered.contextWindow, 128_000);
+    assert.deepEqual(offered.thinkingLevels, ["off"]);
     assert.equal(await oauth.bindingFor(done.providerId, "grok-2"), undefined);
     const binding = await oauth.bindingFor(done.providerId, "grok-4.7");
     assert.equal(binding.apiStyle, "responses");
@@ -744,7 +809,7 @@ test("an xAI account offers the chat models its /models endpoint returns", async
   }
 });
 
-test("a new Grok inherits grok-4.6 even when an older Grok is first in the pin", async () => {
+test("live account metadata never inherits a sibling model record", async () => {
   const fetchModels = async () => new Response(JSON.stringify({
     data: [{ id: "grok-4.7" }],
   }), { status: 200, headers: { "content-type": "application/json" } });
@@ -785,9 +850,10 @@ test("a new Grok inherits grok-4.6 even when an older Grok is first in the pin",
   oauth.respond({ loginId, promptId: prompt.request.promptId, value: "abc" });
   const done = await waitFor(events, "done");
   const binding = await oauth.bindingFor(done.providerId, "grok-4.7");
-  assert.equal(binding.modelConfig.contextWindow, 500_000);
-  assert.equal(binding.modelConfig.maxTokens, 500_000);
-  assert.deepEqual(binding.supportedThinkingLevels, ["minimal", "low", "medium", "high", "xhigh"]);
+  assert.equal(binding.modelConfig.source, "generic");
+  assert.equal(binding.modelConfig.contextWindow, 128_000);
+  assert.equal(binding.modelConfig.maxTokens, 8_192);
+  assert.deepEqual(binding.supportedThinkingLevels, ["off"]);
 });
 
 async function liveCopilotBinding(sibling, options = {}) {
@@ -839,33 +905,32 @@ const adaptiveSonnet = {
   },
 };
 
-test("a live-only Claude model retains its sibling's thinking protocol and effort mapping", async () => {
+test("a live-only Claude model does not inherit Pi metadata from its sibling", async () => {
   const binding = await liveCopilotBinding(adaptiveSonnet);
   assert.equal(binding.apiStyle, "anthropic_messages");
   assert.equal(binding.modelConfig.name, "claude-sonnet-99");
-  assert.equal(binding.modelConfig.compat?.forceAdaptiveThinking, true);
-  assert.deepEqual(binding.modelConfig.thinkingLevelMap, adaptiveSonnet.thinkingLevelMap);
-  assert.equal(binding.modelConfig.contextWindow, 1_000_000);
-  assert.equal(binding.modelConfig.maxTokens, 128_000);
+  assert.equal(binding.modelConfig.source, "generic");
+  assert.equal(binding.modelConfig.compat, undefined);
+  assert.equal(binding.modelConfig.thinkingLevelMap, undefined);
+  assert.equal(binding.modelConfig.contextWindow, 128_000);
+  assert.equal(binding.modelConfig.maxTokens, 8_192);
 });
 
-test("live-only reasoning models preserve default levels in sparse effort maps", async () => {
+test("live-only reasoning models do not inherit a sibling effort map", async () => {
   const binding = await liveCopilotBinding({
     ...adaptiveSonnet,
     thinkingLevelMap: { xhigh: "xhigh", max: "max" },
   });
-  assert.deepEqual(binding.supportedThinkingLevels, [
-    "off", "minimal", "low", "medium", "high", "xhigh", "max",
-  ]);
-  assert.equal(clampThinkingLevel(binding, "high"), "high");
+  assert.deepEqual(binding.supportedThinkingLevels, ["off"]);
+  assert.equal(clampThinkingLevel(binding, "high"), "off");
 });
 
-test("live-only models respect null-disabled levels and non-reasoning siblings", async () => {
+test("live-only models do not inherit reasoning restrictions from siblings", async () => {
   const restricted = await liveCopilotBinding({
     ...adaptiveSonnet,
     thinkingLevelMap: { off: null, minimal: null, low: null, medium: null, high: null, xhigh: "xhigh", max: null },
   });
-  assert.deepEqual(restricted.supportedThinkingLevels, ["xhigh"]);
+  assert.deepEqual(restricted.supportedThinkingLevels, ["off"]);
   const nonReasoning = await liveCopilotBinding({ ...adaptiveSonnet, reasoning: false });
   assert.equal(nonReasoning.supportsReasoning, false);
   assert.deepEqual(nonReasoning.supportedThinkingLevels, ["off"]);
@@ -879,7 +944,7 @@ test("a live-only model without a same-tier sibling keeps generic capabilities",
   assert.equal(binding.modelConfig.thinkingLevelMap, undefined);
 });
 
-test("published model metadata takes precedence over the pinned sibling", async () => {
+test("models.dev metadata takes precedence over Pi sibling metadata", async () => {
   const published = {
     ...genericModelConfig("claude-sonnet-99"),
     source: "models.dev",
@@ -905,7 +970,7 @@ test("an explicit effort map on generic metadata governs the fallback's supporte
   assert.deepEqual(binding.supportedThinkingLevels, ["high"]);
 });
 
-test("live-only Claude bindings send adaptive thinking with the requested wire effort", async () => {
+test("a live-only Claude request keeps its wire ID without Pi sibling metadata", async () => {
   const binding = await liveCopilotBinding({
     ...adaptiveSonnet,
     thinkingLevelMap: { off: null, minimal: null, xhigh: "xhigh", max: "max" },
@@ -925,53 +990,55 @@ test("live-only Claude bindings send adaptive thinking with the requested wire e
   };
   const model = buildProviderModel(provider);
   const models = createProviderModels(provider, model);
-  for (const level of ["high", "xhigh", "max"]) {
-    let request;
-    const result = await models.streamSimple(model, {
-      messages: [{ role: "user", content: "fixture", timestamp: 1 }],
-    }, {
-      reasoning: clampThinkingLevel(provider, level),
-      maxRetries: 0,
-      fetch: async (input, init) => {
-        request = new Request(input, init);
-        return Response.json({ type: "error", error: { type: "invalid_request_error", message: "fixture response" } }, { status: 400 });
-      },
-    }).result();
-    assert.equal(result.stopReason, "error");
-    assert.ok(request, "the real adapter must reach the HTTP boundary");
-    const body = await request.json();
-    assert.equal(body.model, "claude-sonnet-99");
-    assert.equal(body.thinking.type, "adaptive");
-    assert.equal(body.output_config.effort, level);
-    assert.equal("budget_tokens" in body.thinking, false);
-    assert.equal(request.headers.get("Authorization"), "Bearer test-copilot-access-token");
-    assert.equal(request.headers.get("x-api-key"), null);
-  }
+  let request;
+  const result = await models.streamSimple(model, {
+    messages: [{ role: "user", content: "fixture", timestamp: 1 }],
+  }, {
+    reasoning: "off",
+    maxRetries: 0,
+    fetch: async (input, init) => {
+      request = new Request(input, init);
+      return Response.json({ type: "error", error: { type: "invalid_request_error", message: "fixture response" } }, { status: 400 });
+    },
+  }).result();
+  assert.equal(result.stopReason, "error");
+  assert.ok(request, "the real adapter must reach the HTTP boundary");
+  const body = await request.json();
+  assert.equal(body.model, "claude-sonnet-99");
+  assert.equal(body.thinking.type, "enabled");
+  assert.equal(body.thinking.budget_tokens, 1_024);
+  assert.equal(body.output_config, undefined);
+  assert.equal(request.headers.get("Authorization"), "Bearer test-copilot-access-token");
+  assert.equal(request.headers.get("x-api-key"), null);
 });
 
-test("legacy thinking siblings are not implicitly promoted to adaptive", async () => {
+test("legacy thinking siblings do not define an unknown model's thinking metadata", async () => {
   const binding = await liveCopilotBinding({
     ...adaptiveSonnet,
     id: "claude-sonnet-4.5",
     compat: undefined,
     thinkingLevelMap: undefined,
   });
+  assert.equal(binding.modelConfig.source, "generic");
+  assert.equal(binding.modelConfig.contextWindow, 128_000);
+  assert.equal(binding.modelConfig.maxTokens, 8_192);
   assert.notEqual(binding.modelConfig.compat?.forceAdaptiveThinking, true);
   assert.equal(binding.modelConfig.thinkingLevelMap, undefined);
-  assert.deepEqual(binding.supportedThinkingLevels, ["off", "minimal", "low", "medium", "high"]);
+  assert.deepEqual(binding.supportedThinkingLevels, ["off"]);
 });
 
-test("live-only thinking restrictions survive runtime launch without a saved model binding", async () => {
+test("live-only models do not inherit thinking restrictions from a sibling", async () => {
   const disabled = { off: null, minimal: null, low: null, medium: null, high: null, xhigh: null, max: null };
-  for (const [sibling, expected] of [
-    [{ ...adaptiveSonnet, thinkingLevelMap: { ...disabled, high: "high" } }, { supportsReasoning: true, supportedThinkingLevels: ["high"] }],
-    [{ ...adaptiveSonnet, reasoning: false, thinkingLevelMap: undefined }, { supportsReasoning: false, supportedThinkingLevels: ["off"] }],
-    [{ ...adaptiveSonnet, thinkingLevelMap: disabled }, { supportsReasoning: false, supportedThinkingLevels: ["off"] }],
+  for (const sibling of [
+    { ...adaptiveSonnet, thinkingLevelMap: { ...disabled, high: "high" } },
+    { ...adaptiveSonnet, reasoning: false, thinkingLevelMap: undefined },
+    { ...adaptiveSonnet, thinkingLevelMap: disabled },
   ]) {
     const binding = await liveCopilotBinding(sibling);
     const effective = modelConfigWithBinding(binding.modelConfig);
-    assert.deepEqual(capabilitiesFromModelConfig(effective), expected);
-    assert.deepEqual(effective.thinkingLevelMap, sibling.thinkingLevelMap);
+    assert.equal(binding.modelConfig.thinkingLevelMap, undefined);
+    assert.equal(effective.contextWindow, 128_000);
+    assert.equal(effective.maxTokens, 8_192);
   }
 });
 

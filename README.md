@@ -37,7 +37,7 @@ Local-first · Model-agnostic · Plugin-powered · macOS / Windows / Linux
 
 </div>
 
-> **Current release line: 0.15.x (Early Preview).**
+> **Current release line: 0.16.x (Early Preview).**
 
 ---
 
@@ -575,7 +575,7 @@ Agent / Plan / Goal
 | macOS    | Apple Silicon | `.dmg` / `.zip`                         |
 | macOS    | Intel         | `.dmg` / `.zip`                         |
 | Windows  | x64           | Installer / `.zip`                      |
-| Linux    | x64           | `.AppImage` / `.deb` / `.rpm` / `.asar` |
+| Linux    | x64 / ARM64   | `.AppImage` / `.deb` / `.rpm` / `.asar` |
 
 macOS releases are signed with a Developer ID certificate and notarized by Apple.
 
@@ -584,7 +584,7 @@ macOS releases are signed with a Developer ID certificate and notarized by Apple
 
 <br />
 
-Linux x64 packages require **glibc 2.35+**.
+Linux packages require **glibc 2.35+**.
 
 Common supported distributions include:
 
@@ -610,6 +610,7 @@ The Agent Runtime uses:
 
 * `pi-ai`
 * `pi-agent-core`
+* `pi-coding-agent`
 
 > **Pi provides the Agent Engine. PI-Desktop builds the persistent desktop workspace, sessions, permissions, plugins, and agent orchestration around it.**
 

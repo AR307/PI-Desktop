@@ -13,6 +13,19 @@ device registration; a later password login registers and pairs again. Account
 grant management on desktop can revoke old registrations' shares without allowing a new
 mobile device to use them.
 
+Device creation sends only kind/name. MC returns the installation ID and a
+one-time secret; desktop keeps both in encrypted main-process storage and Android
+keeps both in secure credential storage. Restarts and token rotation reuse that
+identity. Desktop reauthorization supplies both fields once for the new
+authorization; catalog/grant refreshes never register again. A missing secret
+requires explicit sign-out and pairing again, not a guessed client device ID.
+
+Mobile login first reads MC's encryption policy and uses RSA-OAEP-256 when enabled.
+Account/sync HTTP 429 and 503 preserve credentials and honor Retry-After, including
+responses with no JSON body. Pairing stops when connection initialization fails.
+Both interfaces show actionable account/service errors and the supplied retry
+time. Authentication cooldown is independent of model request retries.
+
 Mobile offers login, verification challenges, pairing, shared project/session
 navigation, history paging, streamed text/thinking/tools, pending plans, image
 cards, approvals, question answering, send and stop. It can update the current

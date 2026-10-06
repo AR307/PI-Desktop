@@ -129,7 +129,7 @@ test("Composer owns the mode and model controls", () => {
   assert.doesNotMatch(stylesSource, /\.conversation-topbar \.ct-mode/);
   assert.match(composerModelPickerSource, /composer-model-thinking-chip/);
   assert.match(composerModelPickerSource, /composer-model-thinking-menu/);
-  assert.match(composerModelPickerSource, /composer-menu-entry/);
+  assert.match(composerModelPickerSource, /<ComposerModelList/);
   assert.match(composerModelPickerSource, /composer-menu-back/);
 });
 

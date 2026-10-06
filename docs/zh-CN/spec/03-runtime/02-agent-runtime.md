@@ -96,6 +96,9 @@ pi 消费排队输入时保留渲染器提供的消息 id；即使补充输入�
 6. 在 Electron main 的会话绑定路径边界上校验结构化附件，按 SHA-256 持久化
    图片字节，持久用户消息中只保留附件引用。只有处于视觉模型 10 MB 内联上限
    之内的图片才会被读进内存；更大的图片走流式哈希/复制以及既有的安全路径回退
+   草稿里的 `pi-desktop://session/<id>` 链接在同一步骤里解析成有界摘录附件：只限
+   同一项目，当前对话在任何读取之前就被跳过；运行时随后把它作为一个
+   `<session_reference name="…" session="…">` 块排在用户自己的话之前引用给模型
 7. 为本回合快照有效的 shell ID 与方言
 8. 用解析出的会话配置和有效思考级别启动 pi 回合；HTTP 429 的建连与流式失败
    使用运行时自有的静默 10 次重试预算，其他瞬时的 transport/provider 失败则在
@@ -278,11 +281,12 @@ E2E-SESSION-completion-notice-allows-silence。
 同一个会话。持久检查点总结了旧模型上下文，同时
 渲染器继续显示每个原始用户、助手和工具行。
 
-PI-Desktop 复用 pi-agent-core 的 `buildSessionContext`、`convertToLlm`、
-`estimateContextTokens`、`prepareCompaction` 和 `compact` 原语。桌面运行时拥有
-这些原语的运行时机，以及结果如何穿过 Rust 存储
-边界； OpenCode DCP 仅是 AGPL-3.0 行为参考，不是链接或
-复制的依赖关系。
+pi-agent-core 提供 Agent 循环及稳定的 agent/event/tool 类型，pi-ai 提供面向
+提供商的请求与消息估算。由于旧版实验性 harness API 已被移除，运行时自行维护
+上下文投影、LLM 消息转换、token 估算适配器、压缩切点选择和摘要生成。这些实现
+保留现有会话与检查点行为，并继续由 Rust host 独占持久会话状态；OpenCode DCP
+仅作为 AGPL-3.0 行为参考，不是链接或复制的依赖关系。详细依赖边界见
+[pi 运行时依赖边界](../02-architecture/06-pi-runtime-dependency-boundary.md)。
 
 压缩遵循 Codex 的机制 (ADR 0064)：它总是内联发生在
 回合边界，模型可以通过`new_context`请求，每次compaction
@@ -323,11 +327,9 @@ pi 0.84.4+ 只在循环将要在同一次运行中开启另一个助手回合时
 发出 `compaction_end`。阻塞路径将两者背靠背组成。
 
 **在检查点中幸存下来的内容。** 成功检查点留下的模型上下文是
-摘要以及最多一条**用户**消息；助手和工具消息是
-从模型上下文中删除并保留在可见的转录本中。圆周率
-`prepareCompaction` 仍然选择切点，因此其回合边界和
-保留分割回合处理，但运行时会折叠分割回合
-前缀和最近的尾部返回到摘要输入中，因此摘要涵盖
+摘要以及最多一条**用户**消息；助手和工具消息会从模型上下文中删除，
+但仍保留在可见的转录本中。运行时自有的准备逻辑选择切点并保留回合边界
+和分割回合处理，然后把分割回合前缀和最近尾部折叠回摘要输入，因此摘要涵盖
 整个紧凑的范围内，没有任何东西跨越边界而未被覆盖。
 
 **保留尾部回退**是例外，因为没有摘要覆盖它负责的范围：它保留真实的近期窗口——
@@ -508,6 +510,12 @@ Plan 和 Goal 是两种 **合约模式** (D198)。他们共用一个耐用的
 已提交且 queued/running 执行被中断，持久模式
 仍然是 Agent 并且不会重播执行。
 
+历史 SubmitPlan/SubmitGoal 显示只读卡片：可展开完整 Markdown、查看真实审批状态、打开
+计划文件；同类型后续提交出现后，旧版本标记为已被替代。审批操作仍只在实时审批栏中。
+历史元数据与规划事件按提案身份及版本合并，迟到的 pending 工具回显不能覆盖审批结果。
+继续聊天、上下文压缩、切换会话及重启后仍可阅读；文件被删除也不影响数据库中的正文。
+缺少审批元数据的旧主机仅显示快照并标注状态不可用，不把旧 pending 当作当前状态。
+
 手动模式和配置选择可以由渲染器上演，同时
 轮运行，但主机持久性仅保持空闲状态。选择 Agent 是
 故意的用户覆盖并且不综合计划或批准。每个
@@ -636,7 +644,10 @@ Frontmatter 新增 `permission: inherit | ask | accept-edits | auto`（默认
   `Task` 工具接受一个可选的 `model` 参数（`"provider/modelId"`），用于在本次
   运行中覆盖该委托的模型。解析优先级：Task.model 参数 → 定义 frontmatter 的
   引脚 → 会话模型。父 agent 会在系统提示中看到一份模型摘要，列出提供商设置里
-  所有标记为 `availableForSubagents` 的模型。若委托目录为空，提示会告诉模型
+  所有标记为 `availableForSubagents` 的模型。空目录下的系统摘要、Task 说明和
+  覆盖请求错误均指向「设置 → 模型 → 编辑服务或账号 → 模型高级设置 →
+  可供 AI 自动调度 → 保存」，要求使用目录中的准确键，避免猜测 provider/model。
+  若委托目录为空，提示会告诉模型
   省略 `model`，使用定义的固定模型，无固定模型时继承会话模型；显式给出的键如果正好就是当前会话的
   provider/model，同样按继承处理。其他显式模型键必须已配置并已为委托启用。
   Electron 单独传递 `subagentModelKeys` 与 `subagentProviders`：后者可含仅供定义
@@ -977,7 +988,7 @@ sidecar 构建了一个完整的工具注册表，但它不会序列化每个工
 
 - Agent：`Read`、`Bash`、`Edit` 和 `Write`（匹配 pi 的编码代理核心）
 - Agent：只要技能目录非空，`Skill` 也在核心集中（D404、ADR 0230）——`# Skills`
-  段落与用户输入的 `/skill-id` 都要求模型调用它，而模式中缺失的工具根本无法被调用
+  段落与用户输入的 `/skill:<skill-id>` 都要求模型调用它，而模式中缺失的工具根本无法被调用
 - Agent：当子代理目录非空时，`Task`、`TaskWait`、`TaskList` 和
   `TaskStop` 也是如此 (§5f) — 模型必须寻找的能力是它不会使用的能力，
   委托生命周期值得每个请求的额外模式
@@ -999,15 +1010,21 @@ sidecar 最多激活四个匹配项，并将名称写入 canonical
 模式。具有本机延迟工具搜索的提供商可在该负载点接收定义；其他
 提供商通常会收到活动定义。
 
-每个新用户提示前都会清除延迟激活集，再从有效上下文重建。成功的
-`ToolSearch` 结果读取 canonical `details.addedToolNames`；为兼容历史
-数据，也接受 `details.activated` 和顶层 `addedToolNames`。成功的延迟
-工具结果会贡献其工具名。仅恢复当前模式延迟目录中仍存在的名称；失败、
-中断、缺少结果的占位行以及助手/用户文本不会激活工具。工具注册表、主机
-权限路径、工具超时和工作区包含规则保持不变。`ToolSearch` 是 sidecar 的
-本地工具，不跨越主机 RPC 边界。激活标记保留在持久化工具结果中，因此
-只要证据仍在有效上下文，运行时重启或新提示都可以复用能力；证据被压缩
-或消失后仍需重新搜索。
+Deferred activation remains sticky within a live runtime. Restoration uses
+successful activation evidence and the current catalog; old declarations do not
+re-grant tools revoked from the live activation set. For official bound Flash,
+full declarations and execution activation are independent: versioned
+`tool_activation` sections carry the account/model/API/endpoint/catalog identity
+and active names through restart and compaction. Only matching, valid state and
+newer successful ToolSearch results restore activation; malformed or changed
+epochs fail closed. Inactive declared tools are blocked before extension/Host
+execution, and activation never bypasses mode or approval checks. The full
+catalog is deterministic from the first request. More than 128 tools or an
+insufficient context budget falls back to on-demand declarations with a
+diagnostic, without truncation. Other bindings retain their existing projection.
+Fixed declarations may increase total cost for short conversations. See the
+English section 7.1 and the chronological-system-transcript ADR for the complete
+contract.
 
 对于用户可见的 HTML 可交付成果，默认系统提示要求代理
 创建页面或创建第一个页面后激活 `BrowserPreview` 一次
@@ -1183,7 +1200,7 @@ System/Direct/Custom 代理路由保持不变。
 provider transport 重建。`EPROTO` 等协议错误继续使用原有重试行为。详见
 [证书信任 ADR](../../../adr/provider-system-certificates.md)。
 
-## Pi 0.99.1 execution boundary
+## Pi 1.0.1 execution boundary
 
 Published model metadata and account entitlement come from one account-scoped
 Pi Models collection. Effective binding projection is shared by launch, delegates

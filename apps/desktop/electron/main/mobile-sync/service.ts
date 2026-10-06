@@ -1,4 +1,3 @@
-import { randomUUID } from "node:crypto";
 import { hostname } from "node:os";
 import WebSocket from "ws";
 import { IPC, type AppSettings, type MobileGrant, type MobilePairing, type MobileRelayEnvelope, type MobileRelayTicket, type MobileSyncScope, type MobileSyncScopeInput, type MobileSyncSettings, type MobileSyncStatus } from "@pi-desktop/shared";
@@ -11,9 +10,13 @@ import { MobilePeer } from "./peer";
 import { MobileScopeAccess } from "./scope";
 import { openMobileRelay } from "./transport";
 import { object, string } from "./validation";
+import { MobileRequestCooldown, MobileServiceError } from "@pi-desktop/shared";
+import type { MobileDeviceCredentials } from "./device-credentials";
+import { registerMobileDevice } from "./device-registration";
 
 type Dependencies = {
   dataDir: string; account: MirrorCodingAccount; images: ImageService;
+  credentials: MobileDeviceCredentials;
   host(): HostRpc; agent(): AgentHost;
   send(channel: string, state: unknown): void;
   log(message: string, error?: unknown): void;
@@ -37,6 +40,7 @@ export class MobileSyncService {
   private incoming: Promise<void> = Promise.resolve();
   private receivedAt = Date.now();
   private stopConfiguration: () => void;
+  private readonly cooldown = new MobileRequestCooldown();
   constructor(private deps: Dependencies) {
     this.scope = new MobileScopeAccess(deps.host);
     this.stopConfiguration = onSessionConfigured(() => {
@@ -69,7 +73,8 @@ export class MobileSyncService {
   }
   async createPairing(input: MobileSyncScopeInput): Promise<MobilePairing> {
     const scope = await this.scope.resolve(input);
-    await this.refresh();
+    const state = await this.refresh();
+    if (state.error) throw new Error(state.error);
     if (!this.settings || this.deps.account.snapshot().status !== "connected") throw new Error("mobile_login_required");
     await this.write(async () => {
       const settings = this.settings!;
@@ -115,15 +120,17 @@ export class MobileSyncService {
       const account = this.deps.account.snapshot();
       if (account.status !== "connected" || !account.account) { this.publish({ status: "signed_out" }); return this.status(); }
       const accountId = String(account.account.id);
+      const authorizationId = this.deps.account.authorizationId;
+      if (!authorizationId) throw new Error("mobile_login_required");
+      const deviceId = await registerMobileDevice(this.deps.credentials, accountId, authorizationId, hostname(), (path, body) => this.request(path, body));
+      if (epoch !== this.epoch || this.disposed) return this.status();
       if (!this.settings) {
         const saved = (await this.deps.host().call<AppSettings>("settings.get")).mobileSync;
-        this.settings = saved?.accountId === accountId ? saved : { deviceId: randomUUID(), accountId, scopes: [], revokedGrantIds: [] };
+        if (epoch !== this.epoch || this.disposed) return this.status();
+        this.settings = saved?.accountId === accountId ? { ...saved, deviceId } : { deviceId, accountId, scopes: [], revokedGrantIds: [] };
         await this.persist();
       }
-      this.publish({ status: this.socket?.readyState === WebSocket.OPEN ? "online" : "connecting", deviceId: this.settings.deviceId, error: undefined });
-      const registration = object(await this.request("/devices/register", { deviceId: this.settings.deviceId, kind: "desktop", name: hostname() }));
-      if (epoch !== this.epoch) return this.status();
-      const deviceId = string(registration.deviceId, "device_id");
+      this.publish({ status: this.socket?.readyState === WebSocket.OPEN ? "online" : "connecting", deviceId: this.settings.deviceId, error: undefined, retryAt: undefined });
       if (deviceId !== this.settings.deviceId) { this.settings.deviceId = deviceId; await this.persist(); }
       for (const id of [...this.settings.revokedGrantIds]) {
         try { await this.request(`/grants/${encodeURIComponent(id)}/revoke`, {}); this.settings.revokedGrantIds = this.settings.revokedGrantIds.filter((item) => item !== id); await this.persist(); }
@@ -160,8 +167,8 @@ export class MobileSyncService {
     } catch (error) {
       if (epoch === this.epoch) {
         const code = error instanceof Error ? error.message : "mobile_connection_failed";
-        this.publish({ status: "error", error: code });
-        if (code !== "mobile_service_unavailable") this.schedule();
+        this.publish({ status: "error", error: code, retryAt: error instanceof MobileServiceError ? error.retryAt : undefined });
+        if (error instanceof MobileServiceError ? error.status === 429 || error.status >= 500 : error instanceof TypeError) this.schedule();
       }
     }
     return this.status();
@@ -199,16 +206,21 @@ export class MobileSyncService {
   }
   private schedule() {
     if (this.disposed || this.timer || this.deps.account.snapshot().status !== "connected") return;
-    this.timer = setTimeout(() => { this.timer = undefined; void this.refresh(); }, 5_000); this.timer.unref();
+    this.timer = setTimeout(() => { this.timer = undefined; void this.refresh(); }, Math.max(5_000, (this.state.retryAt ?? 0) - Date.now())); this.timer.unref();
   }
   private async request(path: string, data?: unknown): Promise<unknown> {
     const epoch = this.epoch;
+    this.cooldown.check();
     const response = await this.deps.account.request(`/api/pi-sync${path}`, { ...(data !== undefined ? { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(data) } : {}), signal: AbortSignal.timeout(20_000) });
     if (response.status === 404 || response.status === 501) throw new Error("mobile_service_unavailable");
-    const body = object(await response.json());
+    let result: unknown;
+    try { result = await this.cooldown.read<unknown>(response); }
+    catch (error) {
+      if (epoch === this.epoch && error instanceof MobileServiceError) this.publish({ error: error.code, retryAt: error.retryAt });
+      throw error;
+    }
     if (epoch !== this.epoch || this.disposed) throw new Error("mobile_account_changed");
-    if (!response.ok || body.success !== true) { const error = body.error && typeof body.error === "object" ? object(body.error) : {}; throw new Error(typeof error.code === "string" ? error.code : "mobile_service_unavailable"); }
-    return body.data;
+    return result;
   }
   private persist() { return this.deps.host().call("settings.set", { mobileSync: this.settings }); }
   private write(operation: () => Promise<void>) { const task = this.writes.then(operation); this.writes = task.catch(() => undefined); return task; }

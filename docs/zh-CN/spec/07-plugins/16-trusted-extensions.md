@@ -117,6 +117,11 @@ Agent 扩展。
 版本说明和 registry 来源的 npm lockfile，拒绝不安全的包路径和嵌套依赖 spec，禁用 git
 解析，并隔离 npm 的配置/cache 与用户凭据和代理设置。导入包不代表其所有第三方扩展依赖都能执行。
 
+macOS/Linux 未配置 npm 路径时，校验与安装会在继承的 `PATH` 后追加已存在的常见用户二进制目录，
+包括 Homebrew 和 `~/.local/bin`，以便从 Dock/Finder 启动时仍能找到已安装的 Node.js/npm。
+这只改变安装子进程的环境，不执行 shell 启动脚本、不修改应用的全局 `PATH`。显式选择的
+npm 保持原有优先级，不使用这些回退目录。
+
 ## 4. 加载与运行时
 
 ### 4.1 扩展在哪里运行
@@ -136,6 +141,9 @@ main、渲染层或插件宿主进程中。
   工具结果类型守卫。`@earendil-works/pi-tui` 解析到一个桩
   模块，它把每个符号导出为惰性值，使顶层 import 永不失败。调用被桩替代的
   符号时在调用点产生一条诊断。
+- 可信扩展的 coding-agent shim 仅公开文档列出的受支持助手。导入或访问其他根导出会
+  产生 `unsupported_api` 诊断；该导出仍不可用，loader 不会加载完整 coding-agent
+  运行时作为回退。
 
 ### 4.3 每会话一个 Runner
 

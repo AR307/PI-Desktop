@@ -41,6 +41,9 @@ The instruction adapter reads only the fixed global `~/.pi/agent/AGENTS.md`
 and each registered project's root `AGENTS.md`; it does not scan nested
 repositories or arbitrary files. Imported instruction files are written only
 after their scope is explicitly selected, mapped where required, and approved.
+Instruction files carry no instruction-specific byte cap; their content is
+bounded only by the shared portable-entity payload bound Host checks when it
+uploads a revision and when it validates a remote one.
 Directory-shaped skills carry bounded sibling resources as authenticated
 objects. Package paths, symlinks, collisions, file counts, and total size are
 validated by Host before approved resources are written: at most 256 resources

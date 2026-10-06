@@ -8,7 +8,7 @@
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import type { ProviderPublic } from "@pi-desktop/shared";
-import { IconCopy, IconKey, IconPencil, IconPlug, IconStar, IconTrash } from "../icons";
+import { IconCopy, IconKey, IconPencil, IconPlug, IconTrash } from "../icons";
 import { useArmedDelete, type CapabilityMenuItem } from "./AgentCapabilityLayout";
 import { ServiceRow } from "./ServiceRow";
 import { serviceRowKind } from "./service-row-status";
@@ -17,16 +17,12 @@ import type { AccountEntry } from "./useVendorAccounts";
 
 export type ServiceListProps = {
   providers: ProviderPublic[];
-  defaultProviderId: string | undefined;
-  /** Whether a row can serve as the app default right now. */
-  isReady: (provider: ProviderPublic) => boolean;
   accountFor: (providerId: string) => AccountEntry | null;
   /** A page-level write or dialog is in flight; card order is locked meanwhile. */
   busy: boolean;
   isRowBusy: (providerId: string) => boolean;
   testingId: string | null;
   onEdit: (provider: ProviderPublic) => void;
-  onMakeDefault: (provider: ProviderPublic) => void;
   onTest: (provider: ProviderPublic) => void;
   onCopy: (provider: ProviderPublic) => void;
   onToggleEnabled: (provider: ProviderPublic) => void;
@@ -37,14 +33,11 @@ export type ServiceListProps = {
 
 export function ServiceList({
   providers,
-  defaultProviderId,
-  isReady,
   accountFor,
   busy,
   isRowBusy,
   testingId,
   onEdit,
-  onMakeDefault,
   onTest,
   onCopy,
   onToggleEnabled,
@@ -78,7 +71,7 @@ export function ServiceList({
     }
   };
 
-  const menuItems = (provider: ProviderPublic, isDefault: boolean): CapabilityMenuItem[] => {
+  const menuItems = (provider: ProviderPublic): CapabilityMenuItem[] => {
     const kind = serviceRowKind(provider);
     const items: CapabilityMenuItem[] = [];
     // A plugin owns its row's fields and lifetime; only its key is the user's.
@@ -90,17 +83,6 @@ export function ServiceList({
         onSelect: () => {
           closeMenu(false);
           onEdit(provider);
-        },
-      });
-    }
-    if (!isDefault && isReady(provider)) {
-      items.push({
-        key: "default",
-        label: t("settings.makeDefault"),
-        icon: <IconStar size={14} />,
-        onSelect: () => {
-          closeMenu(true);
-          onMakeDefault(provider);
         },
       });
     }
@@ -161,7 +143,6 @@ export function ServiceList({
     <ul className="model-provider-list" aria-busy={reorder.saving}>
       {reorder.providers.map((provider) => {
         const kind = serviceRowKind(provider);
-        const isDefault = defaultProviderId === provider.id;
         const rowBusy = reorder.saving || isRowBusy(provider.id);
         const onOpen =
           kind !== "plugin"
@@ -174,11 +155,10 @@ export function ServiceList({
             key={provider.id}
             provider={provider}
             entry={accountFor(provider.id)}
-            isDefault={isDefault}
             busy={rowBusy}
             testing={testingId === provider.id}
             dragging={reorder.draggingId === provider.id}
-            menuItems={menuItems(provider, isDefault)}
+            menuItems={menuItems(provider)}
             menuOpen={openMenuId === provider.id}
             anyMenuOpen={openMenuId !== null}
             restoreMenuFocus={restoreMenuFocus}

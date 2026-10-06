@@ -22,6 +22,7 @@ import type {
   AgentQueuePushRequest,
   AskToolResolution,
   PlanProposal,
+  PendingInteractiveRequests,
   QueuedTurnSummary,
   RacpApprovalResult,
   RacpEventEnvelope,
@@ -50,6 +51,9 @@ function isWidening(session: RacpPermissionMode, effective: RacpPermissionMode):
 type HostLike = {
   call<T = unknown>(method: string, params?: Record<string, unknown>): Promise<T>;
 };
+
+/** Interactive cards one read may restore; a session never has many open. */
+const MAX_PENDING_INTERACTIVE = 8;
 
 export type AgentHostBridgeOptions = {
   invoke: IpcInvoke;
@@ -80,6 +84,19 @@ export const DESKTOP_PRINCIPAL: Principal = {
 export function createAgentHostBridge(options: AgentHostBridgeOptions) {
   const abortingSessions = new Set<string>();
   const resolvingViaModule = new Set<string>();
+
+  /**
+   * Ask answers already travelling through the Host input path, keyed by
+   * `sessionId:requestId`. The Host's runtime port answers through this same
+   * registered IPC handler, so resolving an open input re-enters
+   * `resolveAskByRequestId` while the outer frame still holds the pending
+   * input (it is deleted only after `respondInput` returns). Without this
+   * guard the re-entrant frame matches that same input again and the two
+   * frames recurse until the stack overflows, leaving the question pending
+   * forever. The re-entrant frame returns `null`, so its caller takes the
+   * direct sidecar resolve instead.
+   */
+  const resolvingInputs = new Set<string>();
 
   const requireHost = (): HostLike => {
     const host = options.getHost();
@@ -329,6 +346,80 @@ export function createAgentHostBridge(options: AgentHostBridgeOptions) {
     agentHost,
     observeWorkTarget(sessionId: string): string | null {
       return agentHost.observeWorkTarget(sessionId).activeTurnId;
+    },
+    /**
+     * Every interactive request this session is waiting on: the ask questions
+     * this sidecar generation still holds plus Host-owned permission requests.
+     * A renderer that reloaded reads this instead of keeping a card that no
+     * longer exists; both lists are bounded.
+     */
+    async pendingInteractiveRequests(sessionId: string): Promise<PendingInteractiveRequests> {
+      const asks = agentHost.pendingInputRequests(sessionId)
+        .slice(0, MAX_PENDING_INTERACTIVE)
+        .map((entry) => entry.original);
+      const pending = await listPendingToolRequests(options.getHost, sessionId);
+      return {
+        asks,
+        permissions: pending.slice(0, MAX_PENDING_INTERACTIVE).map(
+          ({ createdAt: _createdAt, expiresAt: _expiresAt, ...request }) => request,
+        ),
+      };
+    },
+    /**
+     * The single open ask of a session, or `null` when none or several are
+     * open: an answer that cannot be attributed to exactly one question must
+     * fail closed rather than guess.
+     */
+    openAsk(sessionId: string) {
+      const open = agentHost.pendingInputRequests(sessionId);
+      if (open.length !== 1) return null;
+      const [entry] = open;
+      return {
+        inputId: entry.input.id,
+        turnId: entry.input.turnId,
+        requestId: entry.original.requestId,
+        toolCallId: entry.original.toolCallId,
+        questions: entry.original.questions,
+      };
+    },
+    /** Resolve one open ask through the Host-owned input path. */
+    async resolveOpenAsk(input: { sessionId: string; inputId: string; answers: Array<string[] | null> }) {
+      return forIpc(() => agentHost.respondInput(DESKTOP_PRINCIPAL, {
+        inputId: input.inputId,
+        answers: input.answers,
+        context: { requestId: `live-voice:${input.sessionId}` },
+      }));
+    },
+    /**
+     * Resolve a Composer ask card through the Host-owned input path, matched
+     * by the runtime request id the card carries. Returns `null` when this
+     * Host holds no matching open input — including the re-entrant call the
+     * Host's own runtime port makes while this frame is still in flight — so
+     * the caller falls back to the direct sidecar resolve; otherwise the
+     * pending input is deleted before the sidecar settles, so a later
+     * `pendingInteractiveRequests` read (for example after switching windows
+     * back to the session) no longer resurrects the already answered card.
+     */
+    async resolveAskByRequestId(resolution: AskToolResolution): Promise<{ ok: boolean } | null> {
+      const sessionId = String(resolution?.sessionId ?? "").trim();
+      const requestId = String(resolution?.requestId ?? "").trim();
+      if (!sessionId || !requestId) return null;
+      const key = `${sessionId}:${requestId}`;
+      if (resolvingInputs.has(key)) return null;
+      const entry = agentHost.pendingInputRequests(sessionId)
+        .find((candidate) => candidate.original.requestId === requestId);
+      if (!entry) return null;
+      resolvingInputs.add(key);
+      try {
+        await forIpc(() => agentHost.respondInput(DESKTOP_PRINCIPAL, {
+          inputId: entry.input.id,
+          answers: resolution.answers,
+          context: { requestId },
+        }));
+      } finally {
+        resolvingInputs.delete(key);
+      }
+      return { ok: true };
     },
     lookupWorkAdmission(request: {
       sessionId: string;

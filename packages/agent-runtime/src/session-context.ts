@@ -1,23 +1,23 @@
+import { readSystemMessage } from "./system-transcript-journal.js";
 /**
  * Project pi session entries into the model context.
  *
- * pi 0.85 moved `buildSessionContext` off the public package export and made
- * the remaining helper async for custom-entry projectors. PI-Desktop
- * synthesizes only message and compaction entries, so the projection stays
- * synchronous and keeps the `{ messages }` shape the runtime already uses.
+ * The runtime owns this synchronous projection because its transcript includes
+ * desktop-only entries and persisted host checkpoints. It keeps the
+ * `{ messages }` shape consumed by the agent loop.
  *
  * The slice-from-latest-compaction and compactionSummary-before-retainedTail
- * order are copied from pi-agent-core; D203 depends on that order. Retained
+ * order preserve the behavior D203 depends on. Retained
  * reasoning turns (#296) sit between the summary and the user tail so strict
  * DeepSeek relays still see real thinking without replaying tool-call pairs.
  */
 
+import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import {
   createBranchSummaryMessage,
   createCompactionSummaryMessage,
-  type AgentMessage,
-  type Entry,
-} from "@earendil-works/pi-agent-core";
+} from "./pi-runtime-messages.js";
+import type { Entry } from "./pi-runtime-types.js";
 import {
   retainedReasoningFromDetails,
   retainedReasoningToMessages,
@@ -59,6 +59,8 @@ export function sessionEntryToContextMessages(
       return isContextMessage(entry.message) ? [entry.message] : [];
     case "compaction":
       return [
+        ...(entry.details && typeof entry.details === "object" && "systemMessageJson" in entry.details
+          ? [readSystemMessage(entry.details.systemMessageJson)] : []),
         createCompactionSummaryMessage(
           entry.summary,
           entry.tokensBefore,
@@ -71,7 +73,8 @@ export function sessionEntryToContextMessages(
               entry.timestamp,
               identity,
             )),
-        ...entry.retainedTail.filter(isContextMessage),
+        ...entry.retainedTail.filter((message) => isContextMessage(message) &&
+          !(message.role === "system" && entry.details && typeof entry.details === "object" && "systemMessageJson" in entry.details)),
       ];
     case "branch_summary":
       return entry.summary

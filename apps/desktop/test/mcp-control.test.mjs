@@ -16,6 +16,7 @@ const {
   isLoopbackBindHost,
   mcpControlRendererEvent,
   negotiateMcpProtocolVersion,
+  projectSessionGetResult,
   stripSecretMaterial,
   tokensEqual,
 } = await import("../electron/main/mcp-control.ts");
@@ -81,6 +82,36 @@ test("local MCP control server authenticates, discovers, and invokes desktop ope
   const dataDir = mkdtempSync(join(tmpdir(), "pi-mcp-control-"));
   const calls = [];
   const events = [];
+  const sessionMessages = [
+    { id: "m1", role: "user", content: "hello" },
+    { id: "m2", role: "assistant", content: "hi" },
+  ];
+  const largeSession = {
+    session: {
+      id: "large-session",
+      compaction: {
+        id: "cp-large",
+        createdAt: "2026-10-03T07:37:04.094Z",
+        summary: "x".repeat(700_000),
+        retainedTail: [{ content: "large" }],
+        details: { generation: 13, modifiedFiles: ["src/a.ts"] },
+      },
+      messages: sessionMessages,
+    },
+  };
+  const smallSession = {
+    session: {
+      id: "small-session",
+      compaction: {
+        id: "cp-small",
+        createdAt: "2026-10-03T07:37:04.094Z",
+        summary: "Keep this summary",
+        retainedTail: [{ content: "Keep this reply" }],
+        details: { generation: 2, modifiedFiles: ["src/b.ts"] },
+      },
+      messages: sessionMessages,
+    },
+  };
   const server = new McpControlServer({
     dataDir,
     port: 0,
@@ -96,6 +127,10 @@ test("local MCP control server authenticates, discovers, and invokes desktop ope
       }
       if (channel === "pi-desktop/session/create") {
         return { session: { id: "session-created", projectPath: args[0]?.projectPath ?? null } };
+      }
+      if (channel === "pi-desktop/session/get") {
+        if (args[0]?.id === largeSession.session.id) return largeSession;
+        if (args[0]?.id === smallSession.session.id) return smallSession;
       }
       return { ok: true };
     },
@@ -392,6 +427,39 @@ test("local MCP control server authenticates, discovers, and invokes desktop ope
   assert.equal(readSession.body.result.isError, undefined);
   assert.equal(events.filter(Boolean).length, refreshCount);
 
+  const readLargeSession = await post(
+    info.url,
+    info.token,
+    {
+      jsonrpc: "2.0",
+      id: 16,
+      method: "tools/call",
+      params: { name: "pi_session_get", arguments: { id: largeSession.session.id } },
+    },
+    { "Mcp-Session-Id": sessionId },
+  );
+  const largeResult = readLargeSession.body.result.structuredContent;
+  assert.equal(largeResult.truncated, undefined);
+  assert.deepEqual(largeResult.session.messages, sessionMessages);
+  assert.equal(largeResult.session.compaction.createdAt, largeSession.session.compaction.createdAt);
+  assert.equal(largeResult.session.compaction.details.generation, 13);
+  assert.equal(largeResult.session.compaction.summary, undefined);
+  assert.equal(largeResult.session.compaction.retainedTail, undefined);
+  assert.equal(largeResult.session.compaction.details.modifiedFiles, undefined);
+
+  const readSmallSession = await post(
+    info.url,
+    info.token,
+    {
+      jsonrpc: "2.0",
+      id: 17,
+      method: "tools/call",
+      params: { name: "pi_session_get", arguments: { id: smallSession.session.id } },
+    },
+    { "Mcp-Session-Id": sessionId },
+  );
+  assert.deepEqual(readSmallSession.body.result.structuredContent, smallSession);
+
   const missingPath = await post(
     info.url,
     info.token,
@@ -504,6 +572,160 @@ test("control-plane helpers clamp protocol versions, strip secrets, and bound re
   assert.equal(bounded.truncated, true);
   assert.equal(bounded.reason, "MCP_RESULT_LIMIT");
   assert.ok(JSON.stringify(bounded).length < 600_000);
+});
+
+test("session/get compaction metadata is projected before bounding (mocode #495)", () => {
+  const messages = [
+    { id: "m1", role: "user", content: "hello" },
+    { id: "m2", role: "assistant", content: "hi" },
+  ];
+  const huge = "x".repeat(700_000);
+  const raw = {
+    session: {
+      id: "s1",
+      title: "Long session",
+      modelId: "deepseek/deepseek-v4.1-flash",
+      mode: "agent",
+      messageStart: 0,
+      hasMoreBefore: false,
+      compaction: {
+        id: "cp1",
+        throughMessageId: "m900",
+        tokensBefore: 12_345,
+        createdAt: "2026-10-03T07:37:04.094Z",
+        summary: huge,
+        retainedTail: [{ huge }],
+        details: { generation: 13, modifiedFiles: ["a", "b", "c"] },
+        providerId: "p1",
+        modelId: "deepseek/deepseek-v4.1-flash",
+      },
+      messages,
+    },
+  };
+
+  // Without the projection the whole answer is replaced by a half-JSON preview
+  // and `messages` becomes unreachable — exactly what the phone hit.
+  const unprojected = boundMcpResult(raw);
+  assert.equal(unprojected.truncated, true);
+
+  const bounded = boundMcpResult(raw, projectSessionGetResult);
+  assert.notEqual(bounded.truncated, true, "projected answer must fit the limit");
+
+  const session = bounded.session;
+  assert.deepEqual(session.messages, messages, "messages must survive");
+  assert.equal(session.title, "Long session");
+  assert.equal(session.modelId, "deepseek/deepseek-v4.1-flash");
+  // The compact identity external clients rely on is kept ...
+  assert.equal(session.compaction.createdAt, "2026-10-03T07:37:04.094Z");
+  assert.equal(session.compaction.details.generation, 13);
+  // ... and the unbounded fields are dropped.
+  assert.equal(session.compaction.summary, undefined);
+  assert.equal(session.compaction.retainedTail, undefined);
+  assert.equal(session.compaction.details.modifiedFiles, undefined);
+});
+
+test("session/get compaction history is projected before bounding (mocode #506)", () => {
+  // The history array alone blows the limit even though the newest record is
+  // already projected and the transcript page is tiny: the phone could not open
+  // the session at ANY messageLimit/contentLimit, because the overflow was
+  // independent of the transcript page.
+  const huge = "y".repeat(200_000);
+  const historyEntry = (generation) => ({
+    id: `cp${generation}`,
+    throughMessageId: `m${generation}`,
+    tokensBefore: generation * 1000,
+    createdAt: `2026-09-2${generation}T00:00:00.000Z`,
+    summary: huge,
+    retainedTail: [{ content: huge }],
+    details: { generation, modifiedFiles: ["a", "b", "c"] },
+    providerId: "p1",
+    modelId: "deepseek/deepseek-v4.1-flash",
+  });
+  const messages = [{ id: "m1", role: "user", content: "hello" }];
+  const raw = {
+    session: {
+      id: "s1",
+      title: "Long session",
+      messageStart: 0,
+      hasMoreBefore: false,
+      compaction: {
+        id: "cp7",
+        createdAt: "2026-10-05T02:51:23.415Z",
+        details: { generation: 7 },
+      },
+      compactions: [historyEntry(1), historyEntry(2), historyEntry(3), historyEntry(4)],
+      messages,
+    },
+  };
+
+  const unprojected = boundMcpResult(raw);
+  assert.equal(unprojected.truncated, true, "the history array alone must exceed the limit");
+
+  const bounded = boundMcpResult(raw, projectSessionGetResult);
+  assert.notEqual(bounded.truncated, true, "projected answer must fit the limit");
+
+  const session = bounded.session;
+  assert.deepEqual(session.messages, messages, "messages must survive");
+  assert.equal(session.compaction.details.generation, 7, "newest record keeps its identity");
+  assert.equal(session.compactions.length, 4, "history length is preserved");
+  for (const entry of session.compactions) {
+    // The compact identity is kept ...
+    assert.equal(typeof entry.createdAt, "string");
+    assert.equal(typeof entry.details.generation, "number");
+    // ... and every entry's unbounded fields are dropped.
+    assert.equal(entry.summary, undefined);
+    assert.equal(entry.retainedTail, undefined);
+    assert.equal(entry.details.modifiedFiles, undefined);
+  }
+});
+
+test("session/get projection bounds a session with history but no newest record (mocode #506)", () => {
+  const huge = "z".repeat(700_000);
+  const raw = {
+    session: {
+      id: "s1",
+      compactions: [
+        {
+          id: "cp1",
+          createdAt: "2026-09-29T22:54:23.437Z",
+          summary: huge,
+          retainedTail: [huge],
+          details: { generation: 1, modifiedFiles: ["a"] },
+        },
+      ],
+      messages: [{ id: "m1", role: "user", content: "hello" }],
+    },
+  };
+
+  assert.equal(boundMcpResult(raw).truncated, true);
+
+  const bounded = boundMcpResult(raw, projectSessionGetResult);
+  assert.notEqual(bounded.truncated, true, "history-only sessions must still be projected");
+  assert.equal(bounded.session.compactions[0].summary, undefined);
+  assert.equal(bounded.session.compactions[0].details.generation, 1);
+});
+
+test("session/get projection leaves a small session untouched (mocode #495)", () => {
+  const raw = {
+    session: {
+      id: "s1",
+      compaction: {
+        id: "cp1",
+        createdAt: "t",
+        summary: "A small summary",
+        retainedTail: [{ role: "assistant", content: "A retained reply" }],
+        details: { generation: 1, modifiedFiles: ["src/a.ts"] },
+      },
+      messages: [],
+    },
+  };
+  assert.deepEqual(boundMcpResult(raw, projectSessionGetResult), raw);
+  // Non-session shapes and sessions without a compaction record pass through.
+  assert.deepEqual(boundMcpResult({ ok: true }, projectSessionGetResult), { ok: true });
+  assert.deepEqual(
+    boundMcpResult({ session: { id: "s2" } }, projectSessionGetResult),
+    { session: { id: "s2" } },
+  );
 });
 
 test("renderer refresh events fire only for mutating control operations", () => {

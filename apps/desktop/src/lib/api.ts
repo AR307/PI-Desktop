@@ -1,4 +1,5 @@
 import type { ImageGenerationState, ImageModelInfo, ImageSessionConfig } from "@pi-desktop/shared";
+import { projectPlanHistory } from "./plan-history";
 import type {
   ScheduledTaskRun,
   MobilePairing,
@@ -31,6 +32,7 @@ import type {
   QueuedTurnSummary,
   AgentStatus,
   AskToolResolution,
+  PendingInteractiveRequests,
   AgentInstructionFile,
   AppSettings,
   CommandShellCatalog,
@@ -128,6 +130,7 @@ import type {
   TrustedExtensionUiPromptResponse,
   MirrorCodingAccountState,
   SessionTodoSnapshot,
+  StorageInfo,
 } from "@pi-desktop/shared";
 import {
   defaultCommandShellForPlatform,
@@ -286,6 +289,9 @@ export interface ExternalMcpImportItem {
 }
 
 export interface ExternalMcpImportPayload {
+  /** Defaults to global for existing callers. */
+  level?: "global" | "project";
+  projectPath?: string;
   items: ExternalMcpImportItem[];
 }
 
@@ -340,6 +346,7 @@ function normalizeSessionDetail(detail: SessionDetail | null): SessionDetail | n
   return detail
     ? {
         ...detail,
+        messages: projectPlanHistory(detail.messages, detail.planHistory ?? [], detail.id),
         mode: normalizeMode((detail as { mode?: unknown }).mode),
       }
     : null;
@@ -566,6 +573,7 @@ export const api = {
   updatesDownload: () => invoke<UpdateState>(IPC.invoke.updatesDownload),
   updatesInstall: () => invoke(IPC.invoke.updatesInstall),
   updatesOpenReleases: () => invoke(IPC.invoke.updatesOpenReleases),
+  updatesDismiss: () => invoke(IPC.invoke.updatesDismiss),
   openFeedback: () => invoke(IPC.invoke.appOpenFeedback),
   listNotifications: (input?: { unreadOnly?: boolean; limit?: number }) =>
     invoke<NotificationListResult>(IPC.invoke.notificationList, input ?? {}),
@@ -660,6 +668,14 @@ export const api = {
   runImportModelConfigs: (items: ModelConfigImportCandidate[]) =>
     invoke<ImportRunResult>(IPC.invoke.modelConfigImportRun, items),
   getSettings: () => invoke<AppSettings>(IPC.invoke.settingsGet).then(normalizeSettings),
+  getStorageInfo: () => invoke<StorageInfo>(IPC.invoke.storageGet),
+  chooseStorageDirectory: () => invoke<string | null>(IPC.invoke.storageChoose),
+  migrateStorage: (input: { path: string; language: string }) =>
+    invoke<void>(IPC.invoke.storageMigrate, input),
+  clearStorageCache: (input: { language: string }) =>
+    invoke<void>(IPC.invoke.storageClearCache, input),
+  removeStorageBackup: (input: { language: string }) =>
+    invoke<void>(IPC.invoke.storageRemoveBackup, input),
   setSettings: (settings: AppSettings) =>
     invoke(IPC.invoke.settingsSet, validateSettingsWrite(settings)),
   mirrorCodingState: () =>
@@ -930,7 +946,12 @@ export const api = {
     invoke<{ task: ScheduledTask }>(IPC.invoke.scheduledUpdate, input),
   deleteScheduled: (id: string) => invoke(IPC.invoke.scheduledDelete, id),
   executeScheduled: (id: string) => invoke<{ sessionId: string }>(IPC.invoke.scheduledExecute, id),
-  listScheduledRuns: () => invoke<{ runs: ScheduledTaskRun[] }>(IPC.invoke.scheduledListRuns),
+  listScheduledRuns: (options: {
+    taskId?: string;
+    limit?: number;
+    /** One newest run per task, for the task column's own outcomes. */
+    latestPerTask?: boolean;
+  } = {}) => invoke<{ runs: ScheduledTaskRun[] }>(IPC.invoke.scheduledListRuns, options),
   runScheduled: (id: string) =>
     invoke<{ sessionId: string; prompt: string; task: ScheduledTask }>(
       IPC.invoke.scheduledRun,
@@ -1007,6 +1028,8 @@ export const api = {
     invoke(IPC.invoke.toolResolvePermission, resolution),
   resolveAskTool: (resolution: AskToolResolution) =>
     invoke(IPC.invoke.askToolResolve, resolution),
+  pendingInteractive: (sessionId: string) =>
+    invoke<PendingInteractiveRequests>(IPC.invoke.pendingInteractive, { sessionId }),
   pendingPlans: (sessionId?: string) =>
     invoke<PlansPendingResult>(
       IPC.invoke.plansPending,
@@ -1439,10 +1462,10 @@ export const api = {
       IPC.invoke.windowSetWorkPanelChatWidth,
       { width },
     ),
-  setWindowBackgroundColor: (theme: "light" | "dark", color?: string) =>
-    invoke<{ applied: boolean; theme: "light" | "dark"; color?: string }>(
+  setWindowBackgroundColor: (theme: "light" | "dark", color?: string, cornerRadius?: number) =>
+    invoke<{ applied: boolean; theme: "light" | "dark"; color?: string; cornerRadius?: number | null }>(
       IPC.invoke.windowSetBackgroundColor,
-      { theme, color },
+      { theme, color, cornerRadius },
     ),
   windowControl: (action: WindowControlAction) =>
     invoke<{ maximized: boolean }>(IPC.invoke.windowControl, { action }),

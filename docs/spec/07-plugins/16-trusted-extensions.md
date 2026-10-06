@@ -10,17 +10,18 @@ surface of PI-Desktop. This document specifies one plugin contribution,
 `contributes.agentExtensions`: TypeScript or JavaScript modules that run
 inside the Agent sidecar, receive an `ExtensionAPI` object, and register
 tools, commands, and event handlers directly on the agent loop. The
-`ExtensionAPI` contract is the one defined by `@earendil-works/pi-coding-agent`,
-which PI-Desktop adopts alongside the `pi-ai` and `pi-agent-core` kernel
-(ADR 0002), so an extension written for the pi CLI is the module a plugin
-contributes. D388 folded the earlier standalone "trusted extensions"
-registry into this contribution; the engine below is unchanged.
+`ExtensionAPI` shape is modeled on `@earendil-works/pi-coding-agent`, which
+PI-Desktop adopts alongside the `pi-ai` and `pi-agent-core` kernel (ADR 0002).
+The Desktop adapter implements an explicit subset, so compatibility with the
+pi CLI is limited to the members listed here. D388 folded the earlier
+standalone "trusted extensions" registry into this contribution; the engine
+below is unchanged.
 
 This contract describes extensions attached to Desktop Agent sessions. The
 Desktop adapter implements the explicit subset in §5–6; new upstream events do
 not become actionable here automatically. Native Pi continuation runs the
-coding-agent SDK's own extension lifecycle and can use its 0.87.1 boundary
-hooks, subject to the separate native-session lease and trust rules in
+coding-agent SDK's own extension lifecycle and native runtime package version,
+subject to the separate native-session lease and trust rules in
 [ADR 0254](../../adr/0254-native-pi-session-continuation.md).
 
 Provider declarations are a separate manifest surface rather than part of this
@@ -143,9 +144,13 @@ reuse it after validation; a stale saved path returns to the recovery prompt.
 If persistence fails, a native warning explains that the choice could not be
 saved but the current import can still use the validated executable.
 
-The selected executable's directory is added only to the install child's `PATH`
-so npm can find `node`; no shell startup probing or global environment mutation
-is permitted. Version checks and installation retain a minimal environment with
+When no npm executable is configured on macOS/Linux, validation and installation
+append existing well-known user binary directories (including Homebrew and
+`~/.local/bin`) after the inherited `PATH`. This lets GUI imports find an existing
+Node.js/npm installation without executing shell startup files. A configured
+executable keeps its selected directory first and does not use these fallbacks.
+Only the install child's environment changes; the application `PATH` is unchanged.
+No shell startup probing or global environment mutation is permitted. Version checks and installation retain a minimal environment with
 no inherited credentials. The registry-only proxy, isolated npm configuration,
 bounded two-step install, disabled git resolution, and disabled lifecycle scripts
 remain unchanged. Configured Windows `.cmd`/`.bat` launchers use the adjacent
@@ -217,11 +222,10 @@ never in Electron main, the renderer, or a plugin host process.
 
 ### 4.2 Loader
 
-- The sidecar pins `@earendil-works/pi-coding-agent` at exactly the version
-  pinned for `pi-ai` and `pi-agent-core`. The three versions must match; CI
-  fails when they drift. Native Pi sessions run its extension loader
-  in process, so the pin is a bundled runtime dependency and not a
-  types-only contract.
+- The sidecar pins `@earendil-works/pi-agent-core`, `pi-ai`, and
+  `pi-coding-agent` together at the same exact release. Native Pi sessions run
+  the coding-agent session manager in process, so these are runtime dependencies,
+  not a types-only contract.
 - The loader mirrors the `pi-coding-agent` discovery rules and uses
   `jiti/static` with `virtualModules`, so the babel transform is bundled
   and no path resolution happens at runtime. The bundling step is verified
@@ -240,6 +244,13 @@ never in Electron main, the renderer, or a plugin host process.
   resolves to a stub module that exports every symbol as an inert
   value so a top-level import never fails. Using a stubbed symbol raises a
   diagnostic at call time.
+- The trusted-extension coding-agent shim exposes only its documented supported
+  helpers. Importing or accessing another root export reports an
+  `unsupported_api` diagnostic; the export remains unavailable, and the loader
+  does not load the full coding-agent runtime as a fallback.
+  `TRUSTED_EXTENSION_KERNEL_VERSION` remains the legacy marker exposed as
+  `VERSION` by this shim. It describes the compatibility subset modeled on the
+  0.87.1 API and deliberately does not mirror the installed 1.0.0 package.
 
 ### 4.3 Runner per session
 
@@ -511,7 +522,13 @@ runtime, main, and renderer tracks in parallel.
 
 ## 13. Versioning policy
 
-- Upgrading any pi package upgrades all three together.
+- Upgrading the sidecar kernel upgrades `pi-agent-core`, `pi-ai`, and
+  `pi-coding-agent` together at one exact version; the dependency gate verifies
+  the direct pins. Desktop's `pi-ai` and `pi-mcp` development dependencies
+  follow that release.
+- The `VERSION` field on the extension compatibility shim uses the shared
+  `TRUSTED_EXTENSION_KERNEL_VERSION` marker, not the package release. Change
+  that marker only with an explicit compatibility review and shim contract test.
 - A fixture set of sample extensions covering each supported member runs as a
   contract test on every upgrade.
 - New `ExtensionAPI` members land in the Unsupported class with a

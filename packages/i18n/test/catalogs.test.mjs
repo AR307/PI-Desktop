@@ -21,6 +21,25 @@ function placeholders(value) {
 
 const english = flattenCatalog(en);
 
+test("offline storage maintenance has localized progress and recovery copy before renderer startup", () => {
+  const fields = ["progressTitle", "progressHint", "failedTitle", "failedHint", "continueOriginal", "unavailableHint"];
+  const stages = ["scanning", "copying", "verifying", "relocating", "cleaning", "complete", "failed"];
+  for (const [locale, catalog] of Object.entries(catalogs)) {
+    const copy = catalog.settings.storage;
+    for (const field of fields) {
+      assert.equal(typeof copy[field], "string", `${locale}: ${field}`);
+      assert.ok(copy[field].trim(), `${locale}: ${field} must not be blank`);
+    }
+    assert.deepEqual(Object.keys(copy.stages).sort(), [...stages].sort(), locale);
+    for (const stage of stages) assert.ok(copy.stages[stage].trim(), `${locale}: ${stage}`);
+    if (locale !== "en") {
+      assert.notEqual(copy.progressTitle, en.settings.storage.progressTitle, locale);
+      assert.notEqual(copy.failedHint, en.settings.storage.failedHint, locale);
+      assert.notEqual(copy.unavailableHint, en.settings.storage.unavailableHint, locale);
+    }
+  }
+});
+
 test("every shipped catalog matches English keys and interpolation variables", () => {
   for (const [id, catalog] of Object.entries(catalogs)) {
     const flat = flattenCatalog(catalog);
@@ -37,7 +56,7 @@ test("Live Voice preparation and call recovery copy is localized in every shippe
     "playbackBlocked", "playbackFailed", "mediaReleaseUnconfirmed",
     "callActionFailed", "workNotConnected", "transcript", "transcriptEmpty",
     "userSpeaking", "assistantSpeaking", "muted", "resumePlayback",
-    "selectWorkSession", "shareContext", "contextConsent", "contextShared",
+    "selectWorkSession", "shareContext", "contextShared",
     "contextNotShared", "createWorkSession", "viewWorkSession", "enableDetail",
     "microphoneDenied", "microphoneUnavailable", "microphoneBusy",
     "phase.connecting", "phase.closing",
@@ -52,8 +71,8 @@ test("Live Voice preparation and call recovery copy is localized in every shippe
     }
   }
 
-  assert.match(english["liveVoice.enableDetail"], /voice-only by default/);
-  assert.match(english["liveVoice.enableDetail"], /separate opt-in and work session/);
+  assert.match(english["liveVoice.enableDetail"], /current Composer session as the default work target/);
+  assert.match(english["liveVoice.enableDetail"], /switch sessions by voice/);
 });
 
 test("canonical thinking levels are not translated catalog entries", () => {
@@ -114,7 +133,6 @@ test("settings rail labels stay concise and parallel across locales", () => {
     "skills",
     "mcp",
     "subagents",
-    "import",
     "projects",
     "info",
   ].map((key) => `settings.nav.${key}`);
@@ -130,7 +148,6 @@ test("settings rail labels stay concise and parallel across locales", () => {
       "Skills",
       "MCP",
       "Subagents",
-      "Import",
       "Projects",
       "Info",
     ],
@@ -146,11 +163,14 @@ test("settings rail labels stay concise and parallel across locales", () => {
       "技能",
       "MCP",
       "子智能体",
-      "导入",
       "项目",
       "信息",
     ],
   );
+  assert.equal(english["settings.nav.import"], undefined);
+  assert.equal(chinese["settings.nav.import"], undefined);
+  assert.equal(english["settings.import"], undefined);
+  assert.equal(chinese["settings.import"], undefined);
   assert.equal(english["settings.groupPreferences"], "Preferences");
   assert.equal(chinese["settings.groupPreferences"], "偏好");
   assert.equal(english["settings.groupSystem"], "System");

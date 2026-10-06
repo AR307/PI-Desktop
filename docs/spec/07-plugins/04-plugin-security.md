@@ -111,14 +111,19 @@ before it is ever sent to the UI:
   the registration is revoked when the plugin unloads. `pi.themes.upsert` may
   register the same kind of path at runtime. An unregistered reference is refused,
   and the raw path never reaches the renderer
-- `contributes.windowAppearance` (`#rrggbb` / `#rrggbbaa`) requires
+- `contributes.windowAppearance` (`#rrggbb` / `#rrggbbaa` background and an
+  integer `cornerRadius` of 0..24 DIP) requires
   `ui.window.appearance` and applies only while one of that plugin's themes is
   the selected one; leaving the theme restores the host background, because the
-  colour is derived from the live catalog rather than remembered. macOS keeps
-  `vibrancy` and is never sent one
+  appearance is derived from the live catalog rather than remembered. macOS
+  keeps `vibrancy` and its native corner behavior; Linux retains native corner
+  behavior; Windows defaults to 4 DIP
 - The CSS is read from disk at load time and delivered whole over IPC; the
   renderer injects it into a single dedicated `<style>` element appended after
-  the app's own stylesheets, so it can override tokens but never inject markup
+  the app's own stylesheets, so it can override tokens but never inject markup.
+  Later source order wins only at equal selector specificity: use
+  `:root[data-theme="light"]` or `:root[data-theme="dark"]` to match the base
+  palette's selector; bare `:root` has lower specificity
 - Selecting a theme is a settings value (`plugin:<pluginId>:<themeId>`); if the
   providing plugin is disabled or uninstalled the setting falls back to `system`
 

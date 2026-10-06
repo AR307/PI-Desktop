@@ -76,9 +76,18 @@ it must not silently broaden the account or provider allowlist.
 
 ## Recommendation
 
-Complete the pi-ai/pi-agent-core migration first. Keep coding-agent as the
-existing compatibility dependency for compaction/file utilities, with no new
-session-runtime dependency. Record the above patterns for follow-up work; first
-consolidate tool inventory, then evaluate the sandbox independently, and add
-routing only with a product policy and persistence contract. None of these
-follow-ups is a migration acceptance requirement.
+At the time of this review, keep coding-agent as the existing compatibility
+dependency for compaction/file utilities, with no new session-runtime
+dependency. Since the experimental pi-agent-core harness APIs were removed,
+the normal Desktop runtime now owns context projection and host-core checkpoint
+compaction. The remaining production dependency is limited to native Pi session
+continuation and the trusted-extension compatibility shim. Do not move removed
+pi-agent-core APIs into coding-agent.
+
+The user-directed follow-up is to remove coding-agent after replacing the
+native-session and extension-compatibility seams. See
+`docs/spec/02-architecture/06-pi-runtime-dependency-boundary.md` for the
+required migration sequence and compatibility checks. Tool inventory
+consolidation, an independent Codemode sandbox adapter, and virtual routing
+remain separate design follow-ups; none is required for this compatibility
+migration.

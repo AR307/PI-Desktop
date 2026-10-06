@@ -26,6 +26,10 @@ const scheduledSource = await readFile(
   new URL("../src/pages/ScheduledPage.tsx", import.meta.url),
   "utf8",
 );
+const scheduledFormatSource = await readFile(
+  new URL("../src/features/scheduled/scheduled-format.ts", import.meta.url),
+  "utf8",
+);
 const pluginsPageSource = await readPluginsSource();
 const marketplaceSettingsSource = await readFile(
   new URL(
@@ -71,6 +75,10 @@ const protocolSource = await readFile(
 );
 const languageSource = await readFile(
   new URL("../src/lib/app-language.ts", import.meta.url),
+  "utf8",
+);
+const rendererLanguageSource = await readFile(
+  new URL("../src/lib/renderer-language.ts", import.meta.url),
   "utf8",
 );
 const enLocaleSource = await readFile(
@@ -242,16 +250,20 @@ test("basics gates developer tools behind a persisted developer mode", () => {
 
 test("stored language drives i18n and native labels at startup and on settings change", () => {
   assert.match(languageSource, /export function initLanguageSync/);
-  assert.match(languageSource, /changeLanguage/);
-  assert.match(languageSource, /resolveLocale/);
+  assert.match(rendererLanguageSource, /changeLanguage/);
+  assert.match(rendererLanguageSource, /resolveLocale/);
   assert.match(mainSource, /initLanguageSync\(\)/);
   assert.match(electronMainSource, /catalogs\[resolveLocale\(locale\)\]/);
 });
 
 test("date copy follows the active application locale", () => {
+  // The page resolves one locale and hands it to every moment it renders; the
+  // formatter is what actually builds the string.
+  assert.match(scheduledSource, /const locale = i18n\.resolvedLanguage \?\? i18n\.language;/);
+  assert.match(scheduledSource, /locale=\{locale\}/);
   assert.match(
-    scheduledSource,
-    /toLocaleString\(\s*i18n\.resolvedLanguage \?\? i18n\.language/s,
+    scheduledFormatSource,
+    /new Intl\.DateTimeFormat\(locale \|\| undefined/,
   );
   assert.match(
     providersSource,
@@ -274,28 +286,6 @@ test("model configuration keeps model defaults; AI owns app behavior defaults", 
   assert.doesNotMatch(providersSource, /EnhancementModelCard/);
 });
 
-test("default model selector shows every configured model under its provider", () => {
-  const defaultModelPicker =
-    providersSource.match(
-      /visibleDefaultModelOptions\.map\(\(\{ provider, modelId \}, index\) => \{[\s\S]*?<\/li>/,
-    )?.[0] ?? "";
-  assert.notEqual(defaultModelPicker, "");
-  assert.match(defaultModelPicker, /model-default-provider-group/);
-  assert.match(defaultModelPicker, /model-default-option-model font-mono">[\s\S]*?\{modelId\}/);
-  assert.match(defaultModelPicker, /setDefaultModel\(provider, modelId\)/);
-  assert.match(providersSource, /settings-text-action model-default-trigger/);
-  assert.doesNotMatch(providersSource, /defaultModelDescription/);
-  // The accessible name follows the provider heading, which is the vendor
-  // account's own label when it has one (#785).
-  assert.match(
-    providersSource,
-    /aria-label=\{`\$\{providerDisplayName\(provider\)\} · \$\{modelId\}`\}/,
-  );
-  assert.match(providersSource, /placeholder=\{t\("settings\.defaultModelSearch"\)\}/);
-  assert.match(providersSource, /model-default-results/);
-  assert.match(stylesSource, /\.model-default-results\s*\{[\s\S]*?overflow-y: auto;/);
-  assert.match(stylesSource, /scrollbar-gutter: stable/);
-});
 
 test("model configuration lists AI services and vendor accounts together", () => {
   // One list (D625): nothing filters OAuth rows out, and no second section.
@@ -402,7 +392,7 @@ test("settings nav icons map each destination to a semantic lucide glyph", () =>
   assert.match(settingsPageSource, /shortcuts: <IconKeyboard/);
   assert.match(settingsPageSource, /instructions: <IconFileText/);
   assert.match(settingsPageSource, /agent: <IconBot/);
-  assert.match(settingsPageSource, /import: <IconDownload/);
+  assert.doesNotMatch(settingsPageSource, /import: <IconDownload/);
   assert.match(settingsPageSource, /projects: <IconArchive/);
   assert.match(settingsPageSource, /about: <IconInfo/);
   assert.doesNotMatch(settingsPageSource, /general: <IconSettings/);
@@ -438,7 +428,9 @@ test("settings nav keeps a flat searchable index with titled visual groups", () 
     "shortcuts",
     "instructions",
     "agent",
-    "import",
+    "skills",
+    "mcp",
+    "subagents",
     "projects",
     "about",
   ].map((id) => settingsSearchSource.indexOf(`id: "${id}"`));
@@ -477,7 +469,6 @@ test("settings rail uses short parallel labels and descriptive page titles", () 
     "settings.nav.skills",
     "settings.nav.mcp",
     "settings.nav.subagents",
-    "settings.nav.import",
     "settings.nav.projects",
     "settings.nav.info",
   ];
@@ -529,4 +520,17 @@ test("native select menus keep readable theme colors across the app on Windows",
     stylesSource,
     /:root\[data-theme="light"\]\s*\{[^}]*color-scheme:\s*light;/s,
   );
+});
+
+test("Live Voice account cards show their options only after a provider is chosen", async () => {
+  const source = await readFile(
+    new URL("../src/features/settings/voice/LiveVoiceSettings.tsx", import.meta.url),
+    "utf8",
+  );
+  // A card with no provider account bound is the picker and nothing else: the
+  // model, voice, and protocol rows belong to a chosen binding instead of
+  // rendering as empty disabled controls.
+  assert.match(source, /\{current && adapter !== "codex-live" \? \(/);
+  assert.match(source, /\{current && adapter === "openai-realtime" \? \(/);
+  assert.doesNotMatch(source, /disabled=\{!current/);
 });

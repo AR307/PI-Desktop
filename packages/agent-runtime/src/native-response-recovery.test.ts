@@ -130,6 +130,7 @@ function nativeFixture(steps: Step[]) {
       },
       host: {
         async call<T>(method: string): Promise<T> {
+          if (method === "session.appendMessage") return undefined as T;
           if (method !== "tools.execute") throw new Error("Unexpected host call: " + method);
           executions++;
           return { ok: true, content: "Completed tool result" } as T;

@@ -27,8 +27,10 @@ forwards the notification through the existing IPC bridge, and the renderer
 keeps snapshots keyed by session id while rejecting stale revisions.
 
 The Composer TodoDock is a non-focusing, session-aware presentation surface.
-It shows bounded progress and at most eight ordered rows. Remote RACP sessions
-remain local-only for this vertical slice because RACP v1 has no Todo snapshot
+It shows bounded progress and the complete ordered list: the expanded dock
+scrolls inside its own box instead of truncating, so a long checklist stays
+readable without growing the Composer stack. Remote RACP sessions remain
+local-only for this vertical slice because RACP v1 has no Todo snapshot
 operation; the renderer skips local recovery for those session ids rather than
 reading the local database.
 
@@ -46,4 +48,5 @@ reading the local database.
 Host-core tests cover migration, validation, transaction rollback, restart,
 revision ordering, fork isolation, cascade deletion, and RPC authorization.
 Renderer type checks and TodoDock interaction tests cover revision filtering,
-remote-session degradation, session switching, expansion, and bounded display.
+remote-session degradation, session switching, expansion, and full-list display
+through the dock's own scrollport.

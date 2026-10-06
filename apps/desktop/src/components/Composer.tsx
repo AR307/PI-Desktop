@@ -1,6 +1,7 @@
 import { useImageComposer } from "../features/images/useImageComposer";
 import { ImageOptions } from "../features/images/ImageOptions";
 import { useImageReference } from "../features/images/useImageReference";
+import { inheritedSessionModelBinding } from "../lib/session-model";
 import {
   useEffect,
   useLayoutEffect,
@@ -54,7 +55,6 @@ import { useComposerDraft } from "../features/chat/composer/hooks/useComposerDra
 import { useComposerInputHistory } from "../features/chat/composer/hooks/useComposerInputHistory";
 import { usePluginComposerBridge } from "../features/chat/composer/hooks/usePluginComposerBridge";
 import { useComposerSubmit } from "../features/chat/composer/hooks/useComposerSubmit";
-import { ComposerImageAttachments } from "../features/chat/composer/ComposerImageAttachments";
 import { ComposerInput } from "../features/chat/composer/ComposerInput";
 import { useComposerModelMenu } from "../features/chat/composer/hooks/useComposerModelMenu";
 import { useVoiceInput } from "../features/voice/useVoiceInput";
@@ -333,39 +333,15 @@ export function Composer({
       : sessionPermissionMode;
   const composerPermissionMode: Exclude<PermissionMode, "inherit"> =
     mode === "goal" ? "auto" : effectivePermissionMode;
-  const inheritedDraftModel = useMemo(
-    () =>
-      activeSession
-        ? null
-        : newConversationModelBinding({
-            draft: draftConfiguration,
-            latestSession: latestSessionInScope(
-              sessions,
-              workspacePath || null,
-              sessionMeta,
-            ),
-            settings,
-            providers,
-          }),
-    [
-      activeSession,
-      draftConfiguration,
-      sessions,
-      workspacePath,
-      sessionMeta,
-      settings,
-      providers,
-    ],
-  );
-  const provider = providers.find(
-    (candidate) =>
-      candidate.id ===
-      (activeSession?.providerId ?? inheritedDraftModel?.providerId),
-  );
-  const modelId =
-    activeSession?.modelId ??
-    inheritedDraftModel?.modelId ??
-    (settings?.defaultModelId?.trim() || provider?.models?.[0]?.id || provider?.defaultModelId);
+  const recentModels = useAppStore((s) => s.recentModels);
+  const selectedModel = inheritedSessionModelBinding({
+    draft: activeSession ?? draftConfiguration,
+    settings,
+    providers,
+    recentModels,
+  });
+  const provider = providers.find(candidate => candidate.id === selectedModel.providerId);
+  const modelId = selectedModel.modelId;
   const selectedModelCatalog = provider ? providerModels[provider.id] : undefined;
   const catalogThinkingProvider = thinkingProviderForModel(
     provider,
@@ -572,7 +548,6 @@ export function Composer({
           insertDroppedDirectoryPaths={insertDroppedDirectoryPaths}
           dismissDroppedDirectories={dismissDroppedDirectories}
         />
-        <ComposerImageAttachments controller={draft.imagePreview} onRemove={draft.removeImage} disabled={inputBlocked} />
         <div
           ref={composerShellRef}
           className={`composer-shell${inputBlocked ? " is-gated" : ""}${
@@ -659,7 +634,7 @@ export function Composer({
             hasDraftContent={hasDraftContent}
             abort={image.active ? image.abort : abort}
             submit={submitFromComposer}
-            workSessionId={activeSessionId && !nativeSession ? activeSessionId : undefined}
+            workSessionId={activeSessionId ?? undefined}
             workSessionLabel={activeSessionSummary?.title}
           />
         </div>

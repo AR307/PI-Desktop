@@ -2,7 +2,7 @@ export const PROTOCOL_VERSION = 11 as const;
 export const SCHEMA_VERSION = 16 as const;
 export const APP_ID = "net.aiuo.pi-desktop";
 export const APP_NAME = "PI-Desktop";
-export const APP_VERSION = "0.15.11";
+export const APP_VERSION = "0.16.1";
 
 export const APP_MENU_COMMANDS = [
   "newTask",
@@ -56,6 +56,11 @@ export const IPC = {
     imageModels: "pi-desktop/image/models",
     imageRetryDownload: "pi-desktop/image/retryDownload",
     imageAbort: "pi-desktop/image/abort",
+    storageGet: "pi-desktop/storage/get",
+    storageChoose: "pi-desktop/storage/choose",
+    storageMigrate: "pi-desktop/storage/migrate",
+    storageClearCache: "pi-desktop/storage/clearCache",
+    storageRemoveBackup: "pi-desktop/storage/removeBackup",
     appGetVersion: "pi-desktop/app/getVersion",
     appOpenFeedback: "pi-desktop/app/openFeedback",
     appHealth: "pi-desktop/app/health",
@@ -74,6 +79,8 @@ export const IPC = {
     updatesDownload: "pi-desktop/updates/download",
     updatesInstall: "pi-desktop/updates/install",
     updatesOpenReleases: "pi-desktop/updates/openReleases",
+    /** Persist the user's decision to stop nudging about one version (#1317). */
+    updatesDismiss: "pi-desktop/updates/dismiss",
     notificationList: "pi-desktop/notification/list",
     notificationMarkRead: "pi-desktop/notification/markRead",
     notificationMarkAllRead: "pi-desktop/notification/markAllRead",
@@ -108,6 +115,11 @@ export const IPC = {
     liveVoiceEnd: "pi-desktop/voice/live/end",
     liveVoiceHeartbeat: "pi-desktop/voice/live/heartbeat",
     liveVoiceResolveWorkSelection: "pi-desktop/voice/live/work/resolveSelection",
+    liveVoiceStopWorkOperation: "pi-desktop/voice/live/work/stopOperation",
+    liveVoiceCancelQueuedOperation: "pi-desktop/voice/live/work/cancelQueuedOperation",
+    liveVoiceWidgetAction: "pi-desktop/voice/live/widget/action",
+    liveVoiceWidgetOwnerState: "pi-desktop/voice/live/widget/ownerState",
+    liveVoiceWidgetVisibility: "pi-desktop/voice/live/widget/visibility",
     agentCompact: "pi-desktop/agent/compact",
     agentAbort: "pi-desktop/agent/abort",
     agentStop: "pi-desktop/agent/stop",
@@ -195,6 +207,7 @@ export const IPC = {
     todosGet: "pi-desktop/todos/get",
     askToolResolve: "pi-desktop/agent/askTool/resolve",
     plansPending: "pi-desktop/plans/pending",
+    pendingInteractive: "pi-desktop/agent/pendingInteractive",
     plansResolve: "pi-desktop/plans/resolve",
     /**
      * List every paired remote `pi-host` this desktop knows, redacted so no
@@ -428,6 +441,8 @@ export const IPC = {
     liveVoicePort: "pi-desktop/voice/live/event/port",
     liveVoiceControl: "pi-desktop/voice/live/event/control",
     liveVoiceTranscript: "pi-desktop/voice/live/event/transcript",
+    liveVoiceWidgetState: "pi-desktop/voice/live/event/widgetState",
+    liveVoiceWidgetAction: "pi-desktop/voice/live/event/widgetAction",
   },
 } as const;
 

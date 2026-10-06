@@ -22,6 +22,7 @@ import { registerProviderIpc } from "./provider-ipc";
 import { registerScheduledIpc } from "./scheduled-ipc";
 import { registerSessionIpc } from "./session-ipc";
 import { registerSettingsIpc } from "./settings-ipc";
+import { registerStorageIpc } from "../storage/ipc";
 import { registerConfigSyncIpc } from "./config-sync-ipc";
 import { registerSkillsIpc } from "./skills-ipc";
 import { registerAgentImportIpc } from "./agent-import-ipc";
@@ -36,6 +37,7 @@ import { registerSpeechIpc } from "./speech-ipc";
 import { registerVoiceIpc } from "./voice-ipc";
 import { registerLiveVoiceIpc } from "./live-voice-ipc";
 import type { LiveCallService } from "../live-voice/call-service";
+import type { LiveVoiceWidget } from "../live-voice/widget-window";
 import type { IpcRegistrar } from "./types";
 import type { createTraySessions } from "../tray-sessions";
 import { registerMirrorCodingIpc } from "../mirrorcoding/ipc";
@@ -65,6 +67,8 @@ export type RegisterIpcDependencies = {
   activeUserSubagentDocuments: (...args: any[]) => Promise<any>;
   disabledBuiltinSubagents: () => Promise<string[]>;
   liveCallService?: LiveCallService;
+  liveVoiceWidget?: LiveVoiceWidget;
+  restartForStorage: () => void;
   mcpOAuth?: McpOAuthManager;
   [name: string]: any;
 };
@@ -172,6 +176,7 @@ export function registerIpcHandlers(dependencies: RegisterIpcDependencies) {
     sendToRenderer,
     voiceService,
     liveCallService,
+    liveVoiceWidget,
   } = dependencies;
 
 
@@ -246,6 +251,7 @@ export function registerIpcHandlers(dependencies: RegisterIpcDependencies) {
     safeOpenExternal,
     updater,
   });
+  registerStorageIpc({ registrar, getMainWindow, restart: dependencies.restartForStorage });
   registerNotificationIpc({
     registrar,
     getHost,
@@ -318,6 +324,8 @@ export function registerIpcHandlers(dependencies: RegisterIpcDependencies) {
   const loadComposerTemplatesCached = createComposerTemplateLoader(logger);
   const composerCommandService = registerComposerIpc({
     registrar,
+    userMcp,
+    refreshUserMcp,
     plugins,
     agentExtensions,
     optionalWorkspaceRoot,
@@ -491,8 +499,8 @@ export function registerIpcHandlers(dependencies: RegisterIpcDependencies) {
   if (voiceService) {
     registerVoiceIpc({ registrar, voiceService });
   }
-  if (liveCallService) {
-    registerLiveVoiceIpc({ registrar, service: liveCallService, getMainWindow });
+  if (liveCallService && liveVoiceWidget) {
+    registerLiveVoiceIpc({ registrar, service: liveCallService, getMainWindow, widget: liveVoiceWidget });
   }
 
   registerRemoteHostIpc({ registrar });

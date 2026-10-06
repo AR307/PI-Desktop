@@ -9,6 +9,7 @@ import {
   isHttpUrl,
   linkifyMdastTree,
   parseFileRef,
+  parseFileRefPosition,
   remarkChatFileLinks,
   resolvePreviewTarget,
   splitChatText,
@@ -107,6 +108,7 @@ test("resolvePreviewTarget classifies urls and workspace files", () => {
   assert.deepEqual(resolvePreviewTarget("src/a.ts:10", ROOT), {
     kind: "file",
     path: "src/a.ts",
+    line: 10,
   });
   assert.deepEqual(resolvePreviewTarget("./README.md", ROOT, "docs"), {
     kind: "file",
@@ -477,7 +479,7 @@ test("splitChatText turns composer @paths into leaf-name chips", () => {
   assert.equal(files[2].label, "uuid-photo.png");
 });
 
-test("linkifyMdastTree turns bare paths into links and skips code", () => {
+test("linkifyMdastTree turns bare paths and resolvable inline code into links", () => {
   const tree = {
     type: "root",
     children: [
@@ -486,6 +488,7 @@ test("linkifyMdastTree turns bare paths into links and skips code", () => {
         children: [{ type: "text", value: "See apps/desktop/src/App.tsx please" }],
       },
       { type: "inlineCode", value: "apps/desktop/src/App.tsx" },
+      { type: "inlineCode", value: "some ordinary prose here" },
       {
         type: "link",
         url: "https://example.com",
@@ -496,8 +499,45 @@ test("linkifyMdastTree turns bare paths into links and skips code", () => {
   linkifyMdastTree(tree, ROOT);
   assert.equal(tree.children[0].children[1].type, "link");
   assert.equal(tree.children[0].children[1].url, "apps/desktop/src/App.tsx");
-  assert.equal(tree.children[1].type, "inlineCode");
-  assert.equal(tree.children[2].children[0].type, "text");
+  // A resolvable inline-code path becomes a link whose child stays inline code (#1169).
+  assert.equal(tree.children[1].type, "link");
+  assert.equal(tree.children[1].url, "apps/desktop/src/App.tsx");
+  assert.equal(tree.children[1].children[0].type, "inlineCode");
+  // A spaced prose code run is not path-like and stays plain inline code.
+  assert.equal(tree.children[2].type, "inlineCode");
+  assert.equal(tree.children[3].children[0].type, "text");
+});
+
+test("linkifyMdastTree links a spaced Windows path in inline code (#1169)", () => {
+  const tree = {
+    type: "root",
+    children: [
+      {
+        type: "paragraph",
+        children: [{ type: "inlineCode", value: "C:/demo project/readme.md" }],
+      },
+    ],
+  };
+  // The issue's workspace root is the spaced directory itself, so the
+  // reference resolves under it; the link keeps the full source path.
+  linkifyMdastTree(tree, "C:\\demo project");
+  assert.equal(tree.children[0].children[0].type, "link");
+  assert.equal(
+    tree.children[0].children[0].url,
+    encodeURIComponent("C:/demo project/readme.md"),
+  );
+
+  const markup = renderToStaticMarkup(
+    React.createElement(ReactMarkdown, {
+      remarkPlugins: [remarkChatFileLinks("C:\\demo project")],
+      children: "`C:/demo project/readme.md`",
+    }),
+  );
+  assert.ok(
+    markup.includes(
+      '<a href="C%3A%2Fdemo%20project%2Freadme.md"><code>C:/demo project/readme.md</code></a>',
+    ),
+  );
 });
 
 test("linkifyMdastTree ignores a missing tree instead of reading type", () => {
@@ -685,9 +725,65 @@ test("sentence punctuation after URLs stays outside the link", () => {
   );
 });
 
-test("adjacent parenthesis-wrapped URLs all remain independently linkable", () => {
+test("URL link creation is capped per conversion without changing source text", () => {
   const source = "(https://example.com)".repeat(1000);
   const segments = splitChatText(source, ROOT);
-  assert.equal(segments.filter(s => s.kind === "target").length, 1000);
+  assert.equal(segments.filter(s => s.kind === "target").length, 256);
   assert.equal(segments.map(s => s.text).join(""), source);
+  assert.equal(
+    splitChatText("(https://example.com)", ROOT).filter((s) => s.kind === "target").length,
+    1,
+  );
+});
+
+test("parseFileRefPosition keeps :line[:col] that parseFileRef strips", () => {
+  assert.deepEqual(parseFileRefPosition("src/main.rs:42"), { line: 42 });
+  assert.deepEqual(parseFileRefPosition("src/main.rs:42:7"), { line: 42, column: 7 });
+  assert.deepEqual(parseFileRefPosition("src/main.rs:42."), { line: 42 });
+  assert.deepEqual(parseFileRefPosition("src/main.rs:42:7,"), { line: 42, column: 7 });
+  assert.equal(parseFileRefPosition("src/main.rs"), null);
+  assert.equal(parseFileRefPosition("src/main.rs:0"), null);
+});
+
+test("resolvePreviewTarget carries line/col on file chips (#681)", () => {
+  assert.deepEqual(resolvePreviewTarget("src/a.ts:42", ROOT), {
+    kind: "file",
+    path: "src/a.ts",
+    line: 42,
+  });
+  assert.deepEqual(resolvePreviewTarget("src/a.ts:42:7", ROOT), {
+    kind: "file",
+    path: "src/a.ts",
+    line: 42,
+    column: 7,
+  });
+  assert.deepEqual(resolvePreviewTarget("src/a.ts:42:7.", ROOT), {
+    kind: "file",
+    path: "src/a.ts",
+    line: 42,
+    column: 7,
+  });
+  assert.deepEqual(resolvePreviewTarget(`${ROOT}/src/a.ts:42:7`, ROOT), {
+    kind: "file",
+    path: `${ROOT}/src/a.ts`,
+    line: 42,
+    column: 7,
+  });
+});
+
+test("session links segment as their own target", () => {
+  const link = "pi-desktop://session/6f1d2c3b-4a59-4e7f-8a90-b1c2d3e4f506";
+  const segments = splitChatText(`analyze ${link} please`, ROOT);
+  assert.deepEqual(
+    segments.map((segment) => segment.text),
+    ["analyze ", link, " please"],
+  );
+  const target = segments.find((segment) => segment.kind === "target");
+  assert.deepEqual(target.target, {
+    kind: "session",
+    sessionId: "6f1d2c3b-4a59-4e7f-8a90-b1c2d3e4f506",
+  });
+  // A remote id and a bare scheme are not local conversations.
+  assert.equal(resolvePreviewTarget("pi-desktop://session/remote:abc", ROOT), null);
+  assert.equal(resolvePreviewTarget("pi-desktop://session/", ROOT), null);
 });

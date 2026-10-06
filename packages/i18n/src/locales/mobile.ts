@@ -1,4 +1,11 @@
 export const mobileEn = {
+  RATE_LIMITED: "Account requests are temporarily rate limited. Wait before retrying; your login is kept.",
+  RELAY_UNAVAILABLE: "The mobile relay is temporarily unavailable. Your login is kept.",
+  DEVICE_IDENTITY_MISSING: "This login has no saved device secret. Sign out and sign in again, then pair again.",
+  DEVICE_MISMATCH: "MC rejected this installation identity. Sign out and sign in again, then pair again.",
+  INVALID_CREDENTIALS: "Check your username, password and account sign-in settings.",
+  INVALID_ENCRYPTION_KEY: "MC returned an invalid login encryption key. No password was sent.",
+  retryAt: "Try again after {{time}}.",
   ultraHint: "{{reasoning}}Workflow + Subagent",
   ultraUnavailable: "Select a chat model and enable subagents to use Ultra.",
   fast: "Fast",
@@ -46,6 +53,13 @@ export const mobileEn = {
 };
 
 export const mobileZhCN: typeof mobileEn = {
+  RATE_LIMITED: "账号请求暂时受限，请等待后重试；现有登录已保留。",
+  RELAY_UNAVAILABLE: "移动端转发服务暂不可用，现有登录已保留。",
+  DEVICE_IDENTITY_MISSING: "当前登录缺少已保存的设备凭据，请退出并重新登录，再重新配对。",
+  DEVICE_MISMATCH: "MC 拒绝了当前安装身份，请退出并重新登录，再重新配对。",
+  INVALID_CREDENTIALS: "请检查账号、密码和账号的登录设置。",
+  INVALID_ENCRYPTION_KEY: "MC 返回的登录加密公钥无效，未发送密码。",
+  retryAt: "请在 {{time}} 后重试。",
   ultraHint: "{{reasoning}}Workflow + Subagent",
   ultraUnavailable: "请选择聊天模型并启用子代理后使用 Ultra。",
   fast: "Fast 模式",

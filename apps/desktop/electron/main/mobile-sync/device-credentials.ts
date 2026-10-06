@@ -5,6 +5,7 @@ export type MobileDeviceCredentialsRecord = {
   accountId: string;
   deviceId: string;
   deviceSecret: string;
+  authorizationId?: string;
 };
 
 export type MobileDeviceEncryption = {

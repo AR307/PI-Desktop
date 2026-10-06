@@ -10,6 +10,7 @@ const { WebSocketServer, WebSocket } = createRequire(import.meta.url)("ws");
 export async function mobileFixture({ port = 0, messageHandler } = {}) {
   const upstream = await imageFixture();
   const devices = new Map(), sessions = new Map(), refreshTokens = new Map();
+  const desktopAuth = { kind: "desktop", accountId: "901", deviceId: undefined };
   const pairings = new Map(), grants = new Map(), tickets = new Map(), desktops = new Map(), peers = new Map();
   const chats = [], chatRequests = [], calls = [], heldChats = new Set();
   const control = { relayUnavailable: false, challenge: false, dropTurnReplyOnce: false, mobileRefreshes: 0, abortedChats: 0 };
@@ -42,6 +43,7 @@ export async function mobileFixture({ port = 0, messageHandler } = {}) {
     res.setHeader("Access-Control-Allow-Origin", req.headers.origin ?? "*");
     res.setHeader("Access-Control-Allow-Headers", "Authorization, Content-Type");
     res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
+    res.setHeader("Access-Control-Expose-Headers", "Retry-After, X-Mirrorcoding-Sync-Version");
     res.setHeader("Cache-Control", "no-store");
     if (req.method === "OPTIONS") { res.writeHead(204).end(); return; }
     const json = (data, status = 200) => res.writeHead(status, { "Content-Type": "application/json" }).end(JSON.stringify({ success: true, data }));
@@ -112,6 +114,12 @@ export async function mobileFixture({ port = 0, messageHandler } = {}) {
         finish(toolResults.length ? "Mobile decision received. Work continued on the computer." : "Reply from the desktop agent: mobile conversation synchronized."); return;
       }
       calls.push({ path: url.pathname, method: req.method });
+      if (control.rateLimitOnce === url.pathname) {
+        control.rateLimitOnce = undefined;
+        res.setHeader("Retry-After", "3");
+        res.writeHead(429).end(); return;
+      }
+      if (url.pathname === "/api/pi-mobile/auth/encryption-key") { json({ enabled: false }); return; }
       if (url.pathname === "/api/pi-mobile/auth/login") {
         if (!["mobileqa", "other"].includes(body.username) || body.password !== "mobile-pass") { fail("INVALID_CREDENTIALS", 401); return; }
         if (control.challenge) { json({ challenge: { challengeId: body.username, type: "totp" } }); return; }
@@ -128,7 +136,7 @@ export async function mobileFixture({ port = 0, messageHandler } = {}) {
         json({ session: issue(previous.user, previous.deviceId) }); return;
       }
       const bearer = req.headers.authorization?.replace(/^Bearer /, "");
-      const auth = bearer === "fixture-access" ? { kind: "desktop", accountId: "901", deviceId: url.searchParams.get("deviceId") ?? undefined } : sessions.get(bearer);
+      const auth = bearer === "fixture-access" ? desktopAuth : sessions.get(bearer);
       if (!auth) { fail("AUTH_EXPIRED", 401); return; }
       if (url.pathname === "/api/pi-mobile/auth/logout") {
         sessions.delete(bearer); refreshTokens.delete(body.refreshToken);
@@ -137,15 +145,17 @@ export async function mobileFixture({ port = 0, messageHandler } = {}) {
       }
       if (url.pathname === "/api/pi-sync/devices/register") {
         const current = body.deviceId ? devices.get(body.deviceId) : undefined;
-        if (current && current.accountId !== auth.accountId) { fail("ACCOUNT_MISMATCH", 403); return; }
+        if (body.deviceId && (!current || current.accountId !== auth.accountId || current.deviceSecret !== body.deviceSecret)) { fail("DEVICE_MISMATCH", 403); return; }
         if (body.kind !== auth.kind) { fail("ACCOUNT_MISMATCH", 403); return; }
+        if (auth.deviceId && !current) { json({ deviceId: auth.deviceId }); return; }
         const deviceId = current?.deviceId ?? `${auth.kind}-${randomUUID()}`;
-        devices.set(deviceId, { deviceId, name: body.name, kind: body.kind, accountId: auth.accountId }); auth.deviceId = deviceId;
-        json({ deviceId }); return;
+        const deviceSecret = current?.deviceSecret ?? randomUUID();
+        devices.set(deviceId, { deviceId, deviceSecret, name: body.name, kind: body.kind, accountId: auth.accountId }); auth.deviceId = deviceId;
+        json({ deviceId, ...(!current ? { deviceSecret } : {}) }); return;
       }
       if (url.pathname === "/api/pi-sync/devices") {
         const visible = new Set(grantList(auth).map((grant) => grant.desktopDeviceId));
-        json({ devices: [...devices.values()].filter((device) => device.accountId === auth.accountId && (auth.kind === "desktop" || visible.has(device.deviceId))).map(({ accountId, ...device }) => ({ ...device, online: desktops.has(device.deviceId) })) }); return;
+        json({ devices: [...devices.values()].filter((device) => device.accountId === auth.accountId && (auth.kind === "desktop" || visible.has(device.deviceId))).map(({ accountId, deviceSecret, ...device }) => ({ ...device, online: desktops.has(device.deviceId) })) }); return;
       }
       if (url.pathname === "/api/pi-sync/grants") { json({ grants: grantList(auth) }); return; }
       if (url.pathname === "/api/pi-sync/pairings" && req.method === "POST") {

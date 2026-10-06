@@ -7,6 +7,7 @@ import {
   type ToolAction,
 } from "./tool-display";
 import { reviewChangeFromMessage } from "./workspace-review";
+import { isWithinHighlightLimits } from "./render-content-limits";
 
 /*
  * Structured presentation of one tool call (D192).
@@ -23,8 +24,6 @@ import { reviewChangeFromMessage } from "./workspace-review";
  */
 
 /** Beyond this, syntax highlighting costs more than it is worth on expand. */
-const MAX_HIGHLIGHT_BYTES = 100_000;
-const MAX_HIGHLIGHT_LINES = 800;
 /** Rendered list caps; the remainder is reported, never silently dropped. */
 const MAX_LIST_ITEMS = 200;
 const DIFF_CONTEXT_LINES = 2;
@@ -225,14 +224,6 @@ function rosterRows(
   return rows.length > 0 ? { kind: "fields", role: "details", rows } : null;
 }
 
-function countLines(text: string): number {
-  let lines = 1;
-  for (let i = 0; i < text.length; i += 1) {
-    if (text.charCodeAt(i) === 10) lines += 1;
-  }
-  return lines;
-}
-
 /** Extension-derived Shiki tag; `resolveLang` normalizes it at render time. */
 export function langForPath(path: string | null): string {
   if (!path) return "";
@@ -258,8 +249,7 @@ function codeBlock(
     lang,
     highlight:
       lang !== "" &&
-      text.length <= MAX_HIGHLIGHT_BYTES &&
-      countLines(text) <= MAX_HIGHLIGHT_LINES,
+      isWithinHighlightLimits(text),
     ...(extra?.tone ? { tone: extra.tone } : {}),
     ...(extra?.label ? { label: extra.label } : {}),
   };

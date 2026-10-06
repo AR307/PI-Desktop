@@ -1,6 +1,6 @@
 # ADR: Pi 0.99.1 account model authority
 
-- Status: Accepted for the current migration candidate
+- Status: Superseded for chat model metadata by [models.dev catalog authority](models-dev-catalog-authority.md)
 - Date: 2026-09-30
 - Supersedes: ADR 0134 model metadata source
 
@@ -47,3 +47,15 @@ The account adapter reuses Desktop's existing boundaries and preserves saved dat
 with a small explicit display-only compatibility gap. Catalog changes now track
 reviewed Pi pins. No schema migration is needed for the usage ledger: it uses the
 existing turns usage JSON with optional compatible provenance fields.
+
+### Implementation note (2026-10-03)
+
+The 0.99.1 migration initially retained pi-coding-agent for compaction and file
+compatibility. Its experimental pi-agent-core harness APIs have since been
+removed. The normal Desktop runtime now owns transcript projection, estimation,
+checkpoint preparation, and summary generation; Rust host-core remains the
+durable session owner. pi-coding-agent remains temporarily limited to native Pi
+session continuation (including that path's native session behavior) and the
+trusted-extension compatibility shim. Its removal seams and migration criteria
+are recorded in
+`docs/spec/02-architecture/06-pi-runtime-dependency-boundary.md`.

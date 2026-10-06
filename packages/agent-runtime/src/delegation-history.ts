@@ -22,7 +22,7 @@ import { isSubagentThinkingLevel } from "./ultra-policy.js";
  * and api/replay details depend on the binding.
  */
 
-import { estimateTokens } from "@earendil-works/pi-agent-core";
+import { estimateTokens } from "./pi-runtime-estimates.js";
 import type {
   AssistantMessage,
   Message,

@@ -158,7 +158,9 @@ turn that has ended.
     snapshot.
 17. A terminal parent provider/stream error aborts leftover delegates and
     returns the session to idle so Continue is accepted. Parent idle with
-    running delegates still keeps the turn open (D328 / D352).
+    running delegates still keeps the turn open (D328 / D352). System-interrupted
+    delegates settle as failed and remain manually resumable; explicit Stop and
+    dispose remain non-resumable cancellations.
 
 ## 4. Persistence points
 

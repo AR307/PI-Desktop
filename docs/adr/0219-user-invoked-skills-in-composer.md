@@ -21,10 +21,11 @@ the renderer, prompt, or host protocol.
 
 1. Active built-in, plugin, and user Skills contribute entries to the composer
    slash menu. They appear in a separate `Skills` group after extension
-   commands; the group is always last. The exact skill id is the slash name.
-   Existing command names win collisions, so a Skill cannot shadow a template,
-   builtin, plugin, or extension command.
-2. Selecting a Skill inserts `/<skill-id> `. Later slash tokens can select
+   commands; the group is always last. Skill command names use the explicit
+   `skill:<id>` prefix while `skillId` retains the original id for send-time
+   resolution. This namespace prevents collisions with commands and templates
+   that keep their existing unprefixed names.
+2. Selecting a Skill inserts `/skill:<skill-id> `. Later slash tokens can select
    further Skills without opening app commands. Sending follows the ordinary
    prompt path. Electron main resolves the command against the current session
    project, revalidates its active scope and permissions at send time, and

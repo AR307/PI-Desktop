@@ -62,12 +62,12 @@ test("creating a session reveals the empty destination before host IO", () => {
   assert.match(persist, /commitCreatedEmptySession/);
   assert.match(sessionCoordination, /function commitCreatedEmptySession/);
   assert.match(sessionCoordination, /scheduleHomeDraftAdopt/);
-  assert.match(persist, /newConversationModelBinding/);
-  assert.match(persist, /latestSessionInScope/);
+  assert.match(persist, /inheritedSessionModelBinding/);
+  assert.doesNotMatch(persist, /latestSessionInScope/);
   assert.match(persist, /providerId: inherited\.providerId/);
   assert.match(persist, /modelId: inherited\.modelId/);
   assert.match(persist, /draft: draftConfig/);
-  assert.match(persist, /latestSession: runtime\.latestSessionInScope/);
+  assert.match(persist, /recentModels: state\.recentModels/);
 });
 
 test("send and paste wait for an in-flight New Task instead of creating a second session", () => {

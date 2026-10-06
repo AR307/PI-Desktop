@@ -1,5 +1,32 @@
 # PI-Desktop MirrorCoding Edition
 
+## 2026-10-06 - Upstream 0.16.1, mobile registration and scratch previews
+
+- Integrates upstream 0.16.1 while retaining MC catalogs, native model settings,
+  Android sync, Fast, Ultra, subagent controls and ReturnToParent presentation.
+  Resolves overlapping browser capture logic and recent-model selection.
+- Uses MC-issued device IDs and one-time secrets, persisting them in existing
+  secure stores. Restarts and grant refreshes no longer register installations.
+  Honors account/sync Retry-After, handles empty error bodies and reports concrete
+  pairing failures. Android follows MC's RSA-OAEP-256 login requirement.
+- Opens resolved scratch HTML from temporary conversations in the native browser,
+  with per-session root containment and no access to another conversation's files.
+- The three superseded upstream files were moved to Windows Recycle Bin with user
+  approval. This task makes local commits only; no MC deployment or paid requests.
+- Controlled Electron and mobile-browser flows pass registration, rate-limit
+  recovery, pairing, token rotation, restart and interactive scratch HTML preview.
+  Native window capture confirms the HTML guest is visible. No model calls were
+  made by this flow. Final candidate and native Android results follow separately.
+- PiMobileQA native APK acceptance passed 24 checks covering encrypted credential
+  persistence, pairing, chat continuation, Fast/Ultra, keyboard/Back, attachments,
+  image generation/share, foreground recovery and process restart. Requests were
+  served exclusively by the controlled local fixture.
+- Integration retains native clipboard routing for the new session-link action,
+  adapts MC metadata to upstream's providerKey field and preserves Ultra child
+  lifecycle and empty-response recovery with chronological system messages.
+- Windows host regression checks found and fixed relocated capability keys using
+  unnormalized path separators; project overrides now survive a profile move.
+
 ## 2026-10-01 - Ultra automatic asynchronous handoff
 
 - Successful Ultra Task batches now end the parent turn through pi's native

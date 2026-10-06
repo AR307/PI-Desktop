@@ -115,6 +115,12 @@ download and install-on-quit, and raises one reminder per discovered version.
 The last reminded version is stored in the existing Host-owned app settings
 JSON and is intentionally omitted from portable configuration sync.
 
+An update-banner dismissal is also persisted for its available version. In-app
+dismissal cancels an active download and disables install-on-quit for that
+version. Scheduled and explicit checks continue; rediscovering the dismissed
+version does not restart its download, while discovering a newer version clears
+the dismissal and restores automatic delivery.
+
 Installed Windows NSIS, packaged macOS, and Linux AppImage default to Automatic.
 Windows ZIP/portable packages default to Manual; opting into Automatic is
 available on supported Windows packages only after the UI warns that NSIS may

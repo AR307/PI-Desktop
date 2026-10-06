@@ -1,4 +1,11 @@
 export const mobileSyncEn = {
+  RATE_LIMITED: "Account/sync requests are temporarily rate limited. Wait before retrying; your authorization is kept.",
+  RELAY_UNAVAILABLE: "The mobile relay is temporarily unavailable. Your authorization is kept.",
+  DEVICE_MISMATCH: "MC rejected this installation identity. Sign out and authorize again, then pair the phone again.",
+  DEVICE_IDENTITY_MISSING: "This login has no saved device secret. Sign out and authorize again, then pair the phone again.",
+  mobile_service_unavailable: "The MC mobile sync endpoint is unavailable. Check the service deployment.",
+  secure_storage_unavailable: "Secure device storage is unavailable on this computer.",
+  retryAt: "Try again after {{time}}.",
   title: "Sync to mobile", manage: "Manage mobile sync", project: "Project", session: "Session",
   manageDescription: "Pair your Android app to view and continue selected work on this computer.",
   projectDescription: "Shares this project's existing and future sessions with the paired device.",
@@ -21,6 +28,13 @@ export const mobileSyncEn = {
 };
 
 export const mobileSyncZhCN: typeof mobileSyncEn = {
+  RATE_LIMITED: "账号或同步请求暂时受限，请等待后重试；现有授权已保留。",
+  RELAY_UNAVAILABLE: "移动端转发服务暂不可用，现有授权已保留。",
+  DEVICE_MISMATCH: "MC 拒绝了当前安装身份，请退出并重新授权，再重新配对手机。",
+  DEVICE_IDENTITY_MISSING: "当前登录缺少已保存的设备凭据，请退出并重新授权，再重新配对手机。",
+  mobile_service_unavailable: "MC 移动端同步接口不可用，请检查服务端部署。",
+  secure_storage_unavailable: "此电脑的安全设备存储不可用。",
+  retryAt: "请在 {{time}} 后重试。",
   title: "同步到移动端", manage: "管理移动端同步", project: "项目", session: "会话",
   manageDescription: "配对安卓应用，在手机上查看并接续这台电脑上的指定工作。",
   projectDescription: "向配对设备共享此项目已有及以后新建的会话。",

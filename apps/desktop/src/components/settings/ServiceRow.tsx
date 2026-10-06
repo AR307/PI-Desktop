@@ -28,7 +28,7 @@ const OWN_CONTROLS = "button, input, select, textarea, a, label, .model-provider
 export type ServiceRowProps = {
   provider: ProviderPublic;
   entry: AccountEntry | null;
-  isDefault: boolean;
+  isDefault?: boolean;
   /** Mid-request (saving, testing, removing): the row starts nothing new. */
   busy: boolean;
   testing: boolean;
@@ -52,7 +52,7 @@ export type ServiceRowProps = {
 export function ServiceRow({
   provider,
   entry,
-  isDefault,
+  isDefault = false,
   busy,
   testing,
   dragging,

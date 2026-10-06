@@ -1,4 +1,4 @@
-import type { LiveStatus } from "@pi-desktop/shared";
+import type { LiveCallView, LiveStatus } from "@pi-desktop/shared";
 import type { LiveVoiceSnapshot } from "./live-call-controller";
 import { liveVoiceErrorKey } from "./live-voice-error";
 
@@ -81,4 +81,43 @@ export function formatWorkSessionLabel(projectPath: string | undefined, title: s
   const projectLabel = projectPath?.split(/[\\/]/).filter(Boolean).at(-1);
   const sessionLabel = title.trim() || untitledLabel;
   return projectLabel ? `${projectLabel} / ${sessionLabel}` : sessionLabel;
+}
+
+/**
+ * The docked widget window renders the view main pushes; it never runs the call
+ * (media, microphone lease and work scope stay in the owner frame), so the
+ * owner's local lifecycle flags cannot cross to it. Both are recoverable from
+ * the view: a closing phase is stopping, and so is a terminal phase whose
+ * renderer release is still pending — the bar keeps saying "Ending" until the
+ * release is confirmed rather than dropping the controls early.
+ */
+export function liveVoiceWidgetSnapshot(view: LiveCallView | null, ownerErrorCode?: string): LiveVoiceSnapshot {
+  const stopping = view?.phase === "closing" ||
+    ((view?.phase === "ended" || view?.phase === "failed") && view?.mediaRelease === "pending");
+  // The owner frame's own failure wins: a refused action is local to the frame
+  // that ran it and never reaches the call view. The quarantine is a
+  // `mediaRelease` value in the view and a code everywhere else, so it is
+  // translated here — the widget must keep that one failure on screen until the
+  // app restarts, and it can only do that by code.
+  const errorCode = view?.mediaRelease === "unconfirmed"
+    ? "LIVE_MEDIA_RELEASE_UNCONFIRMED"
+    : ownerErrorCode ?? view?.error?.code;
+  return {
+    status: null,
+    call: view,
+    transcripts: [],
+    starting: false,
+    stopping,
+    ...(errorCode ? { errorCode } : {}),
+  };
+}
+
+/** Whether the docked widget has anything to show at all. */
+export function liveVoiceWidgetVisible(snapshot: LiveVoiceSnapshot, dismissedIssue: string | null): boolean {
+  if (liveVoiceMode(snapshot) !== "idle") return true;
+  const issue = liveVoiceIssue(snapshot);
+  if (!issue) return false;
+  // An unconfirmed media release cannot be dismissed into a reusable call slot,
+  // so it stays on screen until the app restarts.
+  return hasUnconfirmedMediaRelease(snapshot) || issue.key !== dismissedIssue;
 }

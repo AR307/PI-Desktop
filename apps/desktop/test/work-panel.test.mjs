@@ -32,7 +32,7 @@ test("work-panel header leaves empty tab-strip space draggable", () => {
   assert.match(panelSource, /className="work-panel-tab-strip-wrap"/);
   assert.match(
     panelSource,
-    /className=\{cx\(\s*"no-drag",\s*"work-panel-tab",/s,
+    /className=\{cx\(\s*"work-panel-tab no-drag",/s,
   );
   assert.doesNotMatch(panelSource, /work-panel-tab-strip-wrap no-drag/);
 });
@@ -59,6 +59,26 @@ test("work panel replaces the context panel overlay", async () => {
   // the bridge channel `IPC.invoke.nav.toggleWorkPanel` is not.
   assert.doesNotMatch(appSource, /IPC\.invoke\.nav\.toggleWorkPanel|navToggleWorkPanel/);
   assert.doesNotMatch(appSource, /key\.toLowerCase\(\) === "j"/);
+});
+
+test("work panel code is preloaded on demand behind an accessible dock fallback", () => {
+  assert.match(
+    appSource,
+    /const loadWorkPanel = \(\) => import\("\.\.\/\.\.\/components\/workpanel\/WorkPanel"\)/,
+  );
+  assert.match(appSource, /const WorkPanel = lazy\(\(\) =>\s*loadWorkPanel\(\)/);
+  assert.match(
+    appSource,
+    /if \(!ready \|\| page !== "chat" \|\| !workPanelOpen\) return;[\s\S]*?loadWorkPanel\(\)\.catch/,
+  );
+  assert.match(
+    appSource,
+    /<Suspense[\s\S]*?className="work-panel work-panel-pending"[\s\S]*?role="status"[\s\S]*?aria-label=\{t\("app\.loadingView"\)\}[\s\S]*?<WorkPanel/,
+  );
+  assert.match(
+    appSource,
+    /className="work-panel work-panel-pending"[\s\S]*?"--work-panel-width": `\$\{pendingWorkPanelWidth\}px`/,
+  );
 });
 
 test("a viewport-fixed toggle is the sole pointer collapse control", () => {
@@ -185,7 +205,7 @@ test("work panel uses the fixed-window internal dock", () => {
   // before unmounting, so MainChat reflows continuously in both directions.
   assert.match(
     appSource,
-    /<\/section>\s*\)\}\s*\{\(presentedWorkPanelOpen \|\| workPanelExiting\) && \(?\s*<WorkPanel/,
+    /<\/section>\s*\)\}\s*\{\(presentedWorkPanelOpen \|\| workPanelExiting\) && \(?\s*<Suspense[\s\S]*?<WorkPanel/,
   );
   assert.doesNotMatch(
     appSource,
@@ -515,9 +535,13 @@ test("work panel context is retained by session instead of cleared on selection"
 
 test("file preview request ids stay unique across session contexts", () => {
   assert.match(storeSource, /let workPanelFileRequestSeq = 0/);
+  assert.match(
+    storeSource,
+    /const nextFileRequest = \(tab\?: WorkPanelTab\)[\s\S]*?createWorkPanelFileRequest\(tab, \+\+workPanelFileRequestSeq\)/,
+  );
   assert.ok(
-    storeSource.match(/seq:\s*\+\+workPanelFileRequestSeq/g)?.length >= 3,
-    "open and activation paths must use the shared request sequence",
+    storeSource.match(/nextFileRequest\((?:tab|activeTab)\)/g)?.length === 4,
+    "open, replace, activation, and close paths must share the position-preserving request",
   );
   assert.doesNotMatch(storeSource, /seq:\s*\([^)]*fileRequest\?\.seq[^)]*\) \+ 1/);
 });

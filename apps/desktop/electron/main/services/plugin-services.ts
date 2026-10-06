@@ -585,9 +585,10 @@ export function createPluginServices({
             | { session: { projectPath?: string } | null }
             | undefined;
           const path = res?.session?.projectPath?.trim();
-          if (path) return path;
-        } catch {
-          // Fall through to the visible workspace.
+          return path || null;
+        } catch (error) {
+          logger.app("plugin", "warn", "browser.session.root.failed", { data: String(error) });
+          return null;
         }
       }
       return getWorkspacePath();

@@ -9,7 +9,7 @@ import type {
   SessionSummary,
   UiMessage,
 } from "@pi-desktop/shared";
-import { modeForProposalKind } from "@pi-desktop/shared";
+import { isRenderableAttachment, modeForProposalKind } from "@pi-desktop/shared";
 import type { ComposerDraftSnapshot } from "../../lib/composer-smart-stop";
 import { normalizeProjectPath } from "../../lib/sidebar-session-groups";
 import {
@@ -25,6 +25,9 @@ export function promptAttachmentsFromDraft(
   references: ComposerDraftSnapshot["fileReferences"],
 ): AgentPromptAttachment[] {
   return references.flatMap((reference) => {
+    // A session link is prompt text: main resolves it into a conversation
+    // reference, and it never travels as a structured attachment.
+    if (reference.kind === "session") return [];
     const kind =
       reference.kind ??
       (/\.(avif|bmp|gif|heic|jpe?g|png|tiff?|webp)$/i.test(reference.path)
@@ -48,13 +51,17 @@ export function promptAttachmentsFromDraft(
 export function promptAttachmentsFromMessage(
   attachments: UiMessage["attachments"],
 ): AgentPromptAttachment[] {
-  return (attachments ?? []).map((attachment) => ({
-    path: attachment.ref,
-    name: attachment.name,
-    kind: attachment.kind,
-    ...(attachment.mimeType ? { mimeType: attachment.mimeType } : {}),
-    ...(attachment.size !== undefined ? { size: attachment.size } : {}),
-  }));
+  // A session reference is not a renderer-resolvable attachment: its link text
+  // is still in the message, so main re-resolves it on the next send.
+  return (attachments ?? [])
+    .filter(isRenderableAttachment)
+    .map((attachment) => ({
+      path: attachment.ref,
+      name: attachment.name,
+      kind: attachment.kind,
+      ...(attachment.mimeType ? { mimeType: attachment.mimeType } : {}),
+      ...(attachment.size !== undefined ? { size: attachment.size } : {}),
+    }));
 }
 
 export function withoutRecordKey<T>(record: Record<string, T>, key: string): Record<string, T> {

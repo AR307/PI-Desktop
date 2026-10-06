@@ -73,7 +73,13 @@ const { useOpenPreviewTarget } = loadModule("../src/hooks/use-preview-target.ts"
       },
     },
   },
-  "../lib/chat-links": loadModule("../src/lib/chat-links.ts", {}),
+  "../lib/chat-links": loadModule("../src/lib/chat-links.ts", {
+    "@pi-desktop/shared": await import("@pi-desktop/shared"),
+    "./chat-link-scanner.ts": loadModule("../src/lib/chat-link-scanner.ts", {
+      "./render-diagnostics.ts": { beginRenderDiagnostic: () => () => {} },
+    }),
+    "./render-diagnostics.ts": { beginRenderDiagnostic: () => () => {} },
+  }),
   "../lib/open-http-url": { openHttpUrl: (...args) => calls.urls.push(args) },
   "../lib/work-panel-tabs": workPanelTabs,
 });
@@ -186,6 +192,14 @@ test("a primary-folder HTML page stays with the side browser", async () => {
   await click({ kind: "file", path: "docs/page.html" });
   assert.deepEqual(calls.tabs, [], "a page to run is not a file to read");
   assert.deepEqual(calls.urls, [["docs/page.html"]]);
+});
+
+test("a temporary conversation HTML link opens the resolved scratch page in the browser", async () => {
+  reset({ pluginView: true });
+  nextMatch = { root: "scratch", relativePath: "pelican.html", absolutePath: "C:/data/scratch/session-1/pelican.html", matchedBy: "exact-relative" };
+  await click({ kind: "file", path: "pelican.html" });
+  assert.deepEqual(calls.urls, [[nextMatch.absolutePath]]);
+  assert.deepEqual(calls.files, []);
 });
 
 test("a reference nothing answers reports itself and opens nothing", async () => {

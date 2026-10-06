@@ -22,7 +22,9 @@ test("uses published Messages reasoning options for an exact native model", asyn
   const catalog = new ModelsDevCatalog({ catalogPath: fileURLToPath(new URL("../resources/models.dev/api.json", import.meta.url)) });
   assert.equal(await catalog.ensureLoaded(), true);
   const metadata = modelMetadata(catalog, "claude-opus-4-7");
-  assert.equal(metadata.compat.forceAdaptiveThinking, true);
+  assert.equal(metadata.api, "anthropic-messages");
+  assert.equal(metadata.reasoning, true);
+  assert.equal(metadata.thinkingProtocol, "adaptive");
   assert(metadata.supportedThinkingLevels.includes("max"));
   assert.equal(metadata.thinkingLevelMap.max, "max");
 });

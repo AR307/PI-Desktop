@@ -208,6 +208,15 @@ against "one summary request" from a settings row.
 
 ## References
 
+### Implementation note (2026-10-03)
+
+The desktop runtime now owns the compaction preparation and context projection
+described here because pi-agent-core removed its experimental harness APIs.
+Cut-point, split-turn, retained-tail, and summary behavior remain governed by
+this ADR and the runtime specification; durable checkpoint ownership remains
+with Rust host-core. See
+`docs/spec/02-architecture/06-pi-runtime-dependency-boundary.md`.
+
 - `docs/spec/03-runtime/01-ipc-protocol.md`
 - `docs/spec/03-runtime/02-agent-runtime.md`
 - `docs/spec/03-runtime/03-tools-and-permissions.md`

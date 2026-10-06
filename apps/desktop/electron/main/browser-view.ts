@@ -95,13 +95,13 @@ export class BrowserPane {
   private window: BrowserWindow | null = null;
   private visible = false;
   private bounds = { x: 0, y: 0, width: 0, height: 0 };
+  private capturing = false;
+  private captureTail: Promise<void> = Promise.resolve();
   private onState: (state: BrowserState) => void;
-  private fileRoot: string | null = null;
+  private fileRoots: readonly string[] = [];
   private watcher: FSWatcher | null = null;
   private watchedDir: string | null = null;
   private reloadTimer: NodeJS.Timeout | null = null;
-  private capturing = false;
-  private captureTail: Promise<unknown> = Promise.resolve();
   private navigationEpoch = 0;
   private stateEventsEpoch: number | null = null;
   private stateUrl: string | null = null;
@@ -151,18 +151,14 @@ export class BrowserPane {
     return wc;
   }
 
-  /**
-   * Chromium temporarily changes the guest viewport during capture. Queue
-   * captures and defer native bounds updates until Chromium restores it, so a
-   * resize made while a screenshot is running cannot be overwritten.
-   */
+  /** Serialize captures with native resizing on this page only. */
   captureScreenshot<T>(capture: (wc: WebContents) => Promise<T>): Promise<T> {
+    // Pin the guest before queueing so a closed/recreated page cannot receive
+    // a screenshot requested for its predecessor.
+    const wc = this.getWebContents();
     const task = this.captureTail.then(async () => {
-      const wc = this.getWebContents();
-      if (!wc) {
-        throw Object.assign(new Error("browser guest is not available"), {
-          code: "UNAVAILABLE",
-        });
+      if (!wc || wc.isDestroyed() || this.getWebContents() !== wc) {
+        throw Object.assign(new Error("browser guest is not available"), { code: "UNAVAILABLE" });
       }
       this.capturing = true;
       try {
@@ -172,8 +168,9 @@ export class BrowserPane {
         this.applyBounds();
       }
     });
-    // Keep later captures usable after one capture fails.
-    this.captureTail = task.catch(() => undefined);
+    // The caller still receives capture errors; a failure must not block the
+    // next independent capture.
+    this.captureTail = task.then(() => undefined, () => undefined);
     return task;
   }
 
@@ -200,11 +197,11 @@ export class BrowserPane {
 
   async navigateAndWait(
     raw: string,
-    fileRoot: string | null = null,
+    fileRoot: string | readonly string[] | null = null,
     timeoutMs = 15_000,
   ): Promise<BrowserState | null> {
-    if (fileRoot) this.fileRoot = fileRoot;
-    const localPath = resolveLocalFile(raw, this.fileRoot);
+    this.fileRoots = typeof fileRoot === "string" ? [fileRoot] : fileRoot ?? [];
+    const localPath = this.fileRoots.map((root) => resolveLocalFile(raw, root)).find((path) => path !== null);
     const localInput = /^file:/i.test(raw.trim()) || isAbsolute(raw.trim());
     const target = localPath
       ? pathToFileURL(localPath).toString()
@@ -311,6 +308,14 @@ export class BrowserPane {
     this.applyBounds();
   }
 
+  private applyBounds(): void {
+    // Chromium restores capture-time viewport metrics on completion. Keep
+    // native bounds unchanged meanwhile, then apply the latest requested size.
+    if (this.view && this.visible && !this.capturing && !this.view.webContents.isDestroyed()) {
+      this.view.setBounds(this.bounds);
+    }
+  }
+
   setVisible(visible: boolean): void {
     this.visible = visible;
     if (!this.view) return;
@@ -360,12 +365,6 @@ export class BrowserPane {
     this.applyBounds();
   }
 
-  private applyBounds(): void {
-    if (this.view && this.visible && !this.capturing) {
-      this.view.setBounds(this.bounds);
-    }
-  }
-
   private detach(): void {
     if (!this.window || this.window.isDestroyed() || !this.view) return;
     const children = this.window.contentView.children;
@@ -409,12 +408,7 @@ export class BrowserPane {
   }
 
   private isAllowedFileUrl(url: string): boolean {
-    if (!this.fileRoot) return false;
-    try {
-      return isWithinRoot(resolve(fileURLToPath(url)), this.fileRoot);
-    } catch {
-      return false;
-    }
+    return this.fileRoots.some((root) => resolveLocalFile(url, root) !== null);
   }
 
   private ensureView(): WebContentsView {

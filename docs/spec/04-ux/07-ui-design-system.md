@@ -16,7 +16,8 @@ The desktop shell targets a 1:1 visual match with the local Codex desktop client
 1. A consumer-brand identity system with vibrant gradients or playful illustrations
 2. A full component library spec (that is [08-component-spec.md](08-component-spec.md))
 3. Custom font services or CDN font hosting — use local bundling
-4. Complex theme marketplace or user-customizable color palettes (MVP: system/light/dark only)
+4. An interactive color-palette editor; built-in system/light/dark choices and
+   plugin-contributed `ui.theme` entries are supported
 5. Pixel-perfect Figma handoff artifacts
 
 ## 3. Visual principles
@@ -273,6 +274,17 @@ accessible name. Running dots in task rows and related-session hover cards
 animate for two 1.6-second cycles when mounted or entering the running state,
 then remain steady until the status changes. They must not continuously
 submit frames while the rest of the window is idle.
+
+The same bound covers every idle-reachable status indicator, because any
+one of them keeps the transparent macOS window dirty and therefore
+re-composited even when nothing is happening: the permission dot on a
+session waiting for approval, the plan-mode chip in the composer toolbar,
+and the warning dot on the backend banner each play two cycles and then
+hold a steady state that carries the meaning by itself (purple fill,
+planning-tinted icon, warning fill). Only indicators that describe work in
+flight — a streaming cursor, a running tool row, a recording microphone —
+may animate for as long as that work lasts. Reduced-motion mode disables
+all of them.
 
 ### 4.6 Tailwind CSS variable stub
 
@@ -1102,12 +1114,24 @@ header-height background behind the excluded lane without covering its controls.
 - The inner panel divider changes the panel width in the renderer. Moving it
   left takes internal space from MainChat until the 450px floor is reached, at
   which point the expanded sidebar yields; moving it right returns that space.
-  Native window edges resize only the fixed app window.
+  Window edges resize only the fixed app window.
 - Panel open and collapse change only the in-flow flex allocation. No positive
   native reservation is requested, and the panel's preferred width remains a
   renderer-local setting.
-- The outer shell keeps native edge/corner resizing enabled on every platform.
-  Frameless titlebar drag regions never replace the OS resize ownership. A
+- All platforms retain native edge/corner resizing. On Windows the main window
+  disables the frameless `WS_THICKFRAME` rim while Electron 43.6's frameless
+  hit test continues to own edge and corner resizing; no border is painted on
+  the left, right, or bottom. The Windows main window uses a 4 DIP rounded
+  hit/draw shape by
+  default: pixels outside its corners have no fill or mouse target. A selected
+  plugin theme with `ui.window.appearance` may set `cornerRadius` to an integer
+  from 0 through 24 DIP; removing that theme restores 4 DIP. The shape becomes
+  rectangular while maximized or fullscreen and follows every resize. Native
+  window background colors remain theme-owned inside the shape. Electron's borderless
+  fullscreen fallback fills the display without reporting `isFullScreen()`;
+  Main tracks its state so toggling back restores the previous bounds and
+  fullscreen geometry is never persisted. Frameless titlebar drag
+  regions remain separate from window-edge resizing. A
   300ms stable-bounds settle window prevents recovery logic from competing with
   a slow pointer gesture, and normal base bounds persist 600ms after the last
   native resize/move event. Electron enforces an 800×560 minimum, capped to the
@@ -1422,11 +1446,10 @@ is reserved for non-Settings contexts where OS-level rendering is acceptable.
   per D092, the content cards fill the pane width available from the current
   window instead of retaining D070's fixed 720px cap — the earlier in-shell
   200px rail and broad grouped directory are superseded
-- **Import**: four kinds (sessions / models / skills / MCP) behind one
-  page-scale segmented switcher, composed like the agent capability pages: a
-  quiet pre-scan next-action state per kind, one toolbar per kind (select-all
-  with both counts, the kind's own option, re-scan, import selected), and one
-  list whose group headers are quiet label lines and whose candidates are
-  individual tiles. No per-kind scan card, no tinted group band, no second
-  copy of the settings row scaffold
+- **Inline import workbenches**: model configuration, external skills, and
+  external MCP scans live in Models, Skills, and MCP respectively. Each page
+  exposes an explicit scan action and an inline selection workbench; opening a
+  workbench never scans automatically. Skills and MCP imports follow the
+  selected global/project scope. Settings has no session-import destination;
+  plugins retain session ingestion through their existing API.
 - Light destination cards use white elevated plates (not flat gray fills)

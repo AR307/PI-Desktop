@@ -57,7 +57,8 @@ function shape(message: UiMessage): MessageShape {
   const value = {
     content,
     thinking,
-    visible: message.role !== "assistant" || content || thinking || Boolean(message.hostedSearch || message.error),
+    visible: !(message.role === "system" && message.modelSystem) &&
+      (message.role !== "assistant" || content || thinking || Boolean(message.hostedSearch || message.error)),
     answer: message.parentToolCallId
       ? content || Boolean(message.error)
       : content || !thinking || Boolean(message.error),
@@ -72,7 +73,7 @@ function canReplace(previous: UiMessage, next: UiMessage): boolean {
     previous.parentToolCallId !== next.parentToolCallId ||
     previous.agentName !== next.agentName || previous.createdAt !== next.createdAt ||
     previous.toolCallId !== next.toolCallId || previous.toolName !== next.toolName ||
-    previous.hostedSearch !== next.hostedSearch
+    previous.hostedSearch !== next.hostedSearch || Boolean(previous.modelSystem) !== Boolean(next.modelSystem)
   ) return false;
   if (isDelegationStartTool(previous.toolName) && (
     previous.toolArgs !== next.toolArgs || previous.toolResult !== next.toolResult

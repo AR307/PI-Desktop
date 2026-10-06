@@ -34,7 +34,7 @@ mod tests {
         assert!(saved.ultra);
         assert_eq!(saved.thinking_level, "low");
         rename_session(&db, &session.id, "Ultra search session").unwrap();
-        let search = crate::session_search::search(&db, "Ultra search", 0).unwrap();
+        let search = crate::session_search::search(&db, "Ultra search", 0, 50).unwrap();
         assert_eq!(search.hits.len(), 1);
         assert!(search.hits[0].session.ultra);
         drop(db);

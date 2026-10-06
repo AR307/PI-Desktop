@@ -1,4 +1,6 @@
 import { SubagentStopButton } from "./SubagentStopButton";
+import { PlanHistoryCard } from "./PlanHistoryCard";
+import { planSubmission } from "../../../lib/plan-history";
 import { GeneratedImages } from "./GeneratedImages";
 import "../../../styles/generated-images.css";
 import { ImageResult, imageResultFromMessage } from "../../images/ImageResult";
@@ -161,6 +163,10 @@ export const ToolRow = memo(function ToolRow(props: ToolRowProps) {
     "toolCard",
     variant === "default" && message.toolStatus !== "denied" ? message.toolName : undefined,
   );
+  const proposal = planSubmission(message);
+  if (proposal && variant === "default" && message.toolStatus !== "denied") {
+    return <PlanHistoryCard message={message} proposal={proposal} autoOpen={props.autoOpen} onUserInteraction={props.onUserInteraction} />;
+  }
   const hostRow = <HostToolRow {...props} />;
   return cardEntry ? (
     <PluginToolCard key={cardEntry.id} entry={cardEntry} message={message} fallback={hostRow} />

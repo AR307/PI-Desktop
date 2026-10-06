@@ -33,6 +33,7 @@ export type MobileSyncStatus = {
   pairings: MobilePairing[];
   grants: MobileGrant[];
   error?: string;
+  retryAt?: number;
 };
 /** Persisted through the host settings boundary; secrets remain in Electron main. */
 export type MobileSyncSettings = {

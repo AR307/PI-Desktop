@@ -811,8 +811,17 @@ type ToolTokenUsage = {
 
 type SessionDetail = SessionSummary & {
  messages: UiMessage[];
+  /** Authoritative metadata for SubmitPlan/SubmitGoal calls in this page. */
+  planHistory?: Array<{ proposal: PlanProposal; superseded: boolean }>;
 };
 ```
+
+历史读取仅为当前会话返回页中的 SubmitPlan/SubmitGoal 调用附加 `planHistory`。
+SQLite 提供真实审批状态、完整 Markdown 快照、文件路径及同类型的新版本替代标记，
+原始 JSONL 工具结果保持不变。显示截断不影响这些有提交大小限制的计划快照。
+该字段兼容旧主机和原生会话；分叉会话不复制审批记录，也不从工具结果或文件名推断状态。
+渲染器可将其投影到 `UiMessage.planHistory`，但不得将显示元数据写回模型证据。
+
 
 Electron 主进程用该会话精确 provider/API URL 与 model 的本地 models.dev
 记录，丰富 session list/get/create/fork/configure 结果中的有效推理能力。
@@ -1798,7 +1807,14 @@ Electron 等待主机关闭之前会停止服务，并将清单标记为非活�
 `read`、`write` 或 `dangerous`；通用危险操作，以及命名的删除会话、配置会话和决议
 计划工具，都要求 `confirm: true`。该标志是 Agent 确认，不是桌面用户弹窗。所有调用
 仍会经过现有 IPC 处理器的校验、主机权限、工作区边界和错误模型。文本负载和
-`structuredContent` 都有大小上限。
+`structuredContent` 都有大小上限：512 KiB（`MAX_RESULT_CHARS`）。超出上限的答复不会被
+原样返回，而是替换为 `{truncated: true, reason: "MCP_RESULT_LIMIT", preview: "<JSON 前
+512 KiB>"}`，因此外部调用方永远不会收到被静默缩短的负载。如果超限答复来自
+`session/get`（`pi_session_get`）且含有 `compaction` 记录，Main 会先将该记录投影为精简身份
+（`createdAt` 与 `details.generation`），再复查大小，然后才返回截断信封。这样，当长会话中
+无界增长的 `ContextCompactionRecord`（`summary` / `retainedTail` / `details.modifiedFiles`）
+本身导致超限时，转写仍可完整返回。未超限的答复保留完整 compaction 详情；桌面自己的会话详情
+保持不变。
 
 六个 `session/collaboration/*` 操作仅限第一方插件：它们要求经过认证的插件工具调用上下文，
 因此会出现在 `pi.desktop.listOperations` 中并可通过 `pi.desktop.invoke` 调用，但被排除在
@@ -1867,7 +1883,7 @@ unchanged. See [provider configuration](12-provider-config-schema.md).
 
 ## 16. 实时语音 API
 
-实时语音是仅供主窗口使用、由应用管理的通话通路，详见[live-voice.md](live-voice.md)。DTO 定义在 `packages/shared/src/types/live-voice.ts`；preload 只暴露下表列出的白名单通道。Main 从调用 IPC 的受信 frame 推导 owner，并只向该 frame 发送通话事件。payload 不能提供 owner 身份或凭证。
+实时语音是应用管理的通话通路，其所有权绑定在主窗口上，详见[live-voice.md](live-voice.md)。DTO 定义在 `packages/shared/src/types/live-voice.ts`；preload 只暴露下表列出的白名单通道。Main 从调用 IPC 的受信 frame 推导 owner，并只向该 frame 发送通话事件。payload 不能提供 owner 身份或凭证。停靠挂件窗口只绘制通话控件、不拥有通话，因此它的三条通道单独校验，且永不进入 owner 推导。
 
 | IPC 通道 | 方向 | 契约 |
 |---|---|---|
@@ -1885,5 +1901,12 @@ unchanged. See [provider configuration](12-provider-config-schema.md).
 | `pi-desktop/voice/live/event/port` | Main → Renderer | 转交一个通话专用 `MessagePort`，附带 call ID 和一次性 nonce |
 | `pi-desktop/voice/live/event/control` | Main → Renderer | Provider 控制请求，仅包含 v1 明确允许的控制类型 |
 | `pi-desktop/voice/live/event/transcript` | Main → Renderer | 当前通话的临时、有界字幕事件 |
+| `pi-desktop/voice/live/widget/visibility` | 挂件 → Main | 挂件自身的展示决定与所需内容盒尺寸；Main 据此显示或隐藏该窗口 |
+| `pi-desktop/voice/live/widget/action` | 挂件 → Main | 在挂件中按下的通话操作；Main 校验发送方后转发给 owner frame 执行 |
+| `pi-desktop/voice/live/widget/ownerState` | 主窗口 → Main | 只有 owner frame 才知道的信息：它自身的错误码（例如被拒绝的静音）以及绑定工作会话是否在等待决策；两者都不在通话视图中 |
+| `pi-desktop/voice/live/event/widgetState` | Main → 挂件 | 权威通话视图加上 owner 自身的错误码与等待决策标记，推送给停靠挂件窗口 |
+| `pi-desktop/voice/live/event/widgetAction` | Main → 主窗口 | 需要 owner frame 执行的挂件操作 |
 
 只有 owner 验证成功后才会创建 `MessagePort`，之后由 preload 中继到 renderer 窗口。owner 在首个 `hello` 中回送每通电话独有的 nonce；Main 仅在 call ID 和 nonce 均匹配时接受该端口一次。二进制帧包含有界 PCM 音频、采集 epoch、释放确认、播放游标和协议就绪信号。它不是通用 IPC 隧道：不会传输 Provider 凭证、任意命令、工作区路径、Agent 消息或持久化字幕。通话结束或 owner 丢失时会关闭端口。
+
+停靠挂件窗口不是通话 owner，也不可能成为 owner：它在所有经过 owner 校验的通道上都会像任何其他 renderer 一样被以 `PERMISSION_DENIED` 拒绝。Main 只在该窗口作为发送方时响应它的两条通道；owner 自身的错误码经由主窗口传入，因为执行操作的是该 frame。挂件操作本身不会改变通话状态：它被转发给 owner frame，结果状态再通过 owner 收到的同一份权威视图回到挂件。

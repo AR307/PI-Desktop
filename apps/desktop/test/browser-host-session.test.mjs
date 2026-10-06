@@ -20,9 +20,9 @@ function harness() {
       setVisible(value) { this.visible = value; },
       getState: () => state, getWebContents: () => null,
       invalidateNavigation: () => {},
-      navigateAndWait(target) {
+      navigateAndWait(target, allowedRoots) {
         const done = deferred();
-        loads.push({ target, pane, finish() {
+        loads.push({ target, allowedRoots, pane, finish() {
           state = { url: target, title: target, isLoading: false, canGoBack: false, canGoForward: false };
           onState(state); done.resolve(state);
         }, fail: () => done.resolve(null) });
@@ -35,6 +35,7 @@ function harness() {
   };
   const host = new BrowserHost({
     createPane, isPluginLoaded: () => true,
+    getScratchDir: (sessionId) => `/scratch/${sessionId}`,
     getFileRoot(sessionId) {
       const done = deferred(); roots.push({ sessionId, ...done }); return done.promise;
     },
@@ -65,6 +66,17 @@ test("BrowserPreview prepares a new resource tab without navigating or rewriting
   h.host.setChromeSession("A", "one", "A.html");
   assert.equal(h.host.getState().url, "A.html");
   assert.equal(h.loads.length, 2, "switching back must reuse the page");
+});
+
+test("temporary preview passes only the page owner's scratch root when no workspace exists", async () => {
+  const h = harness();
+  h.host.setChromeSession("temporary", "html", "/scratch/temporary/pelican.html");
+  h.roots.at(-1).resolve(null);
+  await settled();
+  assert.deepEqual(h.loads.at(-1).allowedRoots, ["/scratch/temporary"]);
+  h.loads.at(-1).finish();
+  await settled();
+  assert.equal(h.host.getState().url, "/scratch/temporary/pelican.html");
 });
 
 test("background navigation targets that session's last selected tab", async () => {

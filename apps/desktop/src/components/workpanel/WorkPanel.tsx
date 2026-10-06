@@ -801,8 +801,6 @@ export function WorkPanel({
       />
       <div className="work-panel-main">
         <header className="work-panel-header">
-          {/* The wrap stays draggable; only tabs and actions opt out, so the
-              empty strip space moves the native window. */}
           <div className="work-panel-tab-strip-wrap">
               <div
                 ref={tabStripRef}
@@ -826,8 +824,7 @@ export function WorkPanel({
                   return (
                     <div
                       className={cx(
-                        "no-drag",
-                        "work-panel-tab",
+                        "work-panel-tab no-drag",
                         selected && "active",
                         draggingTabId === tab.id && "is-dragging",
                         dropIndicator?.tabId === tab.id &&

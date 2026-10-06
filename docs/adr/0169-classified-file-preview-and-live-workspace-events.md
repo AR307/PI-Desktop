@@ -44,6 +44,13 @@ missing or broken:
 
 ## Consequences
 
+The 2026-10-06 preview correction also runs HTML references resolved in the
+current session's scratch directory through the side browser. BrowserHost gives
+each page its owning session's project and scratch roots; a temporary session
+never borrows the visible project's root. Existing canonical containment checks
+apply to navigation. Other sessions' scratch directories remain outside scope.
+Positioned source references and non-HTML scratch files keep the host file tab.
+
 - Third-party plugins can preview images and oversized files without inventing
   a second read API.
 - A docked view follows theme, locale, and project switches live.

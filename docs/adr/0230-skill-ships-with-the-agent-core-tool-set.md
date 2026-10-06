@@ -18,7 +18,7 @@ Two later decisions assume a `Skill` tool the model can call immediately:
 - D174 makes the skill catalog the model-invoked way to load a document, and
   advertises it in the `# Skills` system-prompt section with an instruction to
   load a matching skill first.
-- ADR 0219 answers a user-typed `/skill-id` by persisting an instruction to
+- ADR 0219 answers a user-typed `/skill:<skill-id>` by persisting an instruction to
   call the local `Skill` tool with the validated id on that turn.
 
 Neither can be satisfied when the tool is absent from the first request's tool
@@ -43,7 +43,7 @@ for a skill pays one or two extra round trips before the body is ever loaded.
 ## Consequences
 
 - A matching task loads its skill on the first turn instead of discovering the
-  tool first, and a `/skill-id` invocation works as ADR 0219 describes.
+  tool first, and a `/skill:<skill-id>` invocation works as ADR 0219 describes.
 - Every Agent-mode request carries one more tool schema. The catalog is already
   bounded per session, and the delegation lifecycle was admitted to the core set
   for the same reason: a capability the model has to go looking for is one it

@@ -37,15 +37,75 @@ relational schema. The host stores one JSON record per group in the
 `projectGroups` namespace, shared memory in `projectGroupMemory`, and shared
 instructions in `projectGroupInstructions`. The record contains the stable group
 id, display name, ordered canonical roots, primary root, timestamps, and optional
-`detachedPaths`. Removed roots stay in `detachedPaths` so an old path project
-record is not recreated as a standalone legacy group; sessions and files are not
-deleted. Existing path projects are projected as legacy single-root groups at
-read time; their path-scoped memory and filesystem instructions remain readable.
+`detachedPaths`. Removed roots without sessions stay in `detachedPaths` so an old
+path project record is not recreated as a standalone legacy group. A removed root
+with sessions is omitted from `detachedPaths` and remains readable as a standalone
+legacy group; removing a root from group membership never deletes sessions or files.
+Existing path projects are projected as legacy single-root groups at read time;
+their path-scoped memory and filesystem instructions remain readable.
 5. **Plan/Goal checkpoints are immutable host artifacts** with recorded path,
    hash, and size; the existing approval row also carries execution fields.
    Startup interruption is the process-epoch fence and no work is replayed.
 
 ## 2. File layout
+
+### User-selected storage location (issue #1213)
+
+Settings → General → Storage can select an empty directory on a different
+volume. A selected directory contains `data/` (the complete host/application
+profile) and `browser/` (Chromium default and persistent plugin/browser session
+state). The existing default directories remain unchanged until the user
+explicitly migrates. Project files outside the application profile are not moved.
+
+The original Electron `userData` directory remains the installation identity,
+single-instance lock, and owner-only `storage-location.json` bootstrap anchor.
+Chromium `sessionData` follows `browser/`; this preserves existing localStorage,
+cookies, IndexedDB and persistent partition state by copying the complete old
+profile. An explicit `PI_DESKTOP_DATA_DIR` still overrides the default and disables
+settings-driven maintenance, since such profiles opt out of the installation lock.
+A managed relaunch discards only the environment root published for child services
+through the internal `--pi-managed-storage` argument before reacquiring the lock.
+The location is machine-local and never part of cloud configuration sync.
+
+Migration is cold: the accepted settings action journals pending work, then uses
+existing ordered shutdown to settle turns/outbox and stop writers. The next launch
+points Chromium `sessionData` at a temporary directory, then opens only a
+sandboxed, nonpersistent maintenance window before importing the application
+composition root. The default session initializes with that first window, so it
+must not be inside a profile the job is about to copy or clean. It inventories bytes/files, checks free space, streams
+the copy, preserves permissions and internal/external links, and SHA-256 verifies
+both source and copied files. An interrupted copy may be retried only with its
+matching ownership marker; nonempty/unrelated destinations and overlapping roots
+are rejected. The stable installation lock prevents competing managed launches.
+
+Rust's offline `--relocate-data <old-root> <copied-root>` mode owns structured
+path relocation in the copied SQLite index, transcripts/revisions/checkpoints,
+outbox, installed plugin registry and agent capability metadata. It does not boot
+RPC, upgrade schemas, recover turns, or sweep scratch. It changes only known
+path-bearing fields under the old root. External projects, dev/builtin plugins,
+narrative text, commands, source code, secrets, and arbitrary plugin-private formats
+are preserved. Credentials and their machine key migrate as bytes with their
+permissions. SQLite ownership stays exclusively in Rust.
+
+Only after validation/relocation succeeds is the flushed bootstrap pointer
+atomically replaced. Errors keep the old profile active and visible in settings;
+retrying the same destination uses the failed job's ownership identity. A crash
+before publication leaves pending work to recopy from the source. An unavailable
+selected volume refuses startup rather than creating a blank profile elsewhere.
+Original directories remain explicit backups. Deleting these requires a separate
+settings confirmation after checking new-location functionality, including plugins
+that may own absolute references the host cannot safely rewrite. Backup cleanup
+preflights every root and protects active storage and bootstrap/lock files.
+
+Cache cleanup is a separate confirmed cold-restart operation. Its filesystem
+allowlist is `cache/`, `plugins/cache/download/`, `plugins/cache/backup/`,
+`openable-attachments/`, and Chromium's Cache/Code Cache/GPU/shader cache
+folders in the default profile and persistent partitions. Intermediate or leaf
+symlinks cannot redirect cleanup, even within the same profile. It never clears
+cookies/localStorage/IndexedDB, transcripts, attachments, secrets, scratch,
+review snapshots, plugin code/data, models, configuration, or logs. Partial cleanup
+failure remains observable, retains active roots, and can be retried.
+
 
 A packaged installation keeps this tree in `~/.pi-desktop`. A development build
 keeps the same tree in `~/.pi-desktop-dev`, because a shipped app and a
@@ -122,6 +182,24 @@ per message; `seq` is implied by line order:
 {"type":"message","id":"m3","role":"assistant","createdAt":"…","blocks":[{"type":"thinking","text":"…"},{"type":"text","text":"…"}],"meta":{"usage":{},"modelId":"…"}}
 {"type":"compaction","id":"cp1","summary":"…","firstKeptMessageId":"m2","throughMessageId":"m3","tokensBefore":917000,"retainedTail":[…],"providerId":"…","modelId":"…","createdAt":"…"}
 ```
+
+Internal system-state rows use role `system`, empty visible content, and optional
+`meta.modelSystem = { version: 1, messageJson, beforeMessageId?, afterMessageId? }`.
+`messageJson` is validated JSON text of a Pi system message with sections and tool
+schema deltas; executable functions are excluded. JSON text preserves section and schema key
+order across Rust storage; parsing for validation never reserializes it. Stable row IDs make retries
+idempotent. The anchors restore logical model order when a user row was already
+persisted before its preceding declaration; a surviving following anchor takes
+precedence, then a preceding anchor, then the record's continuation position.
+Forks remap surviving anchor IDs. Normal system notices remain visible; internal
+model-state rows do not produce transcript bubbles or search text.
+
+Compaction details may include one `systemMessageJson` checkpoint. It replaces old
+system updates in the retained tail and is restored before the summary. These
+optional metadata fields use the existing JSONL/SQLite index and require no
+schema migration. Old sessions remain readable; their first continuation records
+a new baseline. Older app versions ignore the metadata and reconstruct their
+usual current prompt, so downgrade does not promise the same cache prefix.
 
 `sessions/<sessionId>.inflight.json` — the assistant reply currently
 streaming in the session, as one `{ schema, sessionId, turnId, savedAt,
@@ -837,9 +915,10 @@ type Block =
       status: "ok" | "error" | "denied"; result?: unknown;
       completedAt?: string; durationMs?: number;
       toolUsage?: ToolTokenUsage }
-  | { type: "attachment"; kind: "image" | "file"; name: string;
-      ref: string /* attachments/<sha256> or absolute path */;
-      mimeType?: string; size?: number }
+  | { type: "attachment"; kind: "image" | "file" | "session"; name: string;
+      ref: string /* attachments/<sha256>, absolute path, or session id */;
+      mimeType?: string; size?: number;
+      text?: string /* bounded referenced-conversation excerpt */ }
   | { type: "hostedSearch"; status: "searching" | "completed" | "failed";
       rounds: Array<{ id: string;
         status: "searching" | "completed" | "failed";
@@ -862,6 +941,13 @@ type Block =
   `scratch/<sessionId>/replayed/` when a path fallback is required. Images
   above the inline bound are hashed and copied with streaming file operations;
   startup and history hydration must not load the whole image into memory.
+- A `kind: "session"` block is a conversation reference: it stores the session
+  id it names, the display title, and the bounded excerpt quoted to the model,
+  so a later turn reads the same reference instead of re-reading the referenced
+  conversation. The excerpt bound, the same-project rule, and the
+  `<session_reference>` prompt block belong to the reference contract
+  (`04-ux/08-component-spec.md` §20B); the host stores exactly what it is given
+  and never reads the referenced session to build one.
 - Assistant thinking is stored only in `thinking` blocks inside the file. The
   derived `text` column contains final answer text, so transcript search and
   answer previews do not expose or mix reasoning.
@@ -1049,7 +1135,7 @@ CREATE TABLE scheduled_tasks (
   id          TEXT PRIMARY KEY,
   title       TEXT NOT NULL,
   prompt      TEXT NOT NULL,
-  cadence     TEXT NOT NULL DEFAULT 'manual',  -- manual | hourly | daily | weekly
+  cadence     TEXT NOT NULL DEFAULT 'manual',  -- manual | hourly | interval | daily | weekly
   enabled     INTEGER NOT NULL DEFAULT 1,
   project_id  INTEGER REFERENCES projects(id) ON DELETE SET NULL,
   config_json TEXT NOT NULL DEFAULT '{}',      -- mode, cron expr, model override, notify policy
@@ -1071,14 +1157,43 @@ CREATE INDEX idx_task_runs ON task_runs(task_id, started_at DESC);
 ```
 
 A run that spawns a session gets its transcript for free via `session_id`.
+That transcript is identified as automation output by an `EXISTS` check against
+`task_runs` that every session summary and search hit carries as `scheduledRun`.
+The ownership is derived on read and never stored on the session row, so the
+SessionList and session search hide the transcript while it has a run, and
+deleting the task returns it to the ordinary lists instead of leaving it
+unreachable (issue #1291).
+`scheduled.listRuns` answers two shapes: one task's own history (`taskId`, at most
+200 rows) and one newest run per task (`latestPerTask`, one row per task, never
+combined with `taskId`). The task column reads the second shape. A global window
+over `task_runs` can be filled by one busy task — retention keeps the last 100
+runs *per task* — and would then report an idle task as never run, so the read
+that feeds the column is per task rather than a shared window.
+Retention keeps the newest 100 runs per task (`TASK_RUNS_KEEP`, applied on every
+boot). Ownership is derived from those rows, so a pruned run takes two things
+with it: the run leaves the task's history, and its session stops carrying
+`scheduledRun`, which returns that transcript to the SessionList and to session
+search. A task that runs faster than the kept window — an `interval` task from
+five minutes up, an hourly task after roughly four days — reaches that boundary;
+replacing the derived marker with a persistent origin is tracked with the rest
+of issue #1291.
+The task page also reads at most 200 runs per task, the bound
+`scheduled.listRuns` enforces for a single task's history.
 The existing JSON extension stores `schedule: {hour, minute, weekday}`,
-`nextRunAt` (epoch milliseconds) and `workspacePath` for desktop automations.
+`intervalMinutes` (5–1440; required by an `interval` cadence and read by no other
+one, so a schedule that keeps the field keeps its value), `nextRunAt` (epoch
+milliseconds), `workspacePath`, and `sessionMode` (`perRun` or `reuse`, absent
+means `perRun`) for desktop automations.
 Optional `weekdays` stores 1–7 unique integers in 0–6, overriding legacy
 `weekday` for weekly schedules. Missing `weekdays` preserves the single-day
 behavior. Invalid or empty selections are rejected before mutation. No table
 migration is needed. Daily/weekly schedules use the host local timezone; hourly
-schedules compute `nextRunAt = now + 3_600_000`, ignoring calendar fields. Absence
-of `schedule` leaves legacy tasks unarmed. No physical schema change is made.
+and interval schedules count elapsed time from the moment they were armed:
+hourly computes `nextRunAt = now + 3_600_000` and interval computes
+`nextRunAt = now + intervalMinutes × 60_000`, both ignoring calendar fields.
+An `interval` task whose schedule carries no `intervalMinutes` is refused rather
+than saved unarmed. Absence of `schedule` leaves legacy tasks unarmed. No
+physical schema change is made.
 Task wire fields project `schedule`, RFC3339 `nextRunAt`, `workspacePath` and the
 optional task-owned `permissionMode` plus paired `providerId`/`modelId` values.
 These additive values stay in `config_json`; no physical migration is required.
@@ -1587,6 +1702,11 @@ source-discriminated transcript authority owned by the Node agent sidecar. They
 are never inserted into SQLite and never copied to the Desktop transcript
 directory. `session.list` merges their projections with Rust-owned
 Desktop summaries, and `session.get` routes by the opaque `native-pi:` id.
+Discovery deduplicates native files that share the same JSONL `header.id`,
+keeping the projection with the newest transcript `updatedAt`. The selected
+file retains its path-derived opaque session id; duplicate files are not
+rewritten or deleted, and their paths are omitted from the in-memory lookup
+map for the current scan.
 
 Detail reads take an immutable byte snapshot, parse it into an in-memory
 `SessionManager`, and follow the current native branch. They must not call
