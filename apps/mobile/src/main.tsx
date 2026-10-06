@@ -7,10 +7,17 @@ import { MobileController } from "./state/controller";
 import "./i18n";
 import "./styles.css";
 
+if (import.meta.env.MODE === "acceptance") {
+  void import("./test/persistence-acceptance").then(({ persistenceAcceptance }) => {
+    window.__PI_MOBILE_PERSISTENCE_TEST__ = persistenceAcceptance;
+  });
+}
+
 declare global {
   interface Window {
     __PI_MOBILE_TEST__?: { credentialStore: CredentialStore };
     __PI_MOBILE_CONTROLLER__?: MobileController;
+    __PI_MOBILE_PERSISTENCE_TEST__?: typeof import("./test/persistence-acceptance").persistenceAcceptance;
   }
 }
 

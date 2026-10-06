@@ -7,12 +7,13 @@ import { resolve } from "node:path";
 
 const run = promisify(execFile);
 const root = resolve(import.meta.dirname, "../../..");
-const output = resolve(root, ".artifacts/mobile-update-qa");
+const output = resolve(root, process.env.PI_ANDROID_UPDATE_OUTPUT ?? ".artifacts/mobile-update-qa");
 const apk = resolve(output, "update.apk");
 if (!process.env.ANDROID_HOME) throw new Error("ANDROID_HOME is required");
 const adbPath = resolve(process.env.ANDROID_HOME, "platform-tools/adb.exe");
 const serial = process.env.PI_ANDROID_SERIAL ?? "emulator-5554";
 const appId = process.env.PI_ANDROID_UPDATE_APP_ID ?? "xyz.mirrorcoding.pi.mobile.updateqa";
+const updateVersionCode = Number(process.env.PI_ANDROID_UPDATE_VERSION_CODE ?? 6);
 const port = 38479;
 const adb = async (...args) => (await run(adbPath, ["-s", serial, ...args], { maxBuffer: 16 * 1024 * 1024 })).stdout;
 const pause = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -36,7 +37,7 @@ let apkRequests = 0;
 const server = createServer(async (request, response) => {
   if (request.url === "/mobile-update.json") {
     response.writeHead(200, { "Content-Type": "application/json", "Cache-Control": "no-store" });
-    response.end(JSON.stringify({ versionName: "0.16.2", versionCode: 6, minAndroidSdk: 24,
+    response.end(JSON.stringify({ versionName: "0.16.2", versionCode: updateVersionCode, minAndroidSdk: 24,
       apkUrl: `http://127.0.0.1:${port}/update.apk`, releaseNotes: "Controlled Android update acceptance" }));
   } else if (request.url === "/update.apk") {
     apkRequests++;
@@ -117,6 +118,11 @@ try {
   await adb("shell", "am", "start", "-n", `${appId}/xyz.mirrorcoding.pi.mobile.MainActivity`);
   cdp = await until(async () => connectWebview().catch(() => null), "QA WebView");
   await until(() => cdp.evaluate("Boolean(document.querySelector('.mobile-shell'))"), "mobile shell");
+  await until(() => cdp.evaluate("Boolean(window.__PI_MOBILE_PERSISTENCE_TEST__)"), "native persistence acceptance hook");
+  await cdp.evaluate("window.__PI_MOBILE_PERSISTENCE_TEST__.seed()");
+  assert.deepEqual(await cdp.evaluate("window.__PI_MOBILE_PERSISTENCE_TEST__.verify()"),
+    { credentials: true, pairing: true, directory: true, history: true });
+  console.log("PASS native credentials, pairing and history saved before upgrade");
   await cdp.tap("button[aria-label='Account and appearance']");
   await until(() => cdp.evaluate("document.querySelector('.mobile-update-section')?.textContent?.includes('Version 0.16.2')"), "available update");
   await screenshot("01-update-available");
@@ -159,9 +165,29 @@ try {
   }
   await until(async () => (await nativeNodes()).some((node) => node.includes('text="Update"') || node.includes('text="Install"')), "system installer");
   await screenshot("05-system-installer");
+  await adb("shell", "input", "keyevent", "4");
+  await until(async () => (await adb("shell", "dumpsys", "package", appId)).includes(`versionCode=${updateVersionCode - 1}`), "installer cancellation retained old version");
+  cdp.close();
+  cdp = await until(async () => connectWebview().catch(() => null), "QA WebView after installer cancellation");
+  await until(() => cdp.evaluate("Boolean(document.querySelector('.mobile-shell'))"), "app after installer cancellation");
+  await until(() => cdp.evaluate("Boolean(window.__PI_MOBILE_PERSISTENCE_TEST__)"), "persistence hook after installer cancellation");
+  assert.deepEqual(await cdp.evaluate("window.__PI_MOBILE_PERSISTENCE_TEST__.verify()"),
+    { credentials: true, pairing: true, directory: true, history: true });
+  console.log("PASS cancelling system installation returns to app with data intact");
+  await cdp.tap("button[aria-label='Account and appearance']");
+  await until(() => cdp.evaluate("document.querySelector('.update-actions button')?.textContent?.includes('Install')"), "install action after cancellation");
+  await cdp.tap(".update-actions button");
+  await until(async () => (await nativeNodes()).some((node) => node.includes('text="Update"') || node.includes('text="Install"')), "system installer reopened");
   await tapNative((node) => node.includes('text="Update"') || node.includes('text="Install"'));
-  await until(async () => (await adb("shell", "dumpsys", "package", appId)).includes("versionCode=6"), "updated APK installed", 60_000);
-  console.log("PASS system installer upgraded independent QA app to code 6");
+  await until(async () => (await adb("shell", "dumpsys", "package", appId)).includes(`versionCode=${updateVersionCode}`), "updated APK installed", 60_000);
+  await adb("shell", "am", "start", "-n", `${appId}/xyz.mirrorcoding.pi.mobile.MainActivity`);
+  cdp.close();
+  cdp = await until(async () => connectWebview().catch(() => null), "upgraded QA WebView");
+  await until(() => cdp.evaluate("Boolean(window.__PI_MOBILE_PERSISTENCE_TEST__)"), "upgraded persistence hook");
+  assert.deepEqual(await cdp.evaluate("window.__PI_MOBILE_PERSISTENCE_TEST__.verify()"),
+    { credentials: true, pairing: true, directory: true, history: true });
+  await screenshot("06-upgraded-history-retained");
+  console.log(`PASS system installer upgraded independent QA app to code ${updateVersionCode}; native credentials, pairing and history retained`);
 } finally {
   cdp?.close();
   await new Promise((resolve) => server.close(resolve));
