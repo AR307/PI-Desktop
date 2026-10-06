@@ -2406,7 +2406,9 @@ unchanged. See [provider configuration](12-provider-config-schema.md).
 ## 15. Cloud configuration sync
 
 The Settings → Cloud sync page uses the following renderer-to-Main channels;
-all are forwarded to the Host-owned `configSync.*` RPC methods:
+all are forwarded to the Host-owned `configSync.*` RPC methods. The page is a
+development-build-only surface for now; the channels and their Host contracts
+are unchanged:
 
 | IPC channel | Host method | contract |
 |---|---|---|
