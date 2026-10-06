@@ -126,15 +126,26 @@ async function openPhone() {
 }
 async function openSession(device) {
   await phone.locator(".grant-open").filter({ hasText: device.name }).click();
-  await phone.locator(".session-card").filter({ hasText: `${device.name} history` }).click();
+  await until(async () => (await view()).desktopId === device.deviceId, "computer opened");
+  if ((await view()).grant?.scope.kind !== "session") await phone.locator(".session-card").filter({ hasText: `${device.name} history` }).click();
   await until(async () => (await view()).selectedId === device.session.id && !(await view()).loading, "history opened");
+}
+async function pairPhone(code) {
+  await phone.getByRole("button", { name: "Pair desktop", exact: true }).click();
+  await phone.getByLabel("8-digit pairing code").fill(code);
+  await phone.getByRole("button", { name: "Pair and sync", exact: true }).click();
+}
+async function revokeGrant(device, grantId) {
+  const row = device.page.locator(`[data-grant-id="${grantId}"]`);
+  await row.locator('[data-action="revoke-mobile-grant"]').click();
+  await row.locator('[data-action="confirm-mobile-revoke"]').click();
 }
 async function readAllHistory(expectedCount) {
   while ((await view()).messages.length < expectedCount && (await view()).snapshot?.hasMoreHistory) {
     const before = (await view()).messages.length;
     await phone.locator(".transcript").evaluate(element => { element.scrollTop = 0; });
-    if (await phone.locator("button.load-older").isVisible()) await phone.locator("button.load-older").click();
     await until(async () => (await view()).messages.length > before || !(await view()).snapshot?.hasMoreHistory, "older page");
+    await phone.locator('.load-older[role="status"]').waitFor({ state: "detached" });
   }
   check(`read ${expectedCount} history rows`, (await view()).messages.length === expectedCount);
 }
@@ -147,9 +158,7 @@ try {
   check("account code has eight digits", /^\d{8}$/.test(code));
   await screenshot("desktop-account-pairing", first.page);
   await openPhone();
-  await phone.getByRole("button", { name: "Pair desktop", exact: true }).click();
-  await phone.getByLabel("8-digit pairing code").fill(code);
-  await phone.getByRole("button", { name: "Pair and sync", exact: true }).click();
+  await pairPhone(code);
   await until(async () => (await view()).directories.length === 2 && (await view()).directories.every(row => row.sessions.length === 2), "two computer directories");
   check("one account pairing discovers two separate computers", fixture.grants.size === 1 && [...fixture.grants.values()][0].desktopDeviceId === undefined);
   const rows = (await view()).directories;
@@ -197,9 +206,39 @@ try {
   await second.page.getByRole("switch", { name: "Share this computer's projects", exact: true }).click();
   await until(async () => !(await view()).directories.some(row => row.desktopDeviceId === second.deviceId), "one computer opted out");
   check("opt-out removes only that computer", (await view()).directories.length === 2 && fixture.grants.size === 1);
+
+  const accountGrant = [...fixture.grants.values()].find(grant => grant.scope.kind === "account");
+  const sessionPairing = await invoke(first, "mobile-sync/createPairing", { kind: "session", sessionId: first.session.id });
+  await pairPhone(sessionPairing.code);
+  await until(async () => (await view()).grants.length === 2, "additional session authorization");
+  const sessionGrant = [...fixture.grants.values()].find(grant => grant.scope.kind === "session");
+  check("session pairing preserves the separate account grant", Boolean(accountGrant && sessionGrant?.scope.id === first.session.id));
+  await openSession(third); await readAllHistory(2);
   await settings(first);
-  await first.page.locator('[data-action="revoke-mobile-grant"]').first().click();
-  await first.page.locator('[data-action="confirm-mobile-revoke"]').click();
+  await revokeGrant(first, accountGrant.id);
+  await until(async () => {
+    const state = await view();
+    return state.grants.length === 1 && state.directories.length === 1 &&
+      state.directories[0].desktopDeviceId === first.deviceId && state.directories[0].sessions.length === 1 &&
+      state.directories[0].sessions[0].id === first.session.id && !state.selectedId && !state.messages.length;
+  }, "account revocation narrows access to the remaining session");
+  check("account revocation closes removed content and retains the independent session grant");
+  const scopedHistoryRequests = fixture.relayCalls.filter(call => call.method === "session/history").length;
+  await phone.route(`${fixture.origin}/**`, route => route.abort("internetdisconnected"));
+  fixture.disconnectPhones();
+  await phone.reload();
+  await phone.locator(".grant-open").filter({ hasText: first.name }).waitFor();
+  const scopedOffline = await view();
+  check("offline restart exposes only the still-authorized session", scopedOffline.grants.length === 1 && scopedOffline.grants[0].id === sessionGrant.id &&
+    scopedOffline.directories.length === 1 && scopedOffline.directories[0].sessions.length === 1 && scopedOffline.directories[0].sessions[0].id === first.session.id);
+  await openSession(first); await readAllHistory(610);
+  check("remaining session keeps its cached history after account revocation", (await view()).messages.some(message => message.id === "Desktop A-0") &&
+    !(await view()).messages.some(message => message.id.startsWith("Desktop C-")) && fixture.relayCalls.filter(call => call.method === "session/history").length === scopedHistoryRequests);
+  await screenshot("mobile-offline-session-grant");
+  await phone.unroute(`${fixture.origin}/**`);
+  await phone.evaluate(() => window.__PI_MOBILE_CONTROLLER__.resume());
+  await until(async () => (await view()).connection === "connected", "remaining session reconnected");
+  await revokeGrant(first, sessionGrant.id);
   await until(async () => fixture.peers.size === 0 && (await view()).grants.length === 0 && (await view()).directories.length === 0, "account authorization revoked");
   await phone.reload();
   await until(async () => !(await view()).loading, "revoked restart");
