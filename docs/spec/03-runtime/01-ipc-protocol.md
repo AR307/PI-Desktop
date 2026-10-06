@@ -1852,7 +1852,13 @@ Renderer IPC kept for the Plan-safe preview facade and URL fallback:
   shallowest path. Relative and indexed candidates must resolve to regular files
   whose real paths remain inside their answering root; an exact path through an
   escaping or dangling link cannot fall back to a same-name indexed file. The
-  files-panel ignore set applies. A reference that matches
+  files-panel ignore set applies. An absolute reference may also name a store
+  the app reads without searching it: the whole scratch store
+  (`<data_dir>/scratch/`) holds every session's files — a generated image is
+  clicked from whatever conversation is open — and the read guards (`fs/read`,
+  `fs/open`, the image reader) already accept it, so such a path completes
+  instead of reporting a restriction. A shorthand never completes from that
+  wider store; it still searches the session's own one. A reference that matches
   nothing returns `match: null`; an absolute path outside every allowed root
   also returns `reason: "outside-allowed-roots"`, without trying a same-name
   file inside a root. Resolving never opens anything (ADR 0262).
