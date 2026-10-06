@@ -37,6 +37,17 @@ desktop, shared, runtime or Rust changes. The browser suite also accepts
 
 ## Electron and mobile browser flow
 
+`attachment-cache.mjs` is the focused controlled attachment-cache path. It
+opens a desktop-owned image from the phone, verifies the relay download and
+IndexedDB write, reloads the phone with the MC boundary offline, previews the
+cached image without another relay read, then revokes the grant and checks that
+the image bytes and shared session are gone. It uses isolated profiles and
+makes no model requests.
+
+```powershell
+node apps/desktop/test/e2e/mobile/attachment-cache.mjs
+```
+
 `sync-preview.mjs` is the focused account/sync regression flow: empty HTTP 429
 responses with Retry-After, server-issued installation identities, pairing,
 restart without registration, token refresh preserving device secrets, history,
