@@ -61,6 +61,20 @@ describe("host ports", () => {
     expect(await createHostSessionPort(() => null).get("s1")).toBeNull();
   });
 
+  it("returns the durable revision captured with the history page", async () => {
+    let latestRevision = 8;
+    const port = createHostSessionPort(() => ({
+      async call<T>() {
+        const captured = latestRevision;
+        latestRevision = 9;
+        return { session: { id: "s1", messages: [], hasMoreBefore: false, syncRevision: captured } } as T;
+      },
+    }));
+    const page = await port.history("s1", { limit: 10 });
+    expect(page.syncRevision).toBe(8);
+    expect(latestRevision).toBe(9);
+  });
+
   it("round-trips queue records through the host-core RPC shape", async () => {
     const calls: Array<{ method: string; params: Record<string, unknown> }> = [];
     const store = createHostQueueStore(() => ({

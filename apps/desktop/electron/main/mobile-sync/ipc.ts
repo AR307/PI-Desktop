@@ -10,6 +10,10 @@ export function registerMobileSyncIpc(
 ): void {
   registrar.handle(IPC.invoke.mobileSyncStatus, async () => service.status());
   registrar.handle(IPC.invoke.mobileSyncRefresh, async () => service.refresh());
+  registrar.handle(IPC.invoke.mobileSyncSetAccountSharing, async (enabled: unknown) => {
+    if (typeof enabled !== "boolean") throw new RacpError("INVALID_ARGUMENT", "invalid_account_sharing_state");
+    return service.setAccountSharing(enabled);
+  });
   registrar.handle(IPC.invoke.mobileSyncCancelPairing, async (id: unknown) =>
     service.cancelPairing(string(id, "pairing_id")),
   );
@@ -19,7 +23,9 @@ export function registerMobileSyncIpc(
   registrar.handle(IPC.invoke.mobileSyncCreatePairing, async (input: unknown) => {
     const row = object(input);
     let scope: MobileSyncScopeInput;
-    if (row.kind === "session") {
+    if (row.kind === "account") {
+      scope = { kind: "account" };
+    } else if (row.kind === "session") {
       scope = { kind: "session", sessionId: string(row.sessionId, "session_id") };
     } else if (row.kind === "project") {
       scope =

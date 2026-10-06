@@ -127,8 +127,8 @@ export function MobilePairingDialog({ target, existing, onClose }: {
 
   return <AccountDialog title={t("mobileSync.title")} onCancel={() => void close()}>
     <div className="mobile-sync-dialog-body" data-testid="mobile-pairing-dialog">
-      <div className="mobile-sync-scope"><span>{t(target.scope.kind === "project" ? "mobileSync.project" : "mobileSync.session")}</span><strong>{pairing?.scope.label ?? target.label}</strong></div>
-      <p>{t(target.scope.kind === "project" ? "mobileSync.projectDescription" : "mobileSync.sessionDescription")}</p>
+      <div className="mobile-sync-scope"><span>{t(target.scope.kind === "account" ? "mobileSync.account" : target.scope.kind === "project" ? "mobileSync.project" : "mobileSync.session")}</span><strong>{pairing?.scope.label ?? target.label}</strong></div>
+      <p>{t(target.scope.kind === "account" ? "mobileSync.accountDescription" : target.scope.kind === "project" ? "mobileSync.projectDescription" : "mobileSync.sessionDescription")}</p>
       {!connected ? <>
         <p>{t("mobileSync.loginRequired")}</p>
         {confirmLogin ? <><p>{t("mirrorCoding.confirmDescription")}</p><Button disabled={busy} onClick={() => void login(true)}>{t("mirrorCoding.confirm")}</Button></> :

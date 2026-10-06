@@ -15,6 +15,7 @@ export class MobileScopeAccess {
     return result.groups;
   }
   async resolve(input: MobileSyncScopeInput): Promise<MobileSyncScope> {
+    if (input.kind === "account") throw new RacpError("INVALID_ARGUMENT", "account_scope_requires_service");
     if (input.kind === "session") {
       const { session } = await this.host().call<{ session?: SessionDetail }>("session.get", { id: input.sessionId, messageLimit: 1 });
       if (!session) throw new RacpError("NOT_FOUND", "session_not_found");
@@ -26,21 +27,24 @@ export class MobileScopeAccess {
   }
   async sessions(grants: MobileGrant[]): Promise<SessionSummary[]> {
     if (!grants.length) return [];
+    const accountWide = grants.some((grant) => grant.scope.kind === "account");
     const [result, groups] = await Promise.all([
       this.host().call<{ sessions: SessionSummary[] }>("session.list"), this.groups(),
     ]);
+    if (accountWide) return result.sessions;
     const ids = new Set(grants.filter((grant) => grant.scope.kind === "session").map((grant) => grant.scope.id));
     const groupIds = new Set(grants.filter((grant) => grant.scope.kind === "project").map((grant) => grant.scope.id));
     const roots = new Set(groups.filter((group) => groupIds.has(group.id)).flatMap((group) => group.roots.map((root) => pathKey(root.path))));
     return result.sessions.filter((session) => ids.has(session.id) || (session.projectPath && roots.has(pathKey(session.projectPath))));
   }
   async require(sessionId: string, grants: MobileGrant[]): Promise<SessionSummary> {
+    const accountWide = grants.some((grant) => grant.scope.kind === "account");
     const explicit = grants.some((grant) => grant.scope.kind === "session" && grant.scope.id === sessionId);
     const projectIds = new Set(grants.filter((grant) => grant.scope.kind === "project").map((grant) => grant.scope.id));
-    if (!explicit && !projectIds.size) throw new RacpError("FORBIDDEN", "session_not_shared");
+    if (!accountWide && !explicit && !projectIds.size) throw new RacpError("FORBIDDEN", "session_not_shared");
     const { session } = await this.host().call<{ session?: SessionDetail }>("session.get", { id: sessionId, messageLimit: 1, contentLimit: 1 });
     if (!session) throw new RacpError("FORBIDDEN", "session_not_shared");
-    if (!explicit) {
+    if (!accountWide && !explicit) {
       const groups = await this.groups();
       const member = session.projectPath && groups.some((group) => projectIds.has(group.id) && group.roots.some((root) => pathKey(root.path) === pathKey(session.projectPath)));
       if (!member) throw new RacpError("FORBIDDEN", "session_not_shared");

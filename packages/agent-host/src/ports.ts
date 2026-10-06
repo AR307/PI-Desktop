@@ -137,7 +137,7 @@ export interface SessionPort {
       /** Presentation cap per text/value field; omitted reads stay uncapped. */
       contentLimit?: number;
     },
-  ): Promise<{ items: RacpItemSummary[]; hasMore: boolean }>;
+  ): Promise<{ items: RacpItemSummary[]; hasMore: boolean; syncRevision?: number }>;
 }
 
 export class SystemClock implements Clock {

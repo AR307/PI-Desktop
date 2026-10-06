@@ -50,7 +50,8 @@ export class MobileSyncService {
   }
   status(): MobileSyncStatus { return structuredClone({ ...this.state, pairings: this.state.pairings.filter((pairing) => Date.parse(pairing.expiresAt) > Date.now()) }); }
   observeInvoke(channel: string) {
-    if ([IPC.invoke.sessionMoveProject, IPC.invoke.projectGroupUpdate, IPC.invoke.projectGroupRename].some((value) => value === channel)) {
+    if ([IPC.invoke.sessionCreate, IPC.invoke.sessionDelete, IPC.invoke.sessionRename, IPC.invoke.sessionMoveProject,
+      IPC.invoke.projectGroupCreate, IPC.invoke.projectGroupUpdate, IPC.invoke.projectGroupRename].some((value) => value === channel)) {
       for (const { peer } of this.peers.values()) peer.desktopChanged();
     }
   }
@@ -58,7 +59,8 @@ export class MobileSyncService {
   async start() {
     this.started = true;
     const saved = (await this.deps.host().call<AppSettings>("settings.get")).mobileSync;
-    this.active = !!saved?.scopes.length;
+    this.active = !!saved?.scopes.length || saved?.accountSyncEnabled === true || saved?.accountSharingPending === true;
+    this.publish({ accountSyncEnabled: saved?.accountSyncEnabled === true });
     if (this.active) void this.refresh(false);
     else this.publish({ status: this.deps.account.snapshot().status === "connected" ? "offline" : "signed_out" });
   }
@@ -67,15 +69,18 @@ export class MobileSyncService {
     const account = this.deps.account.snapshot();
     if (account.status !== "connected" || String(account.account?.id ?? "") !== this.settings?.accountId) {
       this.epoch += 1; this.disconnect(); this.settings = undefined;
-      this.publish({ status: "signed_out", deviceId: undefined, grants: [], pairings: [], error: undefined });
+      this.publish({ status: "signed_out", deviceId: undefined, grants: [], pairings: [], accountSyncEnabled: false, error: undefined });
     }
     if (account.status === "connected" && account.account && this.active) void this.refresh(false);
   }
   async createPairing(input: MobileSyncScopeInput): Promise<MobilePairing> {
-    const scope = await this.scope.resolve(input);
     const state = await this.refresh();
     if (state.error) throw new Error(state.error);
     if (!this.settings || this.deps.account.snapshot().status !== "connected") throw new Error("mobile_login_required");
+    if (input.kind === "account" && !this.settings.accountSyncEnabled) throw new Error("mobile_account_sharing_disabled");
+    const scope = input.kind === "account"
+      ? { kind: "account" as const, id: this.settings.accountId, label: "All projects and sessions" }
+      : await this.scope.resolve(input);
     await this.write(async () => {
       const settings = this.settings!;
       if (!settings.scopes.some((item) => sameScope(item, scope))) settings.scopes.push(scope);
@@ -103,6 +108,27 @@ export class MobileSyncService {
     } catch { this.publish({ error: "mobile_revoke_pending" }); }
     return this.status();
   }
+  async setAccountSharing(enabled: boolean): Promise<MobileSyncStatus> {
+    if (!this.settings) {
+      await this.refresh();
+      if (!this.settings) throw new Error("mobile_login_required");
+    }
+    await this.write(async () => {
+      if (!this.settings) throw new Error("mobile_login_required");
+      this.settings.accountSyncEnabled = enabled;
+      this.settings.accountSharingPending = true;
+      await this.persist();
+    });
+    this.publish({ accountSyncEnabled: enabled, error: undefined });
+    this.reconcilePeers();
+    for (const { peer } of this.peers.values()) peer.directoryChanged();
+    try {
+      await this.publishSharing();
+    } catch (error) {
+      this.publish({ error: error instanceof Error ? error.message : "mobile_connection_failed" });
+    }
+    return this.status();
+  }
   refresh(activate = true): Promise<MobileSyncStatus> {
     if (this.disposed) return Promise.resolve(this.status());
     this.active ||= activate;
@@ -127,11 +153,12 @@ export class MobileSyncService {
       if (!this.settings) {
         const saved = (await this.deps.host().call<AppSettings>("settings.get")).mobileSync;
         if (epoch !== this.epoch || this.disposed) return this.status();
-        this.settings = saved?.accountId === accountId ? { ...saved, deviceId } : { deviceId, accountId, scopes: [], revokedGrantIds: [] };
+        this.settings = saved?.accountId === accountId ? { ...saved, deviceId } : { deviceId, accountId, scopes: [], revokedGrantIds: [], accountSyncEnabled: false };
         await this.persist();
       }
-      this.publish({ status: this.socket?.readyState === WebSocket.OPEN ? "online" : "connecting", deviceId: this.settings.deviceId, error: undefined, retryAt: undefined });
+      this.publish({ status: this.socket?.readyState === WebSocket.OPEN ? "online" : "connecting", deviceId: this.settings.deviceId, accountSyncEnabled: this.settings.accountSyncEnabled === true, error: undefined, retryAt: undefined });
       if (deviceId !== this.settings.deviceId) { this.settings.deviceId = deviceId; await this.persist(); }
+      if (this.settings.accountSharingPending) await this.publishSharing();
       for (const id of [...this.settings.revokedGrantIds]) {
         try { await this.request(`/grants/${encodeURIComponent(id)}/revoke`, {}); this.settings.revokedGrantIds = this.settings.revokedGrantIds.filter((item) => item !== id); await this.persist(); }
         catch { /* Keep the local denial and retry on the next connection. */ }
@@ -143,6 +170,7 @@ export class MobileSyncService {
       const priorIds = new Set(this.state.grants.map((grant) => grant.id));
       const consumed = grants.filter((grant) => !priorIds.has(grant.id));
       this.publish({ grants, pairings: this.state.pairings.filter((pairing) => !consumed.some((grant) => sameScope(grant.scope, pairing.scope))) }); this.reconcilePeers();
+      for (const { peer } of this.peers.values()) peer.directoryChanged();
       if (!this.socket) {
         const data = object(await this.request("/relay/ticket", { deviceId }));
         const ticket: MobileRelayTicket = { ticket: string(data.ticket, "ticket"), url: string(data.url, "url"), expiresAt: string(data.expiresAt, "expires_at") };
@@ -195,7 +223,11 @@ export class MobileSyncService {
     } catch (error) { this.deps.log("mobile relay frame rejected", error); }
   }
   private grantsFor(deviceId: string) { return this.state.grants.filter((grant) => grant.mobileDeviceId === deviceId && this.accepts(grant)); }
-  private accepts(grant: MobileGrant) { return !!this.settings && grant.accountId === this.settings.accountId && grant.desktopDeviceId === this.settings.deviceId && !this.settings.revokedGrantIds.includes(grant.id) && this.settings.scopes.some((scope) => sameScope(scope, grant.scope)); }
+  private accepts(grant: MobileGrant) {
+    if (!this.settings || grant.accountId !== this.settings.accountId || this.settings.revokedGrantIds.includes(grant.id)) return false;
+    if (grant.scope.kind === "account") return this.settings.accountSyncEnabled === true && grant.scope.id === this.settings.accountId;
+    return grant.desktopDeviceId === this.settings.deviceId && this.settings.scopes.some((scope) => sameScope(scope, grant.scope));
+  }
   private reconcilePeers() { for (const [id, entry] of this.peers) if (!this.grantsFor(entry.deviceId).length) { this.send({ type: "peer.close", peerId: id, reason: "share_revoked" }); this.removePeer(id); } }
   private removePeer(id: string) { this.peers.get(id)?.peer.dispose(); this.peers.delete(id); }
   private closePeers() { for (const id of this.peers.keys()) this.removePeer(id); }
@@ -222,6 +254,15 @@ export class MobileSyncService {
     if (epoch !== this.epoch || this.disposed) throw new Error("mobile_account_changed");
     return result;
   }
+  private async publishSharing(): Promise<void> {
+    if (!this.settings) return;
+    await this.request(`/devices/${encodeURIComponent(this.settings.deviceId)}/sharing`, { accountSyncEnabled: this.settings.accountSyncEnabled === true });
+    await this.write(async () => {
+      if (!this.settings) return;
+      this.settings.accountSharingPending = false;
+      await this.persist();
+    });
+  }
   private persist() { return this.deps.host().call("settings.set", { mobileSync: this.settings }); }
   private write(operation: () => Promise<void>) { const task = this.writes.then(operation); this.writes = task.catch(() => undefined); return task; }
   private disconnect() {
@@ -237,7 +278,7 @@ export class MobileSyncService {
     await this.deps.credentials.clear();
     this.settings = undefined;
     await this.deps.host().call("settings.set", { mobileSync: null });
-    this.publish({ status: "signed_out", deviceId: undefined, grants: [], pairings: [], error: undefined, retryAt: undefined });
+    this.publish({ status: "signed_out", deviceId: undefined, grants: [], pairings: [], accountSyncEnabled: false, error: undefined, retryAt: undefined });
   }
   dispose() { this.stopConfiguration(); this.disposed = true; this.epoch += 1; this.disconnect(); }
 }
@@ -245,6 +286,6 @@ export class MobileSyncService {
 const sameScope = (left: MobileSyncScope, right: MobileSyncScope) => left.kind === right.kind && left.id === right.id;
 function parseGrant(value: unknown): MobileGrant {
   const row = object(value); const scope = object(row.scope);
-  if (scope.kind !== "project" && scope.kind !== "session") throw new Error("invalid_mobile_scope");
-  return { id: string(row.id, "grant_id"), accountId: string(row.accountId, "account_id"), desktopDeviceId: string(row.desktopDeviceId, "desktop_device_id"), mobileDeviceId: string(row.mobileDeviceId, "mobile_device_id"), mobileDeviceName: string(row.mobileDeviceName, "mobile_device_name"), createdAt: string(row.createdAt, "created_at"), scope: { kind: scope.kind, id: string(scope.id, "scope_id"), label: string(scope.label, "scope_label") } };
+  if (scope.kind !== "account" && scope.kind !== "project" && scope.kind !== "session") throw new Error("invalid_mobile_scope");
+  return { id: string(row.id, "grant_id"), accountId: string(row.accountId, "account_id"), ...(scope.kind === "account" ? {} : { desktopDeviceId: string(row.desktopDeviceId, "desktop_device_id") }), mobileDeviceId: string(row.mobileDeviceId, "mobile_device_id"), mobileDeviceName: string(row.mobileDeviceName, "mobile_device_name"), createdAt: string(row.createdAt, "created_at"), scope: { kind: scope.kind, id: string(scope.id, "scope_id"), label: string(scope.label, "scope_label") } };
 }

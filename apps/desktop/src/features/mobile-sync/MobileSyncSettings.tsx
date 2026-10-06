@@ -2,15 +2,15 @@ import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Smartphone } from "lucide-react";
 import type { MobilePairing, MobileSyncScope } from "@pi-desktop/shared";
-import { Button } from "../../components/ui";
+import { Button, SettingsToggle } from "../../components/ui";
 import { api } from "../../lib/api";
 import { MobilePairingDialog, type MobilePairingTarget } from "./MobilePairingDialog";
 import { useMobileSync } from "./useMobileSync";
 import "./mobile-sync.css";
 
 function pairingTarget(scope: MobileSyncScope): MobilePairingTarget {
-  return { label: scope.label, scope: scope.kind === "session"
-    ? { kind: "session", sessionId: scope.id }
+  return { label: scope.label, scope: scope.kind === "account" ? { kind: "account" }
+    : scope.kind === "session" ? { kind: "session", sessionId: scope.id }
     : { kind: "project", projectId: scope.id } };
 }
 
@@ -21,6 +21,7 @@ export function MobileSyncSettings() {
   const [confirmRevoke, setConfirmRevoke] = useState<string>();
   const [busy, setBusy] = useState<string>();
   const [error, setError] = useState<string>();
+  const [sharingBusy, setSharingBusy] = useState(false);
   const revoke = async (id: string) => {
     setBusy(id);
     setError(undefined);
@@ -31,18 +32,30 @@ export function MobileSyncSettings() {
     } catch { setError("revokeFailed"); }
     finally { setBusy(undefined); }
   };
+  const setAccountSharing = async () => {
+    if (!state || sharingBusy) return;
+    setSharingBusy(true); setError(undefined);
+    try { await api.mobileSync.setAccountSharing(state.accountSyncEnabled !== true); await refresh(); }
+    catch { setError("sharingFailed"); }
+    finally { setSharingBusy(false); }
+  };
 
   return <section className="settings-card-block mirrorcoding-card" data-testid="mobile-sync-settings">
     <div className="mobile-sync-heading"><Smartphone size={20} aria-hidden /><h3>{t("mobileSync.manage")}</h3><Button variant="ghost" disabled={refreshing || Boolean(busy)} onClick={() => void refresh()}>{t("mobileSync.refresh")}</Button></div>
     <p>{t("mobileSync.manageDescription")}</p>
+    <div className="mobile-sync-account-sharing">
+      <div><strong>{t("mobileSync.accountSharing")}</strong><p>{t("mobileSync.accountSharingDescription")}</p></div>
+      <SettingsToggle checked={state?.accountSyncEnabled === true} busy={sharingBusy} disabled={!state || state.status === "signed_out"} label={t("mobileSync.accountSharing")} onChange={() => void setAccountSharing()} />
+    </div>
     {state ? <p className="mobile-sync-status" data-status={state.status} role="status">{t(`mobileSync.status.${state.status}`)}</p> : !loadError && <p role="status">{t("common.loading")}</p>}
     {(error || loadError || state?.error) && <p className="mirrorcoding-error" role="alert">{t(`mobileSync.${error ?? loadError ?? (state?.error === "mobile_revoke_pending" ? "revokePending" : "requestFailed")}`)}</p>}
+    {state?.accountSyncEnabled && <div className="mobile-sync-account-pair"><Button variant="ghost" disabled={Boolean(busy)} onClick={() => setPairing({ target: { scope: { kind: "account" }, label: t("mobileSync.accountScope") } })}>{t("mobileSync.pairAccount")}</Button></div>}
     {state?.pairings.length ? <ul className="mobile-sync-grants">{state.pairings.map((item) => <li className="mobile-sync-grant" key={item.id}>
       <strong>{item.scope.label}</strong><p>{t("mobileSync.pendingPairing")}</p>
       <div className="mirrorcoding-actions"><Button variant="ghost" onClick={() => setPairing({ target: pairingTarget(item.scope), existing: item })}>{t("mobileSync.showCode")}</Button></div>
     </li>)}</ul> : null}
     {state?.grants.length ? <ul className="mobile-sync-grants">{state.grants.map((grant) => <li className="mobile-sync-grant" key={grant.id} data-grant-id={grant.id}>
-      <strong>{grant.mobileDeviceName}</strong><span>{t(grant.scope.kind === "project" ? "mobileSync.project" : "mobileSync.session")}: {grant.scope.label}</span>
+      <strong>{grant.mobileDeviceName}</strong><span>{t(grant.scope.kind === "account" ? "mobileSync.account" : grant.scope.kind === "project" ? "mobileSync.project" : "mobileSync.session")}: {grant.scope.label}</span>
       <p>{t("mobileSync.pairedAt", { time: new Date(grant.createdAt).toLocaleString(i18n.language) })}</p>
       {confirmRevoke === grant.id ? <div className="mobile-sync-revoke-confirm">
         <p>{t("mobileSync.revokeDescription")}</p><div className="mirrorcoding-actions">

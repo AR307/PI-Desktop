@@ -36,7 +36,7 @@ function liveState() {
 }
 
 /** Harness: a fake Agent Host + host RPC behind one MobilePeer with captured replies. */
-function buildPeer({ bigMessage = "big ".repeat(80_000) } = {}) {
+function buildPeer({ bigMessage = "big ".repeat(80_000), grants = [{ id: "grant-1", scope: { kind: "session", id: "s1", label: "Session" } }], sessions = [SESSION], groups = [] } = {}) {
   const calls = { agent: [], host: [] };
   const agent = {
     attach: async (_principal, params) => { calls.agent.push(["attach", params]); return { attached: true }; },
@@ -44,8 +44,8 @@ function buildPeer({ bigMessage = "big ".repeat(80_000) } = {}) {
     unsubscribe: () => true,
     ack: () => {},
     sessionState: async (sessionId) => { calls.agent.push(["sessionState", sessionId]); return liveState(); },
-    snapshot: async (sessionId, _summary, options) => { calls.agent.push(["snapshot", sessionId, options]); return { ...liveState(), items: [], hasMoreHistory: true }; },
-    history: async (_principal, params) => { calls.agent.push(["history", params]); return { items: [], hasMore: false, revision: 4 }; },
+    snapshot: async (sessionId, _summary, options) => { calls.agent.push(["snapshot", sessionId, options]); return { ...liveState(), items: [], hasMoreHistory: true, syncRevision: 12 }; },
+    history: async (_principal, params) => { calls.agent.push(["history", params]); return { items: [], hasMore: false, revision: 4, syncRevision: 12 }; },
     describeSession: () => racpSession(),
     queueEntries: (sessionId) => { calls.agent.push(["queueEntries", sessionId]); return [{ turn: { id: "turn-q1" }, content: "queued prompt text" }]; },
     getTurn: (turnId) => ({ id: turnId, sessionId: "s1", status: "queued" }),
@@ -59,6 +59,8 @@ function buildPeer({ bigMessage = "big ".repeat(80_000) } = {}) {
       if (method === "settings.get") return {};
       if (method === "providers.get") return {};
       if (method === "plans.pending") return { plans: [] };
+      if (method === "session.syncRevision") return { syncRevision: 12 };
+      if (method === "session.changes") return { sessionId: params.sessionId, afterRevision: params.afterRevision, revision: 12, hasMore: false, changes: [{ revision: 12, kind: "upsert", messageId: "m-1", sequence: 1, message: { id: "m-1", role: "assistant", content: "Updated", createdAt: SESSION.createdAt } }] };
       if (method === "session.get") {
         return { session: { ...SESSION, messages: [{ id: "m-big", role: "assistant", content: bigMessage, createdAt: SESSION.createdAt }], compactions: [{ id: "ck-1", throughMessageId: "m-2", summary: "s", tokensBefore: 1 }] } };
       }
@@ -71,8 +73,8 @@ function buildPeer({ bigMessage = "big ".repeat(80_000) } = {}) {
     host: () => host, agent: () => agent,
     account: { snapshot: () => ({ status: "connected", account: { id: 1 } }) },
     images: { subscribe: () => () => {}, subscribeConfiguration: () => () => {}, states: () => [], abortSession: () => false },
-    scope: { sessions: async () => [SESSION], require: async () => SESSION },
-    grants: () => [{ id: "grant-1", scope: { kind: "session", id: "s1", label: "Session" } }],
+    scope: { sessions: async () => sessions, groups: async () => groups, require: async () => SESSION },
+    grants: () => grants,
     send: (frame) => sent.push(JSON.parse(frame)),
     close: (reason) => { throw new Error(`peer closed: ${reason}`); },
   });
@@ -119,10 +121,37 @@ test("session/state serves live state and session/history caps per-field content
   await initialize(request);
   const { state } = await request("session/state", { sessionId: "s1" });
   assert.equal(state.revision, 4);
+  assert.equal(state.syncRevision, 12);
   assert.equal(state.items, undefined);
-  await request("session/history", { sessionId: "s1", limit: 50 });
+  const historyPage = await request("session/history", { sessionId: "s1", limit: 50 });
+  assert.equal(historyPage.syncRevision, 12);
   const history = calls.agent.find(([name]) => name === "history");
   assert.equal(history[1].contentLimit, MOBILE_ITEM_CONTENT_LIMIT);
+});
+
+test("account directory includes empty projects and ungrouped sessions without subscribing to content", async () => {
+  const { request, sent, calls, peer } = buildPeer({
+    grants: [{ id: "account-grant", scope: { kind: "account", id: "account-1", label: "Account" } }],
+    groups: [{ id: "project-empty", name: "Empty", primaryPath: "D:/empty", roots: [{ path: "D:/empty" }] }],
+  });
+  await initialize(request);
+  const { subscriptionId } = await request("directory/subscribe", {});
+  const directory = await request("directory/list", { limit: 10 });
+  assert.equal(directory.projects[0].id, "project-empty");
+  assert.equal(directory.sessions[0].projectId, undefined);
+  assert.ok(!calls.agent.some(([method]) => method === "subscribe"));
+  peer.directoryChanged();
+  assert.ok(sent.some((frame) => frame.method === "mobile.directoryChanged"));
+  assert.equal((await request("events/unsubscribe", { subscriptionId })).removed, true);
+});
+
+test("durable session changes map host messages to RACP items", async () => {
+  const { request, calls } = buildPeer();
+  await initialize(request);
+  const page = await request("session/changes", { sessionId: "s1", afterRevision: 8, limit: 20 });
+  assert.equal(page.revision, 12);
+  assert.equal(page.changes[0].item.content.content, "Updated");
+  assert.deepEqual(calls.host.find(([method]) => method === "session.changes")[1], { sessionId: "s1", afterRevision: 8, limit: 20, contentLimit: MOBILE_ITEM_CONTENT_LIMIT });
 });
 
 test("session/item streams the full item JSON in relay-safe chunks", async () => {

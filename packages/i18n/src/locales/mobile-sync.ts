@@ -1,4 +1,8 @@
 export const mobileSyncEn = {
+  account: "Account", accountScope: "This MirrorCoding account",
+  accountSharing: "Share this computer's projects", accountSharingDescription: "One account pairing can discover projects and sessions on this computer while sharing is enabled.",
+  pairAccount: "Pair account", accountDescription: "Shares projects and sessions on every computer where account sharing is enabled.",
+  sharingFailed: "Could not update account sharing. The local setting was kept; try again when connected.",
   RATE_LIMITED: "Account/sync requests are temporarily rate limited. Wait before retrying; your authorization is kept.",
   RELAY_UNAVAILABLE: "The mobile relay is temporarily unavailable. Your authorization is kept.",
   DEVICE_MISMATCH: "MC rejected this installation identity. Sign out and authorize again, then pair the phone again.",
@@ -28,6 +32,10 @@ export const mobileSyncEn = {
 };
 
 export const mobileSyncZhCN: typeof mobileSyncEn = {
+  account: "账号", accountScope: "此 MirrorCoding 账号",
+  accountSharing: "共享此电脑的项目", accountSharingDescription: "开启后，一次账号配对即可发现此电脑上的项目和会话。",
+  pairAccount: "配对账号", accountDescription: "共享所有已开启账号共享的电脑上的项目和会话。",
+  sharingFailed: "无法更新账号共享；本地设置已保留，请连接后重试。",
   RATE_LIMITED: "账号或同步请求暂时受限，请等待后重试；现有授权已保留。",
   RELAY_UNAVAILABLE: "移动端转发服务暂不可用，现有授权已保留。",
   DEVICE_MISMATCH: "MC 拒绝了当前安装身份，请退出并重新授权，再重新配对手机。",

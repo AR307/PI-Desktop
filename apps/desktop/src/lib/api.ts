@@ -549,6 +549,7 @@ function normalizePlansChangedEvent(value: unknown): PlanningStateEvent {
 export const api = {
   mobileSync: {
     status: () => invoke<MobileSyncStatus>(IPC.invoke.mobileSyncStatus),
+    setAccountSharing: (enabled: boolean) => invoke<MobileSyncStatus>(IPC.invoke.mobileSyncSetAccountSharing, enabled),
     createPairing: (scope: MobileSyncScopeInput) => invoke<MobilePairing>(IPC.invoke.mobileSyncCreatePairing, scope),
     cancelPairing: (pairingId: string) => invoke<MobileSyncStatus>(IPC.invoke.mobileSyncCancelPairing, pairingId),
     revoke: (grantId: string) => invoke<MobileSyncStatus>(IPC.invoke.mobileSyncRevoke, grantId),

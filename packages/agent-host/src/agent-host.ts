@@ -798,7 +798,7 @@ export class AgentHost {
   async history(
     principal: Principal,
     params: { sessionId: string; beforeItemId?: string; limit?: number; contentLimit?: number },
-  ): Promise<{ items: RacpItemSummary[]; hasMore: boolean; revision: number }> {
+  ): Promise<{ items: RacpItemSummary[]; hasMore: boolean; revision: number; syncRevision?: number }> {
     this.requireRole(principal, "session/history");
     const state = this.state(params.sessionId);
     const limit = Math.max(1, Math.min(params.limit ?? 100, 200));
@@ -850,6 +850,7 @@ export class AgentHost {
       ...base,
       items: page.items,
       hasMoreHistory: page.hasMore,
+      ...(page.syncRevision !== undefined ? { syncRevision: page.syncRevision } : {}),
     };
   }
 

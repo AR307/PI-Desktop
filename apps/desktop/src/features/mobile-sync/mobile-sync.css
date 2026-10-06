@@ -16,3 +16,5 @@
 .mobile-sync-status[data-status="online"]::before { background: var(--ds-success); }
 .mobile-sync-success { color: var(--ds-success) !important; }
 .mobile-sync-revoke-confirm { display: grid; gap: 8px; padding: 12px; border: 1px solid var(--ds-border-default); border-radius: var(--radius-sm); }
+.mobile-sync-account-sharing { display: flex; align-items: center; gap: 16px; justify-content: space-between; border-top: 1px solid var(--ds-border-default); border-bottom: 1px solid var(--ds-border-default); padding: 14px 0; }
+.mobile-sync-account-sharing p { margin-top: 4px; font-size: var(--text-sm); }

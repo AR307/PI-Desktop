@@ -29,6 +29,7 @@ export type HostSessionRecord = {
   messages?: UiMessage[];
   messageStart?: number;
   hasMoreBefore?: boolean;
+  syncRevision?: number;
 };
 
 /** Opaque Main/Host authorization fingerprint; never send the source identity to the renderer or model. */
@@ -112,6 +113,7 @@ export function createHostSessionPort(getHost: () => HostRpc | null): SessionPor
       return {
         items: (record?.messages ?? []).map(toRacpItem),
         hasMore: record?.hasMoreBefore === true,
+        ...(record?.syncRevision !== undefined ? { syncRevision: record.syncRevision } : {}),
       };
     },
   };

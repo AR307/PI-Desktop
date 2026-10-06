@@ -1,12 +1,12 @@
 import { randomUUID } from "node:crypto";
 import { RacpError, type AgentHost, type Principal } from "@pi-desktop/agent-host";
-import { toSessionSummary, type HostRpc } from "@pi-desktop/host-runtime";
+import { toRacpItem, toSessionSummary, type HostRpc } from "@pi-desktop/host-runtime";
 import { encodeFrame, errorObjectFrom, isRequest, parseFrame } from "@pi-desktop/racp/framing";
 import {
   APP_VERSION, MOBILE_ATTACHMENT_CHUNK_BYTES, MOBILE_ITEM_CONTENT_LIMIT,
   RACP_DEFAULT_LIMITS, RACP_DEFAULT_POLICY, RACP_EVENT_NOTIFICATION, RACP_PROTOCOL_VERSION, RACP_SUBSCRIPTION_CLOSED_NOTIFICATION,
   SESSION_THINKING_LEVELS, validateImageOptions,
-  protocolVersionsCompatible, type AppSettings, type MobileGrant, type MobileSession, type MobileSessionConfiguration, type MobileSessionConfigureInput, type MobileSessionSnapshot, type MobileSessionState,
+  protocolVersionsCompatible, type AppSettings, type MobileDirectoryPage, type MobileGrant, type MobileProject, type MobileSession, type MobileSessionChangesPage, type MobileSessionConfiguration, type MobileSessionConfigureInput, type MobileSessionHistoryPage, type MobileSessionSnapshot, type MobileSessionState, type ProjectGroupRecord, type UiMessage,
   type RacpApprovalResponse, type RacpCursor, type RacpEventEnvelope, type RacpInitializeResult, type RacpInputResponse,
   type ProviderPublic, type SessionSummary, type SessionDetail, type PlanProposal, type ThinkingLevel,
 } from "@pi-desktop/shared";
@@ -29,6 +29,7 @@ export class MobilePeer {
   private initialized = false;
   private closed = false;
   private subscriptions = new Map<string, string>();
+  private directorySubscriptions = new Set<string>();
   private delivery: Promise<void> = Promise.resolve();
   private pendingEvents = 0;
   private attachments: MobileAttachments;
@@ -51,8 +52,16 @@ export class MobilePeer {
     this.closed = true;
     for (const [id, sessionId] of this.subscriptions) this.deps.agent().unsubscribe(id, sessionId);
     this.subscriptions.clear(); this.attachments.dispose(); this.stopImages(); this.stopConfiguration();
+    this.directorySubscriptions.clear();
   }
-  desktopChanged() { for (const sessionId of new Set(this.subscriptions.values())) void this.deliverActivity(sessionId, { configurationChanged: true }); }
+  desktopChanged() {
+    this.directoryChanged();
+    for (const sessionId of new Set(this.subscriptions.values())) void this.deliverActivity(sessionId, { configurationChanged: true });
+  }
+  directoryChanged() {
+    if (this.closed || !this.directorySubscriptions.size || !this.deps.grants().length) return;
+    this.deps.send(encodeFrame({ jsonrpc: "2.0", method: "mobile.directoryChanged", params: { desktopDeviceId: this.deps.desktopDeviceId } }));
+  }
   async frame(frame: string) {
     if (this.closed) return;
     if (Buffer.byteLength(frame) > RACP_DEFAULT_LIMITS.maxFrameBytes) { this.deps.close("PAYLOAD_TOO_LARGE"); return; }
@@ -75,6 +84,12 @@ export class MobilePeer {
     if (!this.initialized) throw new RacpError("PROTOCOL_MISMATCH", "connection_not_initialized");
     if (!this.deps.grants().length) throw new RacpError("FORBIDDEN", "share_revoked");
     if (method === "connection/ping") return { ok: true, serverTime: new Date().toISOString() };
+    if (method === "directory/list") return this.directory(params);
+    if (method === "directory/subscribe") {
+      const subscriptionId = randomUUID();
+      this.directorySubscriptions.add(subscriptionId);
+      return { subscriptionId };
+    }
     if (method === "session/list") {
       const grants = this.deps.grants().filter((grant) => params.grantId === undefined || grant.id === params.grantId);
       if (!grants.length) throw new RacpError("FORBIDDEN", "share_not_authorized");
@@ -83,6 +98,11 @@ export class MobilePeer {
     }
     if (method === "events/unsubscribe" || method === "events/ack") {
       const id = string(params.subscriptionId, "subscription_id");
+      if (this.directorySubscriptions.has(id)) {
+        if (method === "events/ack") return { acknowledged: true };
+        this.directorySubscriptions.delete(id);
+        return { removed: true };
+      }
       const sessionId = this.subscriptions.get(id);
       if (!sessionId) return { removed: false };
       await this.require(sessionId);
@@ -110,7 +130,12 @@ export class MobilePeer {
       }
       case "session/snapshot": return { snapshot: await this.snapshot(session) };
       case "session/state": return { state: await this.state(session) };
-      case "session/history": return agent.history(this.principal, { sessionId, ...(params.beforeItemId ? { beforeItemId: string(params.beforeItemId, "before_item_id") } : {}), limit: integer(params.limit ?? 50, "limit", 200) || 1, contentLimit: MOBILE_ITEM_CONTENT_LIMIT });
+      case "session/history": {
+        const page = await agent.history(this.principal, { sessionId, ...(params.beforeItemId ? { beforeItemId: string(params.beforeItemId, "before_item_id") } : {}), limit: integer(params.limit ?? 50, "limit", 200) || 1, contentLimit: MOBILE_ITEM_CONTENT_LIMIT });
+        if (page.syncRevision === undefined) throw new RacpError("HOST_DISCONNECTED", "history_sync_revision_missing");
+        return { ...page, syncRevision: page.syncRevision } satisfies MobileSessionHistoryPage;
+      }
+      case "session/changes": return this.changes(sessionId, params);
       case "session/item": return this.itemContent(sessionId, params);
       case "message/status": {
         const messageId = string(params.messageId, "message_id");
@@ -186,6 +211,61 @@ export class MobilePeer {
   private async require(sessionId: string) {
     if (this.closed) throw new RacpError("HOST_DISCONNECTED", "connection_closed");
     return this.deps.scope.require(sessionId, this.deps.grants());
+  }
+  private async directory(params: Record<string, unknown>): Promise<MobileDirectoryPage> {
+    const grants = this.deps.grants();
+    const grantIds = grants.map((grant) => grant.id).sort().join("\u0000");
+    const [groups, records] = await Promise.all([this.deps.scope.groups(), this.deps.scope.sessions(grants)]);
+    const accountWide = grants.some((grant) => grant.scope.kind === "account");
+    const projectIds = new Set(grants.filter((grant) => grant.scope.kind === "project").map((grant) => grant.scope.id));
+    const visibleGroups = groups.filter((group) => accountWide || projectIds.has(group.id));
+    const projects: MobileProject[] = visibleGroups.map((group) => ({ id: group.id, label: group.name, path: group.primaryPath, archived: false }));
+    const sorted = [...records].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt) || a.id.localeCompare(b.id));
+    const limit = integer(params.limit ?? 50, "limit", 100) || 1;
+    const cursor = params.cursor === undefined ? undefined : string(params.cursor, "cursor");
+    const start = cursor ? sorted.findIndex((item) => directoryCursor(item) === cursor) + 1 : 0;
+    if (cursor && start === 0) throw new RacpError("INVALID_ARGUMENT", "invalid_directory_cursor");
+    const page = sorted.slice(start, start + limit);
+    const sessions = await Promise.all(page.map(async (record) => {
+      const group = groupForSession(record.projectPath, visibleGroups);
+      const description = await this.describe(record);
+      return group ? { ...description, projectId: group.id } : { ...description, projectId: undefined };
+    }));
+    if (grantIds !== this.deps.grants().map((grant) => grant.id).sort().join("\u0000")) throw new RacpError("FORBIDDEN", "share_changed");
+    return { desktopDeviceId: this.deps.desktopDeviceId, projects, sessions,
+      ...(start + limit < sorted.length ? { nextCursor: directoryCursor(page.at(-1)!) } : {}), generatedAt: new Date().toISOString() };
+  }
+  private async changes(sessionId: string, params: Record<string, unknown>): Promise<MobileSessionChangesPage> {
+    const afterRevision = integer(params.afterRevision ?? 0, "after_revision");
+    const limit = integer(params.limit ?? 50, "limit", 50) || 1;
+    type HostChange = { revision: number; kind: "upsert"; messageId: string; sequence: number; message: UiMessage } | { revision: number; kind: "delete"; messageId: string };
+    type HostPage = { sessionId: string; afterRevision: number; revision: number; hasMore: boolean; changes: HostChange[] };
+    const read = (contentLimit: number) => this.deps.host().call<HostPage>("session.changes", { sessionId, afterRevision, limit, contentLimit });
+    let page = await read(MOBILE_ITEM_CONTENT_LIMIT);
+    let changes = page.changes.map((change) => change.kind === "upsert"
+      ? { revision: change.revision, kind: change.kind, messageId: change.messageId, sequence: change.sequence, item: toRacpItem(change.message) }
+      : change);
+    if (changes.length && Buffer.byteLength(JSON.stringify(changes[0])) > 512 * 1024) {
+      page = await read(8 * 1024);
+      changes = page.changes.map((change) => change.kind === "upsert"
+        ? { revision: change.revision, kind: change.kind, messageId: change.messageId, sequence: change.sequence, item: toRacpItem(change.message) }
+        : change);
+    }
+    let count = 0;
+    let bytes = 0;
+    for (const change of changes) {
+      const size = Buffer.byteLength(JSON.stringify(change));
+      if (bytes + size > 512 * 1024) break;
+      bytes += size;
+      count += 1;
+    }
+    if (changes.length && count === 0) throw new RacpError("PAYLOAD_TOO_LARGE", "session_change_too_large");
+    return { ...page, changes: changes.slice(0, count),
+      ...(count < changes.length ? { revision: changes[count - 1].revision, hasMore: true } : {}) };
+  }
+  private async syncRevision(sessionId: string): Promise<number> {
+    const result = await this.deps.host().call<{ syncRevision: number }>("session.syncRevision", { sessionId });
+    return result.syncRevision;
   }
   private async configure(record: SessionSummary, params: Record<string, unknown>): Promise<MobileSession> {
     if (!canPrompt(record)) throw new RacpError("FORBIDDEN", "session_read_only");
@@ -315,7 +395,8 @@ export class MobilePeer {
       this.deps.agent().snapshot(record.id, undefined, { contentLimit: MOBILE_ITEM_CONTENT_LIMIT }),
       this.describe(record),
     ]);
-    return { ...snapshot, session, ...context };
+    if (snapshot.syncRevision === undefined) throw new RacpError("HOST_DISCONNECTED", "snapshot_sync_revision_missing");
+    return { ...snapshot, session, ...context, syncRevision: snapshot.syncRevision };
   }
   /** The snapshot minus its transcript page: live state for cached clients. */
   private async state(record: SessionSummary): Promise<MobileSessionState> {
@@ -324,7 +405,7 @@ export class MobilePeer {
       this.deps.agent().sessionState(record.id),
       this.describe(record),
     ]);
-    return { ...state, session, ...context };
+    return { ...state, session, ...context, syncRevision: await this.syncRevision(record.id) };
   }
   /** Session-scoped extras both projections carry: plans, image jobs, queue previews, compaction marks. */
   private async sessionContext(sessionId: string) {
@@ -407,6 +488,20 @@ export class MobilePeer {
         revision: state.revision, kind: "turn.activity", occurredAt: new Date().toISOString(), payload });
     } catch { this.deps.close("share_revoked"); }
   }
+}
+
+function directoryCursor(session: SessionSummary): string {
+  return Buffer.from(JSON.stringify([session.updatedAt, session.id]), "utf8").toString("base64url");
+}
+
+function groupForSession(path: string | undefined, groups: ProjectGroupRecord[]): ProjectGroupRecord | undefined {
+  if (!path) return undefined;
+  const normalized = path.replace(/\\/g, "/").replace(/\/+$/, "");
+  const key = process.platform === "win32" ? normalized.toLowerCase() : normalized;
+  return groups.find((group) => group.roots.some((root) => {
+    const rootPath = root.path.replace(/\\/g, "/").replace(/\/+$/, "");
+    return (process.platform === "win32" ? rootPath.toLowerCase() : rootPath) === key;
+  }));
 }
 
 function canPrompt(record: SessionSummary): boolean {

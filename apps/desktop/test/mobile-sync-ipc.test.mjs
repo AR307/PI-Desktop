@@ -22,6 +22,7 @@ test("mobile IPC validates scope and delegates to the main service", async () =>
   const service = {
     status: () => ({ status: "offline", pairings: [], grants: [] }),
     refresh: async () => ({ status: "online", pairings: [], grants: [] }),
+    setAccountSharing: async (enabled) => ({ status: "online", accountSyncEnabled: enabled, pairings: [], grants: [] }),
     createPairing: async (scope) => {
       calls.push(scope);
       return { id: "pairing-1", code: "12345678", expiresAt: "2030-01-01T00:00:00Z", scope: { kind: "session", id: scope.sessionId, label: "Session" } };
@@ -33,6 +34,7 @@ test("mobile IPC validates scope and delegates to the main service", async () =>
   const pairing = await handlers.get(IPC.invoke.mobileSyncCreatePairing)({ kind: "session", sessionId: "session-1" });
   assert.equal(pairing.code, "12345678");
   assert.deepEqual(calls, [{ kind: "session", sessionId: "session-1" }]);
+  assert.equal((await handlers.get(IPC.invoke.mobileSyncSetAccountSharing)(true)).accountSyncEnabled, true);
   await assert.rejects(
     () => handlers.get(IPC.invoke.mobileSyncCreatePairing)({ kind: "unknown" }),
     (error) => error?.code === "INVALID_ARGUMENT" && error?.message === "invalid_mobile_scope",
