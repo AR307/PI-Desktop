@@ -49,10 +49,13 @@ pub(super) fn refresh_task(
     if !transcripts::update_message(db.data_dir(), session_id, record)? {
         return Err(anyhow!("delegation Task is missing from its transcript"));
     }
-    db.conn().execute(
+    let tx = db.conn().unchecked_transaction()?;
+    tx.execute(
         "UPDATE messages SET text = ?3, is_error = ?4 WHERE session_id = ?1 AND id = ?2",
         params![session_id, record.id, text, record.is_error],
     )?;
+    sync::record_upsert(&tx, session_id, &record.id)?;
+    tx.commit()?;
     Ok(())
 }
 

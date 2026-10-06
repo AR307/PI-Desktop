@@ -1,6 +1,7 @@
 mod config_sync_rpc;
 mod scheduled_rpc;
 mod scheduled_tools;
+mod session_sync;
 mod todos;
 
 use std::io::{self, BufRead, BufReader as StdBufReader, Read, Write};
@@ -2527,6 +2528,9 @@ async fn handle_request(
                 }
             };
             Ok(json!({ "session": session }))
+        }
+        "session.syncRevision" | "session.changes" => {
+            session_sync::handle(state, method, &params).await
         }
         "session.get" => {
             let id = params

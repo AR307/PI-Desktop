@@ -14,7 +14,9 @@ use crate::transcripts::{self, CompactionRecord, MessageRecord, RevisionRecord};
 mod delegation_updates;
 mod fork_files;
 mod model_system;
+mod sync;
 mod usage;
+pub use sync::{list_session_changes, session_sync_revision};
 pub use usage::record_usage;
 
 pub const MODES: [&str; 3] = ["plan", "goal", "agent"];
@@ -274,6 +276,8 @@ pub struct SkillMention {
 pub struct SessionDetail {
     #[serde(flatten)]
     pub summary: SessionSummary,
+    /// Durable message sync position captured under the same host read lock.
+    pub sync_revision: i64,
     pub messages: Vec<UiMessage>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub plan_history: Vec<crate::plans::PlanHistoryEntry>,
@@ -1210,6 +1214,7 @@ pub fn restore_orphaned_session(db: &Database, session_id: &str) -> Result<bool>
             record,
             record_index_text(record).as_deref(),
         )?;
+        sync::record_upsert(&tx, session_id, &record.id)?;
     }
     tx.commit()?;
     tracing::info!(
@@ -1677,6 +1682,7 @@ pub fn get_session_with_options(
         None => None,
     };
     Ok(Some(SessionDetail {
+        sync_revision: session_sync_revision(db, id)?,
         summary,
         plan_history,
         navigation_parent,
@@ -1839,6 +1845,7 @@ pub fn fork_session_through(
         }
         for (seq, record) in records.iter().enumerate() {
             insert_index_row(&tx, &id, seq as i64, None, record, texts[seq].as_deref())?;
+            sync::record_upsert(&tx, &id, &record.id)?;
         }
         tx.commit()?;
         Ok(())
@@ -1869,6 +1876,7 @@ pub fn fork_session_through(
     };
     let messages = records.into_iter().map(record_to_ui).collect();
     Ok(ForkSessionResult::Created(Box::new(SessionDetail {
+        sync_revision: session_sync_revision(db, &summary.id)?,
         summary,
         plan_history: Vec::new(),
         navigation_parent: None,
@@ -2090,23 +2098,21 @@ pub fn append_message(
         {
             let stamped = "UPDATE messages SET text = ?3, is_error = ?4, streaming = 0
                  WHERE session_id = ?1 AND id = ?2";
-            if transcripts::update_message(db.data_dir(), session_id, &record)? {
-                db.conn().execute(
-                    stamped,
-                    params![session_id, record.id, text, record.is_error],
-                )?;
-            } else {
+            if !transcripts::update_message(db.data_dir(), session_id, &record)? {
                 // The index knows this id but the transcript does not. A device
                 // that lost a provisional row's bytes leaves exactly this shape,
                 // and the caller is delivering the settled row for it: appending
                 // keeps the file the source of truth instead of failing a reply
                 // whose only other copy is the checkpoint.
                 transcripts::append_message(db.data_dir(), session_id, &session_created, &record)?;
-                db.conn().execute(
-                    stamped,
-                    params![session_id, record.id, text, record.is_error],
-                )?;
             }
+            let tx = db.conn().unchecked_transaction()?;
+            tx.execute(
+                stamped,
+                params![session_id, record.id, text, record.is_error],
+            )?;
+            sync::record_upsert(&tx, session_id, &record.id)?;
+            tx.commit()?;
         } else {
             delegation_updates::refresh_task(db, session_id, &message, &record, text.as_deref())?;
             return Ok(());
@@ -2242,6 +2248,7 @@ fn repair_unindexed_transcript_message(
     record: &MessageRecord,
 ) -> Result<bool> {
     let mut records = dedupe_records(transcripts::read_transcript(db.data_dir(), session_id)?);
+    let previous = records.clone();
     let Some(position) = records.iter().position(|existing| existing.id == record.id) else {
         return Ok(false);
     };
@@ -2250,7 +2257,7 @@ fn repair_unindexed_transcript_message(
     }
     records[position] = record.clone();
     invalidate_transcript_layout(session_id);
-    rebuild_session_message_index(db, session_id, &records)?;
+    rebuild_session_message_index(db, session_id, &records, &previous, &record.id)?;
     tracing::warn!(
         %session_id,
         message_id = %record.id,
@@ -2263,6 +2270,8 @@ fn rebuild_session_message_index(
     db: &Database,
     session_id: &str,
     records: &[MessageRecord],
+    previous: &[MessageRecord],
+    repaired_id: &str,
 ) -> Result<()> {
     let existing_turns: std::collections::HashMap<String, String> = {
         let mut stmt = db.conn().prepare_cached(
@@ -2311,6 +2320,8 @@ fn rebuild_session_message_index(
     if changed == 0 {
         return Err(anyhow!("session not found while rebuilding message index"));
     }
+    sync::record_replacement(&tx, session_id, previous, records)?;
+    sync::record_upsert(&tx, session_id, repaired_id)?;
     tx.commit()?;
     Ok(())
 }
@@ -2404,6 +2415,7 @@ fn append_record(
         return Err(anyhow!("session not found: {session_id}"));
     };
     insert_index_row(&tx, session_id, seq - 1, turn_id, record, text)?;
+    sync::record_upsert(&tx, session_id, &record.id)?;
     tx.commit()?;
     Ok(())
 }
@@ -2687,6 +2699,7 @@ fn rewrite_transcript(
 fn rewrite_transcript_body(db: &Database, session_id: &str, messages: &[UiMessage]) -> Result<()> {
     let session_created = session_created_at(db, session_id)?;
     crate::session_collaboration::validate_replacement(db, session_id, messages)?;
+    let previous = dedupe_records(transcripts::read_transcript(db.data_dir(), session_id)?);
     let (records, texts) = records_and_texts(messages);
     let compactions: Vec<CompactionRecord> =
         transcripts::read_compactions(db.data_dir(), session_id)?
@@ -2735,6 +2748,7 @@ fn rewrite_transcript_body(db: &Database, session_id: &str, messages: &[UiMessag
     }
     tx.prepare_cached("UPDATE sessions SET last_seq = ?1, updated_at = ?2 WHERE id = ?3")?
         .execute(params![records.len() as i64, now_ms(), session_id])?;
+    sync::record_replacement(&tx, session_id, &previous, &records)?;
     tx.commit()?;
     Ok(())
 }
@@ -3359,6 +3373,9 @@ pub fn save_active_branch_revision(
     let (record, _) = ui_to_record(root);
     invalidate_transcript_layout(session_id);
     transcripts::update_message(db.data_dir(), session_id, &record)?;
+    let tx = db.conn().unchecked_transaction()?;
+    sync::record_upsert(&tx, session_id, &record.id)?;
+    tx.commit()?;
     Ok(Some(ActiveRevisionSave {
         root_user_id,
         revision_count: total,
@@ -3464,6 +3481,7 @@ pub fn activate_message_revision(
     }
 
     let (records, texts) = records_and_texts(&combined);
+    let (previous, _) = records_and_texts(&live);
     // A checkpoint whose anchors survive the switch stays valid; the rest is
     // dropped with the branch it summarised, exactly as on truncation.
     let compactions: Vec<CompactionRecord> =
@@ -3532,6 +3550,7 @@ pub fn activate_message_revision(
     }
     tx.prepare_cached("UPDATE sessions SET last_seq = ?1, updated_at = ?2 WHERE id = ?3")?
         .execute(params![records.len() as i64, now_ms(), session_id])?;
+    sync::record_replacement(&tx, session_id, &previous, &records)?;
     tx.commit()?;
     Ok(combined)
 }
@@ -3604,6 +3623,7 @@ pub fn import_session(
                 record,
                 texts[seq].as_deref(),
             )?;
+            sync::record_upsert(&tx, &summary.id, &record.id)?;
         }
         tx.commit()?;
         Ok(())

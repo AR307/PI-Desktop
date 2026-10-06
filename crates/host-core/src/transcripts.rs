@@ -36,7 +36,7 @@ pub const TRANSCRIPT_SCHEMA: i64 = 1;
 
 /// One persisted message: the canonical block array plus promoted fields,
 /// not the flat UiMessage projection (spec 04 §1 "lossless transcripts").
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct MessageRecord {
     pub id: String,
