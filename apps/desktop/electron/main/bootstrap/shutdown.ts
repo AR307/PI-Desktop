@@ -49,6 +49,7 @@ export type ShutdownDependencies = {
   confirmQuitDialog: () => Promise<boolean>;
   disposePowerSaveBlockers: () => void;
   liveCallService?: Pick<LiveCallService, "endForLifecycle">;
+  disposeSystemProxyRelay?: () => Promise<void>;
 };
 
 /** Register the last-window and before-quit resource lifecycle handlers. */
@@ -72,6 +73,7 @@ export function registerShutdownHandlers({
   confirmQuitDialog,
   disposePowerSaveBlockers,
   liveCallService,
+  disposeSystemProxyRelay,
 }: ShutdownDependencies): void {
   app.on("window-all-closed", () => {
     // The D216 tray is resident on every platform, so its presence says nothing
@@ -188,6 +190,7 @@ export function registerShutdownHandlers({
         mcpShutdown,
         remoteHostsShutdown,
       ]);
+      await disposeSystemProxyRelay?.();
     })();
 
     const releaseQuit = () => {

@@ -57,6 +57,13 @@ still means CNB, so no persisted setting is migrated. The environment override
 `PI_DESKTOP_PLUGIN_MARKET_URL` stays above every channel so dev builds and
 tests can point at a local catalog without touching persisted settings.
 
+Marketplace catalog and package downloads follow Settings → General → Network.
+System mode sends host-core `curl` through Electron's authenticated loopback
+SOCKS relay, which resolves each destination using the active OS proxy/PAC
+configuration. Direct mode forces the marketplace request direct; Custom uses
+the configured proxy and bypass list. The relay credential is runtime-only and
+is not inherited by workspace shell commands.
+
 The official channel is the plugin center: its catalog is the generated
 `catalog.json` the center publishes, and a package installed from it is
 resolved through the platform's download API instead of by joining a relative
