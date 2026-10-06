@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { resolve } from "node:path";
 import { createServer as createViteServer } from "vite";
-import { MOBILE_ITEM_CONTENT_LIMIT, RACP_PROTOCOL_VERSION } from "@pi-desktop/shared";
+import { MOBILE_ITEM_CONTENT_LIMIT, RACP_PROTOCOL_VERSION, TRANSCRIPT_DISPLAY_TRUNCATION_MARKER } from "@pi-desktop/shared";
 
 const vite = await createViteServer({
   root: resolve(import.meta.dirname, ".."),
@@ -36,7 +36,9 @@ function liveState() {
 }
 
 /** Harness: a fake Agent Host + host RPC behind one MobilePeer with captured replies. */
-function buildPeer({ bigMessage = "big ".repeat(80_000), grants = [{ id: "grant-1", scope: { kind: "session", id: "s1", label: "Session" } }], sessions = [SESSION], groups = [] } = {}) {
+function buildPeer({ bigMessage = "big ".repeat(80_000), oversizedMessage, grants = [{ id: "grant-1", scope: { kind: "session", id: "s1", label: "Session" } }], sessions = [SESSION], groups = [] } = {}) {
+  const fullMessage = oversizedMessage ?? { id: "m-big", role: "assistant", content: bigMessage, createdAt: SESSION.createdAt };
+  const fullItem = { id: fullMessage.id, turnId: "", itemType: "message", status: "completed", createdAt: fullMessage.createdAt, content: fullMessage };
   const calls = { agent: [], host: [] };
   const agent = {
     attach: async (_principal, params) => { calls.agent.push(["attach", params]); return { attached: true }; },
@@ -44,8 +46,8 @@ function buildPeer({ bigMessage = "big ".repeat(80_000), grants = [{ id: "grant-
     unsubscribe: () => true,
     ack: () => {},
     sessionState: async (sessionId) => { calls.agent.push(["sessionState", sessionId]); return liveState(); },
-    snapshot: async (sessionId, _summary, options) => { calls.agent.push(["snapshot", sessionId, options]); return { ...liveState(), items: [], hasMoreHistory: true, syncRevision: 12 }; },
-    history: async (_principal, params) => { calls.agent.push(["history", params]); return { items: [], hasMore: false, revision: 4, syncRevision: 12 }; },
+    snapshot: async (sessionId, _summary, options) => { calls.agent.push(["snapshot", sessionId, options]); return { ...liveState(), items: oversizedMessage ? [fullItem] : [], hasMoreHistory: true, syncRevision: 12 }; },
+    history: async (_principal, params) => { calls.agent.push(["history", params]); return { items: oversizedMessage ? [fullItem] : [], hasMore: false, revision: 4, syncRevision: 12 }; },
     describeSession: () => racpSession(),
     queueEntries: (sessionId) => { calls.agent.push(["queueEntries", sessionId]); return [{ turn: { id: "turn-q1" }, content: "queued prompt text" }]; },
     getTurn: (turnId) => ({ id: turnId, sessionId: "s1", status: "queued" }),
@@ -60,9 +62,9 @@ function buildPeer({ bigMessage = "big ".repeat(80_000), grants = [{ id: "grant-
       if (method === "providers.get") return {};
       if (method === "plans.pending") return { plans: [] };
       if (method === "session.syncRevision") return { syncRevision: 12 };
-      if (method === "session.changes") return { sessionId: params.sessionId, afterRevision: params.afterRevision, revision: 12, hasMore: false, changes: [{ revision: 12, kind: "upsert", messageId: "m-1", sequence: 1, message: { id: "m-1", role: "assistant", content: "Updated", createdAt: SESSION.createdAt } }] };
+      if (method === "session.changes") return { sessionId: params.sessionId, afterRevision: params.afterRevision, revision: 12, hasMore: false, changes: [{ revision: 12, kind: "upsert", messageId: oversizedMessage ? fullMessage.id : "m-1", sequence: 1, message: oversizedMessage ?? { id: "m-1", role: "assistant", content: "Updated", createdAt: SESSION.createdAt } }] };
       if (method === "session.get") {
-        return { session: { ...SESSION, messages: [{ id: "m-big", role: "assistant", content: bigMessage, createdAt: SESSION.createdAt }], compactions: [{ id: "ck-1", throughMessageId: "m-2", summary: "s", tokensBefore: 1 }] } };
+        return { session: { ...SESSION, messages: [fullMessage], compactions: [{ id: "ck-1", throughMessageId: "m-2", summary: "s", tokensBefore: 1 }] } };
       }
       throw new Error(`Unexpected host call ${method}`);
     },
@@ -152,6 +154,30 @@ test("durable session changes map host messages to RACP items", async () => {
   assert.equal(page.revision, 12);
   assert.equal(page.changes[0].item.content.content, "Updated");
   assert.deepEqual(calls.host.find(([method]) => method === "session.changes")[1], { sessionId: "s1", afterRevision: 8, limit: 20, contentLimit: MOBILE_ITEM_CONTENT_LIMIT });
+});
+
+test("an oversized tool message advances revision with a bounded expandable projection", async () => {
+  const oversizedMessage = { id: "m-big", role: "tool", content: "Tool completed", createdAt: SESSION.createdAt,
+    toolName: "Search", toolCallId: "call-1", toolResult: { blocks: Array.from({ length: 40 }, () => "x".repeat(32_000)) } };
+  const { request } = buildPeer({ oversizedMessage });
+  await initialize(request);
+  const page = await request("session/changes", { sessionId: "s1", afterRevision: 11 });
+  assert.equal(page.revision, 12);
+  assert.equal(page.hasMore, false);
+  assert.equal(page.changes[0].item.content.toolCallId, "call-1");
+  assert.ok(page.changes[0].item.content.content.endsWith(TRANSCRIPT_DISPLAY_TRUNCATION_MARKER));
+  assert.ok(Buffer.byteLength(JSON.stringify(page)) < 512 * 1024);
+  const history = await request("session/history", { sessionId: "s1" });
+  const snapshot = await request("session/snapshot", { sessionId: "s1" });
+  assert.ok(history.items[0].content.content.endsWith(TRANSCRIPT_DISPLAY_TRUNCATION_MARKER));
+  assert.ok(snapshot.snapshot.items[0].content.content.endsWith(TRANSCRIPT_DISPLAY_TRUNCATION_MARKER));
+  const chunks = []; let offset = 0;
+  for (;;) {
+    const item = await request("session/item", { sessionId: "s1", itemId: "m-big", offset });
+    chunks.push(Buffer.from(item.data, "base64")); offset = item.nextOffset;
+    if (item.eof) break;
+  }
+  assert.deepEqual(JSON.parse(Buffer.concat(chunks).toString("utf8")), oversizedMessage);
 });
 
 test("session/item streams the full item JSON in relay-safe chunks", async () => {

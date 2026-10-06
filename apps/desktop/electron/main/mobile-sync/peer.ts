@@ -14,6 +14,7 @@ import type { ImageService } from "../images/service";
 import type { MirrorCodingAccount } from "../mirrorcoding/account";
 import { MobileAttachments } from "./attachments";
 import { buildMobileModelCatalog } from "./catalog";
+import { fitMobileHistory, fitMobileItem, MOBILE_TRANSCRIPT_PAGE_BYTES } from "./projection";
 import type { MobileScopeAccess } from "./scope";
 import { integer, object, string } from "./validation";
 import { configureSession, currentTurnConfiguration } from "../services/session-configuration";
@@ -133,7 +134,8 @@ export class MobilePeer {
       case "session/history": {
         const page = await agent.history(this.principal, { sessionId, ...(params.beforeItemId ? { beforeItemId: string(params.beforeItemId, "before_item_id") } : {}), limit: integer(params.limit ?? 50, "limit", 200) || 1, contentLimit: MOBILE_ITEM_CONTENT_LIMIT });
         if (page.syncRevision === undefined) throw new RacpError("HOST_DISCONNECTED", "history_sync_revision_missing");
-        return { ...page, syncRevision: page.syncRevision } satisfies MobileSessionHistoryPage;
+        const fitted = fitMobileHistory(page.items);
+        return { ...page, items: fitted.items, hasMore: page.hasMore || fitted.omitted, syncRevision: page.syncRevision } satisfies MobileSessionHistoryPage;
       }
       case "session/changes": return this.changes(sessionId, params);
       case "session/item": return this.itemContent(sessionId, params);
@@ -240,22 +242,15 @@ export class MobilePeer {
     const limit = integer(params.limit ?? 50, "limit", 50) || 1;
     type HostChange = { revision: number; kind: "upsert"; messageId: string; sequence: number; message: UiMessage } | { revision: number; kind: "delete"; messageId: string };
     type HostPage = { sessionId: string; afterRevision: number; revision: number; hasMore: boolean; changes: HostChange[] };
-    const read = (contentLimit: number) => this.deps.host().call<HostPage>("session.changes", { sessionId, afterRevision, limit, contentLimit });
-    let page = await read(MOBILE_ITEM_CONTENT_LIMIT);
-    let changes = page.changes.map((change) => change.kind === "upsert"
-      ? { revision: change.revision, kind: change.kind, messageId: change.messageId, sequence: change.sequence, item: toRacpItem(change.message) }
+    const page = await this.deps.host().call<HostPage>("session.changes", { sessionId, afterRevision, limit, contentLimit: MOBILE_ITEM_CONTENT_LIMIT });
+    const changes = page.changes.map((change) => change.kind === "upsert"
+      ? { revision: change.revision, kind: change.kind, messageId: change.messageId, sequence: change.sequence, item: fitMobileItem(toRacpItem(change.message)) }
       : change);
-    if (changes.length && Buffer.byteLength(JSON.stringify(changes[0])) > 512 * 1024) {
-      page = await read(8 * 1024);
-      changes = page.changes.map((change) => change.kind === "upsert"
-        ? { revision: change.revision, kind: change.kind, messageId: change.messageId, sequence: change.sequence, item: toRacpItem(change.message) }
-        : change);
-    }
     let count = 0;
     let bytes = 0;
     for (const change of changes) {
       const size = Buffer.byteLength(JSON.stringify(change));
-      if (bytes + size > 512 * 1024) break;
+      if (bytes + size > MOBILE_TRANSCRIPT_PAGE_BYTES) break;
       bytes += size;
       count += 1;
     }
@@ -396,7 +391,9 @@ export class MobilePeer {
       this.describe(record),
     ]);
     if (snapshot.syncRevision === undefined) throw new RacpError("HOST_DISCONNECTED", "snapshot_sync_revision_missing");
-    return { ...snapshot, session, ...context, syncRevision: snapshot.syncRevision };
+    const fitted = fitMobileHistory(snapshot.items);
+    return { ...snapshot, items: fitted.items, hasMoreHistory: snapshot.hasMoreHistory || fitted.omitted,
+      session, ...context, syncRevision: snapshot.syncRevision };
   }
   /** The snapshot minus its transcript page: live state for cached clients. */
   private async state(record: SessionSummary): Promise<MobileSessionState> {
