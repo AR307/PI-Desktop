@@ -18,6 +18,7 @@
 - Directory refreshes retain notifications arriving during a request. Stale
   writes check the current authorization before opening a cache transaction;
   closed history instances cannot write back after revocation or sign-out.
+  Offline restoration also filters cached directories against the saved grants.
 - Android 0.16.2/versionCode 5 adds GitHub manifest checks, native DownloadManager
   progress/recovery and explicit system installation from Account.
 - Serializes paging, full-message expansion, durable changes and navigation

@@ -26,6 +26,15 @@ export function grantsForDesktop(grants: MobileGrant[], device: MobileDevice): M
     : grant.desktopDeviceId === device.deviceId);
 }
 
+function restrictDirectory(row: DesktopDirectory): DesktopDirectory {
+  if (row.grants.some((grant) => grant.scope.kind === "account")) return row;
+  const projectIds = new Set(row.grants.filter((grant) => grant.scope.kind === "project").map((grant) => grant.scope.id));
+  const sessionIds = new Set(row.grants.filter((grant) => grant.scope.kind === "session").map((grant) => grant.scope.id));
+  const sessions = row.sessions.filter((session) => sessionIds.has(session.id) || projectIds.has(session.projectId ?? ""));
+  const projects = row.projects.filter((project) => projectIds.has(project.id) || sessions.some((session) => session.projectId === project.id));
+  return { ...row, sessions, projects };
+}
+
 /** One relay per authorized computer; only the selected conversation has a content subscription. */
 export class MobileDirectories {
   private rows = new Map<string, DesktopDirectory>();
@@ -47,10 +56,10 @@ export class MobileDirectories {
       if (!permitted.length) continue;
       const cached = await readDirectory(accountId, device.deviceId);
       if (generation !== this.generation || this.account.session?.account.id !== accountId) return;
-      this.rows.set(device.deviceId, {
+      this.rows.set(device.deviceId, restrictDirectory({
         desktopDeviceId: device.deviceId, projects: [], sessions: [], generatedAt: "", ...cached,
         device: { ...device, online: false }, grants: permitted, connection: "disconnected",
-      });
+      }));
     }
     this.emit();
   }
@@ -79,14 +88,12 @@ export class MobileDirectories {
       // even when this computer is currently offline.
       const row = this.rows.get(device.deviceId)!;
       if (!row.grants.some((grant) => grant.scope.kind === "account")) {
-        const projectIds = new Set(row.grants.filter((grant) => grant.scope.kind === "project").map((grant) => grant.scope.id));
-        const sessionIds = new Set(row.grants.filter((grant) => grant.scope.kind === "session").map((grant) => grant.scope.id));
-        const retained = row.sessions.filter((session) => sessionIds.has(session.id) || projectIds.has(session.projectId ?? ""));
+        const retained = restrictDirectory(row);
         const cache = new TranscriptCache();
-        await this.observer.removing(device.deviceId, row.sessions.filter((session) => !retained.includes(session)).map((session) => session.id));
-        for (const session of row.sessions) if (!retained.includes(session)) await cache.clear({ accountId, desktopDeviceId: device.deviceId, sessionId: session.id });
-        row.sessions = retained;
-        row.projects = row.projects.filter((project) => projectIds.has(project.id) || retained.some((session) => session.projectId === project.id));
+        await this.observer.removing(device.deviceId, row.sessions.filter((session) => !retained.sessions.includes(session)).map((session) => session.id));
+        for (const session of row.sessions) if (!retained.sessions.includes(session)) await cache.clear({ accountId, desktopDeviceId: device.deviceId, sessionId: session.id });
+        row.sessions = retained.sessions;
+        row.projects = retained.projects;
         await saveDirectory(accountId, row, () => this.rows.get(device.deviceId) === row && generation === this.generation);
       }
     }
