@@ -244,6 +244,19 @@ check("a model turn refreshes the plugin credential and uses its access token", 
 check("the refresh callback ran in the plugin process", readFileSync(hookPath, "utf8").includes("provider_oauth_refresh"));
 check("refresh credentials never enter model requests", !JSON.stringify(oauthRequest ?? {}).includes("plugin-refresh"));
 
+await ui.click('button[data-nav="settings"]');
+await ui.until(() => Boolean(document.querySelector(".settings-shell-full")), null, "Settings before sign-out");
+const reopenedModels = await ui.run((label) => {
+  const button = [...document.querySelectorAll(".settings-nav-item")].find((entry) => entry.textContent?.includes(label));
+  button?.click();
+  return Boolean(button);
+}, "Models");
+check("Model settings can be reopened after an OAuth-backed turn", reopenedModels);
+await ui.until(
+  (id) => Boolean(document.querySelector(`[data-provider-id="${id}"] button[aria-haspopup="menu"]`)),
+  pluginOAuthId,
+  "OAuth account row before sign-out",
+);
 await ui.click(`[data-provider-id="${pluginOAuthId}"] button[aria-haspopup="menu"]`);
 const armedSignOut = await ui.run(() => {
   const item = [...document.querySelectorAll('[role="menuitem"]')].find((entry) => entry.textContent?.includes("Sign out"));
