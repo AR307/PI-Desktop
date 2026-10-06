@@ -597,6 +597,12 @@ Tool execution starts only after admission. Shell spawn retries transient
 resource exhaustion (`EAGAIN` / `WouldBlock`) with bounded backoff, never
 retries a command after it has started, and reaps timed-out children before
 releasing the execution slot.
+Admitted `Read`, `Glob`, `Grep`, `Write`, and `Edit` calls run their
+synchronous filesystem work, including the `rg` child wait, on Tokio's blocking
+pool rather than on an async worker, so a long traversal cannot delay unrelated
+RPCs. The read and mutation class limits above also bound those blocking
+threads. Results and error codes are unchanged; a blocking task that panics
+returns `INTERNAL` instead of dropping the response.
 
 `session.appendMessage` is idempotent by message id. An id already indexed in
 another session is remapped to `{sessionId}:{id}` before the JSONL write, and
