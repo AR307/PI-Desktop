@@ -305,6 +305,19 @@ try {
   await until(async () => (await view()).grants.length === 2, "additional session authorization");
   const sessionGrant = [...fixture.grants.values()].find(grant => grant.scope.kind === "session");
   check("session pairing preserves the separate account grant", Boolean(accountGrant && sessionGrant?.scope.id === first.session.id));
+  const broadDirectory = await phone.evaluate(async ({ accountId, desktopDeviceId }) => {
+    const db = await new Promise((resolve, reject) => {
+      const request = indexedDB.open("pi.mobile.transcripts", 2);
+      request.onsuccess = () => resolve(request.result); request.onerror = () => reject(request.error);
+    });
+    try {
+      return await new Promise((resolve, reject) => {
+        const request = db.transaction("directories").objectStore("directories").get(JSON.stringify([accountId, desktopDeviceId]));
+        request.onsuccess = () => resolve(request.result); request.onerror = () => reject(request.error);
+      });
+    } finally { db.close(); }
+  }, { accountId: accountGrant.accountId, desktopDeviceId: first.deviceId });
+  check("account directory cached both previously authorized sessions", broadDirectory.sessions.length === 2);
   await openSession(third); await readAllHistory(2);
   await settings(first);
   await revokeGrant(first, accountGrant.id);
@@ -317,11 +330,27 @@ try {
   check("account revocation closes removed content and retains the independent session grant");
   const scopedHistoryRequests = fixture.relayCalls.filter(call => call.method === "session/history").length;
   await offline(true);
+  // Emulate a process stopping after new grants were saved but before the old
+  // directory write was replaced. Keep the authoritative saved grants intact.
+  await phone.evaluate(async directory => {
+    const db = await new Promise((resolve, reject) => {
+      const request = indexedDB.open("pi.mobile.transcripts", 2);
+      request.onsuccess = () => resolve(request.result); request.onerror = () => reject(request.error);
+    });
+    try {
+      await new Promise((resolve, reject) => {
+        const transaction = db.transaction("directories", "readwrite");
+        transaction.oncomplete = () => resolve(); transaction.onerror = transaction.onabort = () => reject(transaction.error);
+        transaction.objectStore("directories").put(directory);
+      });
+    } finally { db.close(); }
+  }, broadDirectory);
   await restartPhone();
   await phone.locator(".grant-open").filter({ hasText: first.name }).waitFor();
   const scopedOffline = await view();
   check("offline restart exposes only the still-authorized session", scopedOffline.grants.length === 1 && scopedOffline.grants[0].id === sessionGrant.id &&
     scopedOffline.directories.length === 1 && scopedOffline.directories[0].sessions.length === 1 && scopedOffline.directories[0].sessions[0].id === first.session.id);
+  check("interrupted directory pruning cannot widen saved session authorization", !scopedOffline.directories[0].sessions.some(session => session.id === first.ungrouped.id));
   await openSession(first); await readAllHistory(610);
   check("remaining session keeps its cached history after account revocation", (await view()).messages.some(message => message.id === "Desktop A-0") &&
     !(await view()).messages.some(message => message.id.startsWith("Desktop C-")) && fixture.relayCalls.filter(call => call.method === "session/history").length === scopedHistoryRequests);
