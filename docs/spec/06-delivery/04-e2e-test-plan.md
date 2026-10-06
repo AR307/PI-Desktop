@@ -2913,6 +2913,8 @@ identify the platform validation still needed.
   15. Archive one project session, open it from Projects, and return to Projects.
   16. Return to the app shell and open Plugins.
 - **Expected**: The rail contains exactly General, AI, Shortcuts, Instructions, Models, Skills, MCP, Subagents, Projects, Cloud sync, Remote Hosts, and Info in that order, each with its semantic Lucide icon (Sliders / Sparkles / Keyboard / FileText / Bot / BookOpen / Server / Bot / Archive / CloudDownload / Globe / Info). The flat directory is visually grouped under four muted, non-interactive headings — Preferences / 偏好 for General, AI, and Shortcuts; Agent / 智能体 for Instructions and Models; Workspace / 工作区 for Projects; About / 关于 for Info — with whitespace and no divider lines between groups; searching keeps the destination results flat and hides empty groups together with their headings. Appearance remains in General, while Permissions, Defaults, and the Command shell row live under 全局 AI; an available selected shell is represented by the selector without a duplicate Configured status, while default, fallback, and no-effective-shell states remain explicit; Context management has no settings card; Keyboard shortcuts and global instructions have their own destinations; Developer lives under Info; Projects shows active, closed, and archived durable rows without a visibility toggle, grouping them under the always-visible Pinned / All projects / Archived strips (D168/D267/D455) with per-section counts in a one-column workbench. The destination renders no hero block and no page-level counter run: the intro is one quiet description line, and each group strip's count agrees with its rendered rows; a click selects a row without leaving Settings; sorting by Name reorders rows inside every section without hiding any; search matches project fields and session titles and reports a match count, a session-title result selects its owning project, lists sessions in the inspector by latest activity with relative update times, and reveals history in batches of eight; clearing the search restores the complete index. The inspector menu closes on Escape and on an outside press. Bootstrap completion and background refreshes do not return Settings or Extensions to the chat home; the destination changes only after an explicit navigation action. Restore keeps the archive open and activation returns to chat with the restored project retained in the sidebar. Opening an archived session succeeds before clearing its archived state, returns to chat with that session selected, and makes it visible in the project sidebar; returning to Project archive no longer shows that session as archived. The home sidebar and global page results have no standalone Projects destination; Settings search finds Projects; Plugins remains an independent app-shell destination.
+  A packaged build omits Cloud sync from the rail and settings search; see
+  `04-ux/06-settings-ia.md`.
 - **Specs linked**: `04-ux/06-settings-ia.md`, `04-ux/01-ui-ia.md`, `03-runtime/11-provider-model-system.md`
 - **Acceptance**: B (model configuration), F (project persistence)
 - **Milestone**: M4
@@ -9389,9 +9391,9 @@ must keep splitting are covered by `markdown-blocks.test.mjs`.
   local WebDAV fixture that supports strong ETags and conditional PUT, plus a
   fixture variant that ignores conditional headers but supports `PROPFIND`
   directory listing. No real WebDAV account, provider, or production desktop.
-  Developer mode starts off so the public destination is exercised as shipped.
-- **Steps:** 1) Open Settings with developer mode off; confirm Cloud sync is
-  present in the rail and returned by settings search, then open it and
+  Developer mode starts off so the destination is exercised as developed.
+- **Steps:** 1) In a development build with developer mode off, confirm Cloud
+  sync is present in the rail and returned by settings search, then open it and
   confirm neither the rail row nor the page title carries an Experimental
   badge. 2) Toggle developer mode on and off and confirm the destination stays
   reachable either way. 3) Enter the fixture URL,
@@ -9418,9 +9420,10 @@ must keep splitting are covered by `markdown-blocks.test.mjs`.
   refreshes in the background. Confirm a configured endpoint reuses its stored
   WebDAV app password, while password fields themselves remain blank and no
   vault password is written to renderer storage.
-- **Expected:** Cloud sync is reachable in every build without developer mode,
-  carries no Experimental badge on the rail row or page title, and neither its
-  availability nor its behavior changes when developer mode is toggled.
+- **Expected:** Cloud sync is reachable in development builds without developer
+  mode, is absent from a packaged build's rail, page, and settings search,
+  carries no Experimental badge, and neither its availability nor its behavior
+  changes when developer mode is toggled.
   Strict mode refuses
   unreliable conditional writes. The explicit
   compatibility mode accepts only a server that proves bounded directory
@@ -9445,8 +9448,9 @@ must keep splitting are covered by `markdown-blocks.test.mjs`.
 - **Milestone:** M6+.
 - **Status:** Draft; merge/crypto, in-process WebDAV conditional-write
   coverage, and the two-device host/WebDAV path are automated by
-  `pnpm test:e2e:config-sync`. Public Cloud sync visibility without developer
-  mode is asserted by `settings-developer-only-destinations.test.mjs`; full
+  `pnpm test:e2e:config-sync`. Cloud sync's development-build-only visibility
+  and its packaged-build omission are asserted by
+  `settings-developer-only-destinations.test.mjs`; full
   renderer-driven persistence and checkpoint recovery fault injection remain.
 
 **E2E-CHAT-session-todo-checklist: TodoWrite to session-aware TodoDock**
@@ -9870,8 +9874,9 @@ This test plan spec is accepted when:
 - Open Settings (footer profile → Settings).
 - Expect **full-page** Codex settings (no app sidebar/nav). Left rail has Back
   to app, search, and exactly General / AI / Shortcuts / Instructions / Models /
-  Skills / MCP / Subagents / Projects / Cloud sync / Remote Hosts / Info in that
-  order; content pane shows the selected destination.
+  Skills / MCP / Subagents / Projects, Cloud sync / Remote Hosts / Info in that
+  order (a packaged build leaves Cloud sync out); content pane shows the
+  selected destination.
 - Return to the app shell and expect Plugins to remain an independent
   sidebar-footer destination.
 - Drag the empty 46px top band over either the rail or content pane; the native
@@ -10083,8 +10088,8 @@ This test plan spec is accepted when:
 - Expect the working theme selector without inert toggle or open-target rows.
 - Expect Appearance in General and Permissions + Defaults in AI. The rail
   contains General, AI, Shortcuts, Instructions, Models, Skills, MCP,
-  Subagents, Projects, Cloud sync, and Info; Remote Hosts appears only in
-  developer mode. Voice may appear between AI and Shortcuts in development
+  Subagents, Projects, Cloud sync (development builds only), and Info; Remote
+  Hosts appears only in developer mode. Voice may appear between AI and
   builds with developer mode on; plugin-contributed destinations follow the
   core groups. There is no Import destination.
 - Resize between 800px, 1200px, and 1600px widths; the content cards fill the
@@ -16540,9 +16545,10 @@ the latest destination. These assertions measure work counts, not device FPS.
 - Automated coverage: `pnpm test:e2e:settings-scroll` mounts the production
   SettingsPage, store, translations, and built CSS in isolated Electron. Only
   preload data is stubbed; search navigation uses SearchDialog's public store
-  entry points. It also checks that Cloud sync has no developer-mode gate and
-  no Experimental badge, that Remote hosts keeps its badge, and the fallback
-  to General. This covers renderer interaction, not host persistence or the
+  entry points. It also checks that Cloud sync stays a development-build-only
+  destination with no developer-mode gate and no Experimental badge, that
+  Remote hosts keeps its badge, and the fallback to General. This covers
+  renderer interaction, not host persistence or the
   full global-search dialog.
 
 ### E2E-SCHEDULED-dispatch
