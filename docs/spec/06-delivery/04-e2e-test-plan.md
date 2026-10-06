@@ -16921,6 +16921,33 @@ host-created files. The full app's file-preview viewer is covered separately.
   Send in an older chat: accepted submission updates new-chat inheritance;
   rejected submission does not. Deferred configuration alone does not count
   as usage.
+
+## E2E-AGENT-jev-classifier-opt-in
+
+- **Preconditions:** Isolated desktop profile, a deterministic local chat
+  provider fixture, a fake Host secret store, and a sidecar `fetch` fixture
+  that intercepts `https://api.typesafe.ai/v1/systemone`. Do not use a real
+  TypeSafe key or provider endpoint.
+- **Steps:** 1) Open Settings → Models, save a sentinel TypeSafe key, and enable
+  Jev. 2) Start an Agent turn whose deterministic chat fixture requests
+  `ToolSearch` for Jev, then calls `JevClassify` with one choice, one score and
+  one boolean question over a small JSON state. 3) Inspect the fixture request
+  and the rendered tool result. 4) Start turns in Plan and Goal. 5) Disable Jev
+  and start another Agent turn, then re-enable it and remove the key.
+- **Expected:** The key is stored under the fixed Host secret reference and is
+  never returned to renderer state or transcript. `JevClassify` appears in the
+  Agent's deferred catalog only while enabled with a saved key, and never in
+  Plan or Goal. The fixture receives the TypeSafe System One payload and
+  bearer header; the tool returns bounded structured answers and usage. A
+  disabled/missing key omits the tool on the next turn, and removing the key
+  turns the setting off.
+- **Specs:** [Tools and permissions](../03-runtime/03-tools-and-permissions.md),
+  [provider/model system](../03-runtime/11-provider-model-system.md),
+  [secrets storage](../03-runtime/14-secrets-storage.md),
+  [settings IA](../04-ux/06-settings-ia.md).
+- **Acceptance:** No paid or real-provider call. The fixture verifies request
+  body, auth redaction, cancellation, timeout, malformed input rejection, and
+  that disabling/removing Jev affects the next Agent launch.
 - Disable/remove a provider or model and mark a model for image generation:
   unavailable history entries are skipped for inheritance and recent menu rows.
 - Settings contains no fixed chat-default picker or Make default service action;
