@@ -3329,6 +3329,11 @@ identify the platform validation still needed.
 - **Acceptance**: G (isolated panel)
 - **Status**: Documented
 
+Initial-load timeout check: Open a fixture panel from Extensions → Installed
+whose page load remains pending. After 15 seconds, the open request must report
+`PANEL_LOAD_TIMEOUT` through the initiating action and destroy the hidden
+window; opening a normal panel afterward must still work.
+
 #### E2E-024AA: Plugin-owned UI follows the host locale
 
 - **Preconditions**: A loaded plugin with a panel or settings destination, and a plugin process subscribed to `pi.events.on("appearance:changed")`.
