@@ -273,7 +273,9 @@ check("the sign-out action requires its confirmation click", confirmedSignOut);
 const disconnected = await ui.until(
   async (id) => {
     const result = await window.piDesktop.invoke(window.piDesktop.channels.invoke.providersOauthVendors);
-    return result.vendors.some((vendor) => vendor.vendorId === id && vendor.accounts.some((account) => !account.connected));
+    if (!result.ok) throw new Error(`Failed to list OAuth vendors: ${result.error.message}`);
+    if (!Array.isArray(result.data?.vendors)) throw new Error("OAuth vendor response did not include vendors");
+    return result.data.vendors.some((vendor) => vendor.vendorId === id && vendor.accounts.some((account) => !account.connected));
   },
   pluginOAuthId,
   "plugin OAuth sign-out",
