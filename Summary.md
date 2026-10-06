@@ -2,14 +2,19 @@
 
 ## 2026-10-06 - Session error review acceptance
 
-- Confirmed client fixes cover delegate mutation recovery ownership, UTF-16
-  file tools and branch archives racing host shutdown. Command failures and
-  provider-side interruptions retain their original classifications.
+- Confirmed client fixes cover delegate mutation recovery ownership, failed
+  delegates incorrectly reporting completion, UTF-16 file tools and branch
+  archives racing host shutdown. Invalid commands and provider interruptions
+  retain their original classifications.
 - Real Electron acceptance reads a Chinese PowerShell log, regenerates through
   the transcript menu, quits at completion, then restores and reads both
   branches. Controlled provider requests use no production account or quota.
 - Detailed findings, automated checks, screenshots and remaining evidence
   boundaries are recorded in docs/session-error-review-validation.md.
+- Final runtime/subagent/recovery checks passed 403 tests. The controlled
+  delegate flow proved independent failure budgets, accurate failure status,
+  unaffected sibling/parent work and successful Task resume. Native Clippy
+  completed without warnings using one build job.
 
 ## 2026-10-06 - Preserve pending branch archives on quit
 

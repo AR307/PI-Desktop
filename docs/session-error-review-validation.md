@@ -10,8 +10,10 @@ package metadata and lifecycle log. Fixes use the latest committed local
 
 The candidate starts from feature commit `3ad8df483`. The last origin/main
 refresh resolved to `920b12b8e053165d343a421b3cb8ee93c50a436a`, already included
-in that baseline. No production provider requests, pushes or releases were
-performed for this review.
+in that baseline. The final executable candidate is `45709470f`; both real
+acceptance scripts ran after rebuilding its agent sidecar and Rust host.
+No production provider requests, pushes or releases were performed for this
+review.
 
 ## Findings
 
@@ -26,6 +28,13 @@ A failed tool record is not necessarily an application defect.
 | Glob 4; Grep 3 | Requested directories did not exist. No change to path validation. |
 | BrowserPreview 1 | The requested scratch file was outside this tool's documented workspace-relative scope. Transcript HTML links use the broader session-owned preview path; this is a different entry point. |
 | Browser plugin 3 | Two CDP methods were outside the plugin allowlist. One guest-unavailable result lacks enough evidence to prove a lifecycle defect. No permission broadening or speculative fix. |
+
+The delegate workflow also exposed a related false-completion defect: a
+subagent that wrote text before exhausting its Edit recovery budget could
+return `completed`. It now returns `failed` with the original
+`MUTATION_RETRY_BUDGET_EXHAUSTED` code, preserves the earlier text and can resume
+through `Task(resume)`. User cancellation still takes precedence, and that
+failure does not stop another delegate or the parent.
 
 Seven terminal error log entries fall into three categories:
 
@@ -53,20 +62,21 @@ exit with an explicit warning.
 | --- | --- |
 | Read-only incident audit | Full persisted error inventory and corresponding terminal logs reviewed; user history unchanged. |
 | Runtime suite on the delegate-isolation module | 98 files, 1,357 tests passed. |
-| Integrated runtime, provider retry and native response recovery | 378 tests passed. |
+| Final integrated runtime, subagent, provider retry and response recovery | 403 tests passed across five files after the false-completion fix. |
 | Host-core suite | 782 tests passed with one test thread. A process-abort race in the first parallel run passed independently and in the subsequent serial suite. |
+| Native malformed-input boundary | Five real HostProcess Read cases passed: odd-byte UTF-16, invalid surrogate, UTF-16 NUL and ordinary binary remain rejected; valid UTF-16 text is readable. |
 | Desktop persistence/quit/turn/checkpoint tests | 39 tests passed, including successful, failed and unresponsive branch writes. The new race test failed against the original shutdown order. |
 | TypeScript | Desktop and agent-runtime checks passed; all nine shared package builds passed. |
 | Desktop build | Electron Main, Preload and Renderer production build passed. Agent sidecar was rebuilt. |
-| Source checks | Rust formatting, diff whitespace and desktop style-token checks passed. |
-| Real delegate execution | `scripts/e2e-subagent-edit-isolation.mjs` ran the real runtime, pi Agent and SubagentRun against a local HTTP/SSE provider. A failed three times, B continued after A stopped, and the parent had no mutation-budget error. |
+| Source checks | Rust formatting, all-target Clippy with one build job, diff whitespace and desktop style-token checks passed. The first parallel Clippy attempt exhausted the Windows pagefile; the single-job rerun completed without warnings. |
+| Real delegate execution | `scripts/e2e-subagent-edit-isolation.mjs` ran the real runtime, pi Agent and SubagentRun against a local HTTP/SSE provider. A failed three times after producing text and reported failure; B completed and the parent had no mutation-budget error. A then resumed and completed. |
 | Real Electron user path | `apps/desktop/test/e2e/session-error-review.mjs` used a new profile, controlled MC authorization and a real Rust host. It read a Chinese UTF-16 log, regenerated via the transcript menu, quit at completion, reopened and read both original and regenerated branches. Six assertions passed; no disposed-host archive error. The UTF-16 assertion failed with the old host binary. |
 
 The Electron run retained screenshots and its isolated profile under
-`.artifacts/session-errors-1791299536962/`. Screenshots were inspected, including
+`.artifacts/session-errors-1791300312128/`. Screenshots were inspected, including
 the completed reply before quit and the regenerated reply after restart. The
-Rust executable used there was built from `4e4a6af7a`; its entire host-core source
-tree matches the integrated candidate.
+Rust executable used for the final rerun was rebuilt from `7004d5cd1`; its
+entire host-core source tree matches the integrated candidate.
 
 One separate session-collaboration cancellation warning appeared during the
 deliberately immediate quit. It is a canceled follow-up operation, not the
@@ -80,3 +90,7 @@ tool-transport correction failed, or whether that provider has recovered.
 No timeout increase, protocol substitution, automatic whole-turn replay or
 permission expansion was introduced. Existing installed applications are not
 replaced by these local commits.
+
+The targeted Biome invocation matched no configured files, so it is not
+reported as a successful lint check. No production-provider recovery, app
+installer or release was validated by these controlled development runs.
