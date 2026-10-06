@@ -4,14 +4,18 @@ import { mkdir, writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { execFileSync } from "node:child_process";
-import { HostProcess } from "@pi-desktop/host-runtime";
 import { mobileFixture } from "./fixture.mjs";
+import { accountAndroid } from "./account-android.mjs";
 
 // Actual Electron/Rust and phone-sized browser acceptance against a controlled
 // MC boundary. No model requests, production accounts, or user profiles.
 const require = createRequire(import.meta.url);
-const { _electron, chromium } = require(process.env.PI_TEST_PLAYWRIGHT ?? "playwright");
+const playwright = require(process.env.PI_TEST_PLAYWRIGHT ?? "playwright");
+const { _electron, chromium } = playwright;
 const root = resolve(import.meta.dirname, "../../../../..");
+const desktopRoot = resolve(process.env.PI_TEST_DESKTOP_ROOT ?? root);
+const { HostProcess } = await import(pathToFileURL(join(desktopRoot, "packages/host-runtime/dist/index.js")).href);
+const nativeAndroid = process.env.PI_TEST_ANDROID === "1";
 const output = resolve(process.env.PI_TEST_OUTPUT ?? join(root, ".artifacts", `mobile-account-${Date.now()}`));
 const hostBinary = process.env.PI_DESKTOP_HOST_BIN ?? join(root, "target/debug/pi-desktop-host-core.exe");
 const longMessageId = "Desktop A-608";
@@ -20,6 +24,8 @@ const revision = () => ({
   candidate: execFileSync("git", ["rev-parse", "HEAD"], { cwd: root, encoding: "utf8" }).trim(),
   base: execFileSync("git", ["rev-parse", "origin/main"], { cwd: root, encoding: "utf8" }).trim(),
   workspace: execFileSync("git", ["status", "--short"], { cwd: root, encoding: "utf8" }).trim(),
+  desktopRoot,
+  desktopCandidate: execFileSync("git", ["rev-parse", "HEAD"], { cwd: desktopRoot, encoding: "utf8" }).trim(),
 });
 const startedRevision = revision();
 const passed = [], errors = [], cleanupErrors = [], desktops = [];
@@ -30,12 +36,16 @@ const until = async (probe, label, timeout = 30_000) => {
   throw new Error(`Timed out: ${label}`);
 };
 await mkdir(output, { recursive: true });
-const fixture = await mobileFixture();
+const fixture = await mobileFixture({ port: nativeAndroid ? Number(process.env.PI_ANDROID_FIXTURE_PORT ?? 38487) : 0, encryptedLogin: nativeAndroid });
 process.env.VITE_MC_ORIGIN = fixture.origin;
-const mobileRequire = createRequire(join(root, "apps/mobile/package.json"));
-const { createServer } = await import(pathToFileURL(mobileRequire.resolve("vite")).href);
-const vite = await createServer({ root: join(root, "apps/mobile"), mode: "acceptance", server: { host: "127.0.0.1", port: 0, hmr: false, watch: null }, logLevel: "error" });
-await vite.listen();
+let vite;
+if (!nativeAndroid) {
+  const mobileRequire = createRequire(join(root, "apps/mobile/package.json"));
+  const { createServer } = await import(pathToFileURL(mobileRequire.resolve("vite")).href);
+  vite = await createServer({ root: join(root, "apps/mobile"), mode: "acceptance", server: { host: "127.0.0.1", port: 0, hmr: false, watch: null }, logLevel: "error" });
+  await vite.listen();
+}
+const android = nativeAndroid ? accountAndroid({ root, output, fixture, playwright, check, until, errors, passed }) : undefined;
 let browser, phone, phoneContext, credentials;
 const view = () => phone.evaluate(() => window.__PI_MOBILE_CONTROLLER__.getSnapshot());
 const invoke = (device, channel, ...args) => device.page.evaluate(async ({ channel, args }) => {
@@ -70,7 +80,7 @@ async function seed(name, count) {
 async function launch(device, first = false) {
   const env = { ...process.env, PI_DESKTOP_DATA_DIR: device.profile, PI_DESKTOP_HOST_BIN: hostBinary, PI_DESKTOP_MIRRORCODING_TEST_ORIGIN: fixture.origin };
   delete env.ELECTRON_RUN_AS_NODE;
-  device.app = await _electron.launch({ executablePath: require("electron"), args: [join(root, "apps/desktop"), `--user-data-dir=${device.electronProfile}`], env, timeout: 60_000 });
+  device.app = await _electron.launch({ executablePath: require("electron"), args: [join(desktopRoot, "apps/desktop"), `--user-data-dir=${device.electronProfile}`], env, timeout: 60_000 });
   device.page = await until(async () => {
     for (const page of device.app.windows()) if (await page.locator(".app-shell").count()) return page;
   }, `${device.name} shell`, 60_000);
@@ -106,25 +116,52 @@ async function enable(device) {
   fixture.devices.get(status.deviceId).name = device.name;
 }
 async function screenshot(name, page = phone) {
-  await page.screenshot({ path: join(output, `${name}.png`), fullPage: true });
+  await page.evaluate(async () => {
+    for (const animation of document.getAnimations()) {
+      if (animation.effect?.getTiming().iterations !== Infinity) animation.finish();
+    }
+    await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+  });
+  if (android && page === phone) await android.screenshot(name);
+  else await page.screenshot({ path: join(output, `${name}.png`), fullPage: true, animations: "disabled" });
   check(`${name} fits viewport`, await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth));
 }
 async function openPhone() {
-  browser = await chromium.launch({ headless: true });
-  phoneContext = await browser.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true, locale: "en-US", colorScheme: "dark" });
-  await phoneContext.exposeBinding("readTestCredential", () => credentials ?? null);
-  await phoneContext.exposeBinding("saveTestCredential", (_source, value) => { credentials = value; });
-  await phoneContext.exposeBinding("clearTestCredential", () => { credentials = undefined; });
-  await phoneContext.addInitScript(() => {
-    window.__PI_MOBILE_TEST__ = { credentialStore: { read: () => window.readTestCredential(), write: (value) => window.saveTestCredential(value), clear: () => window.clearTestCredential() } };
-  });
-  phone = await phoneContext.newPage(); phone.setDefaultTimeout(20_000);
-  phone.on("pageerror", error => errors.push({ surface: "phone", message: error.message, after: passed.at(-1) }));
-  await phone.goto(vite.resolvedUrls.local[0]);
+  if (android) phone = await android.open();
+  else {
+    browser = await chromium.launch({ headless: true });
+    phoneContext = await browser.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true, locale: "en-US", colorScheme: "dark" });
+    await phoneContext.exposeBinding("readTestCredential", () => credentials ?? null);
+    await phoneContext.exposeBinding("saveTestCredential", (_source, value) => { credentials = value; });
+    await phoneContext.exposeBinding("clearTestCredential", () => { credentials = undefined; });
+    await phoneContext.addInitScript(() => {
+      window.__PI_MOBILE_TEST__ = { credentialStore: { read: () => window.readTestCredential(), write: (value) => window.saveTestCredential(value), clear: () => window.clearTestCredential() } };
+    });
+    phone = await phoneContext.newPage(); phone.setDefaultTimeout(20_000);
+    phone.on("pageerror", error => errors.push({ surface: "phone", message: error.message, after: passed.at(-1) }));
+    await phone.goto(vite.resolvedUrls.local[0]);
+  }
   await phone.locator('[name="username"]').fill("mobileqa");
   await phone.locator('[name="password"]').fill("mobile-pass");
   await phone.locator('.login-form button[type="submit"]').click();
   await phone.getByRole("heading", { name: "Shared work", exact: true }).waitFor();
+}
+async function appearance(language, theme) {
+  await phone.getByRole("button", { name: /^(Account and appearance|账号与外观)$/ }).click();
+  await phone.getByLabel(/^(Language|语言)$/).selectOption("en");
+  await phone.getByRole("group", { name: "Theme", exact: true }).getByRole("button", { name: theme, exact: true }).click();
+  await phone.getByLabel("Language", { exact: true }).selectOption(language);
+  await phone.getByRole("dialog").getByRole("button", { name: /^(Close|关闭)$/ }).click();
+  await phone.locator(".surface").waitFor({ state: "hidden" });
+}
+async function offline(enabled) {
+  if (android) await android.offline(enabled);
+  else if (enabled) { await phone.route(`${fixture.origin}/**`, route => route.abort("internetdisconnected")); fixture.disconnectPhones(); }
+  else await phone.unroute(`${fixture.origin}/**`);
+}
+async function restartPhone() {
+  if (android) phone = await android.restart();
+  else await phone.reload();
 }
 async function openSession(device) {
   await phone.locator(".grant-open").filter({ hasText: device.name }).click();
@@ -197,6 +234,7 @@ async function readAllHistory(expectedCount) {
   check(`read ${expectedCount} history rows`, (await view()).messages.length === expectedCount);
 }
 try {
+  await android?.prepare();
   const first = await seed("Desktop A", 610), second = await seed("Desktop B", 4), third = await seed("Desktop C", 2);
   await launch(first, true); await enable(first);
   await launch(second, true); await enable(second);
@@ -220,15 +258,19 @@ try {
   await phone.evaluate(() => window.__PI_MOBILE_CONTROLLER__.back());
   await until(async () => !(await view()).selectedId, "history flushed before reopening");
   const historyRequests = fixture.relayCalls.filter(call => call.method === "session/history").length;
-  await phone.route(`${fixture.origin}/**`, route => route.abort("internetdisconnected"));
-  fixture.disconnectPhones();
-  await phone.reload();
+  await offline(true);
+  await restartPhone();
   await phone.locator(".grant-open").filter({ hasText: first.name }).waitFor();
   await openSession(first); await readAllHistory(610);
   check("offline app reload preserves all loaded history", (await view()).messages.some(message => message.id === "Desktop A-0") && fixture.relayCalls.filter(call => call.method === "session/history").length === historyRequests);
   check("previously expanded long content stays complete after offline reload", (await view()).messages.find(message => message.id === longMessageId)?.content === longMessageContent &&
     await phone.locator(`[data-message-id="${longMessageId}"] button.load-full`).count() === 0);
   await screenshot("mobile-offline-cached-history");
+  if (android) {
+    await appearance("zh-CN", "Light");
+    await screenshot("android-offline-history-light-zh");
+    await appearance("en", "Dark");
+  }
   await close(first);
   await withHost(first, async host => {
     const { session } = await host.call("session.get", { id: first.session.id });
@@ -239,7 +281,7 @@ try {
   });
   const beforeReconnect = fixture.relayCalls.length;
   await launch(first);
-  await phone.unroute(`${fixture.origin}/**`);
+  await offline(false);
   await phone.evaluate(() => window.__PI_MOBILE_CONTROLLER__.resume());
   await until(async () => (await view()).messages.some(message => message.id === "new-after-restart"), "durable delta after host restart");
   await readAllHistory(610);
@@ -274,9 +316,8 @@ try {
   }, "account revocation narrows access to the remaining session");
   check("account revocation closes removed content and retains the independent session grant");
   const scopedHistoryRequests = fixture.relayCalls.filter(call => call.method === "session/history").length;
-  await phone.route(`${fixture.origin}/**`, route => route.abort("internetdisconnected"));
-  fixture.disconnectPhones();
-  await phone.reload();
+  await offline(true);
+  await restartPhone();
   await phone.locator(".grant-open").filter({ hasText: first.name }).waitFor();
   const scopedOffline = await view();
   check("offline restart exposes only the still-authorized session", scopedOffline.grants.length === 1 && scopedOffline.grants[0].id === sessionGrant.id &&
@@ -285,12 +326,12 @@ try {
   check("remaining session keeps its cached history after account revocation", (await view()).messages.some(message => message.id === "Desktop A-0") &&
     !(await view()).messages.some(message => message.id.startsWith("Desktop C-")) && fixture.relayCalls.filter(call => call.method === "session/history").length === scopedHistoryRequests);
   await screenshot("mobile-offline-session-grant");
-  await phone.unroute(`${fixture.origin}/**`);
+  await offline(false);
   await phone.evaluate(() => window.__PI_MOBILE_CONTROLLER__.resume());
   await until(async () => (await view()).connection === "connected", "remaining session reconnected");
   await revokeGrant(first, sessionGrant.id);
   await until(async () => fixture.peers.size === 0 && (await view()).grants.length === 0 && (await view()).directories.length === 0, "account authorization revoked");
-  await phone.reload();
+  await restartPhone();
   await until(async () => !(await view()).loading, "revoked restart");
   check("revocation clears cached computers and history visibility", (await view()).directories.length === 0 && (await view()).messages.length === 0);
   check("acceptance made no model calls", fixture.chats.length === 0 && fixture.upstream.calls.length === 0);
@@ -303,8 +344,9 @@ try {
 } finally {
   for (const device of desktops) await close(device).catch(error => cleanupErrors.push(error.message));
   await browser?.close().catch(error => cleanupErrors.push(error.message));
-  await vite.close().catch(error => cleanupErrors.push(error.message)); fixture.close();
-  await writeFile(join(output, "report.json"), JSON.stringify({ startedRevision, finishedRevision: revision(), passed, errors, cleanupErrors, relayCalls: fixture.relayCalls }, null, 2));
+  await android?.close().catch(error => cleanupErrors.push(error.message));
+  await vite?.close().catch(error => cleanupErrors.push(error.message)); fixture.close();
+  await writeFile(join(output, "report.json"), JSON.stringify({ startedRevision, finishedRevision: revision(), ...android?.report, passed, errors, cleanupErrors, relayCalls: fixture.relayCalls }, null, 2));
   if (errors.length || cleanupErrors.length) process.exitCode = 1;
   console.log(`Account sync acceptance report: ${output}`);
 }
