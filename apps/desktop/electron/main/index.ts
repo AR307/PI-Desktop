@@ -1062,6 +1062,7 @@ registerShutdownHandlers({
   activeTurns,
   persistenceOutbox,
   inflightCheckpointer,
+  flushEventPersistence: eventPersistence.flush,
   pluginPanels,
   plugins,
   userMcp,

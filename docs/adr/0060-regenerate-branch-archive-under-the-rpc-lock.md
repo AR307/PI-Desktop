@@ -58,6 +58,19 @@ an idempotent stamp destroyed a message.
    which the caller already logs as a skipped archive rather than treating as
    data loss. Nothing a v9 client relies on changes.
 
+## Amendment (2026-10-06): quit waits for branch persistence
+
+Turn finalization releases active-turn ownership before the asynchronous branch
+archive necessarily completes. Waiting for an empty active-turn map and outbox
+therefore did not guarantee that the last archive had reached host-core: quit
+could dispose the host while `session.saveActiveRevision` was still in flight.
+
+The existing event-persistence owner now tracks its terminal writes and exposes
+one drain operation. Shutdown stops sidecar event production, drains those writes
+while the host is alive, and only then closes host-core. The wait uses the existing
+two-second shutdown budget and logs an incomplete drain; an unresponsive archive
+cannot prevent application exit. The host still owns archive contents and locking.
+
 ## Alternatives considered
 
 - **Await the outbox and keep the four-call rewrite:** narrows the window but

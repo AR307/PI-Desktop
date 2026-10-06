@@ -223,6 +223,10 @@ renderer-facing status):
 3. Interrupt pending/queued/running Plan and Goal work and reject late responses
 4. Unload plugins
 5. Stop Node agent sidecar
+   and drain accepted terminal event writes, including active regenerate branch
+   archives, before disposing host-core. An empty active-turn map alone does not
+   imply that these asynchronous archives have completed. This drain is bounded
+   to two seconds; an incomplete drain logs `quit before event persistence settled`.
 6. Flush/close Rust host DB
 7. Stop Rust host
 8. Dispose update polling

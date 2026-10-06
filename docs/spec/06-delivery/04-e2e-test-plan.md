@@ -1720,6 +1720,8 @@ identify the platform validation still needed.
   transcript. 4) Repeat the send, press Stop mid-stream, then reopen the
   session from the sidebar and inspect `sessions/<id>.jsonl` and
   `sessions/<id>.inflight.json`. 5) Repeat the send and let it finish normally.
+  6) Regenerate a reply, quit immediately after completion, then reopen and
+  switch between the original and regenerated branch.
 - **Expected**: 2) The session shows the user prompt followed by the streamed
   text up to at most 1.5 s before the quit, as an `aborted` assistant row under
   an `aborted` turn; nothing earlier in the session is missing or truncated. 3)
@@ -1732,6 +1734,10 @@ identify the platform validation still needed.
   no checkpoint file. A completed reply that had not yet left the outbox at
   quit is still present after relaunch (promoted `complete` if recovered from
   the checkpoint, or drained from the outbox before the first `session.get`).
+  6) The regenerated branch includes its final reply. Host disposal waits for
+  accepted branch writes, and a healthy quit does not log `host-core disposed`
+  from the regenerate archive. An unresponsive archive does not prevent exit;
+  it produces an explicit incomplete-drain warning.
 - **Specs linked**: `03-runtime/04-data-storage.md`,
   `03-runtime/06-host-rpc-protocol.md`, `03-runtime/07-process-model.md`,
   `03-runtime/01-ipc-protocol.md`

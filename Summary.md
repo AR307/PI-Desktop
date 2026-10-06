@@ -1,5 +1,15 @@
 # PI-Desktop MirrorCoding Edition
 
+## 2026-10-06 - Preserve pending branch archives on quit
+
+- Event persistence tracks terminal writes independently of active turns.
+  Quit stops sidecar events and drains accepted writes before disposing the
+  Rust host, preventing a just-finished regenerate archive from losing its host.
+- The existing bounded shutdown behavior remains: an unavailable archive is
+  reported and cannot hold the application open indefinitely.
+- A real outbox/quit-handler regression reproduces the previous disposal race
+  and covers successful persistence, storage errors and an unresponsive host.
+
 ## 2026-10-06 - Mobile account discovery and durable local history
 
 - Adds opt-in account grants and independent per-computer directories without
