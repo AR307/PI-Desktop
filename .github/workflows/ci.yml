@@ -118,4 +118,6 @@ jobs:
         run: cargo build -p host-core --locked
 
       - name: Run trusted extensions E2E
+        env:
+          DEBUG_E2E: "1"
         run: xvfb-run --auto-servernum pnpm test:e2e:trusted-extensions
