@@ -12,9 +12,11 @@ import { launchLiveVoiceDesktop } from "./e2e/live-voice-desktop.mjs";
 import { startLiveVoiceFixture } from "./e2e/live-voice-fixture.mjs";
 import { waitFor } from "./e2e/wait.mjs";
 
-if (process.argv.slice(2).some((arg) => arg !== "--fixture")) {
-  throw new Error("Usage: node scripts/e2e-live-voice.mjs [--fixture]. Real accounts are never used by this suite.");
+const args = process.argv.slice(2);
+if (args.some((arg) => !["--fixture", "--plain-http"].includes(arg))) {
+  throw new Error("Usage: node scripts/e2e-live-voice.mjs [--fixture] [--plain-http]. Real accounts are never used by this suite.");
 }
+const plainHttp = args.includes("--plain-http");
 const root = repositoryRoot();
 assertDesktopBuild(root);
 const temp = await mkdtemp(join(tmpdir(), "pi-live-voice-e2e-"));
@@ -24,7 +26,7 @@ const home = join(temp, "home");
 const project = join(temp, "project");
 const evidence = process.env.PI_LIVE_VOICE_EVIDENCE_DIR || join(temp, "evidence");
 for (const path of [dataDir, profile, home, project, evidence]) await mkdir(path, { recursive: true });
-const fixture = await startLiveVoiceFixture(root);
+const fixture = await startLiveVoiceFixture(root, { plainHttp });
 const host = new Host(resolveHostBinary(), dataDir);
 let desktop;
 const results = [];
@@ -110,7 +112,9 @@ try {
   const providerId = created.provider.id;
   await host.call("providers.update", { id: providerId, enabled: true });
   await host.stop();
-  const launch = () => launchLiveVoiceDesktop({ root, dataDir, profile, home, certificate: fixture.certificate, evidence });
+  const launch = () => launchLiveVoiceDesktop({
+    root, dataDir, profile, home, certificate: fixture.certificate, evidence,
+  });
   desktop = await launch();
   const initial = await settings();
   assert.equal(initial.developerMode, false);
@@ -156,7 +160,8 @@ try {
   assert.equal((await status()).call.muted, true);
   assert.equal((await status()).call.workBinding, undefined);
   await clickBar("Unmute microphone");
-  await waitFor(() => fixture.stats.inputFrames > 0, 10_000, "synthetic microphone reaches the real WSS transport");
+  const socketTransport = plainHttp ? "plain WS" : "WSS";
+  await waitFor(() => fixture.stats.inputFrames > 0, 10_000, `synthetic microphone reaches the real ${socketTransport} transport`);
   await waitFor(async () => (await status()).call?.phase === "connected" && fixture.active() === 1,
     2_000, "uplink credit keeps the call and provider socket connected");
   fixture.reply();
@@ -174,7 +179,7 @@ try {
   await waitIdle();
   await waitFor(() => fixture.active() === 0, 5_000, "provider socket closes after hangup");
   assert.deepEqual((await desktop.invoke("sessionList")).sessions, [], "voice-only call creates no Agent session");
-  pass("real Realtime socket, synthetic capture, playback/transcript, mute and hangup");
+  pass(`real Realtime ${socketTransport} socket, synthetic capture, playback/transcript, mute and hangup`);
 
   fixture.holdNextSession();
   await desktop.clickSelector(".live-voice-control button");
@@ -217,7 +222,7 @@ try {
     candidate: execFileSync("git", ["rev-parse", "HEAD"], { cwd: root, encoding: "utf8" }).trim(),
     baseMain: execFileSync("git", ["rev-parse", "origin/main"], { cwd: root, encoding: "utf8" }).trim(),
     date: new Date().toISOString(), platform: process.platform, node: process.version,
-    boundary: "built Electron, real preload/Main/Host, concrete Realtime GA adapter, local trusted TLS peer and synthetic audio",
+    boundary: `built Electron, real preload/Main/Host, concrete Realtime GA adapter, local ${plainHttp ? "loopback HTTP" : "trusted TLS"} peer and synthetic audio`,
     notRun: ["real provider accounts", "physical microphone and audible playback", "Live Work tool execution"],
     results, fixture: fixture.stats,
   }, null, 2));

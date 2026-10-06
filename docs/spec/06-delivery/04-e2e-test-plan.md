@@ -40,9 +40,10 @@
 ### E2E-LIVE-VOICE-public-settings-and-reconnect
 
 - **Preconditions:** A built production Renderer and real Electron/Main/Host,
-  isolated data/profile/project, developer mode off, a local TLS Realtime
-  fixture and synthetic microphone. Trust only the fixture CA in the child
-  process; do not disable TLS, sender, sandbox or microphone checks.
+  isolated data/profile/project, developer mode off, a local TLS or loopback
+  HTTP Realtime fixture and synthetic microphone. For TLS, trust only the
+  fixture CA in the child process; do not disable TLS, sender, sandbox or
+  microphone checks.
 - **Steps:** Open Live from Composer while disabled and follow Open settings.
   Find Voice through settings search, bind the fixture account, enable Live,
   connect, unmute, receive audio/captions, mute and hang up. Cancel a delayed
@@ -55,10 +56,14 @@
   call. Settings survive restart without reconnecting. Legacy Dictation
   settings are unchanged; a voice-only call creates no Agent session.
 - **Coverage:** `pnpm test:e2e:live-voice` drives the built app and its concrete
-  Realtime GA adapter against local WSS; `live-voice-owner.test.mjs` bundles
-  the production owner module and rejects other files/frames. Fixture audio
-  is not physical-device or real-provider acceptance. Commands and results
-  are recorded in `docs/implementation/live-voice-public-readiness.md`.
+  Realtime GA adapter against local WSS; `pnpm test:e2e:live-voice --
+  --plain-http` repeats the call flow against a loopback `ws://` endpoint.
+  `live-voice-websocket-endpoint.test.mjs` connects the production transport to
+  a local loopback WebSocket and verifies proxy refusal; `live-voice-owner.test.mjs`
+  bundles the production owner module and rejects other files/frames. Fixture
+  audio is not physical-device or real-provider acceptance. Commands and
+  results are recorded in
+  `docs/implementation/live-voice-public-readiness.md`.
 - **Specs:** [Live Voice](../03-runtime/live-voice.md).
 
 ### E2E-LIVE-VOICE-provider-call-lifecycle
@@ -97,6 +102,30 @@
   toggle/cancel actions, including that Escape never ends a connected call.
   The full Electron flow and real-provider/device compatibility remain
   unverified until their respective isolated acceptance environments are run.
+
+### E2E-LIVE-VOICE-realtime-plaintext-user-endpoint
+
+- **Preconditions:** Isolated desktop profile with Live Voice enabled and an
+  OpenAI-compatible API-key Provider whose base URL is a local plain-HTTP
+  Realtime fixture such as `http://127.0.0.1:<port>/v1`. Do not use a real
+  provider account.
+- **Steps:** Bind the Realtime adapter to that Provider and start a call with
+  `networkPolicy.mode` at its default (`relaxed`). End the call, switch the
+  mode to `strict` and start again. Repeat in `relaxed` with a system proxy
+  that does not bypass the fixture host.
+- **Expected:** In `relaxed` mode the call connects over
+  `ws://127.0.0.1:<port>/v1/realtime?model=…` and the one-time plaintext
+  notice is raised. In `strict` mode, and on a proxied route, the call fails
+  before any socket opens with a network-policy error. An `https` base URL
+  still connects only over `wss`; Gemini never uses `ws` and Codex SDP stays
+  HTTPS-only.
+- **Specs:** [Live Voice](../03-runtime/live-voice.md),
+  [ADR 0304](../../adr/0304-user-supplied-endpoint-trust.md).
+- **Acceptance:** `apps/desktop/test/live-voice-websocket-endpoint.test.mjs`
+  covers the scheme mapping, the user/third-party split and the refused base
+  URL shapes; the network guard's `relaxed`/`strict` verdict is covered by the
+  existing public-network tests. The full Electron flow remains unverified
+  until its isolated acceptance environment is run.
 
 ### E2E-LIVE-VOICE-four-stage-ui
 
@@ -6473,9 +6502,10 @@ must keep splitting are covered by `markdown-blocks.test.mjs`.
   1. Start an Agent-mode conversation and submit a task covered by the root
      instruction.
   2. Let the agent read or edit `packages/api/handler.ts`.
-  3. Add `packages/api/AGENTS.override.md`, then have the agent access another
+  3. Have the agent read an attachment outside the project root.
+  4. Add `packages/api/AGENTS.override.md`, then have the agent access another
      file in that directory.
-  4. Edit the root instruction while the session is idle, then submit a
+  5. Edit the root instruction while the session is idle, then submit a
      follow-up task.
 - **Expected**: The initial runtime receives the root chain. Before the file
   tool executes, the nested instruction is appended after its root source and
@@ -6483,8 +6513,13 @@ must keep splitting are covered by `markdown-blocks.test.mjs`.
   `AGENTS.md`; `CLAUDE.md` and `.claude/CLAUDE.md` are fallback names. The idle
   follow-up uses changed root content rather than reusing the prior runtime.
   Empty, unreadable, oversized, and out-of-root instruction files do not block
-  the turn; combined UTF-8 content is capped at 32 KiB. If path-specific
-  resolution exceeds its two-second deadline or the host is unavailable, the
+  the turn; combined UTF-8 content is capped at 32 KiB. A file tool whose target
+  is outside the project root, or targets the root itself, keeps the root chain
+  rather than clearing the project instructions; instruction files are still
+  read only from inside the root. A fixture-backed sidecar run verifies that a
+  nested read applies nested rules and a following attachment read restores the
+  root rules without loading an outside `AGENTS.md`. If path-specific resolution exceeds its
+  two-second deadline or the host is unavailable, the
   file tool continues with the base chain and does not retain a sibling
   directory's rules. Repeated file tools in the same directory during one
   prompt reuse one path-resolution claim; the next prompt resolves again so
@@ -6494,9 +6529,10 @@ must keep splitting are covered by `markdown-blocks.test.mjs`.
 - **Specs linked**: `03-runtime/02-agent-runtime.md`
 - **Acceptance**: C (chat/stream), F (persistence)
 - **Milestone**: M5
-- **Status**: Partially automated (`project-instructions.test.ts`,
-  `runtime.test.ts`); full
-  provider/UI journey Draft
+- **Status**: Resolver and runtime behavior are automated in
+  `project-instructions.test.ts` and `runtime.test.ts`; the fixture-backed
+  sidecar scenario runs through `pnpm test:e2e:hosted-search`. The broader full
+  provider/UI journey remains Draft.
 
 #### E2E-AGENTS-002: Global settings and project menus manage instruction files
 
@@ -11234,6 +11270,38 @@ This test plan spec is accepted when:
 - **Acceptance**: E (tools & permissions)
 - **Milestone**: M5
 - **Status**: Documented
+
+#### E2E-EDIT-legacy-replacement-preserves-unmatched-text: A legacy Edit replaces only the matched text
+
+- **Preconditions**: A workspace with an LF file containing `let x = foo;`,
+  `value = 1; // keep me`, and a two-line statement, plus a CRLF copy of the
+  first line.
+- **Steps**:
+  1. Issue an `Edit` with only `path`, `old_string` `= foo;`, and `new_string`
+     `= bar;` (no `tag`, no `ops`).
+  2. Issue a legacy `Edit` whose `old_string` is `value = 1;`, then one whose
+     `old_string` starts mid-line and ends mid-line on the following line.
+  3. Issue a legacy `Edit` whose `old_string` is a whole line including its
+     newline and whose `new_string` is empty.
+  4. Repeat step 1 on the CRLF file, then issue one legacy `Edit` whose
+     `old_string` is not in the file.
+  5. Compare every file on disk to the intended content byte for byte.
+- **Expected**: Each replacement succeeds and returns a new `tag`, and only the
+  matched text changes: the line reads `let x = bar;`, the trailing comment
+  survives, the multi-line match keeps the text before its start and after its
+  end, the whole-line deletion removes that line without leaving a blank line or
+  touching its neighbours, and the CRLF file keeps CRLF endings. The missing
+  `old_string` fails with `EDIT_LEGACY_MATCH_FAILED` and leaves the file
+  unchanged. A replacement whose only effect would be toggling the terminal
+  newline fails with `EDIT_NO_CHANGE` and leaves the file unchanged.
+- **Specs linked**: `03-runtime/18-line-anchored-edit-contract.md` §11
+- **Acceptance**: E (tools & permissions)
+- **Milestone**: M5+
+- **Status**: Automated (host-core unit tests:
+  `edit_legacy_replacement_preserves_unmatched_bytes`,
+  `edit_legacy_identical_replacement_leaves_file_unchanged`,
+  `edit_legacy_terminal_newline_only_change_reports_no_change`,
+  `edit_accepts_legacy_old_string_new_string_shape`)
 
 #### E2E-142: Background delegation converges through TaskWait and honors permission scopes
 

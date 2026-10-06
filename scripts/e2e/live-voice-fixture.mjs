@@ -1,18 +1,22 @@
 import assert from "node:assert/strict";
-import { createServer } from "node:https";
+import { createServer as createHttpServer } from "node:http";
+import { createServer as createHttpsServer } from "node:https";
 import { readFile } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { join } from "node:path";
 
-/** Local TLS peer only: the app still owns its real socket, media and IPC path. */
-export async function startLiveVoiceFixture(root) {
+/** Local peer only: the app still owns its real socket, media and IPC path. */
+export async function startLiveVoiceFixture(root, { plainHttp = false } = {}) {
   const { WebSocketServer, WebSocket } = createRequire(join(root, "apps/desktop/package.json"))("ws");
   const certificates = join(root, "scripts/e2e/fixtures/certificates");
   const certificate = join(certificates, "localhost-cert.pem");
-  const server = createServer({
-    key: await readFile(join(certificates, "localhost-key.pem")),
-    cert: await readFile(certificate),
-  }, (_request, response) => { response.writeHead(404); response.end(); });
+  const requestHandler = (_request, response) => { response.writeHead(404); response.end(); };
+  const server = plainHttp
+    ? createHttpServer(requestHandler)
+    : createHttpsServer({
+      key: await readFile(join(certificates, "localhost-key.pem")),
+      cert: await readFile(certificate),
+    }, requestHandler);
   const sockets = new Set();
   const timers = new Set();
   const errors = [];
@@ -34,7 +38,8 @@ export async function startLiveVoiceFixture(root) {
     const held = holdNext;
     holdNext = false;
     try {
-      assert.equal(new URL(request.url, "https://localhost").pathname, "/v1/realtime");
+      const base = plainHttp ? "http://127.0.0.1" : "https://localhost";
+      assert.equal(new URL(request.url, base).pathname, "/v1/realtime");
       assert.equal(request.headers.authorization, "Bearer live-voice-e2e-key");
     } catch { errors.push("unexpected Realtime connection metadata"); socket.close(); return; }
     socket.once("close", () => { sockets.delete(socket); stats.closed++; });
@@ -74,8 +79,8 @@ export async function startLiveVoiceFixture(root) {
     server.listen(0, "127.0.0.1", resolve);
   });
   return {
-    certificate,
-    baseUrl: `https://localhost:${server.address().port}/v1`,
+    certificate: plainHttp ? undefined : certificate,
+    baseUrl: `${plainHttp ? "http://127.0.0.1" : "https://localhost"}:${server.address().port}/v1`,
     stats,
     errors,
     active: () => sockets.size,

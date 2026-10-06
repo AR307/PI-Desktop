@@ -379,7 +379,7 @@ mod tests {
             .expect("the run's session exists");
         assert!(detail.summary.scheduled_run);
 
-        let page = crate::session_search::search(&st.db, "Nightly", 0).unwrap();
+        let page = crate::session_search::search(&st.db, "Nightly", 0, 30).unwrap();
         let hit = page
             .hits
             .iter()

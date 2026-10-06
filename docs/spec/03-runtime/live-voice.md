@@ -44,6 +44,14 @@ sent only to the frame that owns the call.
 OAuth tokens and API keys remain in Main. SDP, audio and transcript content are
 not logged. Main WebSocket endpoints are validated before connection and use
 the configured desktop network proxy. Unsupported proxy routes fail closed.
+Codex SDP negotiation stays HTTPS-only and the Gemini endpoint is third-party
+and requires `wss`. The OpenAI Realtime Provider base URL is user-supplied
+(ADR 0304): an `https` base URL connects over `wss`, and an `http` base URL
+connects over plain `ws` only when the network guard accepts it under
+`networkPolicy.mode` (`relaxed`, the default; `strict` refuses it). A plain `ws` endpoint is never sent through a
+proxy tunnel; a proxied route for it fails closed with
+`LIVE_NETWORK_POLICY_UNSUPPORTED`. Base URLs with credentials, a query or a
+fragment are refused.
 The PCM port exists for one prepared call, has bounded frame sizes and credits,
 and carries no credentials.
 
