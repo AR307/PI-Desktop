@@ -99,12 +99,6 @@ await tool("pi_project_open", { path: project });
 const created = await tool("pi_session_create", { title: "ext e2e", projectPath: project, mode: "agent" });
 const sessionId = created?.session?.id ?? created?.id;
 check("session created", !!sessionId, sessionId);
-const initialSession = await tool("pi_session_get", { id: sessionId });
-const initialProviderId = initialSession?.session?.providerId;
-const initialModelId = initialSession?.session?.modelId;
-if (typeof initialProviderId !== "string" || typeof initialModelId !== "string") {
-  throw new Error("E2E session did not have an initial model binding");
-}
 
 // 1) tool + hooks (E2E-242)
 const firstPrompt = await tool("pi_agent_prompt", { sessionId, content: "please add 20 and 22" });
@@ -208,6 +202,13 @@ const rendererLeaksCredential = await ui.run(() =>
   document.body.innerText.includes("expired-plugin-access") || document.body.innerText.includes("plugin-refresh"),
 );
 check("renderer does not display access or refresh tokens", rendererLeaksCredential === false);
+
+const initialSession = await tool("pi_session_get", { id: sessionId });
+const initialProviderId = initialSession?.session?.providerId;
+const initialModelId = initialSession?.session?.modelId;
+if (typeof initialProviderId !== "string" || typeof initialModelId !== "string") {
+  throw new Error("E2E session did not have an initial model binding");
+}
 
 // Cancel a second login while its Host prompt is open; the plugin signal must
 // abort without disturbing the credential from the completed login.
