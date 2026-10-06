@@ -357,7 +357,7 @@ test("a panel page that fails its own load keeps the original error", async () =
 });
 
 test("the panel load budget is a generous, seconds-scale default", () => {
-  assert.ok(PLUGIN_PANEL_LOAD_SETTLE_MS >= 10_000);
+  assert.equal(PLUGIN_PANEL_LOAD_SETTLE_MS, 15_000);
 });
 
 test("the open path races the page load against that budget (#998)", () => {

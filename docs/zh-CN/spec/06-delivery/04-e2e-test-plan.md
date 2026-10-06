@@ -1509,11 +1509,11 @@ task-candidate E2E 从请求工作树运行，但使用主工作区已经准备�
 #### E2E-024D：隔离插件面板主桥
 
 - **先决条件**：启用 `ui.panel` 的插件。
-- **步骤**： 1) 打开插件面板。 2) 调用面板桥 API（`ui.showToast`、可选的 fs/net（带授权））。 3) 通过胶囊关闭面板，以及通过禁用或卸载插件关闭面板。
-- **预期**：面板在沙盒 window/partition 中运行；桥接调用经过许可检查；主机在面板关闭时保持稳定，主进程不得抛出 `TypeError: Object has been destroyed` 或弹出未捕获异常对话框。
+- **步骤**： 1) 打开插件面板。 2) 调用面板桥 API（`ui.showToast`、可选的 fs/net（带授权））。 3) 通过胶囊关闭面板，以及通过禁用或卸载插件关闭面板。4) 从「扩展 → 已安装」打开一个初始页面加载一直 pending 的测试面板；等待 15 秒后再打开正常面板。
+- **预期**：面板在沙盒 window/partition 中运行；桥接调用经过许可检查；主机在面板关闭时保持稳定，主进程不得抛出 `TypeError: Object has been destroyed` 或弹出未捕获异常对话框。初始加载持续 pending 达 15 秒的面板以 `PANEL_LOAD_TIMEOUT` 失败，通过发起操作显示错误，并销毁隐藏窗口；页面自行加载失败时保留原始错误，超时后仍可正常打开其他面板。
 - **链接规格**：`07-plugins/01-plugin-system.md`、`07-plugins/03-plugin-api.md`、`07-plugins/04-plugin-security.md`、`07-plugins/12-plugin-ipc-and-host-services.md`
 - **验收**：G（隔离面板）
-- **状态**：已记录
+- **状态**：已记录；初始加载超时及打开路径接线由单元/契约测试覆盖
 
 #### E2E-024AA：插件自有界面跟随宿主语言
 
