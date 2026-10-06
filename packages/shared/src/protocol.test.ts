@@ -79,6 +79,7 @@ describe("Plan protocol contracts", () => {
       IPC.invoke.mobileSyncCancelPairing,
       IPC.invoke.mobileSyncRevoke,
       IPC.invoke.mobileSyncRefresh,
+      IPC.invoke.mobileSyncSetAccountSharing,
       IPC.event.mobileSyncChanged,
     ]) {
       expect(IPC_WHITELIST.has(channel)).toBe(true);

@@ -72,6 +72,8 @@ export type SessionSummary = {
 
 export type SessionDetail = SessionSummary & {
   messages: UiMessage[];
+  /** Durable message position captured with this history page by host-core. */
+  syncRevision?: number;
   /** Authoritative metadata scoped to the submitted contracts in this page. */
   planHistory?: PlanHistoryEntry[];
   /** Owning Task for a nested search target; context only, outside page cursors. */

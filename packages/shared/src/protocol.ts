@@ -234,6 +234,7 @@ export const IPC = {
     mobileSyncCancelPairing: "pi-desktop/mobile-sync/cancelPairing",
     mobileSyncRevoke: "pi-desktop/mobile-sync/revoke",
     mobileSyncRefresh: "pi-desktop/mobile-sync/refresh",
+    mobileSyncSetAccountSharing: "pi-desktop/mobile-sync/setAccountSharing",
     providersList: "pi-desktop/providers/list",
     providersReorder: "pi-desktop/providers/reorder",
     providersCreate: "pi-desktop/providers/create",
