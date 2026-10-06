@@ -96,7 +96,9 @@ test("plugin panel close does not read destroyed webContents", () => {
     hostSource.indexOf("this.windows.set(request.pluginId, win);"),
   );
   assert.doesNotMatch(closedHandler, /win\.webContents/);
-  assert.match(hostSource, /await win\.loadURL\(/);
+  // The hidden window loads through the ready budget (issue #998 item 5), and
+  // the open path's catch still destroys it on a failed load.
+  assert.match(hostSource, /await panelReadyWithin\(\s*win\.loadURL\(/);
   assert.match(hostSource, /if \(!win\.isDestroyed\(\)\) \{\s*win\.destroy\(\);\s*\}/);
 });
 
