@@ -1,5 +1,16 @@
 # PI-Desktop MirrorCoding Edition
 
+## 2026-10-06 - Session error review acceptance
+
+- Confirmed client fixes cover delegate mutation recovery ownership, UTF-16
+  file tools and branch archives racing host shutdown. Command failures and
+  provider-side interruptions retain their original classifications.
+- Real Electron acceptance reads a Chinese PowerShell log, regenerates through
+  the transcript menu, quits at completion, then restores and reads both
+  branches. Controlled provider requests use no production account or quota.
+- Detailed findings, automated checks, screenshots and remaining evidence
+  boundaries are recorded in docs/session-error-review-validation.md.
+
 ## 2026-10-06 - Preserve pending branch archives on quit
 
 - Event persistence tracks terminal writes independently of active turns.
