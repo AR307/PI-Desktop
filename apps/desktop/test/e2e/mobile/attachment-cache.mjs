@@ -130,7 +130,7 @@ try {
   await openSession(session.id);
   await phone.locator(".attachment-preview").filter({ hasText: "controlled-image.png" }).click();
   await phone.locator('.image-preview-button img[alt="controlled-image.png"]').waitFor();
-  await phone.getByRole("button", { name: "Preview", exact: true }).click();
+  await phone.locator(".image-preview-button").filter({ has: phone.getByAltText("controlled-image.png") }).click();
   await phone.locator('.image-preview[role="dialog"] img').waitFor();
   const offlineImageLoaded = await phone.locator('.image-preview[role="dialog"] img').evaluate(img => img.complete && img.naturalWidth > 0);
   check("offline reload previews the IndexedDB image without another relay read", offlineImageLoaded && fixture.relayCalls.filter(call => call.method === "attachment/read").length === reads);
