@@ -15,6 +15,11 @@
   sharing retries, sleeping computers, scoped reconnection and pairing errors.
 - Corrected the peer.open phone identity field in the MC increment document.
   This client work does not deploy MC or claim production joint acceptance.
+- Controlled acceptance passed 46 Electron/mobile-browser checks and 48 native
+  Android checks on PiMobileQA, including 610-message offline restart, durable
+  history changes and reconnection after permissions narrow. Type checks and
+  desktop/mobile builds passed; evidence and the tested revision are recorded in
+  docs/mobile-account-sync-alignment-validation.md.
 
 ## 2026-10-06 - Session error review acceptance
 

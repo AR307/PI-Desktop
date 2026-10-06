@@ -14,6 +14,9 @@ this acceptance.
   account-sync and session-error fixes.
 - Remote main: `920b12b8e053165d343a421b3cb8ee93c50a436a`, an ancestor of the
   candidate. No main integration or history rewrite was needed.
+- Native Android candidate: `4f651049c47ad8f7c433758b9a276418a3299c0c`, with
+  a clean workspace at both the start and end of acceptance. A final fetch
+  confirmed that remote main still points to the baseline above.
 
 ## Reproduction and correction
 
@@ -59,7 +62,16 @@ reused, with task-local workspace package links; no dependency installation was
 needed. Individual repository tool entry points were used instead of claiming a
 new successful pnpm aggregate run.
 
-Native Android acceptance results are recorded after running the same flow on
-the existing PiMobileQA, using its isolated account QA app. Production MC joint
+Native Android acceptance passed 48 checks with no test or cleanup errors in
+`.artifacts/android-alignment/report.json`. The flow used the existing PiMobileQA
+emulator (`emulator-5554`), its native Capacitor WebView and the isolated
+`xyz.mirrorcoding.pi.mobile.accountqa` application. It covered pairing once for
+multiple computers, offline history, all 610 loaded messages after app restart,
+desktop restart with changed rows only, and reconnection under the remaining
+session grant after account access was revoked. Chinese/light and English/dark
+screenshots were inspected for pairing errors and offline history.
+
+The debug APK is at `apps/mobile/android/app/build/outputs/apk/debug/app-debug.apk`;
+it is an isolated QA build, not a signed release upgrade. Production MC joint
 acceptance remains separate from this controlled client validation. No database
 schema or native Android implementation changed.
