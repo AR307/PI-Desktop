@@ -14,6 +14,8 @@ const { _electron, chromium } = require(process.env.PI_TEST_PLAYWRIGHT ?? "playw
 const root = resolve(import.meta.dirname, "../../../../..");
 const output = resolve(process.env.PI_TEST_OUTPUT ?? join(root, ".artifacts", `mobile-account-${Date.now()}`));
 const hostBinary = process.env.PI_DESKTOP_HOST_BIN ?? join(root, "target/debug/pi-desktop-host-core.exe");
+const longMessageId = "Desktop A-608";
+const longMessageContent = `Previously expanded response. ${"Offline-readable long content. ".repeat(3_000)}END OF COMPLETE CACHED RESPONSE`;
 const revision = () => ({
   candidate: execFileSync("git", ["rev-parse", "HEAD"], { cwd: root, encoding: "utf8" }).trim(),
   base: execFileSync("git", ["rev-parse", "origin/main"], { cwd: root, encoding: "utf8" }).trim(),
@@ -58,7 +60,7 @@ async function seed(name, count) {
     device.ungrouped = (await host.call("session.create", { title: `${name} ungrouped`, mode: "agent" })).session;
     for (let index = 0; index < count; index++) await host.call("session.appendMessage", {
       sessionId: device.session.id,
-      message: { id: `${name}-${index}`, role: index % 2 ? "assistant" : "user", content: `${name} historical message ${String(index).padStart(3, "0")}`,
+      message: { id: `${name}-${index}`, role: `${name}-${index}` === longMessageId || index % 2 ? "assistant" : "user", content: `${name}-${index}` === longMessageId ? longMessageContent : `${name} historical message ${String(index).padStart(3, "0")}`,
         status: "complete", createdAt: new Date(Date.UTC(2026, 0, 1, 0, 0, index)).toISOString() },
     });
     await host.call("settings.set", { language: "en", theme: "dark" });
@@ -140,6 +142,51 @@ async function revokeGrant(device, grantId) {
   await row.locator('[data-action="revoke-mobile-grant"]').click();
   await row.locator('[data-action="confirm-mobile-revoke"]').click();
 }
+/** Delay one real relay reply while the browser continues accepting input. */
+function holdNextChangesReply(device) {
+  const entry = [...fixture.peers].find(([, peer]) => peer.desktopDeviceId === device.deviceId);
+  assert(entry, "selected desktop has a live mobile peer");
+  const [peerId, peer] = entry;
+  const send = peer.socket.send;
+  let held;
+  peer.socket.send = function (data, ...args) {
+    const frame = JSON.parse(data.toString());
+    const call = fixture.relayCalls.findLast((call) => call.peerId === peerId && call.id === frame.id);
+    if (!held && call?.method === "session/changes" && call.sessionId === device.session.id) {
+      held = { data, args };
+      return;
+    }
+    return send.call(this, data, ...args);
+  };
+  return {
+    waiting: () => Boolean(held),
+    release() {
+      peer.socket.send = send;
+      if (held) send.call(peer.socket, held.data, ...held.args);
+    },
+  };
+}
+async function readWhileChangesPending(device) {
+  const before = (await view()).messages.length;
+  const gate = holdNextChangesReply(device);
+  try {
+    // Resuming connectivity is a real application entry point for reconciliation.
+    await phone.evaluate(() => window.dispatchEvent(new Event("online")));
+    await until(gate.waiting, "controlled delayed changes reply");
+    await phone.locator(`[data-message-id="${longMessageId}"] button.load-full`).click();
+    await phone.locator(`[data-message-id="${longMessageId}"] button.load-full:disabled`).waitFor();
+    await phone.locator(".transcript").evaluate(element => { element.scrollTop = 0; });
+    await phone.locator('.load-older[role="status"]').waitFor();
+    await screenshot("mobile-reading-during-delayed-sync");
+  } finally { gate.release(); }
+  await until(async () => {
+    const state = await view();
+    return state.messages.length > before && state.messages.find(message => message.id === longMessageId)?.content === longMessageContent;
+  }, "older page and expanded content survive concurrent changes");
+  await phone.evaluate(() => window.__PI_MOBILE_CONTROLLER__.refreshSession());
+  const state = await view();
+  check("paging and full-content loading survive a delayed changes reply", state.messages.length > before && state.messages.find(message => message.id === longMessageId)?.content === longMessageContent);
+}
 async function readAllHistory(expectedCount) {
   while ((await view()).messages.length < expectedCount && (await view()).snapshot?.hasMoreHistory) {
     const before = (await view()).messages.length;
@@ -167,6 +214,7 @@ try {
   check("directory discovery does not download history", !fixture.relayCalls.some(call => ["session/attach", "session/snapshot", "session/history"].includes(call.method)));
   await screenshot("mobile-two-computers");
   await openSession(first);
+  await readWhileChangesPending(first);
   await readAllHistory(610);
   await screenshot("mobile-history-over-500");
   await phone.evaluate(() => window.__PI_MOBILE_CONTROLLER__.back());
@@ -178,6 +226,8 @@ try {
   await phone.locator(".grant-open").filter({ hasText: first.name }).waitFor();
   await openSession(first); await readAllHistory(610);
   check("offline app reload preserves all loaded history", (await view()).messages.some(message => message.id === "Desktop A-0") && fixture.relayCalls.filter(call => call.method === "session/history").length === historyRequests);
+  check("previously expanded long content stays complete after offline reload", (await view()).messages.find(message => message.id === longMessageId)?.content === longMessageContent &&
+    await phone.locator(`[data-message-id="${longMessageId}"] button.load-full`).count() === 0);
   await screenshot("mobile-offline-cached-history");
   await close(first);
   await withHost(first, async host => {
