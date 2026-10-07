@@ -329,7 +329,11 @@ keeps only the ordering and loop-guard rules. The agent mutation workflow is:
    result with an error-specific recovery hint, so the agent stops after reporting
    the exact mismatch. Do not hand-edit old unified-diff hunk headers or continue a
    repair loop.
-4. Keep mutations to one path sequential, even when read/search calls are
+4. Recovery counters are scoped to the parent turn or the individual delegate
+   run. One delegate's failed mutation cannot terminate another delegate or the
+   parent. A delegate that exhausts its budget returns a failed, resumable Task
+   result while preserving any report text it already produced.
+5. Keep mutations to one path sequential, even when read/search calls are
    issued in parallel.
 
 An `EDIT_LINES_UNSEEN` rejection whose reveal was complete is exempt from step
