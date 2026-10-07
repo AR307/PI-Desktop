@@ -40,6 +40,7 @@ import { VendorAccountDialog, type VendorAccountForm } from "./VendorAccountDial
 import { ModelConfigImportPanel } from "../../features/settings/imports/ModelConfigImportPanel";
 import { ImportToggleButton } from "../../features/settings/import-workbench";
 import { JevSettingsCard } from "./JevSettingsCard";
+import { JEV_SERVICE } from "./service-catalog";
 
 type CatalogStatus = {
   loaded: boolean;
@@ -92,6 +93,11 @@ export function ModelConfigPage() {
   // null = closed, "" = add flow, provider id = edit flow.
   const [copyDraft, setCopyDraft] = useState<ProviderCopyDraft | null>(null);
   const [setupFor, setSetupFor] = useState<string | null>(null);
+
+  // The Jev card opens the same dialog, straight on the Jev service.
+  const [jevSetup, setJevSetup] = useState(false);
+  // Bumped when that dialog stored a key, so the card re-reads what exists.
+  const [jevStatusRevision, setJevStatusRevision] = useState(0);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [testingId, setTestingId] = useState<string | null>(null);
   const [changingImageModel, setChangingImageModel] = useState(false);
@@ -383,7 +389,14 @@ export function ModelConfigPage() {
         </section>
       ) : null}
 
-      <JevSettingsCard settings={settings} />
+      <JevSettingsCard
+        settings={settings}
+        onConfigure={() => {
+          setJevSetup(true);
+          setSetupFor("");
+        }}
+        statusRevision={jevStatusRevision}
+      />
 
       <section className="settings-card-block">
         <div className="model-config-section-head">
@@ -513,13 +526,25 @@ export function ModelConfigPage() {
         <ProviderSetupDialog
           provider={editingProvider}
           initialDraft={copyDraft}
-          onClose={() => { setSetupFor(null); setCopyDraft(null); }}
+          initialService={jevSetup ? JEV_SERVICE : undefined}
+          onClose={() => {
+            setSetupFor(null);
+            setCopyDraft(null);
+            setJevSetup(false);
+          }}
           imageModelIds={editingProvider
             ? imageGenerationCandidates
                 .filter((binding) => binding.providerId === editingProvider.id)
                 .map((binding) => binding.modelId)
             : undefined}
           onSaved={afterSaved}
+          onJevConfigured={() => {
+            setSetupFor(null);
+            setCopyDraft(null);
+            setJevSetup(false);
+            // The card is already mounted: tell it the key it read has changed.
+            setJevStatusRevision((revision) => revision + 1);
+          }}
           vendors={vendors}
           onPickSubscription={(vendor) => {
             setSetupFor(null);

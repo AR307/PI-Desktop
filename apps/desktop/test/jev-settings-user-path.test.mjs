@@ -1,3 +1,15 @@
+/**
+ * Isolated Electron user path for Jev settings (D625, settings IA).
+ *
+ * What the card is now: the state of the integration and the way in. It reads
+ * whether a TypeSafe key is stored, lets the switch move only when one is, and
+ * sends the user to the service dialog to add or replace the key — it never
+ * stores a key itself. Removing the key takes the switch down first.
+ *
+ * The key is written by the service dialog (see the Jev service setup test);
+ * this fixture stands in for that by storing one in the fake Host and
+ * remounting the card.
+ */
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { createRequire } from "node:module";
@@ -22,6 +34,7 @@ import { useAppStore } from "../../apps/desktop/src/stores/app-store";
 
 const apiCalls = [];
 let savedKey;
+let configureClicks = 0;
 let savedSettings = {
   defaultMode: "agent",
   theme: "light",
@@ -37,11 +50,8 @@ window.piDesktop = {
     apiCalls.push({ channel, input });
     switch (channel) {
       case "pi-desktop/secrets/has":
+        if (input !== JEV_API_KEY_SECRET_REF) throw new Error("unexpected secret ref");
         return { ok: true, data: { has: typeof savedKey === "string" } };
-      case "pi-desktop/secrets/set":
-        if (input.secretRef !== JEV_API_KEY_SECRET_REF) throw new Error("unexpected secret ref");
-        savedKey = input.value;
-        return { ok: true, data: undefined };
       case "pi-desktop/secrets/delete":
         if (input !== JEV_API_KEY_SECRET_REF) throw new Error("unexpected secret ref");
         savedKey = undefined;
@@ -64,9 +74,16 @@ await i18n.use(initReactI18next).init({
   interpolation: { escapeValue: false },
 });
 useAppStore.setState({ settings: savedSettings });
+
 function JevSettingsHarness() {
   const settings = useAppStore((state) => state.settings);
-  return React.createElement(JevSettingsCard, { settings: settings ?? undefined });
+  const [round, setRound] = React.useState(0);
+  window.__remount = () => setRound((value) => value + 1);
+  return React.createElement(JevSettingsCard, {
+    key: round,
+    settings: settings ?? undefined,
+    onConfigure: () => { configureClicks += 1; },
+  });
 }
 const rootNode = createRoot(document.getElementById("root"));
 flushSync(() => rootNode.render(React.createElement(JevSettingsHarness)));
@@ -88,51 +105,64 @@ function button(label) {
 
 window.jevSettingsProbe = async () => {
   await waitFor(() => document.body.innerText.includes("API key not configured"), "initial key state missing");
-  const toggle = document.querySelector('[role="switch"][aria-label="Enable Jev for Agent"]');
-  if (!toggle?.disabled) throw new Error("Jev must stay disabled until a key is saved");
-  const initialToggleDisabled = toggle.disabled;
+  const toggle = () => document.querySelector('[role="switch"][aria-label="Enable Jev for Agent"]');
+  if (!toggle()) throw new Error("the Jev switch is missing");
+  const initialToggleDisabled = toggle().disabled;
 
-  const input = document.querySelector('input[aria-label="TypeSafe API key"]');
-  if (!input) throw new Error("TypeSafe API key field is missing");
-  const valueSetter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value").set;
-  valueSetter.call(input, "jev-ui-fixture-key");
-  input.dispatchEvent(new Event("input", { bubbles: true }));
+  const addKey = button("Add key");
+  if (!addKey) throw new Error("the card must offer adding a key");
+  flushSync(() => addKey.click());
   await settle();
-  const save = button("Save key");
-  if (!save || save.disabled) throw new Error("Save action did not enable for a key");
-  flushSync(() => save.click());
-  await waitFor(() => document.body.innerText.includes("API key saved securely"), "saved key state was not shown");
-  const keySavedInHost = typeof savedKey === "string";
-  if (input.value !== "") throw new Error("Saved key draft should be cleared");
+  const configureOpened = configureClicks === 1;
 
-  const enable = document.querySelector('[role="switch"][aria-label="Enable Jev for Agent"]');
-  flushSync(() => enable.click());
-  await waitFor(() => enable.getAttribute("aria-checked") === "true", "Jev setting did not turn on");
+  // Without a key the switch stays refused, whatever the card offers.
+  flushSync(() => toggle().click());
+  await settle();
+  // Pressing a switch that has no key behind it must not write a setting.
+  const refusedWithoutKey = toggle().getAttribute("aria-checked") === "false"
+    && !apiCalls.some((call) => call.channel === "pi-desktop/settings/set");
 
-  flushSync(() => button("Remove key").click());
+  // A key the service dialog stored is what the next mount reads.
+  savedKey = "jev-ui-fixture-key";
+  flushSync(() => window.__remount());
+  await waitFor(() => document.body.innerText.includes("API key saved securely"), "configured state missing");
+  const replaceOffered = Boolean(button("Replace key"));
+  const removeOffered = Boolean(button("Remove key"));
+
+  flushSync(() => toggle().click());
+  await waitFor(() => toggle().getAttribute("aria-checked") === "true", "Jev setting did not turn on");
+
+  const remove = button("Remove key");
+  if (!remove) throw new Error("removing the key must stay possible");
+  flushSync(() => remove.click());
   await waitFor(() => document.body.innerText.includes("API key not configured"), "removed key state was not shown");
-  const finalToggle = document.querySelector('[role="switch"][aria-label="Enable Jev for Agent"]');
-  const writes = apiCalls.filter((call) => call.channel === "pi-desktop/settings/set");
-  const secretWrites = apiCalls.filter((call) => [
-    "pi-desktop/secrets/set", "pi-desktop/secrets/delete",
-  ].includes(call.channel));
+
+  const finalToggle = toggle();
+  const settingsWrites = apiCalls.filter((call) => call.channel === "pi-desktop/settings/set");
+  const lastDisable = apiCalls.findLastIndex(
+    (call) => call.channel === "pi-desktop/settings/set" && call.input.jevEnabled === false,
+  );
+  const firstDelete = apiCalls.findIndex((call) => call.channel === "pi-desktop/secrets/delete");
   return {
     initialToggleDisabled,
-    keySavedInHost,
-    keyDraftCleared: input.value === "",
-    enabledSettingPersisted: writes.some((call) => call.input.jevEnabled === true),
+    configureOpened,
+    refusedWithoutKey,
+    replaceOffered,
+    removeOffered,
+    enabledSettingPersisted: settingsWrites.some((call) => call.input.jevEnabled === true),
     disabledAfterRemoval: finalToggle.getAttribute("aria-checked") === "false",
+    toggleDisabledAfterRemoval: finalToggle.disabled === true,
     keyRemovedFromHost: savedKey === undefined,
-    allSecretRefsFixed: secretWrites.every((call) =>
-      call.channel === "pi-desktop/secrets/set"
-        ? call.input.secretRef === JEV_API_KEY_SECRET_REF
-        : call.input === JEV_API_KEY_SECRET_REF),
-    noKeyInSettings: writes.every((call) => !Object.values(call.input).includes("jev-ui-fixture-key")),
+    removalDisabledFirst: firstDelete !== -1 && lastDisable !== -1 && firstDelete > lastDisable,
+    keyNeverStoredFromTheCard: !apiCalls.some((call) => call.channel === "pi-desktop/secrets/set"),
+    storedKeyNeverInSettings: settingsWrites.every(
+      (call) => !Object.values(call.input).includes("jev-ui-fixture-key"),
+    ),
   };
 };
 `;
 
-test("Jev settings stores a secret, enables Jev, then disables and removes it", {
+test("the Jev card reads the key, gates the switch, and disables before removing", {
   timeout: 60_000,
   skip:
     process.platform === "linux" && !process.env.DISPLAY
@@ -214,13 +244,17 @@ app.whenReady().then(async () => {
     const result = JSON.parse(line.slice("JEV_SETTINGS_PROBE ".length));
     assert.deepEqual(result, {
       initialToggleDisabled: true,
-      keySavedInHost: true,
-      keyDraftCleared: true,
+      configureOpened: true,
+      refusedWithoutKey: true,
+      replaceOffered: true,
+      removeOffered: true,
       enabledSettingPersisted: true,
       disabledAfterRemoval: true,
+      toggleDisabledAfterRemoval: true,
       keyRemovedFromHost: true,
-      allSecretRefsFixed: true,
-      noKeyInSettings: true,
+      removalDisabledFirst: true,
+      keyNeverStoredFromTheCard: true,
+      storedKeyNeverInSettings: true,
     });
   } finally {
     await rm(temp, { recursive: true, force: true });

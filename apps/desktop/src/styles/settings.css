@@ -1072,17 +1072,15 @@
   line-height: var(--leading-body);
 }
 
-.jev-settings-key-form {
-  display: grid;
-  gap: 10px;
-  padding: 0 16px 16px;
-}
-
-.jev-settings-key-actions {
+/*
+  The Jev row's control column: two actions and the switch. The row metric
+  above only matches a bare toggle, so the group keeps its own height.
+*/
+.jev-settings-controls {
   display: flex;
-  flex-wrap: wrap;
+  align-items: center;
   gap: 8px;
-  justify-content: flex-end;
+  min-height: var(--ds-field-height);
 }
 
 /*

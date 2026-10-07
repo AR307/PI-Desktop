@@ -1,58 +1,58 @@
-import { useEffect, useState } from "react";
+/**
+ * Jev on the model configuration page (D625, settings IA).
+ *
+ * The card is the state of the integration and the way in: whether a TypeSafe
+ * key is stored, whether the classifier is on for Agent mode, and the actions
+ * that change either. The key itself is entered in the service dialog, which
+ * is also where Jev is added from — one place stores a key, and that place
+ * checks it against TypeSafe first. A field here would be a second way to keep
+ * a key nothing verified.
+ */
+import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import type { AppSettings } from "@pi-desktop/shared";
 import { api } from "../../lib/api";
 import { useAppStore } from "../../stores/app-store";
-import { Button, Field, PasswordInput, SettingsToggle } from "../ui";
+import { Button, SettingsToggle } from "../ui";
 import { SettingsCard, SettingsRow } from "../../features/settings/primitives";
+import { removeJevService } from "./jev-config";
+import { persistJevEnabled, useJevKeyStatus } from "./jev-app-config";
 
-type KeyStatus = "loading" | "configured" | "missing" | "unavailable";
-type BusyAction = "save" | "remove" | "toggle" | null;
+type BusyAction = "toggle" | "remove" | null;
 
-async function persistSettings(patch: Partial<AppSettings>): Promise<void> {
-  const current = useAppStore.getState().settings;
-  if (!current) throw new Error("Settings are not ready");
-  const next = { ...current, ...patch };
-  await api.setSettings(next);
-  useAppStore.setState({ settings: next });
-}
+export type JevSettingsCardProps = {
+  settings?: AppSettings;
+  /** Opens the Jev service dialog, the one place a key is entered. */
+  onConfigure: () => void;
+  /** Bumped when that dialog stored a key, so this card re-reads the state. */
+  statusRevision?: number;
+};
 
-export function JevSettingsCard({ settings }: { settings?: AppSettings }) {
+export function JevSettingsCard({
+  settings,
+  onConfigure,
+  statusRevision = 0,
+}: JevSettingsCardProps) {
   const { t } = useTranslation();
   const showToast = useAppStore((state) => state.showToast);
-  const [keyDraft, setKeyDraft] = useState("");
-  const [keyStatus, setKeyStatus] = useState<KeyStatus>("loading");
+  const [keyStatus, setKeyStatus] = useJevKeyStatus(statusRevision);
   const [busy, setBusy] = useState<BusyAction>(null);
   const enabled = settings?.jevEnabled === true;
   const configured = keyStatus === "configured";
 
-  useEffect(() => {
-    let current = true;
-    void api.hasJevApiKey().then(
-      (hasKey) => {
-        if (current) setKeyStatus(hasKey ? "configured" : "missing");
-      },
-      () => {
-        if (current) setKeyStatus("unavailable");
-      },
-    );
-    return () => {
-      current = false;
-    };
-  }, []);
+  const fail = (error: unknown) => {
+    showToast(error instanceof Error ? error.message : String(error), {
+      variant: "error",
+    });
+  };
 
-  const saveKey = async () => {
-    if (!keyDraft.trim()) return;
-    setBusy("save");
+  const toggleEnabled = async () => {
+    if (!settings || (!enabled && !configured)) return;
+    setBusy("toggle");
     try {
-      await api.setJevApiKey(keyDraft);
-      setKeyDraft("");
-      setKeyStatus("configured");
-      showToast(t("settings.jevKeySaved"), { variant: "success" });
+      await persistJevEnabled(!enabled);
     } catch (error) {
-      showToast(error instanceof Error ? error.message : String(error), {
-        variant: "error",
-      });
+      fail(error);
     } finally {
       setBusy(null);
     }
@@ -61,47 +61,27 @@ export function JevSettingsCard({ settings }: { settings?: AppSettings }) {
   const removeKey = async () => {
     setBusy("remove");
     try {
-      if (enabled) await persistSettings({ jevEnabled: false });
-      await api.deleteJevApiKey();
+      await removeJevService({
+        setEnabled: persistJevEnabled,
+        deleteKey: () => api.deleteJevApiKey(),
+      });
       setKeyStatus("missing");
-      setKeyDraft("");
       showToast(t("settings.jevKeyRemoved"), { variant: "success" });
     } catch (error) {
-      try {
-        setKeyStatus((await api.hasJevApiKey()) ? "configured" : "missing");
-      } catch {
-        setKeyStatus("unavailable");
-      }
-      showToast(error instanceof Error ? error.message : String(error), {
-        variant: "error",
-      });
+      setKeyStatus((await api.hasJevApiKey().catch(() => configured)) ? "configured" : "missing");
+      fail(error);
     } finally {
       setBusy(null);
     }
   };
 
-  const toggleEnabled = async () => {
-    if (!settings || (!enabled && !configured)) return;
-    setBusy("toggle");
-    try {
-      await persistSettings({ jevEnabled: !enabled });
-    } catch (error) {
-      showToast(error instanceof Error ? error.message : String(error), {
-        variant: "error",
-      });
-    } finally {
-      setBusy(null);
-    }
-  };
-
-  const keyStatusText =
-    keyStatus === "configured"
-      ? t("settings.jevKeyConfigured")
-      : keyStatus === "unavailable"
-        ? t("settings.jevKeyStatusUnavailable")
-        : keyStatus === "loading"
-          ? t("settings.jevKeyStatusChecking")
-          : t("settings.jevKeyMissing");
+  const keyStatusText = configured
+    ? t("settings.jevKeyConfigured")
+    : keyStatus === "unavailable"
+      ? t("settings.jevKeyStatusUnavailable")
+      : keyStatus === "loading"
+        ? t("settings.jevKeyStatusChecking")
+        : t("settings.jevKeyMissing");
 
   return (
     <SettingsCard
@@ -113,49 +93,35 @@ export function JevSettingsCard({ settings }: { settings?: AppSettings }) {
         description={t("settings.jevEnableDescription")}
         detail={keyStatusText}
       >
-        <SettingsToggle
-          checked={enabled}
-          label={t("settings.jevEnable")}
-          disabled={busy !== null || !settings || (!configured && !enabled)}
-          busy={busy === "toggle"}
-          onChange={() => void toggleEnabled()}
-        />
-      </SettingsRow>
-      <p className="jev-settings-privacy-note">{t("settings.jevPrivacyNotice")}</p>
-      <div className="jev-settings-key-form">
-        <Field label={t("settings.jevApiKey")}>
-          <PasswordInput
-            value={keyDraft}
-            onChange={(event) => setKeyDraft(event.target.value)}
-            placeholder={t("settings.jevApiKeyPlaceholder")}
-            aria-label={t("settings.jevApiKey")}
-            autoComplete="new-password"
-            showLabel={t("settings.configSync.showPassword")}
-            hideLabel={t("settings.configSync.hidePassword")}
-            disabled={busy !== null}
-          />
-        </Field>
-        <div className="jev-settings-key-actions">
-          <Button
-            variant="primary"
-            size="sm"
-            disabled={busy !== null || !keyDraft.trim()}
-            onClick={() => void saveKey()}
-          >
-            {t("settings.jevSaveKey")}
-          </Button>
+        <div className="jev-settings-controls">
           <Button
             variant="ghost"
             size="sm"
-            disabled={
-              busy !== null || keyStatus === "missing" || keyStatus === "loading"
-            }
-            onClick={() => void removeKey()}
+            disabled={busy !== null}
+            onClick={onConfigure}
           >
-            {t("settings.jevRemoveKey")}
+            {configured ? t("settings.jevReplaceKey") : t("settings.jevConfigureKey")}
           </Button>
+          {configured ? (
+            <Button
+              variant="ghost"
+              size="sm"
+              disabled={busy !== null}
+              onClick={() => void removeKey()}
+            >
+              {t("settings.jevRemoveKey")}
+            </Button>
+          ) : null}
+          <SettingsToggle
+            checked={enabled}
+            label={t("settings.jevEnable")}
+            disabled={busy !== null || !settings || (!configured && !enabled)}
+            busy={busy === "toggle"}
+            onChange={() => void toggleEnabled()}
+          />
         </div>
-      </div>
+      </SettingsRow>
+      <p className="jev-settings-privacy-note">{t("settings.jevPrivacyNotice")}</p>
     </SettingsCard>
   );
 }
