@@ -484,6 +484,9 @@ is unavailable (for example, a missing target), the normalized absolute path is
 the bookkeeping fallback. This identity never changes the submitted tool path
 or replaces Host permission and workspace checks; delegate budgets remain
 isolated from the parent and from other delegate runs.
+If a target later becomes canonicalizable (for example, after creation under a
+symlinked root), its identity may change from the lexical fallback; counts are
+not guaranteed to carry across that transition.
 
 Counts and per-code graces belong to the executing parent turn or delegate
 run. Parallel delegates working on the same path do not share failures or

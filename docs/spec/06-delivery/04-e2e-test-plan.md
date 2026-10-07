@@ -16988,7 +16988,8 @@ host-created files. The full app's file-preview viewer is covered separately.
 - Successfully Edit or Write through an alias and retry: the count and grace
   reset. Removing the file through a linked path clears its pre-mutation identity.
 - Repeat relative/absolute aliases in a temporary session: its scratch root is
-  the relative base. Case-distinct POSIX files remain separate.
+  the relative base. Probe the directory's actual case sensitivity: distinct
+  case-sensitive files remain separate, while case aliases share an identity.
 - Automated filesystem/runtime boundary coverage: `runtime.test.ts` and
   `mutation-recovery.test.ts`; no UI, production profile or real provider is used.
 
