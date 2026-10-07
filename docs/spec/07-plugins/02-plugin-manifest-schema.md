@@ -53,6 +53,9 @@ type PluginManifestV1 = {
  repository?: string;
  icon?: string; // relative path
  main?: string; // plugin runtime entry
+ renderer?: string; // module the host evaluates to mount UI slots (§3.2)
+ rendererActions?: string[]; // actions a renderer component may dispatch, at most 16
+ rendererCallMethods?: string[]; // onRendererCall methods plugin.call may reach, at most 32
  ui?: PluginUiConfig;
  contributes?: PluginContributes;
  permissions?: PluginPermission[];
@@ -136,6 +139,47 @@ Rules:
    titles — is not translated here. The host publishes the active language
    (`pi.app.getLocale`, `appearance:changed`); the plugin localizes itself
    (ADR 0280).
+
+### 3.2 Renderer module (`renderer`)
+
+`renderer` names an ES module inside the package that the host evaluates in its
+own window to mount UI slot components:
+
+- `composerControl` — additive controls in the composer toolbar
+- `composerTrigger` — the item list behind one of the composer's trigger
+  symbols (data, not a component: the host draws the list)
+- `userAction` / `assistantAction` — additive items on a message's action bar
+- `entryExtra` — an additive block below an assistant reply
+- `toolCard` — the card for calls of one of the plugin's own Agent tools
+- `blockRenderer` — the renderer for a fenced block tagged `<pluginId>:<lang>`
+
+`pi.slots.register` returns a disposer, and every registration is withdrawn when
+the plugin unloads. A self-drawn dialog is not a slot: the plugin opens a layer
+with `pi.ui.openLayer` and draws into it (`docs/plugin-plan/ui/`).
+
+The module runs in the host's own realm, so this is a contract and not a sandbox
+boundary; the two whitelists are what keeps a component inside its own plugin.
+`rendererActions` lists the actions a component may dispatch, capped at 16, from
+the fixed vocabulary `plugin.call`, `composer.insertText`, `composer.readDraft`,
+`composer.replaceDraft`, `attachments.add`, `attachments.list`,
+`attachments.remove` — a word outside it is refused as `PLUGIN_ACTION_UNKNOWN`,
+and a word the manifest does not list as `PLUGIN_ACTION_UNDECLARED`.
+`rendererCallMethods` lists the method names the plugin's `onRendererCall`
+answers for `plugin.call`, capped at 32; the host adds the calling plugin's id,
+so a component only ever reaches its own plugin.
+
+```json
+{
+  "permissions": ["renderer.extension"],
+  "renderer": "renderer/index.mjs",
+  "rendererActions": ["plugin.call", "composer.insertText"],
+  "rendererCallMethods": ["openWorkspace"]
+}
+```
+
+Slot names, props and the caps are in `packages/plugin-sdk/src/renderer.ts`
+(`PLUGIN_RENDERER_SLOTS`, `PLUGIN_RENDERER_ACTIONS`, `PLUGIN_SLOT_POSITIONS`),
+and a worked example is `examples/plugins/ui-slots-lab`.
 
 ## 4. contributes
 
@@ -332,6 +376,7 @@ type PluginPermission =
  | "fs.delete"
  | "agent.tool.register"
  | "agent.prompt.inject"
+ | "renderer.extension"
  | "provider.register"
  | "provider.oauth"
  | "net.fetch"
@@ -555,6 +600,11 @@ MVP may implement only:
    `[a-zA-Z][a-zA-Z0-9._-]{0,63}` and is unique; `command` must be declared in
    `contributes.commands`; `default`, when present, uses the same
    modifier-plus-key / F-key grammar as `shortcut` settings
+
+19. `renderer` must be a `.js` or `.mjs` file inside the package;
+    `rendererActions` (at most 16) and `rendererCallMethods` (at most 32) are
+    lists of non-empty names and require `renderer`. Declaring any of the three
+    needs the `renderer.extension` permission (§3.2)
 
 ## 8. Example: minimal plugin
 

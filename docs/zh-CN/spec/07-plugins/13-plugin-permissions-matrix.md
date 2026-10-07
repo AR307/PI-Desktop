@@ -27,6 +27,7 @@
 | `agent.tool.register` | 高 | 注册代理工具 | 安装时确认 | 工具执行情况单独审核 |
 | `agent.prompt.inject` | 高 | 注入系统提示符；激活 `contributes.skills` | 默认拒绝/强确认 | 容易导致行为劫持 |
 | `agent.extension` | 高 | 在 agent 进程内运行 `contributes.agentExtensions` 模块 | 显式确认；v1.1 仅限本地导入和开发插件 | 与 agent 自身工具同等权限；插件沙箱不适用（规格 16） |
+| `renderer.extension` | 高 | 在宿主渲染进程中执行 `manifest.renderer` 以挂载 UI 插槽；`rendererActions` 与 `rendererCallMethods` 决定该模块可以派发的动作与 `onRendererCall` 方法 | 显式确认；v1.1 仅限本地导入和开发插件，与 `agent.extension` 一致 | 模块与 PI-Desktop 同文档运行，因此插槽是契约而不是沙箱。组件只能派发经过审查的动作词表（`plugin.call`、`composer.insertText`、`composer.readDraft`、`composer.replaceDraft`、`attachments.add` / `list` / `remove`），最多 16 个；`plugin.call` 只能触达调用者自己插件的 `onRendererCall` 方法，最多 32 个。插件卸载时注册会被撤销；自绘弹窗位于插件自己打开的层中 |
 | `provider.register` | 高 | `contributes.providers` 成为原生 Provider 列表中的行，归插件所有并在每次加载时按 manifest 刷新 | 显式确认；v1.1 仅限本地导入和开发插件，与 `agent.extension` 一致 | 用户路径拒绝编辑该行（`PROVIDER_OWNED_BY_PLUGIN`）；API key 凭据仍存放在 Host secret store 的常规 provider 引用下 |
 | `provider.oauth` | 高 | 已声明 OAuth provider 的 `onProviderOAuth`；宿主渲染的 `pi.providers.oauth.prompt` / `notify` | 显式确认 | `authKind: "oauth"` 需要与 `provider.register` 一起授予。回调只能读取和刷新该 provider 声明自己的加密凭据。Host 会把刷新令牌隔离在渲染进程与 Agent Runtime 之外。宿主代发的网络请求仍需 `net.fetch` 和 `manifest.net.domains`；插件入口代码本身不是操作系统沙箱。每个 provider 声明只保存一个账号；退出登录会清除凭据 |
 | `net.fetch` | 高 | `net.fetch` | 默认拒绝 | 限定在 `manifest.net.domains` 之内；列表为空或非法即完全不放行出网（§2A） |
@@ -131,6 +132,7 @@ Agent，在 Plan 中不可见。主机返回 `PLUGIN_DISABLED_IN_PLAN`
 | `agent.tool.register` | 为AI Agent提供可执行工具 | 向AI Agent提供可执行工具 |
 | `agent.prompt.inject` | 调整代理指令 | 调整智能体指令 |
 | `agent.extension` | 在 agent 内运行代码 | 在 agent 内运行代码 |
+| `renderer.extension` | Draw UI in chat slots | 在聊天插槽绘制界面 |
 | `net.fetch` | 访问网络 | 访问网络 |
 | `shell.openExternal` | 打开外部链接 | 打开外部链接 |
 | `ui.theme` | 提供一个主题 | 提供主题 |
