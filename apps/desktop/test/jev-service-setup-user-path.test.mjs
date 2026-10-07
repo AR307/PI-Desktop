@@ -124,12 +124,13 @@ function jevDialog(key) {
 }
 
 /**
- * The settings page's own wiring: the card opens the dialog, and the dialog's
- * report of a stored key is what makes the card read the state again.
+ * The settings page's own wiring: the dialog is opened where the service
+ * chooser opens it, and the dialog's report of a stored key is what makes the
+ * card read the state and appear on the page.
  */
-function JevSurface() {
+function JevSurface({ initiallyOpen = false }) {
   const settings = useAppStore((state) => state.settings);
-  const [open, setOpen] = React.useState(false);
+  const [open, setOpen] = React.useState(initiallyOpen);
   const [revision, setRevision] = React.useState(0);
   return React.createElement(
     React.Fragment,
@@ -178,15 +179,15 @@ window.jevServiceSetupProbe = async () => {
   const hiddenWhenEditing = !jevTile();
   const hiddenGroup = !document.body.innerText.includes("Classifiers");
 
-  // 3) The card and the dialog, wired the way the settings page wires them:
-  // adding Jev checks the key, stores it, turns Jev on, and the card reads it.
+  // 3) Jev is not added yet, so the page shows no card: this dialog is opened
+  // the way the service chooser opens it. Adding the service checks the key,
+  // stores it, turns Jev on, and the card appears because the key is there.
   apiCalls.length = 0;
   savedKey = undefined;
   configured = false;
   jevCheck = { ok: true, status: 200 };
-  mount(React.createElement(JevSurface));
-  await waitFor(() => document.body.innerText.includes("API key not configured"), "the card did not read the empty state");
-  flushSync(() => button("Add key").click());
+  mount(React.createElement(JevSurface, { initiallyOpen: true }));
+  const cardAbsentBefore = !document.querySelector('[role="switch"][aria-label="Enable Jev for Agent"]');
   await waitFor(() => !!document.querySelector('input[aria-label="TypeSafe API key"]'), "the Jev form did not open");
   // The dialog is portaled onto documentElement, so the whole page is read.
   const privacyNoticeShown = await waitFor(
@@ -201,7 +202,8 @@ window.jevServiceSetupProbe = async () => {
     () => document.body.innerText.includes("API key saved securely"),
     "the card did not pick up the key the dialog stored",
   );
-  const switchOn = document.querySelector('[role="switch"][aria-label="Enable Jev for Agent"]').getAttribute("aria-checked") === "true";
+  const cardSwitch = document.querySelector('[role="switch"][aria-label="Enable Jev for Agent"]');
+  const switchOn = cardSwitch?.getAttribute("aria-checked") === "true";
   const dialogClosed = !document.querySelector('input[aria-label="TypeSafe API key"]');
   // The check, the store and the switch, in that order.
   const flow = apiCalls.filter((call) => call.channel !== "pi-desktop/secrets/has");
@@ -271,6 +273,7 @@ window.jevServiceSetupProbe = async () => {
     hiddenGroup,
     privacyNoticeShown,
     noModelPanes,
+    cardAbsentBefore,
     switchOn,
     dialogClosed,
     checkedFirst,
@@ -289,7 +292,7 @@ window.jevServiceSetupProbe = async () => {
 };
 `;
 
-test("adding Jev checks the key before storing it, enables it on success, and cancels on close", {
+test("adding Jev checks the key, enables it, shows the card, and cancels on close", {
   timeout: 60_000,
   skip:
     process.platform === "linux" && !process.env.DISPLAY
@@ -377,6 +380,7 @@ app.whenReady().then(async () => {
       privacyNoticeShown: true,
       noModelPanes: true,
       switchOn: true,
+      cardAbsentBefore: true,
       dialogClosed: true,
       checkedFirst: true,
       checkedTheTypedKey: true,

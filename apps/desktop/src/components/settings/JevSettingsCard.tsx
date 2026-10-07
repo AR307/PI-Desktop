@@ -1,12 +1,12 @@
 /**
  * Jev on the model configuration page (D625, settings IA).
  *
- * The card is the state of the integration and the way in: whether a TypeSafe
- * key is stored, whether the classifier is on for Agent mode, and the actions
- * that change either. The key itself is entered in the service dialog, which
- * is also where Jev is added from — one place stores a key, and that place
- * checks it against TypeSafe first. A field here would be a second way to keep
- * a key nothing verified.
+ * The card is the state of the integration: whether a TypeSafe key is stored,
+ * whether the classifier is on for Agent mode, and the actions that change
+ * either. It is only there once Jev has been added — before that it would be a
+ * second place to paste a key, and adding stays where every other service is
+ * added. The key itself is entered in the service dialog, which checks it
+ * against TypeSafe before anything is kept.
  */
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
@@ -39,6 +39,14 @@ export function JevSettingsCard({
   const [busy, setBusy] = useState<BusyAction>(null);
   const enabled = settings?.jevEnabled === true;
   const configured = keyStatus === "configured";
+  /*
+    Jev is one of the services the user adds from "Add service", so an install
+    without it has nothing to show here: a card would only be a second place to
+    paste a key. It appears once a key is stored, and it stays while a Host that
+    cannot answer refuses to say either way or an enabled setting contradicts a
+    missing key — hiding a configured install is the worse failure.
+  */
+  if (!configured && !enabled && keyStatus !== "unavailable") return null;
 
   const fail = (error: unknown) => {
     showToast(error instanceof Error ? error.message : String(error), {

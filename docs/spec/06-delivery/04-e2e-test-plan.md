@@ -16927,21 +16927,24 @@ host-created files. The full app's file-preview viewer is covered separately.
   Build workspace JS packages with `pnpm build:js`, then run
   `pnpm test:e2e:jev`. Do not use a real TypeSafe key or endpoint.
 - **Steps:** 1) On the service chooser's add path, confirm Jev is offered in
-  its own Classifiers group and absent when an existing row changes service.
-  2) Open the Jev form, paste a sentinel key and Check and save: the fixture
-  answers the check, the key reaches Host secure storage, Jev is on. 3) Resolve
-  a session launch with Jev enabled, then disabled and in Plan mode. 4) Through
-  the runtime's deferred catalog, request Jev in Agent mode and inspect
-  Plan/Goal catalogs. 5) Call `JevClassify` with one choice, one score and one
-  boolean question over a small JSON state. 6) Answer a check with 401 for a
-  second key: nothing is written and Jev stays off. 7) Start a check and close
-  the dialog while it is still in flight: the key is not stored and Jev stays
-  off. 8) In the Jev card, switch Jev off and remove the key.
+  its own Classifiers group and absent when an existing row changes service,
+  and that no Jev card is on the model configuration page yet. 2) Open the Jev
+  form, paste a sentinel key and Check and save: the fixture answers the check,
+  the key reaches Host secure storage, Jev is on, and the card appears.
+  3) Resolve a session launch with Jev enabled, then disabled and in Plan mode.
+  4) Through the runtime's deferred catalog, request Jev in Agent mode and
+  inspect Plan/Goal catalogs. 5) Call `JevClassify` with one choice, one score
+  and one boolean question over a small JSON state. 6) Answer a check with 401
+  for a second key: nothing is written and Jev stays off. 7) Start a check and
+  close the dialog while it is still in flight: the key is not stored and Jev
+  stays off. 8) In the Jev card, switch Jev off and remove the key; the card
+  leaves with it.
 - **Expected:** The check runs before any write, in the order check, store, then
   enable, so a refused key leaves no secret and no enabled setting behind, and
-  the refusal is reported with TypeSafe's status. The UI never returns the key
-  to settings state, and removal disables Jev before deleting it. Only an
-  enabled Agent launch reads the key and passes it ephemerally to the sidecar.
+  the refusal is reported with TypeSafe's status. The card is on the page only
+  once Jev has been added, and it leaves when the key does. The UI never returns
+  the key to settings state, and removal disables Jev before deleting it. Only
+  an enabled Agent launch reads the key and passes it ephemerally to the sidecar.
   `JevClassify` appears in the Agent's deferred catalog only with a key and
   never in Plan or Goal. Closing the dialog cancels an in-flight check the same
   way a refused key does: nothing stored, nothing enabled. The fixture receives
