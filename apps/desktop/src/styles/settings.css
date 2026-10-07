@@ -1064,6 +1064,27 @@
   min-height: var(--ds-field-height);
 }
 
+.jev-settings-privacy-note {
+  margin: 0;
+  padding: 0 16px 12px;
+  color: var(--ds-text-secondary);
+  font-size: var(--text-sm);
+  line-height: var(--leading-body);
+}
+
+.jev-settings-key-form {
+  display: grid;
+  gap: 10px;
+  padding: 0 16px 16px;
+}
+
+.jev-settings-key-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
 /*
   A toggle paired with an icon action (prompt enhancement). The control column
   has no gap of its own, so the two would otherwise touch.

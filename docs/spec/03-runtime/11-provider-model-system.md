@@ -217,6 +217,10 @@ PI-Desktop must not permanently restrict users to a short fixed model list.
 5. Chat, image and classifier models are selected by operation type even when
    they share a model ID. pi-ai remains responsible for OAuth, wire identity,
    transport and typed non-chat operations that models.dev does not describe.
+   PI-Desktop's optional Jev integration uses pi-ai's built-in
+   `typesafe/jev-latest` classifier directly; it is never listed or selectable
+   as a chat provider/model. A saved TypeSafe key and explicit Jev setting are
+   required before Agent mode receives the on-demand `JevClassify` tool.
 6. Free-form IDs remain configurable. Conservative generic metadata applies
    when no published model matches; explicit user overrides remain supported.
    Unknown relay metadata uses exact final-segment matching and an unambiguous

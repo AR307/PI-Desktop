@@ -177,6 +177,7 @@ function createRuntime(
     subagentModelKeys: string[];
     pluginSkills: import("./plugin-skills-prompt.js").PluginSkillDef[];
     commandShell: CommandShellOption;
+    jevApiKey: string;
     turnId: string;
     host: { call: ReturnType<typeof vi.fn>; onNotification?: ReturnType<typeof vi.fn> };
     onEvent: (envelope: unknown) => void;
@@ -186,6 +187,7 @@ function createRuntime(
     host: (overrides.host ?? { call: vi.fn(), onNotification: vi.fn(() => () => {}) }) as never,
     sessionId: "session-1",
     mode: overrides.mode === "chat" ? "plan" : overrides.mode ?? "agent",
+    jevApiKey: overrides.jevApiKey,
     turnId: overrides.turnId,
     provider: overrides.provider ?? provider,
     commandShell: overrides.commandShell ?? commandShell,
@@ -2026,6 +2028,83 @@ describe("DesktopAgentRuntime live activity", () => {
 });
 
 describe("DesktopAgentRuntime deferred tool catalog", () => {
+  it("offers Jev only in Agent mode when an API key is supplied", async () => {
+    type ToolResult = {
+      content: Array<{ type: "text"; text: string }>;
+      details: { activated: string[]; addedToolNames: string[] };
+      isError?: boolean;
+    };
+    type RuntimeTestTool = {
+      name: string;
+      execute?: (id: string, input: { query: string }) => Promise<ToolResult>;
+    };
+    type RuntimeTestView = {
+      agent: { state: { tools: RuntimeTestTool[]; systemPrompt: string } };
+      prepareNextTurn: (input: never) => Promise<{
+        context: { tools: RuntimeTestTool[] };
+      }>;
+    };
+
+    const enabled = createRuntime({ jevApiKey: "fixture-key" });
+    try {
+      const view = enabled as unknown as RuntimeTestView;
+      const tools = view.agent.state.tools;
+      const search = tools.find((tool) => tool.name === "ToolSearch");
+      expect(search).toBeDefined();
+      expect(view.agent.state.systemPrompt).toContain("JevClassify");
+
+      const result = await search?.execute?.("search-jev", {
+        query: "JevClassify",
+      });
+      expect(result?.details.activated).toEqual(["JevClassify"]);
+      const next = await view.prepareNextTurn({
+        context: { systemPrompt: "", messages: [], tools },
+        messages: [],
+        newMessages: [],
+        toolResults: [
+          {
+            role: "toolResult",
+            toolCallId: "search-jev",
+            toolName: "ToolSearch",
+            content: result?.content ?? [],
+            details: result?.details,
+            isError: result?.isError ?? false,
+            timestamp: Date.now(),
+          },
+        ],
+      } as never);
+      expect(next.context.tools.map((tool) => tool.name)).toContain(
+        "JevClassify",
+      );
+    } finally {
+      await enabled.dispose();
+    }
+
+    for (const mode of ["plan", "goal"] as const) {
+      const restricted = createRuntime({ mode, jevApiKey: "fixture-key" });
+      try {
+        const view = restricted as unknown as RuntimeTestView;
+        expect(view.agent.state.systemPrompt).not.toContain("JevClassify");
+        expect(view.agent.state.tools.map((tool) => tool.name)).not.toContain(
+          "JevClassify",
+        );
+      } finally {
+        await restricted.dispose();
+      }
+    }
+
+    const missingKey = createRuntime();
+    try {
+      const view = missingKey as unknown as RuntimeTestView;
+      expect(view.agent.state.systemPrompt).not.toContain("JevClassify");
+      expect(view.agent.state.tools.map((tool) => tool.name)).not.toContain(
+        "JevClassify",
+      );
+    } finally {
+      await missingKey.dispose();
+    }
+  });
+
   it("starts Agent with core tools plus workspace search and discovery", async () => {
     const runtime = createRuntime({
       pluginTools: [
