@@ -130,8 +130,8 @@ export function JevSettingsCard({ settings }: { settings?: AppSettings }) {
             placeholder={t("settings.jevApiKeyPlaceholder")}
             aria-label={t("settings.jevApiKey")}
             autoComplete="new-password"
-            showLabel={t("settings.showPassword")}
-            hideLabel={t("settings.hidePassword")}
+            showLabel={t("settings.configSync.showPassword")}
+            hideLabel={t("settings.configSync.hidePassword")}
             disabled={busy !== null}
           />
         </Field>
