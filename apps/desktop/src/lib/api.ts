@@ -29,6 +29,7 @@ import type {
   PendingInteractiveRequests,
   AgentInstructionFile,
   AppSettings,
+  JevKeyCheckResult,
   CommandShellCatalog,
   AppVersionInfo,
   BrowserAction,
@@ -667,11 +668,16 @@ export const api = {
     invoke(IPC.invoke.settingsSet, validateSettingsWrite(settings)),
   /** Store the Jev key in Host secure storage; it is never returned to renderer state. */
   setJevApiKey: (value: string) =>
-    invoke(IPC.invoke.secretsSet, { secretRef: JEV_API_KEY_SECRET_REF, value }),
-  deleteJevApiKey: () =>
-    invoke(IPC.invoke.secretsDelete, JEV_API_KEY_SECRET_REF),
+    invoke<void>(IPC.invoke.secretsSet, { secretRef: JEV_API_KEY_SECRET_REF, value }),
+  deleteJevApiKey: () => invoke<void>(IPC.invoke.secretsDelete, JEV_API_KEY_SECRET_REF),
   hasJevApiKey: () =>
     invoke<{ has: boolean }>(IPC.invoke.secretsHas, JEV_API_KEY_SECRET_REF).then((result) => result.has),
+  /**
+   * Ask TypeSafe whether this key works, without storing anything. Jev keeps
+   * a key only after this answered it; the check text is TypeSafe's own.
+   */
+  testJevApiKey: (value: string) =>
+    invoke<JevKeyCheckResult>(IPC.invoke.jevTest, value),
   configSyncGetState: () => invoke<ConfigSyncState>(IPC.invoke.configSyncGetState),
   configSyncConfigure: (input: ConfigSyncConfigureInput) =>
     invoke<ConfigSyncState>(IPC.invoke.configSyncConfigure, input),
