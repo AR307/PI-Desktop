@@ -2,7 +2,7 @@ import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
-import { type Agent, type AgentMessage } from "@earendil-works/pi-agent-core";
+import { type Agent, type AgentMessage, type AgentTool } from "@earendil-works/pi-agent-core";
 import {
   createAssistantMessageEventStream,
   getCurrentTools,
@@ -784,10 +784,47 @@ describe("DesktopAgentRuntime configuration matching", () => {
     await runtime.dispose();
   });
 
+  it.each(["default", "accept-edits"] as const)("keeps %s delegate recovery across a new parent prompt", async (permission) => {
+    const host = {
+      call: vi.fn(async (method: string) => method === "tools.execute"
+        ? { ok: false, isError: true, errorCode: "EDIT_PARSE_FAILED", content: { error: "bad ops" } }
+        : undefined),
+    };
+    const runtime = createRuntime({ host });
+    const internal = runtime as unknown as {
+      agent: Agent;
+      scopeDelegateTools: (tools: AgentTool[], definition: SubagentDefinition, owner: string) => AgentTool[];
+      resetRunRecoveryState: () => void;
+      pendingMutationTermination?: unknown;
+    };
+    const edit = internal.agent.state.tools.find((tool) => tool.name === "Edit")!;
+    const definition: SubagentDefinition = {
+      name: "writer", description: "Edits files", prompt: "Edit the file", source: "user", tools: ["Edit"],
+      ...(permission === "accept-edits" ? { permission } : {}),
+    };
+    const [delegate] = internal.scopeDelegateTools([edit], definition, "writer-run");
+    const args = { path: "src/example.ts", tag: "ABCD", ops: "PUT 1.=1:" };
+    try {
+      expect(await delegate.execute("child-1", args)).not.toHaveProperty("terminate", true);
+      expect(await delegate.execute("child-2", args)).not.toHaveProperty("terminate", true);
+      expect(await edit.execute("parent-1", args)).not.toHaveProperty("terminate", true);
+      internal.resetRunRecoveryState();
+      expect(await delegate.execute("child-3", args)).toHaveProperty("terminate", true);
+      expect(internal.pendingMutationTermination).toBeUndefined();
+      expect(await edit.execute("parent-2", args)).not.toHaveProperty("terminate", true);
+      expect(await edit.execute("parent-3", args)).not.toHaveProperty("terminate", true);
+      expect(await edit.execute("parent-4", args)).toHaveProperty("terminate", true);
+    } finally {
+      await runtime.dispose();
+    }
+  });
+
   it("clears the mutation strike once an edit on that path lands", async () => {
     const results = [
       { ok: false, isError: true, errorCode: "EDIT_PARSE_FAILED", content: {} },
       { ok: true, isError: false, content: { tag: "C3D4" } },
+      { ok: false, isError: true, errorCode: "EDIT_PARSE_FAILED", content: {} },
+      { ok: false, isError: true, errorCode: "EDIT_PARSE_FAILED", content: {} },
       { ok: false, isError: true, errorCode: "EDIT_PARSE_FAILED", content: {} },
     ];
     let editCall = 0;
@@ -810,7 +847,8 @@ describe("DesktopAgentRuntime configuration matching", () => {
     // Without the reset this failure would be strike three and end the turn.
     const afterSuccess = await edit.execute("edit-3", args);
     expect(afterSuccess.terminate).toBeUndefined();
-    expect((runtime as any).mutationFailureCounts.get("src/example.ts")).toBe(1);
+    expect((await edit.execute("edit-4", args)).terminate).toBeUndefined();
+    expect((await edit.execute("edit-5", args)).terminate).toBe(true);
 
     await runtime.dispose();
   });

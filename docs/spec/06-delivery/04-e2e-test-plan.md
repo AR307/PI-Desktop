@@ -16962,3 +16962,18 @@ host-created files. The full app's file-preview viewer is covered separately.
 - Repeat with UTF-16BE Chinese text. Ordinary binary files remain rejected.
 - Automated coverage: `read_powershell_utf16le_log`,
   `read_and_edit_utf16be_chinese_text`, and the existing binary/CRLF tool tests.
+
+
+## Delegate mutation recovery isolation
+
+- Start two Task delegates editing the same file. Delegate A produces text and
+  fails three Edits; B fails twice and then completes. A is failed with
+  `MUTATION_RETRY_BUDGET_EXHAUSTED`, B completes, and the parent has no mutation
+  error. Resume A with a corrected task and verify successful completion.
+- Run the same flow with failing shell patch commands. Repeat with one delegate
+  to prove that text preceding exhaustion does not become a completed report.
+- While a delegate continues, a new parent prompt resets only the parent's
+  recovery counters. Both default and explicit delegate permissions retain the
+  same isolation.
+- Automated provider-boundary flow: `node scripts/e2e-subagent-edit-isolation.mjs`
+  with optional `--single` and `--patch`; runtime tests cover parent restart.
