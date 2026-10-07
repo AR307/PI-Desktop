@@ -471,6 +471,11 @@ occurrence, because repeating one of those means the model is guessing.
 Counting a grace is per code, not per call, so a stale tag followed by unseen
 lines is two distinct honest failures while the same code twice is not.
 
+Counts and per-code graces belong to the executing parent turn or delegate
+run. Parallel delegates working on the same path do not share failures or
+successful-write resets. A new parent prompt resets only the parent's recovery
+state; still-running delegates retain theirs until they settle.
+
 When the count does reach the limit the tool result carries `terminate: true`
 and the agent loop stops after that batch. Stopping there must not leave a turn
 that merely ends: the runtime finalizes the assistant row with
@@ -483,6 +488,11 @@ body rows must end its header with `:`, for example `PUT 48.=48:`. Stale-tag and
 unseen-line failures continue to direct the model to re-read or use the complete
 reveal. A terminated turn with no message is indistinguishable from a model that
 chose to say nothing.
+
+For delegates, exhaustion is reported on the Task result as `failed` with
+`MUTATION_RETRY_BUDGET_EXHAUSTED`. Earlier report text is preserved but cannot
+turn the failed run into `completed`. The parent and sibling delegates keep
+running, and the failed chain remains available through `Task(resume)`.
 
 ## 10. Drift recovery
 

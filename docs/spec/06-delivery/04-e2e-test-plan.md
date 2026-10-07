@@ -16927,3 +16927,18 @@ host-created files. The full app's file-preview viewer is covered separately.
   image model selection and provider configuration remain available.
 - Coverage: recent-models.test.mjs, recent-model-flow.test.mjs,
   default-model-picker.test.mjs, and scripts/e2e-composer-model-selection.mjs.
+
+
+## Delegate mutation recovery isolation
+
+- Start two Task delegates editing the same file. Delegate A produces text and
+  fails three Edits; B fails twice and then completes. A is failed with
+  `MUTATION_RETRY_BUDGET_EXHAUSTED`, B completes, and the parent has no mutation
+  error. Resume A with a corrected task and verify successful completion.
+- Run the same flow with failing shell patch commands. Repeat with one delegate
+  to prove that text preceding exhaustion does not become a completed report.
+- While a delegate continues, a new parent prompt resets only the parent's
+  recovery counters. Both default and explicit delegate permissions retain the
+  same isolation.
+- Automated provider-boundary flow: `node scripts/e2e-subagent-edit-isolation.mjs`
+  with optional `--single` and `--patch`; runtime tests cover parent restart.
