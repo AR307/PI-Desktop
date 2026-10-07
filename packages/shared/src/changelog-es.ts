@@ -2,6 +2,19 @@ import type { ChangelogEntry } from "./changelog.js";
 
 export const esEntries: ChangelogEntry[] = [
   {
+    "version": "0.16.2",
+    "date": "2026-10-07",
+    "highlights": [
+      "Incluye las mejoras de upstream 0.16.1 en tareas programadas, referencias a archivos, capacidades de modelos y visualización de conversaciones.",
+      "Vincula el teléfono una vez para descubrir todos los equipos que activen el uso compartido de la cuenta, con sus proyectos y conversaciones.",
+      "Lee el historial cargado sin conexión y sin el límite de 500 mensajes; recupera cambios persistentes tras reiniciar el escritorio.",
+      "Busca actualizaciones de Android en Cuenta, descarga el APK y abre el instalador del sistema conservando los datos.",
+      "Mejora el inicio de sesión móvil, los errores de vinculación, la detección sin conexión y la recuperación de permisos compartidos.",
+      "Corrige las vistas previas HTML locales y permite leer o editar registros UTF-16 con BOM sin tratarlos como binarios.",
+      "Aísla los fallos de edición de subagentes, informa cuando se agota la recuperación y guarda la conversación antes de salir."
+    ]
+  },
+  {
     "version": "0.16.1",
     "date": "2026-10-04",
     "highlights": [

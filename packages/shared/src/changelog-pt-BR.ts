@@ -2,6 +2,19 @@ import type { ChangelogEntry } from "./changelog.js";
 
 export const ptBREntries: ChangelogEntry[] = [
   {
+    "version": "0.16.2",
+    "date": "2026-10-07",
+    "highlights": [
+      "Inclui as melhorias do upstream 0.16.1 em tarefas agendadas, referências a arquivos, recursos dos modelos e exibição de conversas.",
+      "Pareie o celular uma vez para descobrir todos os computadores que ativam o compartilhamento da conta, com seus projetos e conversas.",
+      "Leia o histórico carregado offline sem o limite de 500 mensagens e retome as alterações persistentes após reiniciar o desktop.",
+      "Verifique atualizações do Android em Conta, baixe o APK e abra o instalador do sistema preservando os dados do aplicativo.",
+      "Melhora o login móvel, os erros de pareamento, a descoberta offline e a recuperação após mudanças no compartilhamento da conta.",
+      "Corrige as prévias HTML locais e permite ler ou editar registros UTF-16 com BOM sem tratá-los como arquivos binários.",
+      "Isola falhas de edição de subagentes, informa quando a recuperação se esgota e salva a conversa antes de encerrar."
+    ]
+  },
+  {
     "version": "0.16.1",
     "date": "2026-10-04",
     "highlights": [

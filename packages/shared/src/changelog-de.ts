@@ -2,6 +2,19 @@ import type { ChangelogEntry } from "./changelog.js";
 
 export const deEntries: ChangelogEntry[] = [
   {
+    "version": "0.16.2",
+    "date": "2026-10-07",
+    "highlights": [
+      "Enthält die Verbesserungen aus Upstream 0.16.1 für geplante Aufgaben, Dateiverweise, Modellfähigkeiten und die Gesprächsanzeige.",
+      "Einmaliges Koppeln findet alle Computer mit aktivierter Kontofreigabe samt Projekten und Gesprächen.",
+      "Geladene Verläufe bleiben ohne 500-Nachrichten-Limit offline lesbar; nach einem Desktop-Neustart werden Änderungen nachgeladen.",
+      "Unter Konto nach Android-Updates suchen, die APK herunterladen und den Systeminstaller öffnen, ohne App-Daten zu verlieren.",
+      "Verbesserte mobile Anmeldung, Kopplungsfehler, Offline-Erkennung und Wiederherstellung nach geänderten Kontofreigaben.",
+      "Lokale HTML-Vorschauen öffnen zuverlässig; UTF-16-Protokolle mit BOM lassen sich als Text lesen und bearbeiten.",
+      "Bearbeitungsfehler von Unteragenten bleiben isoliert; ausgeschöpfte Wiederherstellung meldet einen Fehler und Gesprächsdaten werden vor dem Beenden gespeichert."
+    ]
+  },
+  {
     "version": "0.16.1",
     "date": "2026-10-04",
     "highlights": [

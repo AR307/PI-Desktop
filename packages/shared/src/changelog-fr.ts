@@ -2,6 +2,19 @@ import type { ChangelogEntry } from "./changelog.js";
 
 export const frEntries: ChangelogEntry[] = [
   {
+    "version": "0.16.2",
+    "date": "2026-10-07",
+    "highlights": [
+      "Intègre les améliorations upstream 0.16.1 pour les tâches planifiées, les références de fichiers, les capacités des modèles et les conversations.",
+      "Un seul appairage découvre tous les ordinateurs qui activent le partage du compte, avec leurs projets et conversations.",
+      "Consultez hors ligne les historiques chargés sans limite de 500 messages et récupérez les changements après un redémarrage du bureau.",
+      "Recherchez les mises à jour Android dans Compte, téléchargez l’APK et ouvrez l’installateur système en conservant vos données.",
+      "Améliore la connexion mobile, les erreurs d’appairage, la découverte hors ligne et la reprise après un changement de partage.",
+      "Corrige les aperçus HTML locaux et permet de lire ou modifier les journaux UTF-16 avec BOM sans les traiter comme des fichiers binaires.",
+      "Isole les échecs d’édition des sous-agents, signale l’épuisement de la récupération et enregistre la conversation avant la fermeture."
+    ]
+  },
+  {
     "version": "0.16.1",
     "date": "2026-10-04",
     "highlights": [

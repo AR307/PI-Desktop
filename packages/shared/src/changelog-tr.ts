@@ -2,6 +2,19 @@ import type { ChangelogEntry } from "./changelog.js";
 
 export const trEntries: ChangelogEntry[] = [
   {
+    "version": "0.16.2",
+    "date": "2026-10-07",
+    "highlights": [
+      "Zamanlanmış görevler, dosya başvuruları, model yetenekleri ve konuşma görünümü için upstream 0.16.1 iyileştirmelerini içerir.",
+      "Telefonu bir kez eşleştirerek hesap paylaşımını etkinleştiren tüm bilgisayarları, projelerini ve konuşmalarını bulun.",
+      "Yüklenen geçmişi 500 mesaj sınırı olmadan çevrimdışı okuyun ve masaüstü yeniden başladıktan sonra kalıcı değişikliklerle eşitleyin.",
+      "Hesap bölümünden Android güncellemelerini denetleyin, APK indirin ve mevcut verileri koruyarak sistem yükleyicisini açın.",
+      "Mobil giriş, eşleştirme hataları, çevrimdışı keşif ve hesap paylaşımı değiştikten sonra kurtarma iyileştirildi.",
+      "Yerel HTML önizlemeleri düzeltildi; BOM içeren UTF-16 günlükleri ikili dosya sayılmadan okunabilir ve düzenlenebilir.",
+      "Alt ajan düzenleme hataları yalıtılır, kurtarma tükendiğinde görev başarısız olarak bildirilir ve çıkmadan önce konuşma kaydı tamamlanır."
+    ]
+  },
+  {
     "version": "0.16.1",
     "date": "2026-10-04",
     "highlights": [

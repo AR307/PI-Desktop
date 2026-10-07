@@ -14,5 +14,8 @@
 The first APK containing the updater must be installed manually. Account-wide
 discovery requires the corresponding MC service update and the new desktop
 sync contract. The previous unpartitioned tail cache is refreshed once on this
-upgrade; desktop conversation data is unchanged. This is a local preview until
-the APK and its generated update manifest are published together.
+upgrade; desktop conversation data is unchanged. The APK and generated
+`mobile-update.json` are published together in `AR307/Mirrorcoding-APP`.
+Android versionCode 6 retains the existing signing identity and application ID
+for covering upgrades. Controlled acceptance is recorded separately from
+production MC integration in the [combined release notes](0.16.2.md).

@@ -2,6 +2,19 @@ import type { ChangelogEntry } from "./changelog.js";
 
 export const enEntries: ChangelogEntry[] = [
   {
+    "version": "0.16.2",
+    "date": "2026-10-07",
+    "highlights": [
+      "Include upstream 0.16.1 improvements to scheduled tasks, file references, model capabilities and conversation rendering.",
+      "Pair a phone once to discover every computer that explicitly enables account sharing, including its projects and conversations.",
+      "Read loaded history offline without the 500-message limit and resume with durable changes after a desktop restart.",
+      "Check for Android updates in Account, download the APK and open the system installer while retaining existing app data.",
+      "Improve mobile login, pairing errors, offline discovery and recovery when account sharing changes.",
+      "Open local HTML previews reliably and read or edit BOM-marked UTF-16 logs without treating them as binary files.",
+      "Keep subagent edit failures isolated, report exhausted recovery as a failed task, and finish transcript persistence before shutdown."
+    ]
+  },
+  {
     version: "0.16.1",
     date: "2026-10-04",
     highlights: [

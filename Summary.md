@@ -1166,3 +1166,11 @@ user preview restart, push or release. See the subagent E2E README for boundarie
 - Updates stale clipboard, ReturnToParent disclosure and sidecar cancellation source contracts; corrects the import-page test boundary on Windows. Release checks retain their intended assertions.
 
 - Release acceptance: 15 real Electron subagent checks and 89 desktop/mobile-browser checks passed; all three packaged Windows app variants boot. Android release APK is signed and non-debuggable, while native QA remains blocked by the existing emulator/ADB fault. User authorized immediate publication with that boundary documented.
+# Release 0.16.2 (2026-10-07)
+
+Prepare Windows x64 installer, portable EXE/ZIP and Android releases from the
+tested account-sync alignment candidate. Synchronize workspace versions and
+nine in-app changelog catalogs; increment Android versionCode to 6 while
+preserving its application ID and existing signing identity. Desktop and mobile
+publish to their separate AR307 repositories with their own update metadata.
+See `docs/releases/0.16.2.md` for included changes and validation boundaries.

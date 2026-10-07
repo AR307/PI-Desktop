@@ -4,7 +4,7 @@ android {
     namespace = "xyz.mirrorcoding.pi.mobile"
     compileSdk = rootProject.ext.compileSdkVersion
     def acceptanceApplicationId = project.hasProperty('piMobileAcceptanceApplicationId') ? project.property('piMobileAcceptanceApplicationId').toString() : "xyz.mirrorcoding.pi.mobile"
-    def acceptanceVersionCode = project.hasProperty('piMobileAcceptanceVersionCode') ? project.property('piMobileAcceptanceVersionCode').toString().toInteger() : 5
+    def acceptanceVersionCode = project.hasProperty('piMobileAcceptanceVersionCode') ? project.property('piMobileAcceptanceVersionCode').toString().toInteger() : 6
     defaultConfig {
         applicationId acceptanceApplicationId
         minSdkVersion rootProject.ext.minSdkVersion
