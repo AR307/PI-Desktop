@@ -345,12 +345,15 @@
 - **Steps:** Mount the production `AskToolCard`, assert the header Tab order
   (decline, skip, next) with no legacy bottom action row, then walk select →
   next → submit, skip → submit, decline-all, and a custom answer, remounting
-  with a fresh request id between flows.
+  with a fresh request id between flows. Finally mount a question whose body
+  holds two markdown blocks and measure their boxes.
 - **Expected:** Every flow resolves through the store's `resolveAsk` with the
   exact answers (skips recorded as `null`), and no render errors are reported.
+  The two question blocks stack vertically on a shared left edge that spans
+  the card's text column, so a sentence never wraps inside a flex column.
 - **Status:** Automated in `pnpm test:e2e:asktool-card`, which mounts the
-   production `AskToolCard` in a real Chromium page and clicks through the
-   header actions.
+  production `AskToolCard` in a real Chromium page, clicks through the header
+  actions, and measures the multi-block question layout.
 
 ### E2E-POWER-keep-awake-setting
 
