@@ -541,6 +541,18 @@ confirmation only: Ask and Accept edits prompt, while Auto may run a mutating
 Bash command without confirmation. The AI Defaults card must describe that both
 contract modes are intent boundaries, not strict read-only security profiles.
 
+### Jev classifier
+
+- Keep Jev separate from the chat provider/model list: it is a TypeSafe
+  structured classifier, not a conversation model.
+- Let the user store or remove a TypeSafe API key and explicitly enable Jev
+  for Agent mode. The key stays in Host secure storage; the renderer only reads
+  whether one exists.
+- Explain that `JevClassify` sends only the state and questions the Agent passes
+  to TypeSafe, and warn users not to include secrets or personal information.
+- The tool is on demand and unavailable in Plan and Goal modes. Removing the
+  key disables Jev.
+
 ### Agent capability destinations (Skills / MCP / Subagents)
 
 Skills, MCP servers, and user-owned Subagents remain three independent

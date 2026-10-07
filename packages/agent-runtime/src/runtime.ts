@@ -14,6 +14,7 @@ import { requestExtensionUi } from "./extensions/ui-request.js";
 import { readLocalRequestErrorDetails } from "./local-request-errors.js";
 import { imageGenerationDescription, imageGenerationParameters } from "./image-generation/tool.js";
 import { todoWriteDescription, todoWriteParameters } from "./todo-tool.js";
+import { createJevClassifierTool } from "./jev-classifier-tool.js";
 import { scheduledToolParameters, scheduledToolDescriptions } from "./scheduled-tools.js";
 import { withPiFileOpToolNames } from "./pi-file-ops.js";
 import { randomUUID } from "node:crypto";
@@ -966,6 +967,8 @@ export type AgentRuntimeOptions = {
   thinkingLevel: SessionThinkingLevel;
   /** Persisted opt-in for retrying transient provider failures until success. */
   infiniteProviderRetry?: boolean;
+  /** TypeSafe Jev credential, resolved by Electron main only when enabled. */
+  jevApiKey?: string;
   systemPrompt?: string;
   /** pi-compatible SYSTEM.md / APPEND_SYSTEM.md resolved for the session (issue #542). */
   customSystemPrompt?: CustomSystemPrompt;
@@ -1030,6 +1033,7 @@ export type RuntimeMatchConfig = {
   mode: Mode;
   provider: RuntimeProviderConfig;
   thinkingLevel: SessionThinkingLevel;
+  jevApiKey?: string;
   pluginTools?: PluginToolDef[];
   pluginSkills?: PluginSkillDef[];
   trustedExtensions?: TrustedExtensionSpec[];
@@ -1793,6 +1797,7 @@ export class DesktopAgentRuntime {
   private providerRateLimitRetryAttempt = 0;
   /** Opt-in mode removes only the retry-count ceiling; abort and backoff stay intact. */
   private infiniteProviderRetry = false;
+  private jevApiKey?: string;
   private activeProviderRetryAttempt = 0;
   private providerRetryInProgress = false;
   private suppressProviderRetryRunEnd = false;
@@ -1893,6 +1898,7 @@ export class DesktopAgentRuntime {
     this.provider = opts.provider;
     this.thinkingLevel = clampThinkingLevel(opts.provider, opts.thinkingLevel);
     this.infiniteProviderRetry = opts.infiniteProviderRetry === true;
+    this.jevApiKey = opts.jevApiKey;
     this.host = opts.host;
     this.onDiagnostic = opts.onDiagnostic ?? (() => undefined);
     this.hostCloseUnsubscribe = this.host.onClose?.(() => {
@@ -2563,6 +2569,7 @@ Do not invent objections or turn speculative risks into blockers. Stop when the 
       !this.disposed &&
       providerMatches &&
       this.mode === config.mode &&
+      this.jevApiKey === config.jevApiKey &&
       this.thinkingLevel ===
         clampThinkingLevel(config.provider, config.thinkingLevel) &&
       current === next &&
@@ -3673,6 +3680,10 @@ Do not invent objections or turn speculative risks into blockers. Stop when the 
       tools.push("PluginScaffold", "PluginPack", "GenerateImages", ...Object.keys(scheduledToolParameters));
     }
     const builtins = tools.map(exec);
+    const jevTools: AgentTool[] =
+      this.mode === "agent" && this.jevApiKey
+        ? [createJevClassifierTool(this.jevApiKey)]
+        : [];
 
     // Plugins contribute Agent tools by default. Plan/Goal modes only
     // expose plugins that declare plan-safe actions (ADR 0211); the
@@ -3749,6 +3760,7 @@ Do not invent objections or turn speculative risks into blockers. Stop when the 
     const extensionTools = this.extensionRunner?.getAgentTools() ?? [];
     return [
       ...builtins,
+      ...jevTools,
       askTool,
       ...pluginTools,
       ...skillTools,

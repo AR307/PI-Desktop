@@ -35,6 +35,7 @@ import { useVendorAccounts } from "./useVendorAccounts";
 import { VendorAccountDialog, type VendorAccountForm } from "./VendorAccountDialog";
 import { ModelConfigImportPanel } from "../../features/settings/imports/ModelConfigImportPanel";
 import { ImportToggleButton } from "../../features/settings/import-workbench";
+import { JevSettingsCard } from "./JevSettingsCard";
 
 type CatalogStatus = {
   loaded: boolean;
@@ -375,6 +376,8 @@ export function ModelConfigPage() {
           </div>
         </section>
       ) : null}
+
+      <JevSettingsCard settings={settings} />
 
       <section className="settings-card-block">
         <div className="model-config-section-head">

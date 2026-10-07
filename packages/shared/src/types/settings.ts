@@ -44,6 +44,8 @@ export type AppSettings = {
    * Absent and false use the bounded ten-retry policy.
    */
   infiniteProviderRetry?: boolean;
+  /** Allow Agent mode to call TypeSafe Jev for explicit structured classifications. */
+  jevEnabled?: boolean;
   /** Prevent idle system sleep while this desktop app runs; off when absent. */
   keepAwakeWhileRunning?: boolean;
   /** Configured command shell for the agent Bash protocol tool. */
