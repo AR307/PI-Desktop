@@ -16922,32 +16922,30 @@ host-created files. The full app's file-preview viewer is covered separately.
   rejected submission does not. Deferred configuration alone does not count
   as usage.
 
-## E2E-AGENT-jev-classifier-opt-in
-
-- **Preconditions:** Isolated desktop profile, a deterministic local chat
-  provider fixture, a fake Host secret store, and a sidecar `fetch` fixture
-  that intercepts `https://api.typesafe.ai/v1/systemone`. Do not use a real
-  TypeSafe key or provider endpoint.
-- **Steps:** 1) Open Settings → Models, save a sentinel TypeSafe key, and enable
-  Jev. 2) Start an Agent turn whose deterministic chat fixture requests
-  `ToolSearch` for Jev, then calls `JevClassify` with one choice, one score and
-  one boolean question over a small JSON state. 3) Inspect the fixture request
-  and the rendered tool result. 4) Start turns in Plan and Goal. 5) Disable Jev
-  and start another Agent turn, then re-enable it and remove the key.
-- **Expected:** The key is stored under the fixed Host secret reference and is
-  never returned to renderer state or transcript. `JevClassify` appears in the
-  Agent's deferred catalog only while enabled with a saved key, and never in
-  Plan or Goal. The fixture receives the TypeSafe System One payload and
-  bearer header; the tool returns bounded structured answers and usage. A
-  disabled/missing key omits the tool on the next turn, and removing the key
-  turns the setting off.
+- **Preconditions:** Isolated Electron profile, fake Host IPC/secret storage,
+  and a `globalThis.fetch` fixture for `https://api.typesafe.ai/v1/systemone`.
+  Build workspace JS packages with `pnpm build:js`, then run
+  `pnpm test:e2e:jev`. Do not use a real TypeSafe key or endpoint.
+- **Steps:** 1) In the rendered Jev settings card, save a sentinel key and
+  enable Jev. 2) Resolve a session launch with Jev enabled, then disabled and
+  in Plan mode. 3) Through the runtime's deferred catalog, request Jev in Agent
+  mode and inspect Plan/Goal catalogs. 4) Call `JevClassify` with one choice,
+  one score and one boolean question over a small JSON state. 5) Disable Jev
+  and remove the key in settings.
+- **Expected:** The UI stores the key under the fixed Host secret reference,
+  never returns it to settings state, and disables Jev after removal. Only an
+  enabled Agent launch reads the key and passes it ephemerally to the sidecar.
+  `JevClassify` appears in the Agent's deferred catalog only with a key and
+  never in Plan or Goal. The fixture receives the TypeSafe System One payload
+  and bearer header; the tool returns bounded structured answers and usage.
 - **Specs:** [Tools and permissions](../03-runtime/03-tools-and-permissions.md),
   [provider/model system](../03-runtime/11-provider-model-system.md),
   [secrets storage](../03-runtime/14-secrets-storage.md),
   [settings IA](../04-ux/06-settings-ia.md).
-- **Acceptance:** No paid or real-provider call. The fixture verifies request
-  body, auth redaction, cancellation, timeout, malformed input rejection, and
-  that disabling/removing Jev affects the next Agent launch.
+- **Acceptance:** No paid or real-provider call. The suite verifies the UI user
+  path, fixed secret reference, opt-in Agent launch boundary, deferred mode
+  catalog, request body, bearer auth, usage, error redaction, cancellation,
+  timeout, malformed and oversized input rejection, and key removal.
 - Disable/remove a provider or model and mark a model for image generation:
   unavailable history entries are skipped for inheritance and recent menu rows.
 - Settings contains no fixed chat-default picker or Make default service action;
