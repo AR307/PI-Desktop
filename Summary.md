@@ -1174,3 +1174,7 @@ nine in-app changelog catalogs; increment Android versionCode to 6 while
 preserving its application ID and existing signing identity. Desktop and mobile
 publish to their separate AR307 repositories with their own update metadata.
 See `docs/releases/0.16.2.md` for included changes and validation boundaries.
+Final release builds and typechecks passed, along with five changelog and 22
+mobile tests. The three Windows distributions started as 0.16.2; the signed
+Android release APK covered versionCode 5 with versionCode 6 on PiMobileQA.
+Captured native windows and the Android login screen were visually checked.
