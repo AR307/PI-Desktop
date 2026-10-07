@@ -8765,6 +8765,75 @@ mod tests {
         assert_eq!(missing.data.unwrap()["errorCode"], "NOT_FOUND");
     }
 
+    #[tokio::test]
+    async fn edit_self_move_rpc_preserves_file_and_read_provenance() {
+        let data_dir = tempfile::tempdir().unwrap();
+        let project = data_dir.path().join("project");
+        fs::create_dir_all(&project).unwrap();
+        let source = project.join("source.txt");
+        fs::write(&source, "original\n").unwrap();
+        let mut app_state = AppState::open(data_dir.path()).unwrap();
+        app_state.handshook = true;
+        let session = sessions::create_session(
+            &app_state.db,
+            Some("Self move".into()),
+            Some("agent".into()),
+            None,
+            None,
+            Some(project.to_string_lossy().into_owned()),
+        )
+        .unwrap();
+        sessions::configure_session_with_thinking(
+            &app_state.db,
+            &session.id,
+            "agent",
+            None,
+            None,
+            None,
+            Some("auto"),
+        )
+        .unwrap();
+        let state = Arc::new(Mutex::new(app_state));
+        let (tx, _rx) = mpsc::unbounded_channel();
+        let read = handle_request(
+            state.clone(),
+            "tools.execute",
+            json!({"sessionId": session.id, "toolCallId": "read-source",
+                "toolName": "Read", "args": {"path": "source.txt"}, "mode": "agent"}),
+            tx.clone(),
+        )
+        .await
+        .unwrap();
+        assert_eq!(read["ok"], true, "{read}");
+        let tag = &read["content"]["tag"];
+        let rejected = handle_request(
+            state.clone(),
+            "tools.execute",
+            json!({"sessionId": session.id, "toolCallId": "self-move",
+                "toolName": "Edit", "args": {"path": "source.txt", "tag": tag,
+                    "ops": "PUT 1.=1:\n+must not land\nMV ./source.txt\n"}, "mode": "agent"}),
+            tx.clone(),
+        )
+        .await
+        .unwrap();
+        assert_eq!(rejected["ok"], false, "{rejected}");
+        assert_eq!(rejected["errorCode"], "EDIT_NO_CHANGE", "{rejected}");
+        assert_eq!(fs::read(&source).unwrap(), b"original\n");
+        // Failure must not invalidate the Read snapshot or poison later edits.
+        let edited = handle_request(
+            state,
+            "tools.execute",
+            json!({"sessionId": session.id, "toolCallId": "valid-edit",
+                "toolName": "Edit", "args": {"path": "source.txt", "tag": tag,
+                    "ops": "PUT 1.=1:\n+changed\n"}, "mode": "agent"}),
+            tx,
+        )
+        .await
+        .unwrap();
+        assert_eq!(edited["ok"], true, "{edited}");
+        assert_eq!(fs::read(&source).unwrap(), b"changed\n");
+    }
+
     /// D137: the audit row for a tool call must carry the three segments
     /// separately, so "the tool was slow" can be told apart from "the user
     /// took 20s to approve it".

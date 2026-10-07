@@ -11195,12 +11195,19 @@ This test plan spec is accepted when:
   6. Emit `Edit` on a path that does not exist but whose basename and tag match
      exactly one file this session recorded, and inspect the warning.
   7. Repeat step 6 with two recorded candidates sharing that basename and tag.
+  8. Emit `MV` to the source itself, `./source`, `sub/../source`, and its
+     absolute path, plus a directory symlink (Windows junction) pointing back
+     to its directory; on Windows also use a case-only alias. Repeat with a
+     content-changing `PUT` in the same call, then use the original Read tag
+     for a valid content edit.
 - **Expected**: Step 1 records a source deletion and a destination creation under
   one tool call; step 3 restores both or neither. Step 4's rollback restores the
   captured bytes, hash-guarded on the full digest rather than the 16-bit tag.
   Step 5 fails rather than editing against content the rollback replaced. Step 6
   rebinds to the real file with a warning, and the write-permission gate is
   evaluated against the rebound path; step 7 declines instead of picking one.
+  Step 8 returns `EDIT_NO_CHANGE` without writing or deleting the source, and
+  the original Read tag remains usable for the following valid edit.
 - **Specs linked**: `03-runtime/18-line-anchored-edit-contract.md` §9.2, §13.1,
   `03-runtime/03-tools-and-permissions.md` §4c, ADR 0043, ADR 0087
 - **Acceptance**: E (tools & permissions), Quality
