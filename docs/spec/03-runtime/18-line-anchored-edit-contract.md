@@ -272,6 +272,9 @@ covers relative/absolute aliases, `.` and `..`, symlinks, and case-only spelling
 on case-insensitive filesystems. `MV` does not support case-only renaming there;
 use a distinct destination instead. Case-sensitive filesystems retain their
 normal distinction between different files whose names differ only in case.
+This rejection applies after path resolution and permission checks succeed;
+an alias rejected by those checks keeps their error (for example,
+`PATH_OUTSIDE_WORKSPACE`) and does not reach the self-move comparison.
 
 ### 7.3 Anchoring rules
 

@@ -11197,7 +11197,8 @@ This test plan spec is accepted when:
   7. Repeat step 6 with two recorded candidates sharing that basename and tag.
   8. Emit `MV` to the source itself, `./source`, `sub/../source`, and its
      absolute path, plus a directory symlink (Windows junction) pointing back
-     to its directory; on Windows also use a case-only alias. Repeat with a
+     to its directory; on a case-insensitive filesystem also use a case-only
+     alias. Repeat with a
      content-changing `PUT` in the same call, then use the original Read tag
      for a valid content edit.
 - **Expected**: Step 1 records a source deletion and a destination creation under

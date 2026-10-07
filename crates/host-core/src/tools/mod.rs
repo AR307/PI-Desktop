@@ -4885,22 +4885,27 @@ mod tests {
     #[tokio::test]
     async fn edit_move_to_self_preserves_source_bytes() {
         let dir = tempfile::tempdir().unwrap();
-        let target = dir.path().join("source.txt");
+        // macOS temp roots may spell /private/var as /var. Use the same
+        // canonical spelling for the workspace and its absolute destination.
+        let root = crate::workspace::simple_canonicalize(dir.path()).unwrap();
+        let target = root.join("source.txt");
         let input = b"original\r\n";
+        std::fs::write(&target, input).unwrap();
         let mut destinations = vec![
             "source.txt".to_string(),
             "./source.txt".to_string(),
             "sub/../source.txt".to_string(),
             target.to_string_lossy().into_owned(),
         ];
-        if cfg!(windows) {
+        // Probe this directory rather than assuming case sensitivity by OS.
+        if root.join("SOURCE.TXT").try_exists().unwrap() {
             destinations.push("SOURCE.TXT".to_string());
         }
         let mut failures = Vec::new();
         for dest in destinations {
             std::fs::write(&target, input).unwrap();
             let read = execute_tool(
-                Some(dir.path()),
+                Some(&root),
                 None,
                 "Read",
                 &json!({"path": "source.txt"}),
@@ -4910,7 +4915,7 @@ mod tests {
             assert!(read.ok, "Read failed: {:?}", read.content);
             // A mixed call must reject the move before even the PUT bytes land.
             let result = execute_tool(
-                Some(dir.path()),
+                Some(&root),
                 None,
                 "Edit",
                 &json!({"path": "source.txt", "tag": read.content["tag"],
