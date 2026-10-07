@@ -966,7 +966,7 @@ pub(crate) fn migrate_v20_to_v21(conn: &Connection, path: &Path) -> Result<()> {
 pub(crate) fn migrate_v21_to_v22_tx(tx: &rusqlite::Transaction<'_>) -> Result<()> {
     tx.execute_batch(
         "DROP INDEX IF EXISTS idx_sessions_updated;
-         CREATE INDEX IF NOT EXISTS idx_sessions_updated_id ON sessions(updated_at DESC, id DESC);"
+         CREATE INDEX IF NOT EXISTS idx_sessions_updated_id ON sessions(updated_at DESC, id DESC);",
     )?;
     tx.pragma_update(None, "user_version", 22i64)?;
     Ok(())
