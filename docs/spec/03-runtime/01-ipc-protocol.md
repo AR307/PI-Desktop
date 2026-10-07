@@ -137,6 +137,8 @@ type AgentPromptAttachment = {
  kind: "image" | "file";
  mimeType?: string;
  size?: number;
+ /** `@path` text this attachment occupies inline in `content`; main-filled. */
+ inlinePath?: string;
 };
 
 type AgentPromptResponse = {
@@ -210,7 +212,12 @@ older images use the existing safe `@path` fallback. Unknown/custom models
 without an explicit image override, non-vision models, oversized images, and
 unavailable refs also use the safe fallback. Main uses streamed hashing and file
 copying for oversized images. The durable user message stores `content` plus
-attachment metadata/ref, never base64.
+attachment metadata/ref, never base64. An image the draft named inline also
+carries that `@path` text as `inlinePath` on the durable message and on the
+sidecar attachment: the runtime keeps the prompt content blocks in the user's
+order instead of appending every image after the text, and the transcript
+renders the image at that position. An attachment without it keeps the trailing
+position.
 Invalid attachment paths fail with `PATH_OUTSIDE_WORKSPACE`.
 
 Regenerate history (D109) also uses session channels:

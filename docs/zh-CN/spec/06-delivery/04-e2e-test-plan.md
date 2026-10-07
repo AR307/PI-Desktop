@@ -5029,6 +5029,9 @@ eleven-tool-round desktop paths are verified by
      内联图片芯片，撤销会恢复；仅图片草稿切换会话后仍保留图片与发送元数据。挂载完整
      Composer，验证仅图片时点击发送会交付附件并清空草稿，文字加图片的发送立即失败时
      全部恢复。窄面板预填 20 张图片，确认输入框内有 20 个内联芯片，删除其中一个后其余保留。
+     发送一条顺序为「文字、图片、更多文字」的提示：确认已发送消息把图片芯片渲染在该位置，
+     而不是接在正文之后；草稿未内联命名的图片仍跟随正文之后。面向模型的提示保持同样的顺序，
+     由运行时放置测试断言这些内容块。
      点击芯片或用 Enter/空格激活它打开居中图片浮层，工作面板与草稿保持
      不变。小图不放大，宽图等比适应窗口；验证缩放、重置、下载原图、多图按钮与方向键
      不变。小图不放大，宽图等比适应窗口；验证缩放、重置、下载原图、多图按钮与方向键
@@ -5066,6 +5069,9 @@ eleven-tool-round desktop paths are verified by
   F（坚持），品质
 - **里程碑**：M5
 - **状态**：单元覆盖（`composer-paste-files.test.mjs`、`composer-clipboard.test.mjs`）；
+  `prompt-inline-attachments.test.mjs` 覆盖内联图片记录 `@path` 与重放副本仍随行，
+  `session-message-presentation.test.mjs` 渲染消息行顺序，
+  `packages/agent-runtime/src/runtime.test.ts` 断言提示内容块；
   `pnpm test:e2e:composer-paste` 挂载真实 ComposerInput、草稿/粘贴 hook、文件查看器、
   生产 CSS 和沙盒 preload，以 Chromium ClipboardEvent 注入混合数据与原生 File，
   调用真实暂存文件写入器和受限文件读取器，核对字节并解码预览图片。
