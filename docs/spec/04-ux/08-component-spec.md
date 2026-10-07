@@ -1744,10 +1744,12 @@ Single message render — either user (plaintext) or assistant (markdown streami
   only trailing/leading composer trim is applied, never internal newline
   collapse. Serialized `@path` file references render as compact leaf-name
   chips matching the composer node (icon + ellipsized name; canonical path in
-  the tooltip and accessible name). Image attachments that are not already
-  inlined as `@path` chips render as the same compact image chip inside the
-  body's own text flow, continuing the message text instead of heading it on a
-  line of its own. Hovering or focusing the chip reveals the bounded data URL
+  the tooltip and accessible name). An image the draft named inline (`inlinePath`
+  on the attachment) renders as the same compact image chip at that position in
+  the body, so a sent message keeps the order the Composer showed. An image
+  attachment without a recorded position continues the message text instead of
+  heading it on a line of its own. Hovering or focusing the chip reveals the
+  bounded data URL
   (`fs/readImageDataUrl`) in a read-only preview card above it (below it when
   the chip sits at the top), and an unresolved load leaves the chip alone. A
   referenced
@@ -3412,10 +3414,14 @@ Anatomy:
   `<data_dir>/scratch/<sessionId>/pasted/`, and returns each UUID-backed
   absolute path with its sanitized original leaf name and kind. The composer
   displays the leaf name, keeps the structured reference in session-scoped
-  transient state, and submits it separately from visible text. Main stores
+  transient state, and serializes its `@path` inline in the prompt text, at the
+  position the chip held in the draft. Main stores
   image bytes under `attachments/<sha256>` and sends visual input only when the
   selected model's effective binding capability accepts images and the 10 MB
-  inline bound is met; otherwise it appends a safe `@path` fallback. SVG inputs
+  inline bound is met; otherwise it appends a safe `@path` fallback. An image the
+  draft named inline records that text on the attachment (`inlinePath`), which is
+  what places the model-facing image block at the user's position and what the
+  transcript and a restored session read back. SVG inputs
   (`image/svg+xml` or `.svg` extension) are always classified as files, never
   as model images, regardless of vision capability (see
   `03-runtime/svg-attachment-input.md`). Removing

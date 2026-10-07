@@ -7994,6 +7994,11 @@ must keep splitting are covered by `markdown-blocks.test.mjs`.
     text-plus-image send to verify full draft restoration. In a narrow pane,
     prefill 20 images, confirm 20 inline chips inside the composer, and remove
     one without losing the others.
+    Send a prompt that puts text, an image, then more text in that order:
+    confirm the sent message renders the image chip at that position instead of
+    after the body, and that an image the draft did not name inline still
+    follows the text. The provider-facing prompt keeps the same order; the
+    runtime placement tests assert those content blocks.
     Inspect the chip and open it with click, Enter, and
      Space. Confirm a centered modal preview opens, the work panel stays
      unchanged, and the draft is neither edited nor sent. Check small images
@@ -8044,7 +8049,12 @@ must keep splitting are covered by `markdown-blocks.test.mjs`.
   F (persistence), Quality
 - **Milestone**: M5
 - **Status**: Unit-covered (`composer-paste-files.test.mjs`,
-  `composer-clipboard.test.mjs`, `composer-native-deletion.test.mjs`); `pnpm test:e2e:composer-paste` mounts the real
+  `composer-clipboard.test.mjs`, `composer-native-deletion.test.mjs`);
+  `prompt-inline-attachments.test.mjs` covers where an inline image's `@path`
+  is recorded and that a replayed fallback copy still travels,
+  `session-message-presentation.test.mjs` renders the row order, and
+  `packages/agent-runtime/src/runtime.test.ts` asserts the prompt content
+  blocks. `pnpm test:e2e:composer-paste` mounts the real
   ComposerInput, draft/paste hooks, file viewer, production CSS and sandboxed
   preload. It dispatches Chromium ClipboardEvents with synthetic mixed data
   and native File objects, exercises the real scratch writer and contained
