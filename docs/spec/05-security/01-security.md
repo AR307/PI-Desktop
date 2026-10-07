@@ -113,11 +113,13 @@ request will actually take. Before each hop the client asks the session that
 carries `net.fetch` for its own proxy decision (`Session.resolveProxy`): on a
 proxied route the hop is judged on its route rather than on a local address the
 app would never dial, so only the resolver-artifact class (`benchmark`, a TUN
-fake-IP) is tolerated there, while a direct or unreadable route keeps the full
-local classification and rejects loopback, RFC1918, ULA, link-local, mapped
-IPv6, and every other non-public class by default. The explicit `allowFakeIp`
-setting may additionally permit only the `benchmark` placeholder for a
-transparent router/TUN deployment. Install writes markdown only through
+fake-IP) is tolerated there. A direct route rejects non-public answers when
+none of the DNS results is acceptable; if a mixed answer contains an acceptable
+public address, Main pins the request to that address and never connects to the
+rejected result (ADR 0321). The explicit `allowFakeIp` setting may additionally
+permit only the `benchmark` placeholder for a transparent router/TUN deployment,
+and only an accepted address is pinned. ULA-only answers and every other
+non-public-only result remain blocked. Install writes markdown only through
 `skills.create`. The host document cap remains 128 KiB after sibling markdown
 is inlined.
 

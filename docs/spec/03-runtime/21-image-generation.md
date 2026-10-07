@@ -9,7 +9,7 @@ image capabilities were marked or unmarked. It must not claim that an image
 model was selected after deselection. Choosing an image default from the
 summary menu retains the image-selection confirmation.
 
-Model Advanced exposes **Set as image model** alongside the image and document attachment capabilities in the model capability group, not as a separate control row. The checkbox is multi-select: saving a provider persists every checked model in `imageGenerationModels`; Cancel leaves settings unchanged. Saving candidates does not replace the default conversation model. Unchecking every image model on the provider that holds the current default clears that default, even when another provider still has a runnable candidate. The Models page drops the check and does not select the other candidate automatically. Unchecking the current model while another model on the same provider stays marked moves the default to the first runnable marked candidate. The unmarked model is available for chat again after saving and reopening settings. Saving another provider preserves a still-runnable image default. Below the default model row in the same defaults panel, **Image generation model** shows the current default and offers a menu to choose one from all marked candidates. When no candidate is configured, or none of them can be selected, the summary row is hidden. A candidate whose provider still exists but is disabled, credential-less or otherwise unusable displays only **Currently unavailable** while another marked candidate can still be selected; a candidate whose provider row is gone is dropped from the stored list on the next settings read or write instead of staying listed. OAuth accounts are not eligible; there is no fallback.
+Model Advanced exposes **Set as image model** alongside the image and document attachment capabilities in the model capability group, not as a separate control row. The checkbox is multi-select: saving a provider persists every checked model in `imageGenerationModels`; Cancel leaves settings unchanged. Saving candidates does not replace the default conversation model. Unchecking every image model on the provider that holds the current default clears that default, even when another provider still has a runnable candidate. The Models page drops the check and does not select the other candidate automatically. Unchecking the current model while another model on the same provider stays marked moves the default to the first runnable marked candidate. The unmarked model is available for chat again after saving and reopening settings. Saving another provider preserves a still-runnable image default. Below the default model row in the same defaults panel, **Image generation model** shows the current default and offers a menu to choose one from all marked candidates. When no candidate is configured, or none of them can be selected, the summary row is hidden. A candidate whose provider still exists but is disabled, credential-less or otherwise unusable displays only **Currently unavailable** while another marked candidate can still be selected; a candidate whose provider row is gone is dropped from the stored list on the next settings read or write instead of staying listed. A signed-in ChatGPT (Codex) account is eligible for its own image model, which its provider row offers next to the models it configures; every other OAuth account is not, and there is no fallback.
 All marked provider/model pairs are excluded from the default conversation picker, provider quick-default action, and Composer model menu. Other providers with the same model ID remain independent. Existing conversation bindings and history are preserved; a conversation still pinned to any image candidate must select a chat model before sending. Runtime launch rejects every marked image model before inference.
 
 ### Provider model removal
@@ -133,7 +133,13 @@ workers preserve output order, propagate cancellation/timeouts, and bound downlo
 sizes and URL safety. Returned text, response ID and operation usage survive the
 artifact projection. Multiple images from one response count as one operation.
 
-The existing settings UI still excludes OAuth candidates. The internal adapter
-may accept OAuth only with an actual supported native image model and account
-auth resolver; it cannot fabricate entitlement or fall back to another account.
+A signed-in ChatGPT (Codex) account is the one OAuth candidate: its
+`gpt-image-2.5` and `gpt-image-2` models are offered next to the models a
+provider configures, even though the account's chat model list never carries
+them. Such a request goes to the
+vendor's Codex image routes (`{baseUrl}/codex/images/generations` and
+`.../images/edits`) with the account's own OAuth token, JSON on both routes and
+input images inline as data URLs. Every other OAuth account stays ineligible,
+and the adapter cannot fabricate entitlement or fall back to another account.
+The candidate disappears as soon as the account's credential is removed.
 Unknown pricing remains unknown. Images never route through the chat selector.

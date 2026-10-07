@@ -397,7 +397,10 @@ type PluginNetDomains = string[]; // "api.example.com" 或 "*.example.com"
 - `baseUrl` 可选，但必须是绝对 `http(s)` URL
 - `apiStyle` 可选，默认 `chat_completions`；可取值是 provider 配置中除 `auto`
   以外的风格
-- `authKind` 可选，为 `api_key`（默认）或 `none`
+- `authKind` 可选，为 `api_key`（默认）、`none` 或 `oauth`
+- OAuth provider 需要 `provider.register` 和独立高风险权限 `provider.oauth`，还需要
+  绝对 HTTP(S) `baseUrl` 及插件主模块导出的 `onProviderOAuth`；`oauth` 元数据可设置
+  `loginLabel` 和 `isSubscription`
 - `models` 要求 1..64 条，id 唯一且长度为 1..256
 
 非空的 `contributes.providers` 需要高风险权限 `provider.register`
@@ -405,9 +408,11 @@ type PluginNetDomains = string[]; // "api.example.com" 或 "*.example.com"
 声明会在每次插件加载时重新读取，并对其自身字段具有权威；禁用插件会保留这些行并
 将其关闭，而删除声明或卸载插件会连同已存凭据一起删除该行。
 
-`oauth` **暂不支持**：宿主还没有插件 OAuth 登录流程，因此 `oauth` 块或
-`authKind: \"oauth\"` 会在清单元数据校验阶段被拒绝。计划中的 `provider.oauth`
-权限与宿主自有的登录流程属于未来工作，当前不可用。
+OAuth 登录使用宿主自有的账号界面和加密凭据存储。宿主通过
+`pi.providers.oauth.prompt` / `notify` 显示登录提示和进度；OAuth 回调只收到该插件
+自身 provider 的凭据。刷新令牌保留在 Electron 主进程与宿主密钥库内，Agent Runtime
+只接收请求所需的访问令牌。每个 provider 声明目前只支持一个账号；宿主插件进程不是
+操作系统沙箱，因此授予 `provider.oauth` 表示信任该插件处理此 provider 的凭据。
 ## 6. activationEvents（可选）
 
 示例：

@@ -345,12 +345,15 @@
 - **Steps:** Mount the production `AskToolCard`, assert the header Tab order
   (decline, skip, next) with no legacy bottom action row, then walk select →
   next → submit, skip → submit, decline-all, and a custom answer, remounting
-  with a fresh request id between flows.
+  with a fresh request id between flows. Finally mount a question whose body
+  holds two markdown blocks and measure their boxes.
 - **Expected:** Every flow resolves through the store's `resolveAsk` with the
   exact answers (skips recorded as `null`), and no render errors are reported.
+  The two question blocks stack vertically on a shared left edge that spans
+  the card's text column, so a sentence never wraps inside a flex column.
 - **Status:** Automated in `pnpm test:e2e:asktool-card`, which mounts the
-   production `AskToolCard` in a real Chromium page and clicks through the
-   header actions.
+  production `AskToolCard` in a real Chromium page, clicks through the header
+  actions, and measures the multi-block question layout.
 
 ### E2E-POWER-keep-awake-setting
 
@@ -2913,6 +2916,8 @@ identify the platform validation still needed.
   15. Archive one project session, open it from Projects, and return to Projects.
   16. Return to the app shell and open Plugins.
 - **Expected**: The rail contains exactly General, AI, Shortcuts, Instructions, Models, Skills, MCP, Subagents, Projects, Cloud sync, Remote Hosts, and Info in that order, each with its semantic Lucide icon (Sliders / Sparkles / Keyboard / FileText / Bot / BookOpen / Server / Bot / Archive / CloudDownload / Globe / Info). The flat directory is visually grouped under four muted, non-interactive headings — Preferences / 偏好 for General, AI, and Shortcuts; Agent / 智能体 for Instructions and Models; Workspace / 工作区 for Projects; About / 关于 for Info — with whitespace and no divider lines between groups; searching keeps the destination results flat and hides empty groups together with their headings. Appearance remains in General, while Permissions, Defaults, and the Command shell row live under 全局 AI; an available selected shell is represented by the selector without a duplicate Configured status, while default, fallback, and no-effective-shell states remain explicit; Context management has no settings card; Keyboard shortcuts and global instructions have their own destinations; Developer lives under Info; Projects shows active, closed, and archived durable rows without a visibility toggle, grouping them under the always-visible Pinned / All projects / Archived strips (D168/D267/D455) with per-section counts in a one-column workbench. The destination renders no hero block and no page-level counter run: the intro is one quiet description line, and each group strip's count agrees with its rendered rows; a click selects a row without leaving Settings; sorting by Name reorders rows inside every section without hiding any; search matches project fields and session titles and reports a match count, a session-title result selects its owning project, lists sessions in the inspector by latest activity with relative update times, and reveals history in batches of eight; clearing the search restores the complete index. The inspector menu closes on Escape and on an outside press. Bootstrap completion and background refreshes do not return Settings or Extensions to the chat home; the destination changes only after an explicit navigation action. Restore keeps the archive open and activation returns to chat with the restored project retained in the sidebar. Opening an archived session succeeds before clearing its archived state, returns to chat with that session selected, and makes it visible in the project sidebar; returning to Project archive no longer shows that session as archived. The home sidebar and global page results have no standalone Projects destination; Settings search finds Projects; Plugins remains an independent app-shell destination.
+  A packaged build omits Cloud sync from the rail and settings search; see
+  `04-ux/06-settings-ia.md`.
 - **Specs linked**: `04-ux/06-settings-ia.md`, `04-ux/01-ui-ia.md`, `03-runtime/11-provider-model-system.md`
 - **Acceptance**: B (model configuration), F (project persistence)
 - **Milestone**: M4
@@ -3195,8 +3200,8 @@ identify the platform validation still needed.
 #### E2E-024F: Refresh official remote marketplace repository
 
 - **Preconditions**: Network available to GitHub raw content.
-- **Steps**: 1) Open Extensions → Marketplace. 2) Use the header Refresh marketplace action. 3) Confirm the source line points at `vastsa/pi-desktop-plugins`.
-- **Expected**: Catalog refreshes from the remote official repo; card grid updates; offline fallback still works if fetch fails.
+- **Steps**: 1) Open Extensions → Marketplace. 2) Use the header Refresh marketplace action. 3) Confirm the source line names the official channel (`plugins.aiuo.net`) and that the GitHub and CNB backups are selectable.
+- **Expected**: Catalog refreshes from the selected channel; card grid updates; offline fallback still works if fetch fails.
 - **Specs linked**: `07-plugins/07-plugin-marketplace.md`
 - **Acceptance**: G (remote marketplace source)
 - **Status**: Documented / host-core unit covered
@@ -3328,6 +3333,11 @@ identify the platform validation still needed.
 - **Specs linked**: `03-runtime/01-ipc-protocol.md`, `04-ux/07-ui-design-system.md`, `07-plugins/01-plugin-system.md`, `07-plugins/03-plugin-api.md`, `07-plugins/04-plugin-security.md`, `07-plugins/12-plugin-ipc-and-host-services.md`, ADR 0081, ADR 0082, ADR 0092, ADR 0093
 - **Acceptance**: G (isolated panel)
 - **Status**: Documented
+
+Initial-load timeout check: Open a fixture panel from Extensions → Installed
+whose page load remains pending. After 15 seconds, the open request must report
+`PANEL_LOAD_TIMEOUT` through the initiating action and destroy the hidden
+window; opening a normal panel afterward must still work.
 
 #### E2E-024AA: Plugin-owned UI follows the host locale
 
@@ -5300,11 +5310,12 @@ must keep splitting are covered by `markdown-blocks.test.mjs`.
 - **Preconditions**: A clean worktree at the current stable version. No release
   tag has been created for the candidate version.
 - **Steps**: 1) Run `node scripts/check-release-docs.mjs` on the aligned tree.
-  2) Regress one surface at a time — remove the newest changelog entry from
-  `en`, then from `zh-CN`, then change a highlight count so the locales differ,
-  then set `docs/package.json` to an older version, then leave the READMEs
-  stating the previous `<major>.<minor>.x` release line — and rerun the
-  preflight after each. 3) Run `node scripts/release.mjs <next-version> --tag`
+  2) Regress one surface at a time — replace the models.dev catalog with an
+  empty object, remove the newest changelog entry from `en`, then from `zh-CN`,
+  change a highlight count so the locales differ, set `docs/package.json` to
+  an older version, and leave the READMEs stating the previous
+  `<major>.<minor>.x` release line — then rerun the preflight after each. 3) Run
+  `node scripts/release.mjs <next-version> --tag`
   with one surface still regressed. 4) Restore every surface, rerun the
   preflight, and repeat the release command.
 - **Expected**: The aligned tree reports alignment and exits 0. Each regression
@@ -6340,24 +6351,29 @@ must keep splitting are covered by `markdown-blocks.test.mjs`.
   fails by 40.125px of content height and 40px of row movement when the reserved
   lane is removed (issue #323).
 
-#### E2E-263: Native interaction stays live during large transcript streaming
+#### E2E-263: Native interaction stays live during large transcript and tool-output rendering
 
 - **Preconditions**: Isolated visible Electron window with the production
-  `Markdown` renderer and built app stylesheet. A separate local Node fixture
-  emits ordered synthetic deltas; no provider, real Host, production session,
-  or user data is used.
-- **Steps**: Stream a 90 Ki-code-unit unbroken message plus a final marker from
-  the child process. Once the rendered message exceeds the streaming-tail
-  threshold, use Electron `webContents.sendInputEvent` to click, type into the
-  draft, switch to another session and back, collapse and expand the transcript,
-  and scroll while deltas continue. Finish the stream and compare every received
-  source code unit, sequence number, final marker, and rendered source length.
+  `Markdown` and `ToolDetailBlocks` renderers and built app stylesheet. A
+  separate local Node fixture emits ordered synthetic deltas; no provider, real
+  Host, production session, or user data is used.
+- **Steps**: Mount a 680 Ki-code-unit tool result, then stream a 90 Ki-code-unit
+  unbroken message plus a final marker from the child process. Once the rendered
+  message exceeds the streaming-tail threshold, use Electron
+  `webContents.sendInputEvent` to click, move between tool-output pages, type
+  into the draft, switch to another session and back, collapse and expand the
+  transcript, and scroll while deltas continue. Finish the stream and compare
+  every received source code unit, sequence number, final marker, and rendered
+  source length.
 - **Expected**: Every native action is acknowledged while streaming remains
   active, each completes within 250 ms, and the action P95 is at most 100 ms on
   the recorded environment. The independent producer advances all 180 sequence
   numbers in order; switching sessions does not move or lose the background
-  stream, and the finished content retains the exact received source.
-- **Specs linked**: `04-ux/08-component-spec.md` §8.7.
+  stream, and the finished content retains the exact received source. The large
+  tool result exposes page controls, renders one page at a time (at most 32 Ki
+  code units plus one code unit where a surrogate pair crosses the boundary),
+  and retains its final page marker.
+- **Specs linked**: `04-ux/08-component-spec.md` §8.7, §9.6.
 - **Status**: Automated by `pnpm test:e2e:renderer-responsiveness`. The parent
   Electron process drives native input under an external 25-second deadline;
   the renderer cannot self-report its own timeout. The fixture is deterministic
@@ -7812,7 +7828,8 @@ must keep splitting are covered by `markdown-blocks.test.mjs`.
   2. Confirm the import, then open the imported stdio server and press Test
      connection.
   3. Leave the server at **Everywhere** and ask the agent in each project to
-     list its available tools.
+     list its available tools. Have the stdio fixture report its working
+     directory and process id; open a second session in `~/work/api` as well.
   4. Set the server to **These projects**, with only `~/work/api` picked.
   5. Ask again in each project.
   6. In the already-open `~/personal/site` session — assembled while the server
@@ -7844,6 +7861,9 @@ must keep splitting are covered by `markdown-blocks.test.mjs`.
   - Test reports connected with the tool names it found, and the row's glyph
      turns from connecting to ready.
   - While global, both sessions see `mcp_<serverId>_<tool>` names.
+  - The stdio fixture runs from each session's project directory. Sessions in
+    `~/work/api` share one process, while `~/personal/site` uses a separate
+    process. A projectless session uses the user's home directory.
   - After narrowing, only the `~/work/api` session sees them; the summary chip
      reads "1 project" and names it.
   - The stale call from step 6 fails with `TOOL_NOT_FOUND` and "not active for
@@ -7975,6 +7995,11 @@ must keep splitting are covered by `markdown-blocks.test.mjs`.
     text-plus-image send to verify full draft restoration. In a narrow pane,
     prefill 20 images, confirm 20 inline chips inside the composer, and remove
     one without losing the others.
+    Send a prompt that puts text, an image, then more text in that order:
+    confirm the sent message renders the image chip at that position instead of
+    after the body, and that an image the draft did not name inline still
+    follows the text. The provider-facing prompt keeps the same order; the
+    runtime placement tests assert those content blocks.
     Inspect the chip and open it with click, Enter, and
      Space. Confirm a centered modal preview opens, the work panel stays
      unchanged, and the draft is neither edited nor sent. Check small images
@@ -8025,7 +8050,12 @@ must keep splitting are covered by `markdown-blocks.test.mjs`.
   F (persistence), Quality
 - **Milestone**: M5
 - **Status**: Unit-covered (`composer-paste-files.test.mjs`,
-  `composer-clipboard.test.mjs`, `composer-native-deletion.test.mjs`); `pnpm test:e2e:composer-paste` mounts the real
+  `composer-clipboard.test.mjs`, `composer-native-deletion.test.mjs`);
+  `prompt-inline-attachments.test.mjs` covers where an inline image's `@path`
+  is recorded and that a replayed fallback copy still travels,
+  `session-message-presentation.test.mjs` renders the row order, and
+  `packages/agent-runtime/src/runtime.test.ts` asserts the prompt content
+  blocks. `pnpm test:e2e:composer-paste` mounts the real
   ComposerInput, draft/paste hooks, file viewer, production CSS and sandboxed
   preload. It dispatches Chromium ClipboardEvents with synthetic mixed data
   and native File objects, exercises the real scratch writer and contained
@@ -9380,9 +9410,9 @@ must keep splitting are covered by `markdown-blocks.test.mjs`.
   local WebDAV fixture that supports strong ETags and conditional PUT, plus a
   fixture variant that ignores conditional headers but supports `PROPFIND`
   directory listing. No real WebDAV account, provider, or production desktop.
-  Developer mode starts off so the public destination is exercised as shipped.
-- **Steps:** 1) Open Settings with developer mode off; confirm Cloud sync is
-  present in the rail and returned by settings search, then open it and
+  Developer mode starts off so the destination is exercised as developed.
+- **Steps:** 1) In a development build with developer mode off, confirm Cloud
+  sync is present in the rail and returned by settings search, then open it and
   confirm neither the rail row nor the page title carries an Experimental
   badge. 2) Toggle developer mode on and off and confirm the destination stays
   reachable either way. 3) Enter the fixture URL,
@@ -9409,9 +9439,10 @@ must keep splitting are covered by `markdown-blocks.test.mjs`.
   refreshes in the background. Confirm a configured endpoint reuses its stored
   WebDAV app password, while password fields themselves remain blank and no
   vault password is written to renderer storage.
-- **Expected:** Cloud sync is reachable in every build without developer mode,
-  carries no Experimental badge on the rail row or page title, and neither its
-  availability nor its behavior changes when developer mode is toggled.
+- **Expected:** Cloud sync is reachable in development builds without developer
+  mode, is absent from a packaged build's rail, page, and settings search,
+  carries no Experimental badge, and neither its availability nor its behavior
+  changes when developer mode is toggled.
   Strict mode refuses
   unreliable conditional writes. The explicit
   compatibility mode accepts only a server that proves bounded directory
@@ -9436,8 +9467,9 @@ must keep splitting are covered by `markdown-blocks.test.mjs`.
 - **Milestone:** M6+.
 - **Status:** Draft; merge/crypto, in-process WebDAV conditional-write
   coverage, and the two-device host/WebDAV path are automated by
-  `pnpm test:e2e:config-sync`. Public Cloud sync visibility without developer
-  mode is asserted by `settings-developer-only-destinations.test.mjs`; full
+  `pnpm test:e2e:config-sync`. Cloud sync's development-build-only visibility
+  and its packaged-build omission are asserted by
+  `settings-developer-only-destinations.test.mjs`; full
   renderer-driven persistence and checkpoint recovery fault injection remain.
 
 **E2E-CHAT-session-todo-checklist: TodoWrite to session-aware TodoDock**
@@ -9861,8 +9893,9 @@ This test plan spec is accepted when:
 - Open Settings (footer profile → Settings).
 - Expect **full-page** Codex settings (no app sidebar/nav). Left rail has Back
   to app, search, and exactly General / AI / Shortcuts / Instructions / Models /
-  Skills / MCP / Subagents / Projects / Cloud sync / Remote Hosts / Info in that
-  order; content pane shows the selected destination.
+  Skills / MCP / Subagents / Projects, Cloud sync / Remote Hosts / Info in that
+  order (a packaged build leaves Cloud sync out); content pane shows the
+  selected destination.
 - Return to the app shell and expect Plugins to remain an independent
   sidebar-footer destination.
 - Drag the empty 46px top band over either the rail or content pane; the native
@@ -10074,8 +10107,8 @@ This test plan spec is accepted when:
 - Expect the working theme selector without inert toggle or open-target rows.
 - Expect Appearance in General and Permissions + Defaults in AI. The rail
   contains General, AI, Shortcuts, Instructions, Models, Skills, MCP,
-  Subagents, Projects, Cloud sync, and Info; Remote Hosts appears only in
-  developer mode. Voice may appear between AI and Shortcuts in development
+  Subagents, Projects, Cloud sync (development builds only), and Info; Remote
+  Hosts appears only in developer mode. Voice may appear between AI and
   builds with developer mode on; plugin-contributed destinations follow the
   core groups. There is no Import destination.
 - Resize between 800px, 1200px, and 1600px widths; the content cards fill the
@@ -13032,7 +13065,9 @@ are withdrawn with ADR 0165.
 
 - **Preconditions**: A reachable local HTTP or SOCKS5 proxy, or a known-bad
   port for the failure path. A configured provider/model whose endpoint is
-  reachable through the proxy is available for the model-request step.
+  reachable through the proxy is available for the model-request step. For
+  System mode, the OS has a local system proxy or PAC fixture with a capture
+  endpoint and a direct fallback route.
 - **Steps**:
   1. Open Settings → General. Confirm a Network card with Proxy modes
      System, Direct, and Custom. System is selected on a profile that never
@@ -13056,12 +13091,18 @@ are withdrawn with ADR 0165.
      TCP chunk. Confirm a subsequent marketplace refresh and a models.dev
      catalog refresh use the proxy (host-core curl `--proxy`, Electron
      `net.fetch`), and confirm a loopback URL in Bypass is not proxied.
-  6. Switch to Direct, then System. Confirm Chromium returns to
-     `mode: "direct"` then `mode: "system"`, and the sidecar is reconfigured
-     without an app restart.
+  6. Switch to Direct. Confirm Chromium returns to `mode: "direct"`, provider
+     and marketplace traffic bypass the System relay, and workspace Bash does
+     not inherit proxy variables from the setting.
+  7. Switch to System. Confirm Chromium returns to `mode: "system"` and send a
+     provider request and marketplace refresh. Confirm both follow the OS/PAC
+     route selected for each destination, including ordered proxy-to-direct
+     fallback, without restarting the app.
 - **Expected**: Custom covers model calls, marketplace, updates, plugin
-  `net.fetch`, and the in-app browser. Workspace Bash `env` does not show
-  `HTTP_PROXY` / `ALL_PROXY` from the setting. OAuth still opens the system
+  `net.fetch`, and the in-app browser. System covers provider and marketplace
+  requests through Electron's OS/PAC resolver. Workspace Bash `env` does not
+  show `HTTP_PROXY` / `ALL_PROXY` from the setting. TLS verification remains
+  enabled on all routes. OAuth still opens the system
   browser. Invalid schemes (`file:`, `ftp:`, and SOCKS4) and malformed
   percent-encoded credentials are rejected. Authenticated HTTP and SOCKS5
   URLs Test and apply without `net::ERR_NO_SUPPORTED_PROXIES` (issue #490).
@@ -13070,11 +13111,14 @@ are withdrawn with ADR 0165.
   `03-runtime/07-process-model.md`, ADR 0177, D340
 - **Acceptance**: B (settings), F (providers), Security
 - **Milestone**: M5
-- **Status**: Unit-covered (`network-proxy.test.ts`, `node-proxy.test.ts`,
-  `authenticated-proxy-relay.test.ts`, `settings-general.test.mjs`,
-  host-core `network_proxy` tests); malformed credentials and unsupported
-  SOCKS4 schemes are covered by the shared parser tests; full UI journey
-  Draft (run only in a capable environment when this surface changes)
+- **Status**: Custom-path unit coverage exists (`network-proxy.test.ts`,
+  `node-proxy.test.ts`, `authenticated-proxy-relay.test.ts`,
+  `settings-general.test.mjs`, host-core `network_proxy` tests); malformed
+  credentials and unsupported SOCKS4 schemes are covered by shared parser
+  tests. `system-proxy-relay.test.ts` covers authenticated provider traffic,
+  PAC proxy fallback, HTTP proxy forwarding, and scheme detection on
+  non-default ports. Full UI journey Draft (run only in a capable environment
+  when this surface changes).
 
 #### E2E-191: Newly emitted AppError codes stay registered
 
@@ -15508,32 +15552,31 @@ plugin-form fixtures in an isolated temporary directory at runtime.
   is `https://127.0.0.1/`. 4) Report a proxied route and a TUN fake-IP answer
   (`198.18.0.1`), the same answer on a `DIRECT` route, on an unreadable route,
   and on a route list that offers `DIRECT`. 5) Let a first hop be proxied and
-  its redirect target direct.
+  its redirect target direct. 6) On a direct route, return both a public address
+  and a ULA address, then return a TUN `benchmark` fake-IP with a ULA address
+  under the existing fake-IP opt-in. 7) Return a ULA address without any
+  acceptable companion address.
 - **Expected**: A source URL the user typed may be a loopback or LAN catalog —
   `https` always, `http` only under
   `networkPolicy.allowInsecureUserEndpoints` — while the same address as a
-  *document* URL inside a catalog, or as a redirect target, is rejected; cloud
-  metadata, `unspecified`, multicast and reserved addresses are rejected on every
-  input. A public CDN URL is accepted. A source that resolves to a private
-  address is fetched rather than refused, and a third-party hop that resolves to
-  one throws a policy error without fetching the private target.
-  retried; a local resolver that answered nothing is, and is reported as
-  `NETWORK_RESOLVE_FAILED` (`kind` `unresolved`) rather than as an address-check
-  refusal — the guard reached no verdict, so nothing may claim it did. An address
-  in a proxy's fake-IP range (`198.18.0.0/15`, Clash's default) is refused and not
-  retried where the guard judged it — a direct or unreadable route — and is
-  accepted on the proxied one, and is reported as `kind` `fake-ip` with
-  `addressKind` `benchmark` and `reason` `non-public-address` — distinct from a
-  real private target (`kind` `policy`, `addressKind` `private`), because the guard
-  judged the target in the second case and only the proxy's placeholder in the
-  first. Every other refusal carries `NETWORK_POLICY_BLOCKED` (spec 08 §3.1) with
-  its `reason`, the address it resolved to, the class of that address, and the
-  route it was judged on, so the install sheet can name the reason and offer a
-  retry instead of leaving the install button disabled with no explanation, and the
-  market list can tell a refused source apart from a merely unreachable one. Every
-  other non-public class still refuses on all routes, and each redirect hop is
-  judged on its own route (ADR 0272).
-- **Specs linked**: `05-security/01-security.md`, ADR 0243, ADR 0272,
+  *document* URL inside a catalog, or as a redirect target, is rejected. Cloud
+  metadata, `unspecified`, multicast, and reserved addresses are rejected on
+  every input. A user-supplied source resolving to a private address is fetched;
+  a third-party hop resolving only to a private address throws a policy error
+  without fetching that target. A local resolver with no answer is retried and
+  reported as `NETWORK_RESOLVE_FAILED` (`kind` `unresolved`), not as an
+  address-check refusal. A direct request with an acceptable address beside a
+  rejected ULA pins the acceptable address; a ULA-only answer stays refused. An
+  address in a proxy's fake-IP range (`198.18.0.0/15`, Clash's default) is
+  accepted on a proxied route. On a direct route it is refused unless the
+  existing fake-IP opt-in allows Main to pin that benchmark address; unreadable
+  routes remain strict. A refusal for a benchmark address is reported as `kind`
+  `fake-ip`, `addressKind` `benchmark`, and `reason` `non-public-address`;
+  refusals for real private targets remain `kind` `policy`, `addressKind`
+  `private`. Every refusal carries the host, reason, address class, and route so
+  the install sheet and market list can distinguish policy blocks from network
+  failures. Every redirect hop is judged on its own route (ADR 0272, ADR 0321).
+- **Specs linked**: `05-security/01-security.md`, ADR 0243, ADR 0272, ADR 0321,
   `03-runtime/01-ipc-protocol.md` §12b
 - **Acceptance**: Security, Quality
 - **Milestone**: M6+
@@ -15773,22 +15816,28 @@ plugin-form fixtures in an isolated temporary directory at runtime.
   acceptance remains outstanding. Required post-integration suites: `test:e2e`,
   `test:e2e:subagents`, `test:e2e:subagent-models`.
 
-#### E2E-PLUGIN-declared-provider-appears-in-the-native-provider-list: A plugin-declared provider is a Host-owned row with thinking controls
+#### E2E-PLUGIN-declared-provider-appears-in-the-native-provider-list: Plugin providers use Host-owned rows, permissions, and OAuth sign-in
 
-- **Preconditions**: An installed local plugin declares one provider in
-  `contributes.providers` with the `provider.register` permission, one model,
-  a fixture `baseUrl`, `thinkingLevels: ["off", "low", "high"]`, and
-  `defaultThinkingLevel: "high"`; a key is stored once through Settings.
+- **Preconditions**: An installed local plugin declares one API-key provider
+  with `provider.register` and one OAuth provider with both `provider.register`
+  and `provider.oauth`. Both use a fixture `baseUrl` and one model; the API-key
+  model has `thinkingLevels: ["off", "low", "high"]` and
+  `defaultThinkingLevel: "high"`. Its `onProviderOAuth` callback uses only a
+  local OAuth fixture and host-rendered `pi.providers.oauth` interactions.
 - **Steps**: 1) Enable the plugin and open Settings → Providers. 2) Inspect
   the model binding and Composer thinking selector, then select the row as the
   session model and run a turn. 3) Change the session thinking level and run a
   second turn. 4) Try to edit the provider, then delete it, through the user
-  path. 5) Disable the plugin, inspect the list and stored credential, and
-  re-enable it. 6) Uninstall the plugin; reinstall and enable it, then remove
-  the declaration from its manifest and reload. 7) Load a manifest that
-  declares providers without `provider.register`. 8) Load a manifest that
-  declares an `oauth` block and `authKind: "oauth"`. 9) Load manifests whose
-  model uses a non-array `thinkingLevels`, a non-string entry, or a non-string
+  path. 5) Open Vendor accounts, sign in to the plugin OAuth provider using its
+  host-rendered prompt/device-code step, then select that provider and run a
+  turn. 6) Expire the fixture access token and run another turn to exercise the
+  plugin refresh callback. 7) Cancel a second login and confirm the callback's
+  abort signal fires; sign out and then disable/re-enable the plugin. 8)
+  Uninstall the plugin; reinstall and enable it, then remove the declaration
+  from its manifest and reload. 9) Load manifests that omit `provider.register`
+  or `provider.oauth`, have OAuth metadata without `authKind: "oauth"`, or
+  lack the `onProviderOAuth` module export. 10) Load manifests whose model uses a
+  non-array `thinkingLevels`, a non-string entry, or a non-string
   `defaultThinkingLevel`.
 - **Expected**: Step 1 shows one row in the native provider list with
   `ownerPluginId` set to the plugin and the row id
@@ -15798,17 +15847,21 @@ plugin-form fixtures in an isolated temporary directory at runtime.
   starts the session at `high`; the turn uses that choice. Step 3 persists and
   uses the changed session level without changing the provider declaration.
   Step 4 refuses both actions with an error whose message begins
-  `PROVIDER_OWNED_BY_PLUGIN` and leaves the row unchanged. Step 5 keeps the
-  row and sets `enabled = 0` while `secret:provider:<id>:api_key` stays stored,
-  so re-enabling restores the credential and thinking binding. Step 6 deletes
-  the row and both credential refs (`:api_key` and `:oauth`) in both orders —
-  uninstall, and a manifest that no longer declares the provider. Steps 7 and
-  8 fail manifest validation as `PLUGIN_INVALID` — the missing-permission
-  message and `plugin OAuth providers are not supported in this release` /
-  `unsupported authKind oauth` — and neither failure changes plugin enablement.
-  Step 9 rejects each malformed thinking-level field with `PLUGIN_INVALID` and
-  leaves plugin enablement unchanged.
+  `PROVIDER_OWNED_BY_PLUGIN` and leaves the row unchanged. Step 5 completes
+  login through the native OAuth dialog and stores one encrypted credential
+  under `secret:provider:<plugin-row-id>:oauth`; the renderer sees only status
+  and the non-secret account label. Step 6 invokes the refresh callback with
+  the plugin's own credential, but only the new access token reaches the Agent
+  Runtime; refresh tokens stay in Electron main and the Host secret store. Step
+  7 stops the callback on cancellation, clears the OAuth secret on sign-out,
+  keeps both manifest-owned rows across disable/enable, and restores sign-in
+  status only for credentials that remain stored. Step 8 removes both rows and
+  their credential refs when uninstalled or undeclared. Step 9 fails closed:
+  missing permissions fail manifest validation, and a missing callback fails
+  plugin load without exposing a sign-in action. Step 10 rejects malformed
+  thinking-level fields with `PLUGIN_INVALID` and leaves enablement unchanged.
 - **Specs linked**: `07-plugins/02-plugin-manifest-schema.md` §4, §5.4, §7;
+  `07-plugins/03-plugin-api.md` (provider OAuth); `07-plugins/04-plugin-security.md`;
   `07-plugins/13-plugin-permissions-matrix.md`; `03-runtime/04-data-storage.md`
   §4.3, §7; `03-runtime/11-provider-model-system.md` §6.2;
   `03-runtime/12-provider-config-schema.md` §2, §9;
@@ -15816,13 +15869,15 @@ plugin-form fixtures in an isolated temporary directory at runtime.
 - **Acceptance**: B (model config), E (tools & permissions), F (persistence),
   G (plugins), Security, Quality
 - **Milestone**: Post-MVP (R7 v1)
-- **Status**: Partially automated (`pnpm test:e2e:trusted-extensions`): the
-  declared row materializing as `plugin:<pluginId>:<declaredId>` in the native
-  provider list with its `ownerPluginId`, endpoint, models, and thinking
-  binding passes. Ownership refusal (`PROVIDER_OWNED_BY_PLUGIN`),
-  disable/enable, undeclare and uninstall cleanup, and the manifest refusals
-  are covered by host-core unit tests; the renderer's read-only row and
-  thinking-selector presentation remain additional validation.
+- **Status**: Runs in the Linux CI integration candidate through
+  `pnpm test:e2e:trusted-extensions` under Xvfb, using local
+  synthetic OAuth credentials: the API-key and OAuth declared rows, permission
+  projection, Settings sign-in picker, Host-rendered device-code and secret
+  prompt, encrypted-credential handoff, refresh, model request auth,
+  cancellation, and sign-out are exercised through the real Electron renderer
+  and plugin process. Ownership refusal, disable/enable, cleanup, and malformed
+  manifest cases remain covered by host-core checks. No live identity provider
+  is used.
 
 #### E2E-CHAT-disclosure-toggle-keeps-reading-position
 
@@ -16509,9 +16564,10 @@ the latest destination. These assertions measure work counts, not device FPS.
 - Automated coverage: `pnpm test:e2e:settings-scroll` mounts the production
   SettingsPage, store, translations, and built CSS in isolated Electron. Only
   preload data is stubbed; search navigation uses SearchDialog's public store
-  entry points. It also checks that Cloud sync has no developer-mode gate and
-  no Experimental badge, that Remote hosts keeps its badge, and the fallback
-  to General. This covers renderer interaction, not host persistence or the
+  entry points. It also checks that Cloud sync stays a development-build-only
+  destination with no developer-mode gate and no Experimental badge, that
+  Remote hosts keeps its badge, and the fallback to General. This covers
+  renderer interaction, not host persistence or the
   full global-search dialog.
 
 ### E2E-SCHEDULED-dispatch

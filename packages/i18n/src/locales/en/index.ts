@@ -238,6 +238,10 @@ export const en = {
   chat: {
     tableActions: "Table actions",
     markdownPlainTextFallback: "Large response shown as plain text to keep the conversation responsive.",
+    largeTextPageControls: "Large output pages",
+    largeTextPage: "Part {{current}} of {{total}}",
+    largeTextPreviousPage: "Previous part",
+    largeTextNextPage: "Next part",
     copyTableMarkdown: "Copy table as Markdown",
     exportTableCsv: "Download table as CSV",
     tablePreview: "Expand table",
@@ -1472,6 +1476,9 @@ sklm: {
     vendorAccountUpdated: "Vendor account updated",
     vendorRemoveAccount: "Remove account",
     vendorAccountRemoved: "{{vendor}} account removed",
+    vendorSignOut: "Sign out",
+    vendorSignedOut: "Signed out of {{vendor}}",
+    pluginOauthFailed: "The plugin could not complete provider sign-in.",
     vendorLoginStarting: "Starting sign-in…",
     vendorBrowserOpened:
       "Finish signing in in your browser, then come back to this window.",
@@ -2215,6 +2222,7 @@ importConfirm: "Imported extensions run inside the agent process with the same a
       "agent.extension": "Run code inside the agent",
       "renderer.extension": "Draw UI in chat slots",
       "provider.register": "Add providers to the model list",
+      "provider.oauth": "Sign in to a provider with OAuth",
       "desktop.control": "Control the desktop",
       "models.list": "List authenticated models",
       "session.read": "Read the current conversation sent to the model",
@@ -2264,6 +2272,8 @@ importConfirm: "Imported extensions run inside the agent process with the same a
         "Loads this plugin's renderer module into the app window to draw UI slot components (message action bars, entry extras, tool cards, code-block renderers, composer controls). The module runs in the same document as PI-Desktop. Enable only code you trust.",
       "provider.register":
         "Adds the providers this plugin defines to Settings' provider list. The plugin supplies the endpoint and models; your API key stays in PI-Desktop.",
+      "provider.oauth":
+        "Lets this plugin run OAuth login and refresh for its declared provider. PI-Desktop encrypts the tokens, but the trusted callback can read them. Host-mediated network access still requires net.fetch and declared domains; plugin entry code is not an OS sandbox, so grant this only to code you trust.",
       "desktop.control":
         "Lets the plugin invoke the reviewed PI-Desktop control catalog. Destructive operations still require confirm=true; the MCP bearer token is never exposed.",
       "models.list": "Can see which models you have signed in for. It does not receive keys.",

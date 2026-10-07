@@ -1,6 +1,6 @@
 {
   "name": "@pi-desktop/agent-runtime",
-  "version": "0.16.1",
+  "version": "0.17.0",
   "private": true,
   "type": "module",
   "main": "./dist/index.js",
@@ -17,6 +17,10 @@
     "./proxy-tunnel": {
       "types": "./dist/socks5.d.ts",
       "import": "./dist/socks5.js"
+    },
+    "./system-proxy-relay": {
+      "types": "./dist/system-proxy-relay.d.ts",
+      "import": "./dist/system-proxy-relay.js"
     }
   },
   "scripts": {

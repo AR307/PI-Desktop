@@ -283,6 +283,66 @@ type PluginModelInfo = {
 只返回已启用且已认证的 provider 行（API key、OAuth 或 `authKind: "none"`）。不含密钥。
 `models.list` 也是面板桥通道，选择器页面可以自行填充。宿主传输不可用时返回空列表，不记警告（D080）。
 
+### provider OAuth（需要 `provider.oauth`）
+
+OAuth provider 声明需要同时拥有 `provider.register` 和 `provider.oauth`、设置
+`baseUrl`，并由插件主模块导出 `onProviderOAuth`。宿主只会为 manifest 中声明的
+provider 调用该回调：
+
+```ts
+type PluginProviderOAuthRequest = {
+  operation: "login" | "refresh"
+  providerId: string       // 插件本地 provider 声明 id
+  loginId?: string         // 仅登录时提供；传给 prompt/notify
+  credential?: PluginProviderOAuthCredential // 仅刷新时提供；属于该 provider 的凭据
+}
+
+type PluginProviderOAuthCredential = {
+  accessToken: string
+  refreshToken?: string
+  expiresAt?: number       // Unix epoch 毫秒
+  accountLabel?: string
+  headers?: Record<string, string>
+}
+
+type PluginProviderOAuthContext = { signal: AbortSignal }
+
+onProviderOAuth(request, { signal }): Promise<PluginProviderOAuthCredential>
+```
+
+登录时，用户授权后回调返回凭据。刷新时，宿主把当前凭据传给同一回调，回调返回更新后
+的凭据。宿主把凭据加密存于 provider 行对应的 OAuth secret 引用下，并串行执行刷新。
+回调只能访问自己的 provider 声明凭据。宿主按请求向 Agent Runtime 传递解析后的访问令牌；
+刷新令牌不会发给渲染进程或 Agent Runtime。每个 provider 声明只保存一个账号；退出登录会
+清除凭据，但保留 manifest 所有的 provider 行。
+
+插件可以使用宿主提供的登录界面，不必自行打开窗口：
+
+```ts
+if (!request.loginId) throw new Error("loginId is required for sign-in")
+const loginId = request.loginId
+
+await pi.providers.oauth.notify(loginId, {
+  kind: "deviceCode",
+  userCode,
+  verificationUri,
+  intervalSeconds,
+  expiresInSeconds,
+})
+
+const code = await pi.providers.oauth.prompt(loginId, {
+  type: "secret",
+  message: "Enter the verification code",
+})
+```
+
+`prompt` 支持 `text`、`secret`、`select` 和 `manual_code`。`notify` 支持非敏感的
+`info`、`authUrl`、`deviceCode` 和 `progress` 事件；宿主会打开经过校验的 HTTP(S) 授权
+链接，并报告浏览器是否成功打开。用户取消、插件卸载或宿主调用超时都会中止回调上下文
+的 signal。使用宿主网络 API 请求 OAuth token 时，仍需 `net.fetch` 和
+`manifest.net.domains`。该权限不提供通用宿主密钥 API。插件入口代码并非操作系统沙箱，
+仍可使用原生 Node API，因此只应向可信代码授予该权限。
+
 ### session（需要 `session.read`）
 ```ts
 pi.session.getLlmContext(): Promise<PluginLlmContext>
@@ -886,6 +946,7 @@ window.pluginBridge.on(event, handler)
 - models.list（返回行数）
 - session.getLlmContext（会话 id、消息数、truncated 标志 —— 不含转录文本）
 - agent.complete（模型 key、体积、usage —— 不含提示或补全文本）
+- provider.oauth（插件 id、声明的 provider id、操作、结果/错误码——绝不记录凭据内容）
 
 日志字段：
 - 插件ID
@@ -915,6 +976,7 @@ window.pluginBridge.on(event, handler)
 - `speech.registerAdapter` / `unregisterAdapter`（`speech.adapter.register`）
 
 - `models.list`、`session.getLlmContext`
+- `onProviderOAuth` 和 `pi.providers.oauth.prompt` / `notify`（`provider.oauth`）
 - `clipboard.*`、`shell.openExternal`、`net.fetch`
 - `browser.*`（访客页 CDP；`browser.cdp`）
 - `services.register` / `unregister`、`bus.publish` / `subscribe`、`events.on` / `off`
