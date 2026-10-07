@@ -24,7 +24,11 @@ import {
   IconServer,
 } from "../icons";
 import { providerServesChatModels } from "./default-model";
-import { planImageGenerationDefaults } from "./image-generation-default";
+import {
+  imageGenerationPickerCandidates,
+  isImageGenerationPickerCandidate,
+  planImageGenerationDefaults,
+} from "./image-generation-default";
 import { copyProviderConfiguration, type ProviderCopyDraft } from "./provider-copy";
 import { ImageGenerationModelRow } from "./ImageGenerationModelRow";
 import { OAuthLoginDialog } from "./OAuthLoginDialog";
@@ -67,16 +71,12 @@ function imageCandidates(
   return result;
 }
 
-function isImageCandidate(candidates: readonly ImageGenerationBinding[], providerId: string, modelId: string) {
-  return candidates.some((entry) => entry.providerId === providerId && sameWireId(entry.modelId, modelId));
-}
-
 function chatModelOptions(providers: readonly ProviderPublic[], imageModels: readonly ImageGenerationBinding[]) {
   return providers.flatMap((provider) => {
     const ids = provider.models?.length
       ? provider.models.map((model) => model.id)
       : [provider.defaultModelId ?? ""];
-    return ids.filter((id) => !!id.trim() && !isImageCandidate(imageModels, provider.id, id))
+    return ids.filter((id) => !!id.trim() && !isImageGenerationPickerCandidate(imageModels, provider.id, id))
       .map((modelId) => ({ provider, modelId }));
   });
 }
@@ -226,11 +226,17 @@ export function ModelConfigPage() {
     setChangingImageModel(true);
     try {
       const current = await api.getSettings();
-      const candidates = imageCandidates(
+      // Exactly the list the picker row offered, so a choice the user could
+      // make is always one this page accepts — including the image model of a
+      // signed-in vendor account, which is never stored as a chat model.
+      const candidates = imageGenerationPickerCandidates(
         current.imageGenerationModels,
         current.imageGeneration,
+        providers,
       );
-      if (!isImageCandidate(candidates, binding.providerId, binding.modelId)) return;
+      if (!isImageGenerationPickerCandidate(candidates, binding.providerId, binding.modelId)) {
+        return;
+      }
       const nextSettings = { ...current, imageGeneration: binding };
       await api.setSettings(nextSettings);
       useAppStore.setState({ settings: nextSettings });
