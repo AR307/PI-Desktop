@@ -554,11 +554,13 @@ contract modes are intent boundaries, not strict read-only security profiles.
   action, so an enabled Jev always has a key the Agent can spend and an
   abandoned dialog never leaves a credential behind. The credential is a
   TypeSafe API key; this integration has no OAuth path.
-- The model configuration page keeps one Jev card: the stored-key state, the
-  Agent-mode switch, and the actions that add, replace or remove the key. The
-  key itself is entered only in the service dialog, which is also where it is
-  checked. It stays in Host secure storage; the renderer only learns whether
-  one exists.
+- The model configuration page shows the Jev card only once Jev has been added:
+  an install without it has nothing there to configure, and adding stays in the
+  service chooser. The card carries the stored-key state, the Agent-mode switch
+  and the actions that replace or remove the key; removing the key takes the
+  switch down first, then the card. The key itself is entered only in the
+  service dialog, which is also where it is checked. It stays in Host secure
+  storage; the renderer only learns whether one exists.
 - Explain that `JevClassify` sends only the state and questions the Agent passes
   to TypeSafe, and warn users not to include secrets or personal information.
 - The tool is on demand and unavailable in Plan and Goal modes. Removing the

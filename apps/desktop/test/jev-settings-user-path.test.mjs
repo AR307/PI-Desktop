@@ -1,10 +1,12 @@
 /**
  * Isolated Electron user path for Jev settings (D625, settings IA).
  *
- * What the card is now: the state of the integration and the way in. It reads
- * whether a TypeSafe key is stored, lets the switch move only when one is, and
- * sends the user to the service dialog to add or replace the key — it never
- * stores a key itself. Removing the key takes the switch down first.
+ * What the card is now: the state of the integration, shown only once Jev has
+ * been added. An install without it has nothing to show here, because adding
+ * happens where every other service is added. It reads whether a TypeSafe key
+ * is stored, lets the switch move only when one is, and sends the user to the
+ * service dialog to add or replace the key; it never stores a key itself.
+ * Removing the key takes the switch down first, and then takes the card away.
  *
  * The key is written by the service dialog (see the Jev service setup test);
  * this fixture stands in for that by storing one in the fake Host and
@@ -104,55 +106,55 @@ function button(label) {
 }
 
 window.jevSettingsProbe = async () => {
-  await waitFor(() => document.body.innerText.includes("API key not configured"), "initial key state missing");
-  const toggle = () => document.querySelector('[role="switch"][aria-label="Enable Jev for Agent"]');
-  if (!toggle()) throw new Error("the Jev switch is missing");
-  const initialToggleDisabled = toggle().disabled;
-
-  const addKey = button("Add key");
-  if (!addKey) throw new Error("the card must offer adding a key");
-  flushSync(() => addKey.click());
+  // 1) With no key stored, Jev has not been added: nothing is shown here.
   await settle();
-  const configureOpened = configureClicks === 1;
-
-  // Without a key the switch stays refused, whatever the card offers.
-  flushSync(() => toggle().click());
   await settle();
-  // Pressing a switch that has no key behind it must not write a setting.
-  const refusedWithoutKey = toggle().getAttribute("aria-checked") === "false"
-    && !apiCalls.some((call) => call.channel === "pi-desktop/settings/set");
+  const hiddenUntilAdded = !document.querySelector('[role="switch"]')
+    && !document.body.innerText.includes("Jev");
 
-  // A key the service dialog stored is what the next mount reads.
+  // 2) The key the service dialog stored is what puts the card on the page.
   savedKey = "jev-ui-fixture-key";
   flushSync(() => window.__remount());
-  await waitFor(() => document.body.innerText.includes("API key saved securely"), "configured state missing");
+  await waitFor(
+    () => document.body.innerText.includes("API key saved securely"),
+    "the card did not appear for a stored key",
+  );
+  const toggle = () => document.querySelector('[role="switch"][aria-label="Enable Jev for Agent"]');
+  if (!toggle()) throw new Error("the Jev switch is missing");
+  const toggleReadyWithKey = !toggle().disabled;
   const replaceOffered = Boolean(button("Replace key"));
   const removeOffered = Boolean(button("Remove key"));
 
+  // The card's own action is the service dialog, the one place a key is kept.
+  flushSync(() => button("Replace key").click());
+  await settle();
+  const configureOpened = configureClicks === 1;
+
+  // 3) The switch is the setting, and a stored key is what it needs.
   flushSync(() => toggle().click());
   await waitFor(() => toggle().getAttribute("aria-checked") === "true", "Jev setting did not turn on");
 
+  // 4) Removing the key takes the switch down first, deletes the key, and the
+  //    card leaves with it.
   const remove = button("Remove key");
   if (!remove) throw new Error("removing the key must stay possible");
   flushSync(() => remove.click());
-  await waitFor(() => document.body.innerText.includes("API key not configured"), "removed key state was not shown");
+  await waitFor(() => !toggle(), "the card must leave once Jev is not added");
 
-  const finalToggle = toggle();
   const settingsWrites = apiCalls.filter((call) => call.channel === "pi-desktop/settings/set");
   const lastDisable = apiCalls.findLastIndex(
     (call) => call.channel === "pi-desktop/settings/set" && call.input.jevEnabled === false,
   );
   const firstDelete = apiCalls.findIndex((call) => call.channel === "pi-desktop/secrets/delete");
   return {
-    initialToggleDisabled,
-    configureOpened,
-    refusedWithoutKey,
+    hiddenUntilAdded,
+    toggleReadyWithKey,
     replaceOffered,
     removeOffered,
+    configureOpened,
     enabledSettingPersisted: settingsWrites.some((call) => call.input.jevEnabled === true),
-    disabledAfterRemoval: finalToggle.getAttribute("aria-checked") === "false",
-    toggleDisabledAfterRemoval: finalToggle.disabled === true,
     keyRemovedFromHost: savedKey === undefined,
+    cardGoneAfterRemoval: !document.querySelector('[role="switch"]'),
     removalDisabledFirst: firstDelete !== -1 && lastDisable !== -1 && firstDelete > lastDisable,
     keyNeverStoredFromTheCard: !apiCalls.some((call) => call.channel === "pi-desktop/secrets/set"),
     storedKeyNeverInSettings: settingsWrites.every(
@@ -162,7 +164,7 @@ window.jevSettingsProbe = async () => {
 };
 `;
 
-test("the Jev card reads the key, gates the switch, and disables before removing", {
+test("Jev's card appears once the service is added, and leaves with it", {
   timeout: 60_000,
   skip:
     process.platform === "linux" && !process.env.DISPLAY
@@ -243,15 +245,14 @@ app.whenReady().then(async () => {
     assert(line, output.slice(-6000));
     const result = JSON.parse(line.slice("JEV_SETTINGS_PROBE ".length));
     assert.deepEqual(result, {
-      initialToggleDisabled: true,
-      configureOpened: true,
-      refusedWithoutKey: true,
+      hiddenUntilAdded: true,
+      toggleReadyWithKey: true,
       replaceOffered: true,
       removeOffered: true,
+      configureOpened: true,
       enabledSettingPersisted: true,
-      disabledAfterRemoval: true,
-      toggleDisabledAfterRemoval: true,
       keyRemovedFromHost: true,
+      cardGoneAfterRemoval: true,
       removalDisabledFirst: true,
       keyNeverStoredFromTheCard: true,
       storedKeyNeverInSettings: true,
