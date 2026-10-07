@@ -16929,6 +16929,16 @@ host-created files. The full app's file-preview viewer is covered separately.
   default-model-picker.test.mjs, and scripts/e2e-composer-model-selection.mjs.
 
 
+## BOM-marked UTF-16 text tools
+
+- Create a UTF-16LE PowerShell build log with a BOM and CRLF, then ask the agent
+  to Read it. The tool and the next model request contain readable log lines.
+- Edit a displayed line. The original BOM, endian and CRLF bytes are preserved.
+- Repeat with UTF-16BE Chinese text. Ordinary binary files remain rejected.
+- Automated coverage: `read_powershell_utf16le_log`,
+  `read_and_edit_utf16be_chinese_text`, and the existing binary/CRLF tool tests.
+
+
 ## Delegate mutation recovery isolation
 
 - Start two Task delegates editing the same file. Delegate A produces text and
