@@ -24,6 +24,7 @@ Provide a permission–capability–risk–default-policy reference table for re
 | `agent.tool.register` | high | Register an agent tool | Confirm at install | Tool execution is audited separately |
 | `agent.prompt.inject` | high | Inject a system prompt; activates `contributes.skills` | Deny by default / strong confirmation | Easily leads to behavior hijacking |
 | `agent.extension` | high | Run `contributes.agentExtensions` modules inside the agent process | Explicit confirmation; local imports and development plugins only in v1.1 | Same access as the agent's own tools; the plugin sandbox does not apply (spec 16) |
+| `renderer.extension` | high | `manifest.renderer` is evaluated inside the host renderer to mount UI slots; `rendererActions` and `rendererCallMethods` open the actions and `onRendererCall` methods that module may use | Explicit confirmation; local imports and development plugins only in v1.1, matching `agent.extension` | The module shares the host's own document, so a slot is a contract rather than a sandbox. A component may dispatch only the reviewed vocabulary (`plugin.call`, `composer.insertText`, `composer.readDraft`, `composer.replaceDraft`, `attachments.add` / `list` / `remove`), capped at 16, and `plugin.call` reaches only the calling plugin's own `onRendererCall` methods, capped at 32. Registrations are withdrawn when the plugin unloads; a self-drawn dialog lives in a layer the plugin opened itself |
 | `provider.register` | high | `contributes.providers` become rows in the native provider list, owned by the plugin and refreshed from the manifest on load | Explicit confirmation; local imports and development plugins only in v1.1, matching `agent.extension` | The user path refuses edits to the row (`PROVIDER_OWNED_BY_PLUGIN`); API-key credentials stay in the Host secret store under the usual provider refs |
 | `provider.oauth` | high | `onProviderOAuth`; host-rendered `pi.providers.oauth.prompt` / `notify` for a declared OAuth provider | Explicit confirmation | Required with `provider.register` for `authKind: "oauth"`. The callback can read and refresh only that contribution's encrypted credential. The Host keeps refresh tokens out of the renderer and Agent Runtime. Host-mediated callback egress still needs `net.fetch` and `manifest.net.domains`; plugin entry code itself is not an OS sandbox. One account is stored per provider contribution; sign out clears it |
 | `net.fetch` | high | `net.fetch` | Deny by default | Confined to `manifest.net.domains`; an empty or malformed list means no egress (§2A) |
@@ -134,6 +135,7 @@ so "Modify the files it lists" is followed by the list.
 | `agent.tool.register` | Provide executable tools to the AI Agent | 向 AI Agent 提供可执行工具 |
 | `agent.prompt.inject` | Adjust agent instructions | 调整智能体指令 |
 | `agent.extension` | Run code inside the agent | 在 agent 内运行代码 |
+| `renderer.extension` | Draw UI in chat slots | 在聊天插槽绘制界面 |
 | `net.fetch` | Access the network | 访问网络 |
 | `shell.openExternal` | Open external links | 打开外部链接 |
 | `ui.theme` | Provide a theme | 提供主题 |
