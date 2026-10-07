@@ -16977,3 +16977,18 @@ host-created files. The full app's file-preview viewer is covered separately.
   same isolation.
 - Automated provider-boundary flow: `node scripts/e2e-subagent-edit-isolation.mjs`
   with optional `--single` and `--patch`; runtime tests cover parent restart.
+
+
+## Regenerate archival during quit
+
+- Regenerate a completed answer and quit as soon as the terminal event arrives.
+  Restart the isolated profile: both revisions and their final messages remain
+  readable, and no `host-core disposed` archival failure appears in the logs.
+- Hold the archive RPC while requesting quit. Host disposal waits for successful
+  archival; storage errors are logged. An unresponsive archive warns and allows
+  quit after the existing two-second bounded wait.
+- Automated coverage: `shutdown-regenerate-persistence.test.mjs` and
+  `node scripts/e2e-regenerate-quit.mjs` (built Desktop, sidecar and host required;
+  Playwright can be supplied through `PI_TEST_PLAYWRIGHT`). Only the model server
+  is simulated in the Electron flow. The fixture profile and screenshots stay
+  under `.artifacts/` for inspection; no user profile or paid model is used.
