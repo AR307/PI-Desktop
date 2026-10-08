@@ -2831,25 +2831,33 @@ identify the platform validation still needed.
 
 - **Preconditions**: A project-scoped session and a path-less session exist;
   at least one session has transcript history and one still has the default
-  title.
+  title. The standalone Session Titles plugin is enabled with
+  `session.autoTitle`, `agent.complete`, and `models.list`, a deterministic test
+  model, a custom prompt template, and thinking set to off.
 - **Steps**: 1) Open a Sidebar session overflow menu or right-click a session
   row and choose Rename. 2) Enter a title with surrounding whitespace and
   save. 3) Verify the title in the Sidebar, topbar, Project archive, and
   Search. 4) Restart the app and verify the title again. 5) Try an empty and
-  an over-80-Unicode-code-point title. 6) Send the first prompt in the
-  default-title session.
+  an over-80-Unicode-code-point title. 6) Open **Session Titles: Configure**,
+  set the prompt to return a fixed test title, choose the deterministic test
+  model, and save. 7) Send the first prompt in the default-title session. 8)
+  Confirm the title stays at its localized default while the turn runs, then
+  wait for `session:turnEnded` and the plugin completion. 9) Manually rename
+  that session and complete another turn.
 - **Expected**: The saved title is trimmed, displayed across every current
   session-summary surface, and persists after restart. The session stays in
   the same project or Temporary group, its transcript/message count and
   recent-activity ordering do not change, and historical notification title
-  snapshots are unchanged. Empty and overlong values are rejected. A custom
-  title is not replaced by first-prompt auto-title; a still-default session
-  continues to receive its automatic title. After its first turn, the default
-  session first shows the prompt fallback and then adopts the concise
-  background LLM summary when the provider returns one.
+  snapshots are unchanged. Empty and overlong values are rejected. Sending a
+  prompt does not change the core title. The enabled plugin replaces a
+  still-default title with the deterministic test title after the completed
+  turn; after a manual rename, a later plugin completion cannot replace it. A
+  session without the plugin remains at its localized default title.
 - **Specs linked**: `03-runtime/01-ipc-protocol.md`,
   `03-runtime/04-data-storage.md`, `03-runtime/06-host-rpc-protocol.md`,
-  `04-ux/01-ui-ia.md`, `04-ux/08-component-spec.md`, ADR 0143
+  `03-runtime/02-agent-runtime.md`, `07-plugins/03-plugin-api.md`,
+  `07-plugins/13-plugin-permissions-matrix.md`, `04-ux/01-ui-ia.md`,
+  `04-ux/08-component-spec.md`, ADR 0143, ADR 0323
 - **Acceptance**: F (session metadata persistence), Quality (localized task
   management)
 - **Milestone**: M2
@@ -9744,24 +9752,26 @@ This test plan spec is accepted when:
 - Composer omits the 本地 workspace label and shows Agent/Plan/Goal plus the
   active model ID; both locales expose the Plan and Goal approval copy.
 
-### US-UI-06 Session auto-title
+### US-UI-06 Session title plugin
 - Create a new task and send a first prompt such as "同步代码".
-- Expect its project or temporary session row to show the normalized prompt
-  fallback immediately, then adopt a concise LLM summary after the first turn.
-- Restart before/after the summary and confirm the current title is retained;
-  rename a task from its session menu and send a first prompt if it was still
-  using a default title. Expect the custom label to remain unchanged while the
-  default-title task receives the normal first-prompt title.
+- The core keeps the localized default title while the prompt is sent and after
+  completion. When the Session Titles plugin is enabled and authorized, it may
+  generate a title after the first completed turn using its configured prompt,
+  model, and thinking level. Without the plugin, the title remains the default.
+- Rename the session manually and complete another turn. The plugin must not
+  replace the user-defined title.
 
 ### US-UI-08 Shortcut-only destination history
 - Navigate Settings → Project archive → a project session → Plugins.
 - Expect no back/forward buttons in the expanded sidebar or main titlebar.
 - Press `Cmd/Ctrl+[` and `Cmd/Ctrl+]`; expect them to traverse that history.
 
-### US-UI-09 Grouped session title backfill
-- Open an older session that previously showed "New task"/"New chat" but has a first user message.
-- Expect its scoped sidebar row to display a truncated first-user-message title
-  after session list load.
+### US-UI-09 Default session title persistence
+- Open an older session that showed "New task"/"New chat" and has a first user
+  message.
+- Without the title plugin, its scoped sidebar row keeps the default title;
+  with the plugin, the title changes only after the first turn completes and the
+  plugin is authorized.
 
 ### US-UI-11 Empty draft reuse
 - Click New task twice.

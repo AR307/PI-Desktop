@@ -45,6 +45,7 @@ This log freezes previously open questions into concrete decisions.
 | D649 | Cloud backup stays closed to users | **Amend D642 / D643: the Settings `sync` destination carries `developmentOnly: true` again, so a packaged build omits its rail row, page, and settings-search hits and falls back to General, while development builds keep it. Developer mode stays irrelevant to the destination and it still carries no Experimental badge. Sync behavior, protocol, host schema, and persisted data are unchanged; dropping the flag reopens it for packaged builds. See `04-ux/06-settings-ia.md` and E2E-CONFIG-SYNC-webdav-portable-configuration.** | The encrypted WebDAV backup is not ready to be offered to packaged-build users yet, so it stays implemented but out of the way until it opens. |
 | D650 | Plugin providers appear in Add Service | **Amend ADR 0259: optional `category` groups manifest-owned provider rows; optional localized `description` supplies one-sentence hover/focus copy. Loaded plugins with `provider.register` contribute unconfigured API-key providers with endpoints. Tiles display provider names only; the Host saves keys through the existing provider secret path. There is no per-plugin provider-count cap. An empty model list is allowed only for an API-key provider with a base URL; after explicit key save, Host discovery populates its cached model choices. Configured rows remain in the provider list and leave the chooser. OAuth / no-auth rows are omitted; no new permission, runtime plugin API, provider row, or credential migration is added. See ADR 0322, `07-plugins/02-plugin-manifest-schema.md`, and E2E-PLUGIN-provider-catalog-add-service.** | Users could not discover manifest-owned community providers in the normal Add Service flow, and each plugin needed to group its own sites without owning credential UI. |
 | D651 | Transcript tool rows never auto-open | **Amend the leaf auto-open provision of the turn-process / thinking-display decisions and ADR `turn-process-and-thinking-display`: a tool-call, hosted-search or plan row keeps its payload collapsed in both display modes and only an explicit user action opens it, including the literal final item of the last activity group. Whole-process and ordinary-group defaults, failed/denied behavior, retained per-item choices, and the thinking row's own leaf default are unchanged. Renderer-only; no host protocol, persistence, permission or plugin contract change. See `04-ux/08-component-spec.md` §9.1/§9.2/§9.5/§9.6, `04-ux/09-interaction-patterns.md` §4.2, and E2E-040.** | A payload that opened itself under the newest call pulled attention away from the answer the user was waiting for and made one turn look different depending on how it ended; leaving every payload to the user keeps one predictable row. |
+| D652 | Make session title generation a standalone plugin | **Supersede ADR 0186: remove core prompt-derived fallback and built-in title completion; new sessions keep their localized default title until a user or plugin changes it. Add the high-risk `session.autoTitle` capability for bounded first-turn context and compare-and-set title updates, backed by schema v23 `sessions.title_source`; manual rename marks `manual`, plugin output marks `generated`. The standalone plugin configures its prompt template, model, and thinking level through its panel and uses `session:turnEnded`, `models.list`, and `agent.complete`. See ADR 0323, E2E-021a, and the plugin API/permission specs.** | Title generation is optional product policy with model and prompt settings, and the host needs a narrow durable boundary that makes manual titles win races. |
 
 ## B. Secondary implementation defaults
 
@@ -386,7 +387,7 @@ Gold source: local Codex electron captures; latest row wins where rows conflict.
 | D605 | Brazilian Portuguese (pt-BR) shell locale | **Amend D314 / ADR 0160 / ADR 0183 / ADR 0185: ship a complete `pt-BR` shell catalog with native name Português (Brasil) and English name Portuguese (Brazil). `pt-BR`, `pt_BR`, and regional `pt-*` resolve to the Brazilian Portuguese catalog; persisted `AppSettings.language` accepts `pt-BR`; Electron packages `pt-BR` and `pt_BR` Chromium locales; and a matching Brazilian Portuguese changelog keeps release notes in the active locale. No host protocol, storage schema, or IPC version change. See ADR 0306.** | Brazilian Portuguese users need a distinct complete shell and release-note language matching the existing searchable locale registry and packaging conventions. |
 | D350 | Focus-aware native task notifications | **Amend D117 / ADR 0107: `notification/showNative` carries `kind` as `task` or `interactive`. Omitted or unknown values default to `task`. Task banners are suppressed whenever the main window is visible and focused, including a focused background session. Interactive prompts are suppressed only for the exact visible focused session. Interactive prompts never create a durable task inbox row. Plugin notifications stay on their permission-gated path. No host protocol or storage schema change. See ADR 0187 and E2E-065 / E2E-065a.** | Task completions and interactive asks share one native channel but need different focus rules. The field is `kind`; a colliding `source` name is not part of the contract. |
 | D358 | Show provider retry causes in the active-turn status | **Amend ADR 0175: `AgentActivity.retrying` may carry bounded, already-redacted error details. The compact retry row stays at rest; hover or keyboard focus reveals the localized summary, stable code/status, and provider message. Intermediate retries never become transcript error rows. See ADR 0196 and US-UI-60d.** | Users need the current retry cause without duplicating the final assistant error. |
-| D359 | Summarize first-turn session titles with a main-owned one-shot | **Keep the first-prompt fallback synchronous. After `agent_end`, the renderer calls allowlisted `session/summarizeTitle`. Electron resolves the session model and runs a thinking-disabled one-shot; a valid result persists through `session.rename`. Automatic replacement refuses a persisted `manualTitle` and any title that is neither a default nor the first-prompt fallback. No host schema change. See ADR 0186 and E2E-021a.** | A truncated first prompt is a poor sidebar label, but title generation must not block the turn or expose credentials to the renderer. |
+| D359 | Summarize first-turn session titles with a main-owned one-shot *(superseded by D652)* | **Historical: the core once applied a first-prompt fallback, then ran `session/summarizeTitle` from Electron after `agent_end`. D652 removes both automatic title paths and moves optional generation to a standalone plugin.** | A truncated first prompt was a poor sidebar label, but title generation must not block the turn or expose credentials to the renderer. |
 | D361 | Inline image transport uses a 10 MB app-side bound | **Amend ADR 0101 / D197: `MAX_INLINE_IMAGE_BYTES` is 10,000,000. Vision-capable models receive images at or below that decimal 10 MB bound as transient base64; larger images and non-vision models keep the `@path` fallback. Electron main and the sidecar share the constant so replay cannot take a different path. No protocol or schema change.** | MiniMax's OpenAI-compatible endpoint accepts one image up to 10 MB; a higher app bound produced provider rejections after the composer had already inlined the bytes. |
 | D316 | Searchable theme picker | **Amend ADR 0160: Settings → General theme is a searchable picker row (same anchored-menu pattern as Language), not three preview cards. System / Light / Dark stay pinned at the top; plugin themes follow after a divider. `AppSettings.theme` and plugin-theme fallback are unchanged. See ADR 0161 and E2E-091.** | Plugin themes wrap a three-column card grid, and Language already solved the growing-list control. |
 | D121 | Branded macOS development host | **`pnpm dev` on macOS launches electron-vite through a fingerprinted, ad-hoc-signed PI-Desktop copy of the installed Electron host bundle under `.cache/electron-dev/`. The generated bundle changes only development host metadata, executable name, bundle identifier, and the ICNS resource; it never mutates `node_modules`. Windows/Linux keep the stock development executable, while packaged lanes remain electron-builder-owned.** | AppKit ignores runtime app-name/menu overrides for the top-level application identity and takes the native menu name and About icon from the host bundle; a branded development host is required for parity with packaged PI-Desktop. |
@@ -4137,17 +4138,14 @@ D193, and D194.
   mapping, settings/pluginChanged apply path, and the darwin live-window
   vibrancy guard. See `04-ux/08-component-spec.md` §1.7 and US-UI-74 / E2E-076.
 
-## 2026-09-08 — Session title summaries and focus-aware native task notifications (D359/D350)
+## 2026-09-08 — Session title summaries and focus-aware native task notifications (historical title decision superseded by D652; D350 remains active)
 
-- The initial prompt remains visible immediately as a normalized 48-character
+- At the time, the initial prompt appeared immediately as a normalized 48-character
   fallback. After the first turn, Electron resolves the session's effective
   provider/model and runs the main-owned `session/summarizeTitle` one-shot with
   thinking disabled; the renderer persists a successful result through
-  `session.rename`.
-- Renderer-local session metadata persists `manualTitle`. Automatic title
-  generation skips that marker and any persisted title that is neither a known
-  default nor the first-prompt fallback, so manual and already-summarized titles
-  survive renderer restart without a host schema change.
+  `session.rename`. D652 / ADR 0323 removed this behavior and made title
+  generation an optional standalone plugin.
 - Native task completion and interactive prompt alerts share an Electron IPC
   entry but have explicit `kind` values. Task banners are suppressed whenever
   the main window is visible and focused, including focused background sessions;
@@ -7550,6 +7548,19 @@ must keep splitting are covered by `markdown-blocks.test.mjs`.
   row leaves the chooser. OAuth and no-auth declarations do not appear.
 - See E2E-PLUGIN-provider-catalog-add-service and
   `07-plugins/02-plugin-manifest-schema.md` §5.4.
+## 2026-10-08 — Make session title generation a standalone plugin (D652)
+
+- The core no longer derives a title from the first prompt or runs a title
+  completion. New sessions remain at their localized default until the user or
+  an installed plugin changes the title.
+- The `session.autoTitle` permission exposes only bounded first-turn text for a
+  default-titled session and a host compare-and-set title update. Schema v23
+  tracks default, manual, and generated title ownership.
+- The standalone plugin exposes its prompt template, model, and thinking level
+  in a settings panel. It uses `session:turnEnded`, `models.list`, and
+  `agent.complete`; manual rename wins any concurrent update.
+- Covered by the host title-source and plugin API tests and E2E-021a. See
+  ADR 0323 and the plugin API and permission specifications.
 
 ## 2026-10-08 — Transcript tool rows never auto-open (D651)
 

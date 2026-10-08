@@ -2933,6 +2933,24 @@ async fn handle_request(
             plugin_sessions::list_messages(&st.db, plugin_id, &params)
                 .map_err(plugin_session_rpc_err)
         }
+        "plugin.session.autoTitleContext" => {
+            let plugin_id = params
+                .get("pluginId")
+                .and_then(Value::as_str)
+                .ok_or_else(|| rpc_err(1002, "pluginId required", "INVALID_PARAMS"))?;
+            let st = state.lock().await;
+            plugin_sessions::auto_title_context(&st.db, plugin_id, &params)
+                .map_err(plugin_session_rpc_err)
+        }
+        "plugin.session.setAutoTitle" => {
+            let plugin_id = params
+                .get("pluginId")
+                .and_then(Value::as_str)
+                .ok_or_else(|| rpc_err(1002, "pluginId required", "INVALID_PARAMS"))?;
+            let st = state.lock().await;
+            plugin_sessions::set_auto_title(&st.db, plugin_id, &params)
+                .map_err(plugin_session_rpc_err)
+        }
         "plugin.session.rename" => {
             let plugin_id = params
                 .get("pluginId")

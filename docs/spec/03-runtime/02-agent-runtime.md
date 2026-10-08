@@ -90,22 +90,20 @@ from pi's steering queue so it cannot execute independently on a later turn.
 An ordinary follow-up stays in the separate Host-owned FIFO until durable turn
 finalization. A steering failure must not terminate the active run.
 
-### 4.1 Session title summarization
+### 4.1 Session title generation
 
-The renderer applies a short first-prompt fallback immediately so sending a
-prompt never waits on title generation. After the first turn emits `agent_end`,
-Electron main resolves the session's effective provider/model and invokes the
-runtime's `summarizeSessionTitle` one-shot path with thinking disabled. The
-runtime supplies the initial user prompt and an optional assistant reply,
-returns only sanitized title text, and treats an empty/failing completion as a
-non-fatal result. The renderer persists a successful title through the existing
-`session.rename` path.
+The core keeps new sessions at their localized default title. It does not
+derive a title from the first prompt or run a title completion. An optional
+standalone plugin may subscribe to `session:turnEnded`; with the dedicated
+`session.autoTitle` permission it can read only the first user prompt and first
+assistant reply for a session whose title is still default, then use
+`agent.complete` with its configured prompt, model, and thinking level.
 
-The renderer also persists a `manualTitle` marker in its local session metadata.
-Automatic summarization is skipped for that marker and for any persisted title
-that is neither a recognized default nor the deterministic first-prompt
-fallback, which protects manual and already-summarized titles after restart.
-No host RPC or storage schema change is required.
+The plugin writes through a host compare-and-set that succeeds only while the
+exact default title is still current. Manual renames and another generated
+title therefore win concurrent updates. Host-core owns the title source in
+schema v23; this state survives renderer restart and does not expose a general
+transcript-read API.
 
 ## 5. Prompt flow
 

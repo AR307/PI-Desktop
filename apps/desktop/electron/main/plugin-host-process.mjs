@@ -316,6 +316,8 @@ function buildApi() {
     },
     session: {
       getLlmContext: () => call("session.getLlmContext"),
+      getAutoTitleContext: (input) => call("session.getAutoTitleContext", [input ?? {}]),
+      setAutoTitle: (input) => call("session.setAutoTitle", [input ?? {}]),
       list: (input) => call("session.list", [input ?? {}]),
       get: (input) => call("session.get", [input ?? {}]),
       listMessages: (input) => call("session.listMessages", [input ?? {}]),

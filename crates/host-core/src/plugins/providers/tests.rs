@@ -101,7 +101,7 @@ fn a_new_database_carries_the_owner_column_at_the_current_schema_version() {
     // v19 session omit, v21 the session Todo checklist, and v22 the
     // session-list index. A fresh database is stamped with the newest version,
     // so the column set is the current one.
-    assert_eq!(SCHEMA_VERSION, 22);
+    assert_eq!(SCHEMA_VERSION, 23);
     let version: i64 = db
         .conn()
         .query_row("PRAGMA user_version", [], |row| row.get(0))

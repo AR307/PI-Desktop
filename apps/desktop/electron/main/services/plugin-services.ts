@@ -138,6 +138,8 @@ export function createPluginServices({
         Number((result as { imported?: unknown })?.imported ?? 0) > 0) ||
       (method === "plugin.session.rename" &&
         (result as { updated?: unknown })?.updated === true) ||
+      (method === "plugin.session.setAutoTitle" &&
+        (result as { updated?: unknown })?.updated === true) ||
       (method === "plugin.session.delete" &&
         (result as { deleted?: unknown })?.deleted === true);
     if (changed) {
@@ -344,6 +346,10 @@ export function createPluginServices({
       get: (pluginId, input) => callPluginSessionHost("plugin.session.get", pluginId, input),
       listMessages: (pluginId, input) =>
         callPluginSessionHost("plugin.session.listMessages", pluginId, input),
+      getAutoTitleContext: (pluginId, input) =>
+        callPluginSessionHost("plugin.session.autoTitleContext", pluginId, input),
+      setAutoTitle: (pluginId, input) =>
+        callPluginSessionHost("plugin.session.setAutoTitle", pluginId, input),
       import: (pluginId, input) => callPluginSessionHost("plugin.session.import", pluginId, input),
       importBatch: (pluginId, input) =>
         callPluginSessionHost("plugin.session.importBatch", pluginId, input),

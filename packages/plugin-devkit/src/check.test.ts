@@ -141,6 +141,7 @@ describe("check", () => {
       "agent.tool.register",
       "browser.cdp",
       "audio.capture.background",
+      "session.autoTitle",
     ]) {
       expect(HIGH_RISK_PERMISSIONS).toContain(permission);
     }
@@ -162,11 +163,12 @@ describe("check", () => {
     const dir = join(await tempDir(), "high-risk-grants");
     await scaffold({ dir, template: "panel-basic" });
     await editManifest(dir, (m) => {
-      m.permissions = [...(m.permissions ?? []), "desktop.control", "session.read"];
+      m.permissions = [...(m.permissions ?? []), "desktop.control", "session.read", "session.autoTitle"];
     });
     const highRisk = (await check(dir)).warnings.find((w) => w.code === "permission.high-risk");
     expect(highRisk?.message).toContain("desktop.control");
     expect(highRisk?.message).toContain("session.read");
+    expect(highRisk?.message).toContain("session.autoTitle");
   });
 
   it("warns when background capability permissions are declared but never called", async () => {

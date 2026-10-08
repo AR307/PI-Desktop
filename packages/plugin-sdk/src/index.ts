@@ -303,6 +303,15 @@ export type PluginSessionGetResult = {
   updatedAt: string;
 };
 
+/** Bounded first-turn data for an eligible default-titled session, never a full transcript. */
+export type PluginAutoTitleContext = {
+  sessionId: string;
+  expectedTitle: string;
+  userPrompt: string;
+  assistantReply?: string;
+  modelKey?: string;
+};
+
 /**
  * One completed turn as a flat fact row (`usage.read`). The host serves raw
  * counters — per-turn tokens and identifiers only; no message body ever
@@ -1216,6 +1225,12 @@ export type PluginHostApi = {
   };
   session: {
     getLlmContext: () => Promise<PluginLlmContext>;
+    getAutoTitleContext: (input: { sessionId: string }) => Promise<PluginAutoTitleContext | null>;
+    setAutoTitle: (input: {
+      sessionId: string;
+      expectedTitle: string;
+      title: string;
+    }) => Promise<{ updated: boolean }>;
     list: (input?: {
       limit?: number;
       cursor?: string;
@@ -1383,6 +1398,7 @@ export const PLUGIN_PERMISSIONS = [
   "session.read.own",
   "session.update.own",
   "session.delete.own",
+  "session.autoTitle",
   // Read-only usage facts (pi.usage.listTurns):
   // completed-turn counters and session titles, never message bodies.
   "usage.read",

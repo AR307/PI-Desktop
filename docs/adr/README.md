@@ -215,7 +215,7 @@ Each ADR includes:
 | 0183 | P0 international shell locales | Accepted (amends 0160 / 0182) |
 | 0184 | Dock the context usage inspector in the composer toolbar | Accepted (amends 0047 / 0103) |
 | 0185 | Korean shell locale | Accepted (amends 0160 / 0183) |
-| 0186 | Summarize First-Turn Session Titles with a Main-Owned One-Shot | Accepted |
+| 0186 | Summarize First-Turn Session Titles with a Main-Owned One-Shot | Superseded by 0323 |
 | 0187 | Focus-Aware Native Task Notifications | Accepted (amends 0107 / D117) |
 | 0188 | Preserve distinct credentials during model configuration import | Accepted (amends 0179 / D342) |
 | 0189 | Parent fatal error aborts leftover delegates | Accepted (amends 0166 / D328) |
@@ -364,3 +364,4 @@ Each ADR includes:
 | 0320 | [Host-owned OAuth lifecycle for plugin providers](0320-plugin-oauth-provider-callbacks.md) | Accepted for implementation (D647; amends ADR 0259) |
 | 0321 | [Pin an acceptable address for mixed direct DNS answers](0321-skill-market-direct-dns-pinning.md) | Accepted (D648; amends ADR 0272) |
 | 0322 | [Plugin providers appear in Add Service](0322-plugin-providers-in-add-service.md) | Accepted for implementation (D650; amends ADR 0259) |
+| 0323 | [Make Session Title Generation a Standalone Plugin](0323-plugin-owned-session-titles.md) | Accepted (D652; supersedes ADR 0186) |

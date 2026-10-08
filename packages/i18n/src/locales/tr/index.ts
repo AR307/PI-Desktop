@@ -2249,6 +2249,7 @@ importConfirm: "İçe aktarılan uzantılar ajan sürecinde, ajanın kendi araç
       "bus.subscribe": "Diğer eklentilerden ileti al",
       "browser.cdp": "Çalışma paneli tarayıcısını kontrol et",
       "usage.read": "Kullanım istatistiklerini oku",
+      "session.autoTitle": "İlk tur başlık bağlamını oku ve otomatik başlıkları güncelle",
     },
     permissionHelp: {
       "ui.panel": "Eklentinin uygulama içinde kendi panelini göstermesini sağlar.",
@@ -2303,6 +2304,8 @@ importConfirm: "İçe aktarılan uzantılar ajan sürecinde, ajanın kendi araç
         "Çalışma paneli tarayıcısında gezebilir, sayfayı okuyabilir, JavaScript çalıştırabilir ve izin listesindeki Chrome DevTools komutlarını gönderebilir. Çerez ve depolama yöntemleri engellenir.",
       "usage.read":
         "Tamamlanan turların kullanım verilerini sayfalı olarak listeler (tur başına token sayaçları). Mesaj içeriği dahil değildir.",
+      "session.autoTitle":
+        "Yalnızca uygun oturumların ilk istemini ve ilk yanıtını okuyabilir; başlık elle değiştirilmemişse otomatik başlığı günceller. Tam dökümü okuyamaz.",
     },
   },
   /**

@@ -2242,7 +2242,8 @@ sklm: {
       "bus.publish": "Envoyer des messages à d'autres plugins",
       "bus.subscribe": "Recevoir des messages d'autres plugins",
       "browser.cdp": "Contrôler le navigateur du panneau de travail",
-      "usage.read": "Lire les statistiques d'utilisation"
+      "usage.read": "Lire les statistiques d'utilisation",
+      "session.autoTitle": "Lire le contexte du premier tour et modifier les titres automatiques"
     },
     "permissionHelp": {
       "ui.panel": "Permet au plugin d'afficher son propre panneau dans l'application.",
@@ -2284,6 +2285,8 @@ sklm: {
       "browser.cdp": "Peut naviguer dans le navigateur du panneau de travail, lire la page, exécuter JavaScript et envoyer des commandes Chrome DevTools sur liste autorisée. Les cookies et les méthodes de stockage sont bloqués.",
       "usage.read":
         "Liste les données d'utilisation des tours terminés (compteurs de tokens par tour, paginés). Aucun contenu de message n'est inclus.",
+      "session.autoTitle":
+        "Peut lire uniquement le premier message et la première réponse des sessions admissibles, puis modifier le titre s'il n'a pas été changé manuellement. Ne peut pas lire la transcription complète.",
     }
   },
   "extensions": {

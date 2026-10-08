@@ -42,6 +42,7 @@ export const HIGH_RISK_PERMISSIONS = [
   "desktop.control",
   "project.create",
   "session.read",
+  "session.autoTitle",
   "session.import",
   "session.delete.own",
   "mcp.server.local",
