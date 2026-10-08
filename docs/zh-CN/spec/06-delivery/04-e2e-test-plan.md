@@ -1406,12 +1406,12 @@ task-candidate E2E 从请求工作树运行，但使用主工作区已经准备�
 #### E2E-022C：检查、打包、安装往返
 
 - **先决条件**：脚手架插件目录。
-- **步骤**：1) `pnpm pi-plugin check <dir>`。 2) 删除 `main` 命名的文件并再次运行 `check`。 3) 恢复它，声明 `contributes.skills` 而不声明 `agent.prompt.inject`，然后再次运行 `check`。 4) `pnpm pi-plugin pack <dir>`。 5) 从插件页面安装生成的 `.piplug`。 6) 要求代理在同一目录上运行 `PluginCheck` 和 `PluginPack`。
-- **预期**：脚手架插件检查干净并报告其文件计数和大小；缺少 `main` 是一个阻止 `pack` 的错误； inert-skills 情况是一个不会阻止的警告； `pack` 使用仅存储条目写入 `dist/<id>-<version>.piplug` 并打印其 sha256；该软件包通过正常的权限审查进行安装，并显示在“活动”下；代理工具会产生相同的判断并拒绝会话工作区之外的任何目录。
+- **步骤**：1) `pnpm pi-plugin check <dir>`。 2) 删除 `main` 命名的文件并再次运行 `check`；对声明了 `manifest.renderer` 的插件，删除它命名的文件后重复一次。 3) 恢复它，声明 `contributes.skills` 而不声明 `agent.prompt.inject`，然后再次运行 `check`。 4) `pnpm pi-plugin pack <dir>`。 5) 从插件页面安装生成的 `.piplug`。 6) 要求代理在同一目录上运行 `PluginCheck` 和 `PluginPack`。
+- **预期**：脚手架插件检查干净并报告其文件计数和大小；缺少 `main` 或 `manifest.renderer` 入口是一个阻止 `pack` 的错误； inert-skills 情况是一个不会阻止的警告； `pack` 使用仅存储条目写入 `dist/<id>-<version>.piplug` 并打印其 sha256；该软件包通过正常的权限审查进行安装，并显示在“活动”下；代理工具会产生相同的判断并拒绝会话工作区之外的任何目录。
 - **链接规格**：`07-plugins/10-plugin-devex.md` §5–§6、`07-plugins/06-plugin-packaging.md`、ADR 0039
 - **承兑**：G（本地包装往返）
 - **里程碑**：后 MVP
-- **状态**：部分自动化（`packages/plugin-devkit` vitest：脚手架→检查→按模板打包，存储方法标头，每个检查规则）；安装步骤已记录
+- **状态**：部分自动化（`packages/plugin-devkit` vitest：脚手架→检查→按模板打包，存储方法标头，每个检查规则，以及把 `permission.high-risk` 列表与权限矩阵 high 行对齐的一致性测试）；安装步骤已记录
 
 #### E2E-023：全局搜索中的插件命令并执行
 
