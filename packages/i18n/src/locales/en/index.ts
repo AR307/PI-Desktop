@@ -367,6 +367,7 @@ export const en = {
     fileRefMissing: "No file matches {{name}}",
     fileRefRestricted: "{{name}} is outside the locations this app can access",
     fileRefLookupFailed: "Could not check this file reference.",
+    fileManagerUnavailable: "The File Manager is unavailable. The file was opened in the built-in viewer.",
     revealFileInFolder: "Show in folder",
     fileRevealFailed: "Could not show the file in its folder.",
     copyFullPath: "Copy full path",

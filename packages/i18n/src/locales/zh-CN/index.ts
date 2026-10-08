@@ -356,6 +356,7 @@ export const zhCN = {
     fileRefMissing: "没有匹配 {{name}} 的文件",
     fileRefRestricted: "{{name}} 不在应用允许访问的范围内",
     fileRefLookupFailed: "无法检查此文件引用。",
+    fileManagerUnavailable: "文件管理器当前不可用，已在内置文件查看器中打开。",
     revealFileInFolder: "在文件夹中显示",
     fileRevealFailed: "无法在文件夹中打开该文件。",
     copyFullPath: "复制完整地址",
