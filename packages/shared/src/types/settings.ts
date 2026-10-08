@@ -63,36 +63,15 @@ export type AppSettings = {
   keepAwakeWhileRunning?: boolean;
   /** Configured command shell for the agent Bash protocol tool. */
   defaultCommandShell?: CommandShellId;
-  /**
-   * Whether the stored user template replaces the built-in one (ADR 0121).
-   * Absent means off. Turning it off keeps `promptEnhancementUserTemplate` so
-   * toggling back on restores the user's text instead of discarding it.
-   */
+  /** @deprecated Retained for one-time migration into pi.prompt-enhancement. */
   promptEnhancementCustomTemplate?: boolean;
-  /**
-   * Composer prompt-enhancement user-template override (ADR 0121). Applied only
-   * while `promptEnhancementCustomTemplate` is on. Host-core rejects a non-blank
-   * value without `{{draft}}` and any value beyond
-   * `PROMPT_ENHANCEMENT_TEMPLATE_MAX_LENGTH`.
-   *
-   * The system prompt is intentionally not overridable: it carries the rewrite
-   * contract the feature is specified against.
-   */
+  /** @deprecated Retained for one-time migration into pi.prompt-enhancement. */
   promptEnhancementUserTemplate?: string;
-  /**
-   * Model the one-shot enhancement runs on. Absent means "follow the Composer's
-   * current model". When the pinned pair is unusable, main falls back to the
-   * Composer model and logs a warning (ADR 0121).
-   */
+  /** @deprecated Retained for one-time migration into pi.prompt-enhancement. */
   promptEnhancementProviderId?: string;
+  /** @deprecated Retained for one-time migration into pi.prompt-enhancement. */
   promptEnhancementModelId?: string;
-  /**
-   * Reasoning effort for the one-shot enhancement. Absent means `off`: the
-   * enhancement never inherits the session's level, because a rewrite rarely
-   * benefits from reasoning and reasoning is the slow path. The value is clamped
-   * onto the resolved model's ladder, and switching model re-clamps it, so a
-   * stored level is always one the model can run.
-   */
+  /** @deprecated Retained for one-time migration into pi.prompt-enhancement. */
   promptEnhancementThinkingLevel?: ThinkingLevel;
   defaultPermissionMode?: GlobalPermissionMode;
   theme: ThemePreference;

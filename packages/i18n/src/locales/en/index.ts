@@ -315,13 +315,6 @@ export const en = {
     moveQueuedPromptDown: "Move down",
     editQueuedPrompt: "Edit",
     editQueuedPromptBusy: "Clear the input before editing this queued message",
-    enhancePrompt: "Enhance prompt",
-    enhancingPrompt: "Enhancing…",
-    undoEnhancement: "Undo enhancement",
-    enhancementFailed: "Prompt enhancement failed",
-    enhancementTimeout:
-      "The rewrite took too long. Try again, or pick a faster enhancement model in Settings.",
-    dismissEnhancementError: "Dismiss enhancement error",
     sendWhileRunning: "Send follow-up · {{shortcut}} to steer",
     steeringUnavailable: "This turn can no longer accept steering. Your draft was kept.",
     nativeSessionBusy: "This native Pi session is still replying. Stop it or wait for the reply to finish before sending.",
@@ -1646,34 +1639,6 @@ sklm: {
     fontSizeXl: "Trenta",
     fontSizeScale: "Text size scale",
     fontSizePercent: "{{value}}%",
-    promptEnhancementTitle: "Prompt enhancement",
-    promptEnhancementDesc:
-      "Applies to the Composer's Enhance prompt action. The system prompt is built in; the user template and the enhancement model can be customized.",
-    promptEnhancementCustomTemplate: "Use a custom template",
-    promptEnhancementCustomTemplateDesc:
-      "Replaces the built-in user template with your own. The system prompt stays built in.",
-    promptEnhancementCustomTemplateActive: "Custom template active",
-    promptEnhancementCustomTemplateNeedsTemplate:
-      "Save a custom template first; the switch then chooses between it and the built-in template.",
-    promptEnhancementEdit: "Edit",
-    promptEnhancementModelTitle: "Enhancement prompt",
-    promptEnhancementModel: "Default model",
-    promptEnhancementThinking: "Reasoning",
-    promptEnhancementThinkingDesc:
-      "Reasoning effort for the rewrite. Off is the default and the fastest.",
-    promptEnhancementThinkingOff: "Off (no reasoning)",
-    promptEnhancementModelFollow: "Follow the current model",
-    promptEnhancementModelUnavailable:
-      "Unavailable — enhance will fall back to the current model",
-    promptEnhancementUserTemplate: "User template",
-    promptEnhancementUserTemplateDesc:
-      "Wraps the draft. It must include the draft variable; use the insert button to place it.",
-    promptEnhancementInsertDraft: "Insert draft variable",
-    promptEnhancementRestore: "Restore default",
-    promptEnhancementMissingDraftVariable:
-      "The user template must contain the draft variable, or the draft cannot be sent.",
-    promptEnhancementTooLong: "The user template must be at most 8000 characters.",
-    promptEnhancementSaveError: "Couldn't save the prompt-enhancement settings.",
   },
   project: {
     open: "Open project",
@@ -2205,6 +2170,7 @@ importConfirm: "Imported extensions run inside the agent process with the same a
       tools: "Agent tools",
       agentExtension: "Agent extension",
       rendererUi: "Chat UI extension",
+      composerTransform: "Composer actions",
       skills: "Skills",
       themes: "Theme",
       mcp: "MCP server",
@@ -2243,6 +2209,7 @@ importConfirm: "Imported extensions run inside the agent process with the same a
       "agent.tool.register": "Add tools for the agent",
       "agent.prompt.inject": "Adjust agent instructions",
       "agent.complete": "Run a one-shot completion with your models",
+      "composer.transform": "Transform text in the Composer",
       "agent.extension": "Run code inside the agent",
       "renderer.extension": "Draw UI in chat slots",
       "provider.register": "Add providers to the model list",
@@ -2292,6 +2259,8 @@ importConfirm: "Imported extensions run inside the agent process with the same a
       "agent.prompt.inject": "Can change instructions sent to the AI agent.",
       "agent.complete":
         "Can spend your model quota on a one-shot completion. The plugin never receives your API keys.",
+      "composer.transform":
+        "Lets this plugin transform text you explicitly select in the Composer. It receives the draft and selected model key, but no conversation history or attachments.",
       "agent.extension": "Runs ExtensionAPI modules inside the agent process with the same access as the agent's own tools. Enable only code you trust.",
       "renderer.extension":
         "Loads this plugin's renderer module into the app window to draw UI slot components (message action bars, entry extras, tool cards, code-block renderers, composer controls). The module runs in the same document as PI-Desktop. Enable only code you trust.",

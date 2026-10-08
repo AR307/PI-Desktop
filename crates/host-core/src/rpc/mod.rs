@@ -743,9 +743,9 @@ fn drop_session_side_data(st: &AppState, id: &str) {
 const DEFAULT_LARGE_PASTE_THRESHOLD: i64 = 600;
 const MIN_LARGE_PASTE_THRESHOLD: i64 = 1;
 const MAX_LARGE_PASTE_THRESHOLD: i64 = 1_000_000;
-/// Upper bound for one stored prompt-enhancement template, in characters.
-/// Mirrored by `PROMPT_ENHANCEMENT_TEMPLATE_MAX_LENGTH` in
-/// `packages/shared/src/prompt-enhancement.ts`; keep the two in step.
+/// Upper bound for a legacy prompt-enhancement template, in characters. The
+/// setting remains validated while older profiles and config-sync backups can
+/// still contain it for the optional plugin's one-time migration.
 const MAX_PROMPT_ENHANCEMENT_TEMPLATE_CHARS: usize = 8000;
 /// The placeholder a usable user template must carry.
 const PROMPT_ENHANCEMENT_DRAFT_VARIABLE: &str = "{{draft}}";

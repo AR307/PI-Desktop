@@ -303,13 +303,6 @@ export const de = {
     "moveQueuedPromptDown": "Nach unten",
     "editQueuedPrompt": "Bearbeiten",
     "editQueuedPromptBusy": "Leeren Sie das Eingabefeld, bevor Sie diese wartende Nachricht bearbeiten",
-    "enhancePrompt": "Eingabeaufforderung verbessern",
-    "enhancingPrompt": "Verbesserung…",
-    "undoEnhancement": "Verbesserung rückgängig machen",
-    "enhancementFailed": "Eingabeaufforderung zur Verbesserung fehlgeschlagen",
-    "enhancementTimeout":
-      "Die Umschreibung hat zu lange gedauert. Erneut versuchen oder in den Einstellungen ein schnelleres Modell wählen.",
-    "dismissEnhancementError": "Verbesserungsfehler verwerfen",
     sendWhileRunning: "Folgenachricht senden · {{shortcut}} zum Lenken",
     steeringUnavailable: "Diese Runde nimmt keine weiteren Eingaben an. Dein Entwurf wurde behalten.",
     nativeSessionBusy: "Diese native Pi-Sitzung antwortet noch. Stoppe sie oder warte auf die Antwort, bevor du sendest.",
@@ -1623,34 +1616,6 @@ sklm: {
     "fontSizeXl": "Trenta",
     "fontSizeScale": "Textgrößenskala",
     "fontSizePercent": "{{value}}%",
-    "promptEnhancementTitle": "Prompt-Verbesserung",
-    "promptEnhancementDesc":
-      "Gilt für die Aktion „Prompt verbessern\" im Composer. Der System-Prompt ist eingebaut; Nutzervorlage und Modell sind anpassbar.",
-    "promptEnhancementCustomTemplate": "Eigene Vorlage verwenden",
-    "promptEnhancementCustomTemplateDesc":
-      "Ersetzt die eingebaute Nutzervorlage durch Ihre eigene. Der System-Prompt bleibt eingebaut.",
-    "promptEnhancementCustomTemplateActive": "Eigene Vorlage aktiv",
-    "promptEnhancementCustomTemplateNeedsTemplate":
-      "Speichern Sie zuerst eine eigene Vorlage; der Schalter wählt dann zwischen ihr und der eingebauten Vorlage.",
-    "promptEnhancementEdit": "Bearbeiten",
-    "promptEnhancementModelTitle": "Prompt-Verbesserung",
-    "promptEnhancementModel": "Standardmodell",
-    "promptEnhancementThinking": "Denkaufwand",
-    "promptEnhancementThinkingDesc":
-      "Denkaufwand für die Umschreibung. Standard ist Aus und am schnellsten.",
-    "promptEnhancementThinkingOff": "Aus (kein Denken)",
-    "promptEnhancementModelFollow": "Aktuellem Modell folgen",
-    "promptEnhancementModelUnavailable":
-      "Nicht verfügbar — die Verbesserung fällt auf das aktuelle Modell zurück",
-    "promptEnhancementUserTemplate": "Benutzer-Vorlage",
-    "promptEnhancementUserTemplateDesc":
-      "Umschließt den Entwurf. Muss die Entwurfsvariable enthalten; fügen Sie sie über die Schaltfläche ein.",
-    "promptEnhancementInsertDraft": "Entwurfsvariable einfügen",
-    "promptEnhancementRestore": "Standard wiederherstellen",
-    "promptEnhancementMissingDraftVariable":
-      "Die Benutzer-Vorlage muss die Entwurfsvariable enthalten, sonst kann der Entwurf nicht gesendet werden.",
-    "promptEnhancementTooLong": "Die Nutzervorlage darf höchstens 8000 Zeichen haben.",
-    "promptEnhancementSaveError": "Die Prompt-Verbesserungseinstellungen konnten nicht gespeichert werden.",
   },
   "project": {
     "open": "Projekt öffnen",
@@ -2181,6 +2146,7 @@ sklm: {
       "tools": "Agententools",
       "agentExtension": "Agent-Erweiterung",
       "rendererUi": "Chat-UI-Erweiterung",
+      "composerTransform": "Composer-Aktionen",
       "skills": "Fähigkeiten",
       "themes": "Thema",
       "mcp": "MCP-Server",
@@ -2219,6 +2185,7 @@ sklm: {
       "agent.tool.register": "Tools für den Agenten hinzufügen",
       "agent.prompt.inject": "Agentenanweisungen anpassen",
       "agent.complete": "One-Shot-Vervollständigung mit Ihren Modellen durchführen",
+      "composer.transform": "Text im Composer umwandeln",
       "agent.extension": "Code im Agenten ausführen",
       "renderer.extension": "Oberfläche in Chat-Slots zeichnen",
       "provider.register": "Anbieter zur Modellliste hinzufügen",
@@ -2260,6 +2227,7 @@ sklm: {
       "agent.tool.register": "Ermöglicht der KI, zusätzliche Tools aufzurufen, die von diesem Plugin bereitgestellt werden.",
       "agent.prompt.inject": "Kann Anweisungen ändern, die an den KI-Agenten gesendet werden.",
       "agent.complete": "Kann Ihr Modellkontingent für eine einmalige Fertigstellung ausgeben. Das Plugin erhält niemals Ihre API-Schlüssel.",
+      "composer.transform": "Erlaubt diesem Plugin, ausdrücklich im Composer ausgewählten Text umzuwandeln. Es erhält den Entwurf und den Modellschlüssel, aber weder Gesprächsverlauf noch Anhänge.",
       "renderer.extension": "Lädt das Renderer-Modul dieses Plugins in das App-Fenster, um UI-Slot-Komponenten zu zeichnen (Nachrichten-Aktionsleisten, Antwort-Anhänge, Tool-Karten, Codeblock-Renderer, Eingabebereich). Das Modul läuft im selben Dokument wie PI-Desktop. Aktiviere nur Code, dem du vertraust.",
       "agent.extension": "Führt ExtensionAPI-Module im Agentenprozess mit denselben Rechten wie die Tools des Agenten aus. Aktivieren Sie nur Code, dem Sie vertrauen.",
       "provider.register": "Fügt die Anbieter, die dieses Plugin definiert, zur Anbieterliste in den Einstellungen hinzu. Das Plugin liefert den Endpunkt und die Modelle; Ihr API-Schlüssel bleibt in PI-Desktop.",

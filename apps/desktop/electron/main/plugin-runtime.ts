@@ -67,6 +67,7 @@ import {
   type PluginProviderContrib,
   type PluginServiceContrib,
   type PluginSettingContrib,
+  type PluginComposerTransformInput,
   type PluginSkillContrib,
   type PluginThemeVariableContrib,
 } from "@pi-desktop/plugin-sdk";
@@ -77,6 +78,7 @@ import {
   type PluginRendererDescriptor,
   type PluginServiceStatus,
   type PluginSettingDefinition,
+  type PluginComposerTransformMeta,
   type PluginWorkspaceInfo,
   BUILTIN_SPEECH_PROTOCOL_IDS,
 } from "@pi-desktop/shared";
@@ -117,6 +119,11 @@ import {
   type PluginShortcutRegistry,
 } from "./plugin-shortcut-registry";
 import { repairImportedExtensionWrapper } from "./imported-plugin-wrapper";
+import {
+  migrateLegacyPromptEnhancementSettings,
+  PROMPT_ENHANCEMENT_PLUGIN_ID,
+  type LegacyPromptEnhancementSettings,
+} from "./plugin-prompt-enhancement-migration";
 
 export type RegisteredCommand = {
   id: string;
@@ -308,6 +315,12 @@ export type PluginHostServices = {
   agentExtensionsChanged?: () => void;
   getLocale?: () => string;
   getAppVersion?: () => string;
+  /** Legacy host-owned prompt enhancement settings, used only for one-time migration. */
+  getLegacyPromptEnhancementSettings?: () =>
+    | LegacyPromptEnhancementSettings
+    | null
+    | undefined
+    | Promise<LegacyPromptEnhancementSettings | null | undefined>;
   /**
    * The appearance the host is currently showing (palette, language, active
    * plugin theme). Panels and plugin processes read it through `app.getAppearance`;
@@ -602,6 +615,9 @@ const PLUGIN_DISPOSE_ALL_TIMEOUT_MS = 3_000;
 const PLUGIN_COMMAND_TIMEOUT_MS = 30_000;
 /** Kept under host-core's 120s tool budget so the plugin-side error wins. */
 const PLUGIN_TOOL_TIMEOUT_MS = 110_000;
+/** User-invoked Composer transforms share the bounded plugin tool budget. */
+const PLUGIN_COMPOSER_TRANSFORM_TIMEOUT_MS = PLUGIN_TOOL_TIMEOUT_MS;
+const MAX_COMPOSER_TRANSFORM_TEXT_LENGTH = 100_000;
 /** Side completions sit under the plugin tool budget (ADR 0174). */
 export const PLUGIN_COMPLETE_TIMEOUT_MS = 90_000;
 /** Fixed panel operations are user-facing and must not hang the renderer. */
@@ -1623,6 +1639,102 @@ export class PluginRuntime {
     );
   }
 
+  /** User-facing transform actions from loaded plugins with explicit consent. */
+  getComposerTransforms(pluginId?: string): PluginComposerTransformMeta[] {
+    const locale = this.services.getLocale?.();
+    const result: PluginComposerTransformMeta[] = [];
+    const candidates = pluginId
+      ? [this.loaded.get(pluginId)].filter((plugin): plugin is LoadedPlugin => Boolean(plugin))
+      : [...this.loaded.values()];
+    for (const loaded of candidates) {
+      if (loaded.disposing || !loaded.permissions.has("composer.transform")) continue;
+      const transforms = loaded.manifest.contributes?.composerTransforms ?? [];
+      for (const transform of transforms) {
+        result.push({
+          pluginId: loaded.manifest.id,
+          pluginName: loaded.manifest.name,
+          id: transform.id,
+          title: resolvePluginLocalizedString(transform.title, locale, transform.id),
+          undoTitle: resolvePluginLocalizedString(
+            transform.undoTitle,
+            locale,
+            `Undo ${resolvePluginLocalizedString(transform.title, locale, transform.id)}`,
+          ),
+        });
+      }
+    }
+    return result;
+  }
+
+  /** Invoke only a declared action; the plugin receives the draft text alone. */
+  async runComposerTransform(
+    input: PluginComposerTransformInput & { pluginId: string },
+  ): Promise<string> {
+    const pluginId = typeof input?.pluginId === "string" ? input.pluginId.trim() : "";
+    const transformId = typeof input?.id === "string" ? input.id.trim() : "";
+    const text = typeof input?.text === "string" ? input.text : "";
+    const modelKey = typeof input?.modelKey === "string" ? input.modelKey.trim() : undefined;
+    if (
+      !pluginId ||
+      !transformId ||
+      !text.trim() ||
+      text.length > MAX_COMPOSER_TRANSFORM_TEXT_LENGTH
+    ) {
+      throw apiError("INVALID_ARGUMENT", "composer transform input is invalid");
+    }
+    if (modelKey && modelKey.length > 512) {
+      throw apiError("INVALID_ARGUMENT", "composer transform modelKey is invalid");
+    }
+    const loaded = this.loaded.get(pluginId);
+    if (!loaded || loaded.disposing || !loaded.child) {
+      throw apiError("NOT_FOUND", "composer transform plugin is not loaded");
+    }
+    this.assertPermission(loaded, "composer.transform");
+    const transform = (loaded.manifest.contributes?.composerTransforms ?? []).find(
+      (entry) => entry.id === transformId,
+    );
+    if (!transform) throw apiError("NOT_FOUND", "composer transform is not declared");
+
+    const startedAt = Date.now();
+    try {
+      const result = await this.sendToChild(
+        loaded,
+        {
+          t: "call",
+          method: "composer.transform",
+          payload: { id: transformId, text, ...(modelKey ? { modelKey } : {}) },
+        },
+        PLUGIN_COMPOSER_TRANSFORM_TIMEOUT_MS,
+      );
+      if (this.loaded.get(pluginId) !== loaded || loaded.disposing) {
+        throw apiError("PLUGIN_UNLOADED", "composer transform plugin was unloaded");
+      }
+      if (typeof result !== "string" || result.length > MAX_COMPOSER_TRANSFORM_TEXT_LENGTH) {
+        throw apiError("PLUGIN_INVALID_RESULT", "composer transform must return a text string");
+      }
+      this.services.audit?.({
+        pluginId,
+        api: "composer.transform",
+        ok: true,
+        transformId,
+        durationMs: Date.now() - startedAt,
+        ts: Date.now(),
+      });
+      return result;
+    } catch (error) {
+      this.services.audit?.({
+        pluginId,
+        api: "composer.transform",
+        ok: false,
+        transformId,
+        errorCode: (error as PluginApiError)?.code ?? "PLUGIN_TRANSFORM_FAILED",
+        durationMs: Date.now() - startedAt,
+        ts: Date.now(),
+      });
+      throw error;
+    }
+  }
+
   getLoaded(pluginId: string): LoadedPlugin | undefined {
     return this.loaded.get(pluginId);
   }
@@ -1916,6 +2028,38 @@ export class PluginRuntime {
               (perm) => declared.has(perm),
             ),
           );
+
+    if (
+      manifest.id === PROMPT_ENHANCEMENT_PLUGIN_ID &&
+      granted.has("composer.transform") &&
+      (manifest.contributes?.composerTransforms?.length ?? 0) > 0 &&
+      this.services.getLegacyPromptEnhancementSettings
+    ) {
+      try {
+        const legacy = await this.services.getLegacyPromptEnhancementSettings();
+        const migration = migrateLegacyPromptEnhancementSettings(
+          this.pluginDataDir(manifest.id),
+          legacy,
+        );
+        if (migration.migrated.length > 0) {
+          this.services.audit?.({
+            pluginId: manifest.id,
+            api: "plugin.settings.migrate",
+            ok: true,
+            keys: migration.migrated,
+            ts: Date.now(),
+          });
+        }
+      } catch (error) {
+        this.services.audit?.({
+          pluginId: manifest.id,
+          api: "plugin.settings.migrate",
+          ok: false,
+          errorCode: (error as PluginApiError)?.code ?? "MIGRATION_FAILED",
+          ts: Date.now(),
+        });
+      }
+    }
 
     const entry =
       this.services.hostEntry ??

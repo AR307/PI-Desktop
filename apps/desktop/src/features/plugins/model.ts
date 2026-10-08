@@ -88,6 +88,7 @@ export const CAPABILITY_ORDER: PluginCapability[] = [
   "panel",
   "views",
   "rendererUi",
+  "composerTransform",
   "commands",
   "tools",
   "agentExtension",

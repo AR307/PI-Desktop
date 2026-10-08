@@ -356,16 +356,13 @@ The app settings JSON optionally stores `thinkingDisplayMode` (`detailed` or
 `compact`). Missing values retain detailed presentation. This additive display
 preference neither rewrites stored reasoning nor changes the database schema.
 
-The same blob optionally stores the prompt-enhancement overrides
-`promptEnhancementCustomTemplate` (the switch that decides whether a stored
-template applies), `promptEnhancementUserTemplate`,
-`promptEnhancementProviderId`, `promptEnhancementModelId`, and
-`promptEnhancementThinkingLevel` (ADR 0121). An absent or blank user template means the
-built-in default applies, so clearing the field stores no key rather than an
-empty string. A non-blank user template must contain the draft variable and stay
-within `PROMPT_ENHANCEMENT_TEMPLATE_MAX_LENGTH`; host-core rejects a write that
-breaks either rule and drops any stored `promptEnhancementSystemPrompt`, which is
-no longer read. No schema version bump is required.
+The settings blob may still contain legacy prompt-enhancement keys from an
+earlier release. They are retained for rollback and downgrade compatibility,
+but the host no longer reads or writes them as active preferences. When the
+user installs and grants the standalone `pi.prompt-enhancement` plugin, Electron
+copies valid legacy values into that plugin's private settings once (see
+`04-ux/12-prompt-enhancement.md`). The migration marker is also stored in the
+plugin's private data directory; the host settings schema does not change.
 
 New config domains (e.g. MCP servers) start as a namespace; they graduate to
 tables only when they need relations or indexes.

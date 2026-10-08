@@ -135,6 +135,15 @@ export type PluginViewMeta = {
   order: number;
 };
 
+/** A user-invoked text action available beside the Composer controls. */
+export type PluginComposerTransformMeta = {
+  pluginId: string;
+  pluginName: string;
+  id: string;
+  title: string;
+  undoTitle: string;
+};
+
 /**
  * An API-key provider a loaded plugin has made available in Add Service.
  * The host resolves the category for the active locale and returns no runtime
@@ -213,7 +222,9 @@ export type PluginCapability =
   /** `contributes.agentExtensions`: ExtensionAPI modules in the agent process. */
   | "agentExtension"
   /** `manifest.renderer`: the plugin ships a renderer slot entry (`docs/plugin-plan/ui/`). */
-  | "rendererUi";
+  | "rendererUi"
+  /** A plugin contributes explicit Composer text actions. */
+  | "composerTransform";
 
 /**
  * A loaded plugin's renderer extension as the renderer host sees it
@@ -351,6 +362,8 @@ export type PluginSummary = {
   /** Declared file scope, so the page can show it next to the permissions. */
   fs?: PluginFsPolicy;
   settings?: PluginSettingDefinition[];
+  /** Present while the plugin is loaded and its transform permission is granted. */
+  composerTransforms?: PluginComposerTransformMeta[];
   /** Live state of the plugin's `contributes.agentExtensions` modules, from
    * the most recent session that loaded them (spec 07-plugins/16 §11). */
   agentExtension?: PluginAgentExtensionStatus;

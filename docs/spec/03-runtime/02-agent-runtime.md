@@ -250,7 +250,7 @@ must remain valid without enabling retries; non-boolean writes stay invalid.
 Each retry is abortable and reports its current backoff through the normalized
 status event. The `retrying` activity carries the classified error code, the
 bounded/redacted provider message, and the HTTP status when known. The main
-session, builtin subagents, and one-shot composer enhancement use the same
+session, builtin subagents, and plugin one-shot completions use the same
 codes, budget size, and precedence.
 
 When the retry budget is exhausted, the final assistant error and lifecycle
@@ -1247,22 +1247,22 @@ Runtime responsibilities:
 
 Local models are supported through OpenAI-compatible endpoints (Ollama, LM Studio, vLLM, etc.).
 
-### 6.1 One-shot Composer enhancement
+### 6.1 Plugin-owned Composer transforms
 
-Composer enhancement uses the same resolved provider binding and retry
-classification as an agent request, but creates a separate completion context
-with exactly one user message and the static enhancement system prompt. It
-does not instantiate a session agent, include transcript history, expose tools,
-or persist a turn. The renderer receives only the trimmed text result; API
-keys and vendor refresh credentials remain in Electron main. OpenCode Go
-one-shots reuse the conversation id as `x-opencode-session` when a session is
-present; otherwise the runtime synthesizes a per-call id so the gateway
-accepts the request.
+Composer text transforms are contributed by explicitly installed plugins
+through the permission-gated `composer.transform` capability. The host sends
+the selected draft and optional model key to the plugin, without transcript
+history or attachment data. A plugin may use the generic `agent.complete`
+capability to request a one-shot completion; that path creates a separate
+completion context and does not instantiate a session agent, expose tools, or
+persist a turn. API keys and vendor refresh credentials remain in Electron
+main. OpenCode Go one-shots reuse the conversation id as `x-opencode-session`
+when a session is present; otherwise the runtime synthesizes a per-call id.
 
 ### 6.2 OpenCode session routing headers
 
-Chat, subagent, context-compaction summary, prompt-enhancement, and plugin
-one-shot completions whose provider is `apiStyle: opencode_go`, whose
+Chat, subagent, context-compaction summary, plugin-owned prompt-enhancement,
+and other plugin one-shot completions whose provider is `apiStyle: opencode_go`, whose
 `vendorKey` is `opencode` or `opencode-go`, whose pi-ai provider id is one of
 those values, or whose base URL host is `opencode.ai` send:
 
