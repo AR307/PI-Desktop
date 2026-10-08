@@ -18,6 +18,7 @@ import { createJevClassifierTool } from "./jev-classifier-tool.js";
 import { scheduledToolParameters, scheduledToolDescriptions } from "./scheduled-tools.js";
 import { withPiFileOpToolNames } from "./pi-file-ops.js";
 import { randomUUID } from "node:crypto";
+import { mkdirSync } from "node:fs";
 import {
   settledDelegationMessage,
   taskMessageSnapshot,
@@ -2728,11 +2729,28 @@ Do not invent objections or turn speculative risks into blockers. Stop when the 
   getTrustedExtensionReports() {
     return this.extensionRunner?.getLoadReports() ?? [];
   }
+  /**
+   * The working directory extensions see: the project root, or the session
+   * scratch for a temporary session. Scratch is otherwise created lazily by the
+   * first host tool call (D114), so it is created here; a failure leaves the
+   * path in place, because loading extensions must not fail the session.
+   */
+  private extensionCwd(): string {
+    if (this.projectPath) return this.projectPath;
+    if (!this.scratchDir) return process.cwd();
+    try {
+      mkdirSync(this.scratchDir, { recursive: true });
+    } catch {
+      // pi.exec reports the missing directory itself.
+    }
+    return this.scratchDir;
+  }
+
   private createExtensionBridge(): TrustedExtensionBridge {
     const runtime = this;
     return {
       sessionId: this.sessionId,
-      cwd: this.projectPath ?? process.cwd(),
+      cwd: this.extensionCwd(),
       getModel: () => runtime.model,
       setModel: (model, signal) => runtime.setExtensionModel(model, signal),
       modelRegistry: runtime.extensionModelRegistry(),
