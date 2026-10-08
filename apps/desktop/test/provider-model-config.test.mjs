@@ -31,6 +31,18 @@ const apiSource = await read("../src/lib/api.ts");
 const catalogContractSource = await read("../../../packages/shared/src/model-catalog.ts");
 const styles = await loadStyles();
 
+test("model configuration places AI services before Jev and image generation", () => {
+  const services = pageSource.indexOf('className="model-config-section-head"');
+  const catalogStatus = pageSource.indexOf('className="model-catalog-status"');
+  const jev = pageSource.indexOf("<JevSettingsCard");
+  const image = pageSource.indexOf("<ImageGenerationModelRow");
+
+  assert.ok(services >= 0, "the AI services section is present");
+  assert.ok(catalogStatus > services, "catalog actions stay with AI services");
+  assert.ok(jev > catalogStatus, "Jev follows AI services");
+  assert.ok(image > jev, "image generation follows Jev");
+});
+
 test("the model list comes from the AI service, not from a browsable catalog", () => {
   assert.match(hookSource, /api\.listProviderModels\(/);
   // The rejected surface and its host-side search must be gone.
