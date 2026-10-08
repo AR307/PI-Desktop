@@ -1528,6 +1528,7 @@ sklm: {
     "modelsFetchFailed": "Impossible de charger les modèles.",
     "modelsFetchFailedStatus": "La demande a échoué ({{status}}).",
     "modelsFetchNotFound": "Cette adresse n'a pas de liste de modèles.",
+    "providerUnavailable": "Le fournisseur sélectionné n’est plus disponible.",
     "modelsFetchInvalidResponse": "Le service n'a pas renvoyé de liste de modèles.",
     "modelsEmptyHint": "Saisissez une URL de base pour charger les modèles.",
     "noModelMatches": "Aucun modèle correspondant.",

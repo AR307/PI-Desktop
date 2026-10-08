@@ -1492,6 +1492,7 @@ export const ptBR = {
     modelsFetchFailed: "Não foi possível carregar os modelos.",
     modelsFetchFailedStatus: "Falha ao buscar modelos do provedor (status {{status}}).",
     modelsFetchNotFound: "Este endereço não possui lista de modelos.",
+    providerUnavailable: "O provedor selecionado não está mais disponível.",
     modelsFetchInvalidResponse: "O serviço não retornou uma lista de modelos.",
     modelsEmptyHint: "Insira uma URL base para carregar modelos.",
     noModelMatches: "Nenhum modelo correspondente.",

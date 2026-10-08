@@ -1511,6 +1511,7 @@ sklm: {
     modelsFetchFailed: "無法獲取模型列表。",
     modelsFetchFailedStatus: "請求失敗（{{status}}）。",
     modelsFetchNotFound: "該地址沒有模型列表。",
+    providerUnavailable: "所選服務已無法使用。",
     modelsFetchInvalidResponse: "服務未返回可用的模型列表。",
     modelsEmptyHint: "填寫地址即可獲取模型列表。",
     refreshModelCatalog: "更新模型目錄",

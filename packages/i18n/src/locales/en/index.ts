@@ -1551,6 +1551,7 @@ sklm: {
     modelsFetchFailed: "Couldn't load models.",
     modelsFetchFailedStatus: "Request failed ({{status}}).",
     modelsFetchNotFound: "This address has no model list.",
+    providerUnavailable: "The selected provider is no longer available.",
     modelsFetchInvalidResponse: "The service did not return a model list.",
     modelsEmptyHint: "Enter a base URL to load models.",
     noModelMatches: "No matching models.",

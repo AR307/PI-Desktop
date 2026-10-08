@@ -1544,6 +1544,7 @@ sklm: {
     modelsFetchFailed: "모델을 불러올 수 없습니다.",
     modelsFetchFailedStatus: "요청 실패 ({{status}}).",
     modelsFetchNotFound: "이 주소에 모델 목록이 없습니다.",
+    providerUnavailable: "선택한 제공자를 더 이상 사용할 수 없습니다.",
     modelsFetchInvalidResponse: "서비스가 모델 목록을 반환하지 않았습니다.",
     modelsEmptyHint: "모델을 불러오려면 기본 URL을 입력하세요.",
     noModelMatches: "일치하는 모델이 없습니다.",

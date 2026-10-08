@@ -93,6 +93,10 @@ export function ModelConfigPage() {
   // null = closed, "" = add flow, provider id = edit flow.
   const [copyDraft, setCopyDraft] = useState<ProviderCopyDraft | null>(null);
   const [setupFor, setSetupFor] = useState<string | null>(null);
+  const [pluginCatalogSetup, setPluginCatalogSetup] = useState<{
+    providerId: string;
+    pluginName: string;
+  } | null>(null);
 
   // The Jev card opens the same dialog, straight on the Jev service.
   const [jevSetup, setJevSetup] = useState(false);
@@ -169,10 +173,30 @@ export function ModelConfigPage() {
       settings.defaultProviderId === saved.id && firstModelId &&
       !models.some((model) => sameWireId(model.id, settings.defaultModelId ?? "") &&
         !selectedImageIds.some((id) => sameWireId(id, model.id)))
-        ? firstModelId
-        : undefined;
+    ? firstModelId
+    : undefined;
     try {
-      if (imageModelIds !== undefined) {
+      if (pluginCatalogSetup?.providerId === saved.id) {
+        const defaultsProviders = [...providers.filter((provider) => provider.id !== saved.id), saved];
+        const currentDefault = defaultsProviders.find(
+          (provider) => provider.id === settings.defaultProviderId,
+        );
+        const keepsCurrentDefault = !!currentDefault &&
+          providerServesChatModels(currentDefault, imageGenerationCandidates) &&
+          chatModelOptions([currentDefault], imageGenerationCandidates).some(
+            ({ modelId }) => sameWireId(modelId, settings.defaultModelId ?? ""),
+          );
+        if (!keepsCurrentDefault && firstModelId) {
+          const nextSettings = {
+            ...settings,
+            defaultProviderId: saved.id,
+            defaultModelId: firstModelId,
+          };
+          await api.setSettings(nextSettings);
+          useAppStore.setState({ settings: nextSettings });
+        }
+        showToast(t("settings.pluginProviderKeySaved"), { variant: "success" });
+      } else if (imageModelIds !== undefined) {
         const current = await api.getSettings();
         const plan = planImageGenerationDefaults(
           current,
@@ -220,6 +244,7 @@ export function ModelConfigPage() {
       }
       setSetupFor(null);
       setCopyDraft(null);
+      setPluginCatalogSetup(null);
       await refreshProviders();
     } catch (error) {
       showToast(error instanceof Error ? error.message : String(error), {
@@ -524,12 +549,16 @@ export function ModelConfigPage() {
 
       {setupFor !== null ? (
         <ProviderSetupDialog
+          key={setupFor}
           provider={editingProvider}
+          pluginCatalogSetup={pluginCatalogSetup?.providerId === editingProvider?.id}
+          pluginCatalogPluginName={pluginCatalogSetup?.pluginName}
           initialDraft={copyDraft}
           initialService={jevSetup ? JEV_SERVICE : undefined}
           onClose={() => {
             setSetupFor(null);
             setCopyDraft(null);
+            setPluginCatalogSetup(null);
             setJevSetup(false);
           }}
           imageModelIds={editingProvider
@@ -549,9 +578,16 @@ export function ModelConfigPage() {
           onPickSubscription={(vendor) => {
             setSetupFor(null);
             setCopyDraft(null);
+            setPluginCatalogSetup(null);
             // Started here, not in the dialog: a click happens once, where
             // StrictMode would run a mount effect twice and open two browsers.
             startLogin(vendor);
+          }}
+          onPickPluginProvider={(providerId, pluginName) => {
+            setPluginCatalogSetup({ providerId, pluginName });
+            setCopyDraft(null);
+            setJevSetup(false);
+            setSetupFor(providerId);
           }}
         />
       ) : null}

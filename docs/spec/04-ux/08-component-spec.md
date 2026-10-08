@@ -3953,7 +3953,7 @@ default nor provider configuration. OAuth accounts remain in their separate sect
 | Busy row | Test/update/delete actions disabled for that card |
 
 ### 19.4 Interactions
-- Add provider opens a modal dialog on a full-window overlay portaled to `#pi-desktop-overlays` on the document element (it can shrink below its 1040px preferred width). Focused credential fields keep their 2px accent ring fully visible: the scrolling body reserves that gutter instead of clipping the ring. Cancel/close resets fields and dismisses the dialog
+- Add provider opens a modal dialog on a full-window overlay portaled to `#pi-desktop-overlays` on the document element (it can shrink below its 1040px preferred width). The chooser groups unconfigured API-key providers declared by loaded plugins under their optional category, searches their category / plugin / provider / endpoint / model labels, and shows the plugin name and endpoint on each tile. Selecting one opens a Host-owned key form for its existing provider row; saving uses the provider secret path and removes that row from the chooser. Category and provider metadata render as text. Focused credential fields keep their 2px accent ring fully visible: the scrolling body reserves that gutter instead of clipping the ring. Cancel/close resets fields and dismisses the dialog
 - The model picker searches and toggles multiple models without using a native
   multiple select. Its portaled menu closes on outside press, Escape, scroll,
   and resize; model selection immediately adds or removes its configuration
