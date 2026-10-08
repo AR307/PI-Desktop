@@ -199,7 +199,7 @@ export async function driveComposerDraft({ renderer, check }) {
   const userRowsBeforeTransform = await page(
     () => document.querySelectorAll('.message-row[data-row-role="user"]').length,
   );
-  await renderer.click('button[aria-label="Lab transform"]');
+  await renderer.click("button.composer-plugin-transform-btn");
   const transformed = await renderer
     .until(
       () => {
@@ -225,7 +225,7 @@ export async function driveComposerDraft({ renderer, check }) {
       userRowsAfterTransform === userRowsBeforeTransform,
     JSON.stringify({ beforeTransform, afterTransform, transformed, userRowsBeforeTransform, userRowsAfterTransform }),
   );
-  await renderer.click('button[aria-label="Undo lab transform"]');
+  await renderer.click("button.composer-plugin-transform-undo");
   const undone = await renderer
     .until(
       (originalText) => {
