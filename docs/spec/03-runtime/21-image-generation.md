@@ -96,6 +96,11 @@ path. A missing or unreadable preview has no download action; revealing a
 missing file reports an error. These actions do not move or overwrite the
 original scratch file.
 
+The renderer owns successful-result previews in the conversation. The bundled
+imagegen skill confirms generation in text and reports failures, but does not
+embed those same result paths as Markdown images; doing so duplicates the
+renderer preview.
+
 Each result records index, status (`succeeded`, `failed`, `cancelled`), successful
 path/MIME type or a safe error code. New files get unique names in session scratch;
 editing never overwrites its source. The tool result and transcript retain file

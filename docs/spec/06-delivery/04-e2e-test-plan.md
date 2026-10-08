@@ -16543,12 +16543,15 @@ the latest destination. These assertions measure work counts, not device FPS.
   host data directory, local image HTTP fixture, no production credentials.
 - **Steps:** Choose a model in Advanced, cancel and verify no change; save and
   replace it through another provider's Advanced settings. Clear the binding via
-  the test settings API to verify recovery. Generate same-prompt variants and distinct images,
-  edit a generated image, inspect partial failures, then restart the host/session.
-  Attempt the tool in a durable Plan session and verify no HTTP request occurs.
+  the test settings API to verify recovery. Generate same-prompt variants and
+  distinct images; confirm each result appears once in the conversation gallery
+  while the assistant confirms completion in text. Edit a generated image,
+  inspect partial failures, then restart the host/session. Attempt the tool in a
+  durable Plan session and verify no HTTP request occurs.
 - **Expected:** One image binding persists without changing the chat default;
   generated files, edit sources and transcript references survive restart.
-  Images render in chat; unconfigured errors navigate to Models settings.
+  Each successful image appears once in its result card instead of being
+  repeated as a Markdown embed; unconfigured errors navigate to Models settings.
 - **Specs:** 03-runtime/21-image-generation; 03-runtime/13-model-catalog-and-selection.
 - **Acceptance:** Configured image generation/editing, safe cancellation and persistence.
 - **Milestone:** Post-MVP.
