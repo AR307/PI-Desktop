@@ -1616,15 +1616,24 @@
   width: max-content;
   max-width: 100%;
   min-width: 0;
-  /* Compact row pickers have less vertical and horizontal chrome; stretched
-     form selects below keep the input-aligned field metric. */
-  height: var(--ds-settings-picker-height);
   padding: 0 10px;
   border-radius: var(--radius-full);
   background: var(--ds-raised);
   box-shadow: var(--ds-raised-shadow);
   color: var(--ds-text-primary);
   font-size: var(--text-sm-plus);
+}
+
+.settings-language-trigger,
+.settings-theme-trigger,
+.settings-font-trigger {
+  /* Appearance values are brief; the compact trigger frees vertical space
+     while SettingsMenuSelect continues to align with adjacent field inputs. */
+  height: var(--ds-settings-picker-height);
+}
+
+.settings-menu-select-trigger {
+  height: var(--ds-field-height);
 }
 
 .settings-menu-select-anchor.is-full .settings-menu-select-trigger {
