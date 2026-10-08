@@ -1,19 +1,5 @@
 use super::*;
-
-fn valid_provider_catalog_text(value: &Value, max_chars: usize) -> bool {
-    let valid_text =
-        |text: &str| !text.trim().is_empty() && text.encode_utf16().count() <= max_chars;
-    match value {
-        Value::String(text) => valid_text(text),
-        Value::Object(localized) => ["en", "zh-CN"].iter().all(|locale| {
-            localized
-                .get(*locale)
-                .and_then(Value::as_str)
-                .is_some_and(valid_text)
-        }),
-        _ => false,
-    }
-}
+mod provider_catalog;
 
 pub(crate) fn validate_contributions(root: &Path, manifest: &PluginManifest) -> Result<()> {
     let Some(contributes) = manifest.contributes.as_ref() else {
@@ -259,16 +245,7 @@ pub(crate) fn validate_contributions(root: &Path, manifest: &PluginManifest) -> 
             {
                 bail!("PLUGIN_INVALID: provider {id} requires a name");
             }
-            if let Some(category) = obj.get("category") {
-                if !valid_provider_catalog_text(category, 128) {
-                    bail!("PLUGIN_INVALID: provider {id} category must be a string or localized strings of at most 128 characters");
-                }
-            }
-            if let Some(description) = obj.get("description") {
-                if !valid_provider_catalog_text(description, 280) {
-                    bail!("PLUGIN_INVALID: provider {id} description must be a string or localized strings of at most 280 characters");
-                }
-            }
+            provider_catalog::validate_provider_catalog_fields(id, obj)?;
             if let Some(style) = obj.get("apiStyle") {
                 let style = style.as_str().ok_or_else(|| {
                     anyhow!("PLUGIN_INVALID: provider {id} apiStyle must be a string")
