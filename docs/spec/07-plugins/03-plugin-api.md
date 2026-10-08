@@ -723,6 +723,10 @@ the guest cannot cover chat/composer. `cdp` is deny-by-default; cookie,
 storage, target, and network-interception methods fail with
 `PERMISSION_DENIED`. Session identity for agent calls comes from the in-flight
 `plugins.execute` `sessionId`, not from plugin arguments (D333 / ADR 0170).
+Page operations (`navigate`, `action`, `openExternal`, `getState`, snapshot,
+screenshot, and CDP calls) are available only while the Browser view is
+visible. Calls made while it is hidden fail with `UNAVAILABLE`; use
+`BrowserPreview` to ask the host to reveal the Browser view before continuing.
 
 `getHistory` returns newest-first entries explicitly recorded by the host, with
 text and images interleaved in capture order. Content written through
