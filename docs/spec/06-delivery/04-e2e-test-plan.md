@@ -12795,14 +12795,14 @@ are withdrawn with ADR 0165.
   assistant reply and the same reference as a sent user chip. 5) Click the file
   path in the tool row's summary, then a path in the `Glob` result's file list
   and a path heading of the `Grep` result. 6) Disable the File Manager plugin,
-  click a project file reference and the tool row summary again, then re-enable
-  it and click both once more. 7) Click a reference that resolves in the
-  project's second folder, then one that resolves in its primary folder. 8)
-  Right-click the sent `@path` chip, the inline-code reference, the markdown
-  link, the local image, a tool row's file path, a tool result's file list, and
-  an attachment image chip; then right-click a reference that matches nothing. 9)
-  On that chip, use Copy full path and Copy relative path, then do the same on a
-  reference that resolves in the session scratch store.
+  then click a project file reference and the tool row summary. 7) Click a
+  reference that resolves in the project's second folder, then one that resolves
+  in its primary folder. 8) Right-click the sent `@path` chip, the inline-code
+  reference, the markdown link, the local image, a tool row's file path, a tool
+  result's file list, and an attachment image chip; then right-click a reference
+  that matches nothing. 9) On that chip, use Copy full path and Copy relative
+  path, then do the same on a reference that resolves in the session scratch
+  store.
 - **Expected**:
   - Right-clicking a file reference opens the renderer's own menu with the
     file's own folder (Show in folder) and both of its addresses (Copy full
@@ -12836,10 +12836,11 @@ are withdrawn with ADR 0165.
     Manager view on that file, reached by its absolute path, with no host
     `file:` tab; the reference from the primary folder opens in that same view
     addressed project-relative (ADR 0263).
-  - With the plugin disabled, a project file reference — from the reply and from
-    a tool row or result list alike — falls back to the host `file:` tab, the
-    surface those clicks used before, which now also reaches the project's other
-    folders; re-enabling the plugin restores the File Manager destination.
+  - With the plugin disabled, a direct project-file click from the reply, tool
+    row, or result list starts the bundled File Manager within its existing
+    scope and permission grant, then opens the requested file there. If the
+    scope or grant excludes the current project, or the view still cannot
+    start, the host `file:` tab opens with an unavailable notice.
 - **Specs linked**: `04-ux/08-component-spec.md` §8.3, §9.6,
   `04-ux/09-interaction-patterns.md` §8a.2, ADR 0104, ADR 0163, ADR 0241,
   ADR 0249, ADR 0262, ADR 0263
@@ -12848,8 +12849,10 @@ are withdrawn with ADR 0165.
 - **Status**: Unit-covered
   (`apps/desktop/test/transcript-file-chips.test.mjs` for the wiring and
   `apps/desktop/test/tool-row-file-refs.test.mjs` for the work-panel entry each
-  shape of resolution produces); full UI journey Draft (run only in a capable
-  environment when this surface changes)
+  shape of resolution produces). The isolated Electron renderer journey in
+  `scripts/e2e-file-ref-line-scroll.mjs` verifies a Markdown link enables the
+  File Manager on demand and a positioned reference still opens in the host
+  viewer; the full packaged UI journey remains Draft.
 
 #### E2E-CHAT-mp4-attachment-opens-in-system-player
 
