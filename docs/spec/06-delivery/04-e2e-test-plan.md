@@ -3026,10 +3026,10 @@ identify the platform validation still needed.
   active multi-item group opens, then closes on completion only if untouched.
   Compact starts processes/groups and all payloads closed, hides reasoning text,
   and keeps an untouched active process open after a failed/denied tool through
-  later recovery. A singleton has no group wrapper. Detailed auto-opens a payload
-  only when the literal final item of the last activity group is an eligible
-  tool/search; it never scans backward past thinking, and failure/denial guards
-  keep that leaf closed. Parent, child and sibling choices are independent;
+  later recovery. A singleton has no group wrapper. No item payload opens itself:
+  a tool/search row stays a header until the user opens it, while a final thinking
+  item keeps its own leaf default and never selects an earlier tool. Parent, child
+  and sibling choices are independent;
   closing/reopening a parent preserves descendants, and streaming/completion does
   not override user-owned choices. Retained-pane remounts preserve choices;
   renderer restart reapplies defaults while tool names, arguments, results and
@@ -16146,9 +16146,9 @@ plugin-form fixtures in an isolated temporary directory at runtime.
   is open and an untouched group closes on completion. Compact starts processes
   and groups closed, hides reasoning, and keeps payloads closed; an untouched
   active process with a recorded failed/denied tool stays open through recovery
-  and closes on completion. Singletons have no group. Detailed auto-opens only
-  an eligible literal final tool/search item of the last activity group; it does
-  not scan past thinking, and failed/denied leaves stay closed. Parent/child/
+  and closes on completion. Singletons have no group. No item payload opens
+  itself: a tool/search row stays closed until the user opens it, while a final
+  thinking item keeps its own leaf default. Parent/child/
   sibling states remain independent, pane-owned user choices survive updates,
   mode changes and remounts, and renderer restart reapplies defaults. Search
   reveals the process and activity group that own the named message once per
