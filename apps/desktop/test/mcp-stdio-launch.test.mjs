@@ -306,10 +306,10 @@ const winUser = win.join("C:", "Users", "zhao");
 const windowsApps = win.join(winUser, "AppData", "Local", "Microsoft", "WindowsApps");
 const pythonOrg = win.join(winUser, "AppData", "Local", "Programs", "Python", "Python311");
 
-function pythonLaunch(files, pathDirs, extraEnv = {}) {
+function pythonLaunch(files, pathDirs, extraEnv = {}, command = "python3") {
   const hostEnv = { PATH: pathDirs.join(";"), ...extraEnv };
   return resolveMcpStdioLaunch({
-    command: "python3",
+    command,
     args: ["-m", "ictrp_mcp.server"],
     env: { PATH: hostEnv.PATH },
     platform: "win32",
@@ -326,6 +326,19 @@ test("Windows python3 skips the Store alias for a real python.exe", () => {
     [windowsApps, pythonOrg],
   );
   assert.equal(launch.command, real);
+  assert.deepEqual(launch.args, ["-m", "ictrp_mcp.server"]);
+});
+
+test("Windows python prefers the requested python.exe over a later python3", () => {
+  const activePython = win.join("C:", "venvs", "project", "Scripts", "python.exe");
+  const unrelatedPython3 = win.join("C:", "Program Files", "Python312", "python3.exe");
+  const launch = pythonLaunch(
+    [activePython, unrelatedPython3],
+    [win.dirname(activePython), win.dirname(unrelatedPython3)],
+    {},
+    "python",
+  );
+  assert.equal(launch.command, activePython);
   assert.deepEqual(launch.args, ["-m", "ictrp_mcp.server"]);
 });
 

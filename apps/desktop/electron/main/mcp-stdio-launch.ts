@@ -314,7 +314,7 @@ function isWindowsAppsDir(dir: string, paths: nodePath.PlatformPath): boolean {
  * the real interpreter.
  */
 export function discoverWindowsPython(
-  options: Pick<McpStdioLaunchOptions, "hostEnv" | "fs">,
+  options: Pick<McpStdioLaunchOptions, "hostEnv" | "fs"> & { launcher: "python" | "python3" },
 ): { command: string; args: string[] } | undefined {
   const hostEnv = options.hostEnv ?? process.env;
   const fs = options.fs ?? defaultFs();
@@ -324,7 +324,10 @@ export function discoverWindowsPython(
     .split(paths.delimiter)
     .filter((dir) => dir && !isWindowsAppsDir(dir, paths))
     .join(paths.delimiter);
-  for (const name of ["python3", "python"]) {
+  // Preserve the configured launcher when both names are available (for
+  // example, a virtual environment's `python.exe` before a system `python3`).
+  const names = options.launcher === "python" ? ["python", "python3"] : ["python3", "python"];
+  for (const name of names) {
     const found = lookOnPath(name, dirs, paths, exts, fs.isFile);
     if (found) return { command: found, args: [] };
   }
@@ -534,7 +537,7 @@ export function resolveMcpStdioLaunch(options: McpStdioLaunchOptions): McpStdioL
       launchCommand = uv;
     }
   } else if (win32 && PYTHON_LAUNCHERS[name] && !/[\\/]/.test(command)) {
-    const python = discoverWindowsPython({ hostEnv, fs });
+    const python = discoverWindowsPython({ hostEnv, fs, launcher: name === "python" ? "python" : "python3" });
     if (python) {
       launchCommand = python.command;
       launchArgs = [...python.args, ...args];
