@@ -44,6 +44,7 @@ This log freezes previously open questions into concrete decisions.
 | D648 | Skill Market pins an acceptable address for mixed direct DNS answers | **Amend ADR 0272: on a direct route, when DNS includes both rejected and acceptable answers, Skill Market selects and pins one acceptable address instead of letting Chromium choose among them. Third-party content prefers a public answer; the benchmark fake-IP is eligible only under the existing opt-in. ULA-only and other non-public-only answers remain blocked. Proxied and unreadable routes keep the existing policy. See ADR 0321 and E2E-SKILL-MARKET-NET-BOUNDARY.** | Dual-stack and transparent-proxy DNS can include an unused synthetic ULA answer beside an address the request can safely use; pinning prevents the rejected address from being dialed while avoiding the false refusal. |
 | D649 | Cloud backup stays closed to users | **Amend D642 / D643: the Settings `sync` destination carries `developmentOnly: true` again, so a packaged build omits its rail row, page, and settings-search hits and falls back to General, while development builds keep it. Developer mode stays irrelevant to the destination and it still carries no Experimental badge. Sync behavior, protocol, host schema, and persisted data are unchanged; dropping the flag reopens it for packaged builds. See `04-ux/06-settings-ia.md` and E2E-CONFIG-SYNC-webdav-portable-configuration.** | The encrypted WebDAV backup is not ready to be offered to packaged-build users yet, so it stays implemented but out of the way until it opens. |
 | D650 | Plugin providers appear in Add Service | **Amend ADR 0259: optional `category` groups manifest-owned provider rows; optional localized `description` supplies one-sentence hover/focus copy. Loaded plugins with `provider.register` contribute unconfigured API-key providers with endpoints. Tiles display provider names only; the Host saves keys through the existing provider secret path. There is no per-plugin provider-count cap. An empty model list is allowed only for an API-key provider with a base URL; after explicit key save, Host discovery populates its cached model choices. Configured rows remain in the provider list and leave the chooser. OAuth / no-auth rows are omitted; no new permission, runtime plugin API, provider row, or credential migration is added. See ADR 0322, `07-plugins/02-plugin-manifest-schema.md`, and E2E-PLUGIN-provider-catalog-add-service.** | Users could not discover manifest-owned community providers in the normal Add Service flow, and each plugin needed to group its own sites without owning credential UI. |
+| D651 | Transcript tool rows never auto-open | **Amend the leaf auto-open provision of the turn-process / thinking-display decisions and ADR `turn-process-and-thinking-display`: a tool-call, hosted-search or plan row keeps its payload collapsed in both display modes and only an explicit user action opens it, including the literal final item of the last activity group. Whole-process and ordinary-group defaults, failed/denied behavior, retained per-item choices, and the thinking row's own leaf default are unchanged. Renderer-only; no host protocol, persistence, permission or plugin contract change. See `04-ux/08-component-spec.md` §9.1/§9.2/§9.5/§9.6, `04-ux/09-interaction-patterns.md` §4.2, and E2E-040.** | A payload that opened itself under the newest call pulled attention away from the answer the user was waiting for and made one turn look different depending on how it ended; leaving every payload to the user keeps one predictable row. |
 
 ## B. Secondary implementation defaults
 
@@ -7549,3 +7550,18 @@ must keep splitting are covered by `markdown-blocks.test.mjs`.
   row leaves the chooser. OAuth and no-auth declarations do not appear.
 - See E2E-PLUGIN-provider-catalog-add-service and
   `07-plugins/02-plugin-manifest-schema.md` §5.4.
+
+## 2026-10-08 — Transcript tool rows never auto-open (D651)
+
+- D651 amends the leaf auto-open provision introduced with the turn-process
+  disclosure: in both Detailed and Compact a tool-call, hosted-search or plan row
+  keeps its payload collapsed until the user opens it, wherever it sits in the
+  activity group. Whole-process and ordinary-group defaults, failed and denied
+  behavior, per-item retained choices, and the thinking row's own leaf default are
+  unchanged.
+- Covered by `apps/desktop/test/interaction-performance.test.mjs`,
+  `apps/desktop/test/thinking-ui.test.mjs`, and
+  `apps/desktop/test/transcript-summary.test.mjs`; the unit test for the removed
+  leaf-ownership helper is retired. See `04-ux/08-component-spec.md`
+  §9.1/§9.2/§9.5, `04-ux/09-interaction-patterns.md` §4.2, ADR
+  `turn-process-and-thinking-display`, and E2E-040.

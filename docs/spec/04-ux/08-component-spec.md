@@ -864,11 +864,11 @@ through later successful recovery, and closes on completion if still untouched.
 Group headers summarize count, running state and issue count without treating a
 failed child as a failed turn.
 
-In Detailed, only the literal final item of the last activity group receives the
-leaf auto-open default when it is an eligible tool-call or hosted-search row.
-Failed and denied rows remain closed, and a final thinking item does not cause a
-backward scan for an earlier tool. Compact keeps all tool/search payloads closed and
-suppresses reasoning text and excerpts; only its active thinking indicator remains.
+No item payload opens itself in either mode: a tool, hosted-search or plan call
+stays a header row until the user opens its disclosure. The activity group and
+the whole process keep their automatic open defaults, so a live turn still shows
+its work. Compact keeps all tool/search payloads closed and suppresses reasoning
+text and excerpts; only its active thinking indicator remains.
 
 Whole process, group and item are independent controls. Closing an ancestor keeps
 descendant choices and reopening restores them; opening a parent never expands all
@@ -2217,10 +2217,9 @@ ordinary processing group only when it has two or more visible items. A singleto
 uses its item disclosure directly, and Task topology keeps its existing container.
 While the turn is active, the ordinary group owning the execution segment opens in
 Detailed and remains closed in Compact; when it settles, an untouched Detailed
-group closes. Detailed auto-opens a leaf payload only when the literal final item
-of the last activity group is an eligible tool-call or hosted-search row. Earlier,
-failed and denied rows remain closed, and a final thinking item does not select an
-earlier tool. Compact keeps every tool/search payload closed.
+group closes. No item payload opens itself in either mode: a tool, hosted-search
+or plan row stays a header row until the user opens it, whichever item of the
+group it is. Compact keeps every tool/search payload closed.
 
 The group header shows `Processing · 12s` while active or `Processed for 12s`
 after completion, plus bounded item and issue counts. Expanding it reveals the
@@ -2252,10 +2251,9 @@ seconds when non-zero) from one hour onward. Zero-value units are omitted, so
   in the transcript after completion. In Detailed the active group starts open and
   closes on completion only if untouched; completed groups otherwise start closed.
   Compact groups start closed. A singleton has no group header.
-- Tool/search payloads remain collapsed in Compact. In Detailed, only an eligible
-  literal final item of the last activity group starts expanded; failed/denied
-  items remain closed, and a final thinking item does not select an earlier tool.
-  Live thinking follows its own disclosure policy and never opens sibling payloads.
+- Tool/search payloads stay collapsed in both modes until the user opens them; no
+  row auto-opens, so a final thinking item never selects an earlier tool. Live
+  thinking follows its own disclosure policy and never opens sibling payloads.
 - The processing group spans the full available assistant column, so expanded
   result details keep a usable width even when the header or payload is short.
 - The visible label is a natural-language action (`Read`, `Ran`, `Searched`),
@@ -2328,17 +2326,16 @@ twice.
 
 | State | Header treatment | Expanded content |
 |---|---|---|
-| Running | Progressive action with readable text and a pulsing marker; a `run` row also shows its spinner and pulses the status dot beside `Working…` | Detailed opens the active multi-item group; only an eligible literal-final tool/search payload opens. Compact payloads stay closed; live thinking follows its own indicator/disclosure policy |
-| Success | Past-tense action + result chips; no green success badge, except a `run` row's dot and `Done` | Result blocks, then arguments if not already shown; an untouched active group closes on completion, while manual group/item choices and the detailed literal-final leaf state are retained |
+| Running | Progressive action with readable text and a pulsing marker; a `run` row also shows its spinner and pulses the status dot beside `Working…` | Detailed opens the active multi-item group; no item payload opens itself. Compact payloads stay closed; live thinking follows its own indicator/disclosure policy |
+| Success | Past-tense action + result chips; no green success badge, except a `run` row's dot and `Done` | Result blocks, then arguments if not already shown; an untouched active group closes on completion, while manual group and item choices are retained |
 | Error | Past-tense action + compact danger status; details remain collapsed by default and open only on user request. A `run` row is in this state whenever its command exited nonzero, whatever the call reported (D227) | Error note first, then arguments |
 | Denied | Muted `Denied` status; payload remains closed until requested | Permission result when available |
 
 ### 9.6 Interactions
 
 - Click the row: expand/collapse only that result payload. Compact payloads start
-  closed. Detailed starts a payload open only when the row is the eligible literal
-  final item of the last activity group; earlier, failed and denied rows remain
-  closed until the user opens them.
+  closed. No payload opens itself in either mode, so the row the user opens is the
+  only expanded one; failed and denied rows behave the same.
 - A file path that a row or its result names is a link, not decoration: clicking
   the summary path of a `Read`, `Write`, `Edit`, or `fetch` row, or a path in a
   result's file list or match groups, completes the reference through the same
