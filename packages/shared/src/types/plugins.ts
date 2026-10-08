@@ -138,6 +138,21 @@ export type PluginViewMeta = {
   order: number;
 };
 
+/**
+ * An API-key provider a loaded plugin has made available in Add Service.
+ * The host resolves the category for the active locale and returns no runtime
+ * code or credentials; the row itself remains host-owned.
+ */
+export type PluginProviderCatalogMeta = {
+  pluginId: string;
+  /** Host provider row id: `plugin:<pluginId>:<contributionId>`. */
+  providerId: string;
+  pluginName: string;
+  category: string;
+  /** Optional one-sentence introduction, resolved for the active app locale. */
+  description?: string;
+};
+
 /** A data-only scenic Settings destination rendered by the host React tree. */
 export type PluginScenicThemesDestinationMeta = {
   pluginId: string;

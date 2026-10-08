@@ -193,6 +193,16 @@ trusts. The callback receives an abort signal when login is cancelled, the
 plugin unloads, or the host call times out. Sign out clears the credential and
 leaves the manifest-owned provider row in place.
 
+The Add Service provider catalog is also Host-rendered. It reads only the
+manifest metadata of loaded plugins with `provider.register`, includes only
+unconfigured API-key providers with an endpoint, and renders the category and
+provider name as text. An optional description is plain tooltip text on hover
+or keyboard focus. The chooser does not execute plugin code or return
+credentials. Saving a key stores it through the Host's existing provider
+secret path; the Host discovers endpoint models after that explicit save, and
+the provider service receives the key when the user sends a request through
+the provider.
+
 ## 6. Path safety
 
 `fs.read` / `fs.write` / `fs.delete` say whether a plugin may touch files;

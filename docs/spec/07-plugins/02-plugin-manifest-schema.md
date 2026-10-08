@@ -323,6 +323,7 @@ type PluginBusContrib = {
 type PluginProviderContrib = {
  id: string; // ^[a-zA-Z][a-zA-Z0-9_-]{0,63}$, unique within the plugin
  name: string; // display name in the native provider list
+ category?: string | { en: string; "zh-CN": string }; // Add Service group; defaults to plugin name
  vendorKey?: string; // models.dev vendor key, default `custom`
  baseUrl?: string; // absolute http(s) URL
  apiStyle?: PluginProviderApiStyle; // wire style, default `chat_completions`
@@ -496,12 +497,18 @@ and `**` matches one or more trailing segments (final segment only).
 
 ## 5.4 providers — provider rows the plugin declares
 
-`contributes.providers` declares at most 8 providers that the Host materializes
-as rows in the native provider list, owned by the plugin ([ADR 0259](../../adr/0259-plugin-declared-providers.md)):
+`contributes.providers` declares provider rows that the Host materializes in
+the native provider list, owned by the plugin ([ADR 0259](../../adr/0259-plugin-declared-providers.md)). There is no per-plugin provider-count cap; the existing 50 MiB plugin package limit remains the outer size bound:
 
 - the declaration `id` matches `[a-zA-Z][a-zA-Z0-9_-]{0,63}` and is unique
   within the plugin; the row id is `plugin:<pluginId>:<declaredId>`
 - `name` is required and is what Settings shows
+- `category` is optional Add Service group metadata. It accepts a non-empty
+  plain string or both localized labels (`en` and `zh-CN`); each label is at
+  most 128 characters. When omitted, the plugin name is the group label.
+- `description` is an optional short introduction shown in an Add Service
+  tooltip on hover or keyboard focus. It accepts a non-empty string or both
+  localized labels (`en` and `zh-CN`), each at most 280 characters.
 - `baseUrl` is optional, but must be an absolute `http(s)` URL
 - `apiStyle` is optional and defaults to `chat_completions`; the accepted values
   are the provider-config styles except `auto`
@@ -510,7 +517,10 @@ as rows in the native provider list, owned by the plugin ([ADR 0259](../../adr/0
   `onProviderOAuth` module export. Optional `oauth.loginLabel` is a
   non-empty string of at most 128 characters; `oauth.isSubscription` is a
   boolean. The host stores one encrypted credential per provider contribution.
-- `models` requires 1..64 entries with unique ids of 1..256 characters
+- `models` accepts up to 64 entries with unique ids of 1..256 characters. An
+  empty list is valid only for an API-key provider with `baseUrl`; after the
+  user saves a key, the Host discovers and caches that endpoint's models and
+  exposes the cached models for the plugin-owned row.
 
 `thinkingLevels` is optional. The Host trims entries, drops unknown canonical
 names, removes duplicates, and preserves the remaining declaration order. An
@@ -524,6 +534,16 @@ The declaration is re-read on every plugin load and is authoritative for its own
 fields; disabling the plugin keeps the rows and turns them off, while dropping a
 declaration or uninstalling the plugin deletes the row with its stored
 credentials.
+
+An API-key provider with a `baseUrl` appears in the Host's **Add Service**
+chooser while its plugin is loaded with `provider.register` and the provider has
+no saved key. Entries are grouped by `category`, or by plugin name when it is
+omitted. Selecting an entry opens the Host-owned key form and saves through the
+existing provider secret path. Once configured, the provider stays in the
+provider list and is omitted from Add Service so the same row is not offered as
+a second add action. OAuth and no-auth contributions do not appear in this
+chooser. Existing plugin-owned row reconciliation and credential retention are
+unchanged; category is display metadata only and does not grant a capability.
 
 OAuth contributions use the host-owned vendor-account UI. `onProviderOAuth`
 handles `login` and `refresh`; `pi.providers.oauth.prompt` and `.notify` provide

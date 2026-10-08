@@ -429,6 +429,13 @@ a usage tab.
   - provider cards with host, first configured model, secret status,
     and test / make-default / delete actions
   - Add account and Add provider use the same primary button treatment
+  - Add Service groups unconfigured API-key providers declared by loaded
+    plugins under each contribution's optional custom category. The category
+    defaults to the plugin name and supports English and Simplified Chinese.
+    Tiles show only the provider name; a one-sentence introduction appears on
+    hover or keyboard focus. Search also matches category, plugin, endpoint,
+    and model IDs. A selection opens the Host-owned API-key form; after saving,
+    that provider remains in the service list and leaves the chooser.
   - the add/edit dialog configures connection identity (name, endpoint, API
     style, and secret). It shrinks to the overlay on a narrow window, and a
     focused credential field keeps its 2px accent ring inside the dialog

@@ -141,7 +141,10 @@ export type PluginManifest = {
     /**
      * Providers this plugin adds to Settings' provider list. Requires the
      * `provider.register` permission; each row is read-only for the user and
-     * refreshed from this manifest on every load.
+     * refreshed from this manifest on every load. API-key providers are also
+     * offered in the Add Service chooser until the user stores a key. An
+     * optional category groups those chooser entries; it is display metadata
+     * and may be localized.
      */
     providers?: PluginProviderContrib[];
     settings?: PluginSettingContrib[];
@@ -524,9 +527,6 @@ export type PluginProviderOAuthContext = {
   signal: AbortSignal;
 };
 
-/** Upper bound on `contributes.providers` entries one plugin may declare. */
-export const MAX_PLUGIN_PROVIDERS_PER_PLUGIN = 8;
-
 /** Upper bound on the model list of one contributed provider. */
 export const MAX_PLUGIN_PROVIDER_MODELS = 64;
 
@@ -566,6 +566,10 @@ export type PluginProviderContrib = {
   id: string;
   /** Display name for the provider row; required and non-empty. */
   name: string;
+  /** Optional Add Service chooser group; defaults to the plugin name. */
+  category?: string | PluginLocalizedString;
+  /** Optional short introduction shown on hover/focus in Add Service. */
+  description?: string | PluginLocalizedString;
   /** Vendor the row is attributed to; `custom` when omitted. */
   vendorKey?: string;
   /** Endpoint the runtime reaches; must be an absolute http(s) URL. */
@@ -574,7 +578,7 @@ export type PluginProviderContrib = {
   authKind?: PluginProviderAuthKind;
   /** OAuth sign-in metadata; valid only when `authKind` is `oauth`. */
   oauth?: PluginProviderOAuthContrib;
-  /** 1..64 models with unique ids. */
+  /** Up to 64 models with unique ids. An empty list enables endpoint discovery after key setup. */
   models: PluginProviderModelContrib[];
 };
 
@@ -1702,9 +1706,6 @@ export function validateContributions(
 
   const declaredProviders = contributes.providers ?? [];
   if (!Array.isArray(declaredProviders)) return "contributes.providers must be an array";
-  if (declaredProviders.length > MAX_PLUGIN_PROVIDERS_PER_PLUGIN) {
-    return `contributes.providers allows at most ${MAX_PLUGIN_PROVIDERS_PER_PLUGIN} entries`;
-  }
   const providerIds = new Set<string>();
   for (const provider of declaredProviders) {
     if (!provider || typeof provider !== "object" || Array.isArray(provider)) {
@@ -1719,6 +1720,44 @@ export function validateContributions(
     providerIds.add(provider.id);
     if (typeof provider.name !== "string" || !provider.name.trim()) {
       return `provider "${provider.id}" requires a name`;
+    }
+    const categoryError = localizedStringError(
+      provider.category,
+      `provider "${provider.id}" category`,
+    );
+    if (categoryError) return categoryError;
+    if (typeof provider.category === "string") {
+      if (!provider.category.trim()) {
+        return `provider "${provider.id}" category must not be empty`;
+      }
+      if (provider.category.length > 128) {
+        return `provider "${provider.id}" category must be at most 128 characters`;
+      }
+    } else if (provider.category) {
+      for (const locale of ["en", "zh-CN"] as const) {
+        if (provider.category[locale].length > 128) {
+          return `provider "${provider.id}" category.${locale} must be at most 128 characters`;
+        }
+      }
+    }
+    const descriptionError = localizedStringError(
+      provider.description,
+      `provider "${provider.id}" description`,
+    );
+    if (descriptionError) return descriptionError;
+    if (typeof provider.description === "string") {
+      if (!provider.description.trim()) {
+        return `provider "${provider.id}" description must not be empty`;
+      }
+      if (provider.description.length > 280) {
+        return `provider "${provider.id}" description must be at most 280 characters`;
+      }
+    } else if (provider.description) {
+      for (const locale of ["en", "zh-CN"] as const) {
+        if (provider.description[locale].length > 280) {
+          return `provider "${provider.id}" description.${locale} must be at most 280 characters`;
+        }
+      }
     }
     if (
       provider.vendorKey !== undefined &&
@@ -1788,8 +1827,14 @@ export function validateContributions(
     if (!Array.isArray(provider.models)) {
       return `provider "${provider.id}" requires models`;
     }
-    if (provider.models.length === 0 || provider.models.length > MAX_PLUGIN_PROVIDER_MODELS) {
-      return `provider "${provider.id}" declares 1 to ${MAX_PLUGIN_PROVIDER_MODELS} models`;
+    if (provider.models.length > MAX_PLUGIN_PROVIDER_MODELS) {
+      return `provider "${provider.id}" declares at most ${MAX_PLUGIN_PROVIDER_MODELS} models`;
+    }
+    if (
+      provider.models.length === 0 &&
+      ((provider.authKind ?? "api_key") !== "api_key" || !provider.baseUrl)
+    ) {
+      return `provider "${provider.id}" may omit models only for an API-key provider with a baseUrl`;
     }
     const modelIds = new Set<string>();
     for (const model of provider.models) {

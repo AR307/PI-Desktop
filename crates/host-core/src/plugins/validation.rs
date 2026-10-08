@@ -1,5 +1,20 @@
 use super::*;
 
+fn valid_provider_catalog_text(value: &Value, max_chars: usize) -> bool {
+    let valid_text =
+        |text: &str| !text.trim().is_empty() && text.encode_utf16().count() <= max_chars;
+    match value {
+        Value::String(text) => valid_text(text),
+        Value::Object(localized) => ["en", "zh-CN"].iter().all(|locale| {
+            localized
+                .get(*locale)
+                .and_then(Value::as_str)
+                .is_some_and(valid_text)
+        }),
+        _ => false,
+    }
+}
+
 pub(crate) fn validate_contributions(root: &Path, manifest: &PluginManifest) -> Result<()> {
     let Some(contributes) = manifest.contributes.as_ref() else {
         return Ok(());
@@ -217,11 +232,6 @@ pub(crate) fn validate_contributions(root: &Path, manifest: &PluginManifest) -> 
 
     if let Some(providers) = map.get("providers") {
         let entries = array_of(providers, "contributes.providers")?;
-        if entries.len() > MAX_PLUGIN_PROVIDERS {
-            bail!(
-                "PLUGIN_INVALID: contributes.providers allows at most {MAX_PLUGIN_PROVIDERS} entries"
-            );
-        }
         if !entries.is_empty() {
             require_permission(manifest, "provider.register", "contributes.providers")?;
         }
@@ -248,6 +258,16 @@ pub(crate) fn validate_contributions(root: &Path, manifest: &PluginManifest) -> 
                 .unwrap_or(true)
             {
                 bail!("PLUGIN_INVALID: provider {id} requires a name");
+            }
+            if let Some(category) = obj.get("category") {
+                if !valid_provider_catalog_text(category, 128) {
+                    bail!("PLUGIN_INVALID: provider {id} category must be a string or localized strings of at most 128 characters");
+                }
+            }
+            if let Some(description) = obj.get("description") {
+                if !valid_provider_catalog_text(description, 280) {
+                    bail!("PLUGIN_INVALID: provider {id} description must be a string or localized strings of at most 280 characters");
+                }
             }
             if let Some(style) = obj.get("apiStyle") {
                 let style = style.as_str().ok_or_else(|| {
@@ -276,10 +296,17 @@ pub(crate) fn validate_contributions(root: &Path, manifest: &PluginManifest) -> 
                 Some(value) => array_of(value, "contributes.providers.models")?,
                 None => bail!("PLUGIN_INVALID: provider {id} requires models"),
             };
-            if models.is_empty() || models.len() > MAX_PLUGIN_PROVIDER_MODELS {
+            if models.len() > MAX_PLUGIN_PROVIDER_MODELS {
                 bail!(
-                    "PLUGIN_INVALID: provider {id} declares 1 to {MAX_PLUGIN_PROVIDER_MODELS} models"
+                    "PLUGIN_INVALID: provider {id} declares more than {MAX_PLUGIN_PROVIDER_MODELS} models"
                 );
+            }
+            let has_base_url = obj
+                .get("baseUrl")
+                .and_then(Value::as_str)
+                .is_some_and(|value| !value.trim().is_empty());
+            if models.is_empty() && (auth_kind != "api_key" || !has_base_url) {
+                bail!("PLUGIN_INVALID: provider {id} may omit models only for an API-key provider with a baseUrl");
             }
             let mut seen_models: Vec<&str> = Vec::new();
             for model in models {

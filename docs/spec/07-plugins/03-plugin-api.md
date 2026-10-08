@@ -341,6 +341,30 @@ Only enabled, authenticated provider rows are returned (API key, OAuth, or
 so a picker page can populate itself. When the host transport is unavailable,
 the call returns an empty list instead of warning (D080).
 
+### Provider entries in Add Service
+
+The Host exposes unconfigured, manifest-declared API-key providers in Settings
+→ Models → Add Service. This is a data-only projection of
+`contributes.providers`; plugins do not register chooser entries at runtime and
+receive no API key. `category` groups the entries and may be a plain string or
+an `{ en, "zh-CN" }` label. The Host saves the key in its existing encrypted
+provider secret store. A configured row remains in the provider list and is
+hidden from Add Service. The `provider.register` grant is sufficient; there is
+no additional permission or plugin API method.
+
+Tiles show the provider name only. Optional `description` copy appears as a
+single-sentence tooltip on hover or keyboard focus; search also checks the
+description. The selected key form shows the endpoint and plugin name for a
+final destination check before saving.
+
+A provider may declare an empty `models` list only when it is API-key based and
+has a `baseUrl`. After the user saves a key, the Host requests that endpoint's
+model list and caches the answer. The cached models are available to the
+plugin-owned row, whose manifest continues to own its endpoint and other
+provider fields. If discovery returns no models, the key remains saved and the
+user can retry from the provider's model controls. Provider count is not capped
+per plugin; the package's existing size limit bounds the manifest.
+
 ### provider OAuth (requires `provider.oauth`)
 
 An OAuth provider contribution needs both `provider.register` and

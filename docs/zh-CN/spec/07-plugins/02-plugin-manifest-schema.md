@@ -427,12 +427,17 @@ type PluginNetDomains = string[]; // "api.example.com" 或 "*.example.com"
 
 ## 5.4 providers —— 插件声明的 provider 行
 
-`contributes.providers` 最多声明 8 个 provider，宿主会把每一项落成原生 provider
-列表中的一行，并归该插件所有（[ADR 0259](../../../adr/0259-plugin-declared-providers.md)）：
+`contributes.providers` 声明的 provider 行由宿主写入原生 provider 列表，并归该插件所有
+（[ADR 0259](../../../adr/0259-plugin-declared-providers.md)）。每个插件不设 provider 数量上限，
+插件包现有的 50 MiB 限制仍是总量边界：
 
 - 声明的 `id` 匹配 `[a-zA-Z][a-zA-Z0-9_-]{0,63}` 且在插件内唯一；行 id 为
   `plugin:<pluginId>:<declaredId>`
 - `name` 必填，是设置页显示的名称
+- `category` 可选，用作“添加服务”分组；可填写普通字符串或同时提供 `en` 与 `zh-CN`
+  的本地化名称，每个名称最多 128 个字符。省略时使用插件名称
+- `description` 可选，是“添加服务”中悬停或键盘聚焦时显示的一句话简介；可填写普通字符串
+  或同时提供 `en` 与 `zh-CN` 的本地化内容，每条最多 280 个字符
 - `baseUrl` 可选，但必须是绝对 `http(s)` URL
 - `apiStyle` 可选，默认 `chat_completions`；可取值是 provider 配置中除 `auto`
   以外的风格
@@ -440,7 +445,8 @@ type PluginNetDomains = string[]; // "api.example.com" 或 "*.example.com"
 - OAuth provider 需要 `provider.register` 和独立高风险权限 `provider.oauth`，还需要
   绝对 HTTP(S) `baseUrl` 及插件主模块导出的 `onProviderOAuth`；`oauth` 元数据可设置
   `loginLabel` 和 `isSubscription`
-- `models` 要求 1..64 条，id 唯一且长度为 1..256
+- `models` 最多 64 条，id 唯一且长度为 1..256。仅当 provider 使用 API Key 且配置了
+  `baseUrl` 时，才允许为空；用户保存 Key 后，宿主会发现并缓存该端点提供的模型
 
 非空的 `contributes.providers` 需要高风险权限 `provider.register`
 （[13-plugin-permissions-matrix.md](/zh-CN/spec/07-plugins/13-plugin-permissions-matrix)）。
