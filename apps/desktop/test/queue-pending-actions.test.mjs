@@ -6,6 +6,82 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { createServer } from "vite";
 import { IPC } from "@pi-desktop/shared";
 
+test("sending the first prompt derives a replaceable title instead of renaming", async (t) => {
+  const server = await createServer({
+    root: fileURLToPath(new URL("..", import.meta.url)),
+    configFile: false,
+    server: { middlewareMode: true, hmr: false, ws: false },
+    appType: "custom",
+    optimizeDeps: { noDiscovery: true, include: [] },
+  });
+  const previousWindow = globalThis.window;
+  try {
+    const { createQueueSlice } = await server.ssrLoadModule("/src/stores/slices/queue-slice.ts");
+    const invoked = [];
+    let refreshed = 0;
+    globalThis.window = { piDesktop: { invoke: async (channel, ...args) => {
+      invoked.push([channel, ...args]);
+      if (channel === IPC.invoke.agentPrompt) return { ok: true, data: { turnId: "turn-1" } };
+      if (channel === IPC.invoke.sessionDeriveTitle) return { ok: true, data: { updated: true } };
+      throw new Error(`Unexpected IPC: ${channel}`);
+    } } };
+    let state = {
+      activeSessionId: "session-a",
+      sessions: [{ id: "session-a", title: "New task", source: "desktop" }],
+      messages: [],
+      pendingPlans: {},
+      runningSessions: {},
+      latestTurnResults: {},
+      sessionOutcomes: {},
+      showToast: assert.fail,
+      rememberModel() {},
+      refreshSessions: async () => {
+        refreshed += 1;
+      },
+    };
+    const runtime = {
+      submittedComposerDrafts: new Map(),
+      sessionTranscriptCache: new Map(),
+      insertOptimisticUserMessage() {},
+      retractOptimisticUserMessage() {},
+    };
+    const slice = createQueueSlice({
+      get: () => state,
+      set: (update) => {
+        const next = typeof update === "function" ? update(state) : update;
+        state = { ...state, ...next };
+      },
+      runtime,
+      promptAttachmentsFromDraft: () => [],
+      withoutRecordKey: (record, key) => {
+        const next = { ...record };
+        delete next[key];
+        return next;
+      },
+      viewingSessionIdForPrompt: () => "session-a",
+      messageErrorFromUnknown: (error) => ({ code: "FAILED", message: String(error) }),
+      assistantErrorMessage: () => ({ role: "assistant", content: "failed" }),
+      materializeDraftSession: async () => null,
+    });
+
+    assert.equal(await slice.sendPrompt("Summarize the first turn", undefined, "session-a"), true);
+    // The host, not the renderer, owns the title: the sidebar keeps the
+    // placeholder until the derived title comes back, and the rename path stays
+    // unused so an installed title plugin can still replace the derived text.
+    assert.equal(state.sessions[0].title, "New task");
+    assert.deepEqual(
+      invoked.filter(([channel]) => channel === IPC.invoke.sessionDeriveTitle),
+      [[IPC.invoke.sessionDeriveTitle, "session-a", "Summarize the first turn"]],
+    );
+    assert.equal(invoked.some(([channel]) => channel === IPC.invoke.sessionRename), false);
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.equal(refreshed, 1);
+  } finally {
+    globalThis.window = previousWindow;
+    await server.close();
+  }
+});
+
 test("pending queue actions stay locked until admission succeeds", async (t) => {
   const server = await createServer({
     root: fileURLToPath(new URL("..", import.meta.url)),

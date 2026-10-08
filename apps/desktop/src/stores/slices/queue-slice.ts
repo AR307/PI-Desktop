@@ -23,6 +23,11 @@ import type {
   ComposerPrefill,
 } from "../../lib/composer-smart-stop";
 import { optimisticUserMessage } from "../../lib/session-transcript";
+import {
+  isDefaultSessionTitle,
+  promptFallbackSessionTitle,
+  untitledTaskTitle,
+} from "../../lib/session-title-utils";
 import type { AppState } from "../app-state";
 import {
   type SessionRuntime,
@@ -38,9 +43,6 @@ export type QueueSliceDependencies = StoreAccess & {
   runtime: SessionRuntime;
   promptAttachmentsFromDraft: PromptAttachmentConverter;
   withoutRecordKey: <T>(record: Record<string, T>, key: string) => Record<string, T>;
-  promptFallbackSessionTitle: (content: string, emptyTitle: string) => string;
-  untitledTaskTitle: () => string;
-  isDefaultSessionTitle: (title?: string | null) => boolean;
   viewingSessionIdForPrompt: (
     state: Pick<AppState, "page" | "activeSessionId">,
     sessionId: string,
@@ -56,9 +58,6 @@ export function createQueueSlice({
   runtime,
   promptAttachmentsFromDraft,
   withoutRecordKey,
-  promptFallbackSessionTitle,
-  untitledTaskTitle,
-  isDefaultSessionTitle,
   viewingSessionIdForPrompt,
   messageErrorFromUnknown,
   assistantErrorMessage,
@@ -439,20 +438,28 @@ export function createQueueSlice({
           submission.draft.fileReferences,
         );
         runtime.insertOptimisticUserMessage(startedIn, optimisticMessage);
-        try {
-          const current = get().sessions.find((session) => session.id === sessionId);
-          if (isDefaultSessionTitle(current?.title)) {
-            const nextTitle = promptFallbackSessionTitle(
-              content,
-              untitledTaskTitle(),
-            );
+        const current = get().sessions.find((session) => session.id === sessionId);
+        // Keeps the session readable without any plugin: the owning host derives
+        // a short title from this prompt but leaves it replaceable, so an
+        // installed title plugin can still upgrade it after the first turn. A
+        // remote session derives on its own host, and the host refuses the write
+        // once the session was renamed. A native Pi session owns its title
+        // outside this host, so it keeps whatever that surface shows.
+        if (
+          isDefaultSessionTitle(current?.title) &&
+          current?.source !== "pi-native"
+        ) {
+          const nextTitle = promptFallbackSessionTitle(content, untitledTaskTitle());
+          if (!isDefaultSessionTitle(nextTitle)) {
             api
-              .renameSession(sessionId, nextTitle)
+              .deriveSessionTitle(sessionId, nextTitle)
               .then(() => get().refreshSessions())
               .catch(() => {
                 // Non-fatal title fallback.
               });
           }
+        }
+        try {
           if (get().pendingPlans[sessionId]?.status === "pending") {
             runtime.submittedComposerDrafts.delete(startedIn);
             runtime.retractOptimisticUserMessage(startedIn, optimisticMessage);

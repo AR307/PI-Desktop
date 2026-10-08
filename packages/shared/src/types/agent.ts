@@ -66,6 +66,13 @@ export type AgentPromptAttachment = {
   kind: "image" | "file";
   mimeType?: string;
   size?: number;
+  /**
+   * The `@path` text this attachment occupies inline in `content`. Electron main
+   * fills it for an attachment the user's draft placed between words, so the
+   * runtime keeps the image block at that position instead of trailing the
+   * prompt text. Absent for older callers and formatted messages.
+   */
+  inlinePath?: string;
 };
 
 export type AgentSteerRequest = Pick<
@@ -78,33 +85,6 @@ export type AgentSteerRequest = Pick<
 export type AgentPromptResponse = {
   accepted: boolean;
   turnId: string;
-};
-
-/** One-shot Composer draft enhancement; this never reads session history. */
-export type PromptEnhancementRequest = {
-  sessionId?: string | null;
-  draft: string;
-  /** Renderer snapshot of the model currently shown in the Composer. */
-  providerId?: string;
-  modelId?: string;
-  thinkingLevel?: ThinkingLevel;
-};
-
-export type PromptEnhancementResponse = {
-  enhancedDraft: string;
-};
-
-export type SessionSummarizeTitleRequest = {
-  sessionId: string;
-  userPrompt: string;
-  assistantReply?: string;
-  providerId?: string;
-  modelId?: string;
-  thinkingLevel?: ThinkingLevel;
-};
-
-export type SessionSummarizeTitleResponse = {
-  title: string;
 };
 
 export type AgentExecuteApprovedPlanRequest = {

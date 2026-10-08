@@ -28,7 +28,7 @@ use crate::scratch;
 use crate::sessions::{self, UiMessage};
 use crate::state::{AppState, HOST_VERSION, PROTOCOL_VERSION};
 use crate::tools::{self, ToolsExecuteParams};
-use crate::transcripts::CompactionRecord;
+use crate::transcripts::{self, CompactionRecord};
 use crate::turn_queue;
 use crate::workspace;
 
@@ -419,25 +419,18 @@ pub async fn serve(state: Arc<Mutex<AppState>>) -> Result<()> {
                 request_tasks.spawn(async move {
                     let _permit = permit;
                     let budget = request_budget_ms(&method, &params);
-                    let out = match with_request_budget(
-                        budget,
-                        handle_request(state, &method, params, tx.clone()),
+                    // Deferred checkpoint writes are committed after the
+                    // handler releases the state lock and before the response
+                    // leaves. Transcript appends are synced inside their write
+                    // path before derived SQLite rows are committed.
+                    let (handled, committed) = transcripts::commit_writes_of(
+                        with_request_budget(
+                            budget,
+                            handle_request(state, &method, params, tx.clone()),
+                        ),
                     )
-                    .await
-                    {
-                        Ok(result) => JsonRpcResponse {
-                            jsonrpc: "2.0",
-                            id,
-                            result: Some(result),
-                            error: None,
-                        },
-                        Err(err) => JsonRpcResponse {
-                            jsonrpc: "2.0",
-                            id,
-                            result: None,
-                            error: Some(err),
-                        },
-                    };
+                    .await;
+                    let out = response_for(id, handled, committed);
                     if let Ok(raw) = serde_json::to_string(&out) {
                         let _ = tx.send(format!("{raw}\n"));
                     }
@@ -582,6 +575,45 @@ fn rpc_err(code: i64, message: impl Into<String>, error_code: &str) -> JsonRpcEr
     }
 }
 
+/// The response for one handled request, given the handler's own outcome and
+/// the outcome of committing deferred checkpoint writes.
+///
+/// Transcript append failures reach the client directly from the handler,
+/// before the SQLite index update. A deferred checkpoint failure is returned
+/// here. If the handler already failed, its error remains the response and the
+/// checkpoint failure is logged because a response carries one error.
+fn response_for(
+    id: Value,
+    handled: Result<Value, JsonRpcError>,
+    committed: anyhow::Result<()>,
+) -> JsonRpcResponse {
+    let error = match (handled, committed) {
+        (Ok(result), Ok(())) => {
+            return JsonRpcResponse {
+                jsonrpc: "2.0",
+                id,
+                result: Some(result),
+                error: None,
+            }
+        }
+        (Ok(_), Err(device)) => rpc_err(1000, device.to_string(), "INTERNAL"),
+        (Err(error), Ok(())) => error,
+        (Err(error), Err(device)) => {
+            tracing::error!(
+                error = %device,
+                "transcript device flush failed behind a request that failed anyway"
+            );
+            error
+        }
+    };
+    JsonRpcResponse {
+        jsonrpc: "2.0",
+        id,
+        result: None,
+        error: Some(error),
+    }
+}
+
 fn config_sync_rpc_err(error: impl ToString) -> JsonRpcError {
     let message = error.to_string();
     let error_code = message
@@ -711,9 +743,9 @@ fn drop_session_side_data(st: &AppState, id: &str) {
 const DEFAULT_LARGE_PASTE_THRESHOLD: i64 = 600;
 const MIN_LARGE_PASTE_THRESHOLD: i64 = 1;
 const MAX_LARGE_PASTE_THRESHOLD: i64 = 1_000_000;
-/// Upper bound for one stored prompt-enhancement template, in characters.
-/// Mirrored by `PROMPT_ENHANCEMENT_TEMPLATE_MAX_LENGTH` in
-/// `packages/shared/src/prompt-enhancement.ts`; keep the two in step.
+/// Upper bound for a legacy prompt-enhancement template, in characters. The
+/// setting remains validated while older profiles and config-sync backups can
+/// still contain it for the optional plugin's one-time migration.
 const MAX_PROMPT_ENHANCEMENT_TEMPLATE_CHARS: usize = 8000;
 /// The placeholder a usable user template must carry.
 const PROMPT_ENHANCEMENT_DRAFT_VARIABLE: &str = "{{draft}}";
@@ -1219,8 +1251,8 @@ fn resolve_persisted_project_workspace(
     state: &AppState,
     session_id: &str,
 ) -> Result<Option<String>, JsonRpcError> {
-    match sessions::get_session(&state.db, session_id) {
-        Ok(Some(detail)) => Ok(detail.summary.project_path),
+    match sessions::session_summary(&state.db, session_id) {
+        Ok(Some(summary)) => Ok(summary.project_path),
         // A tool request must name a persisted session: an unknown id never
         // inherits the mutable global workspace.
         Ok(None) => Err(rpc_err(1007, "session not found", "SESSION_NOT_FOUND")),
@@ -1232,9 +1264,9 @@ fn resolve_tool_workspace(
     state: &AppState,
     session_id: &str,
 ) -> Result<Option<String>, JsonRpcError> {
-    match sessions::get_session(&state.db, session_id) {
-        Ok(Some(detail)) => {
-            if let Some(project_path) = detail.summary.project_path {
+    match sessions::session_summary(&state.db, session_id) {
+        Ok(Some(summary)) => {
+            if let Some(project_path) = summary.project_path {
                 return Ok(Some(project_path));
             }
             let scratch = scratch::session_dir(&state.data_dir, session_id)
@@ -1324,7 +1356,7 @@ fn requires_external_path_permission(
 /// tool compatibility resolver, a plan submission never inherits the mutable
 /// global workspace or accepts a session-less request.
 fn resolve_plan_workspace(state: &AppState, session_id: &str) -> Result<PathBuf, JsonRpcError> {
-    match sessions::get_session(&state.db, session_id) {
+    match sessions::session_summary(&state.db, session_id) {
         Ok(Some(_)) => {}
         Ok(None) => return Err(plan_rpc_err("PLAN_SESSION_NOT_FOUND")),
         Err(error) => return Err(rpc_err(1000, error.to_string(), "INTERNAL")),
@@ -1338,7 +1370,7 @@ fn resolve_plan_workspace_if_available(
     state: &AppState,
     session_id: &str,
 ) -> Result<Option<PathBuf>, JsonRpcError> {
-    match sessions::get_session(&state.db, session_id) {
+    match sessions::session_summary(&state.db, session_id) {
         Ok(Some(_)) => {}
         Ok(None) => return Err(plan_rpc_err("PLAN_SESSION_NOT_FOUND")),
         Err(error) => return Err(rpc_err(1000, error.to_string(), "INTERNAL")),
@@ -2198,9 +2230,9 @@ async fn handle_request(
             st.db
                 .set_setting("app", &settings)
                 .map_err(|e| rpc_err(1000, e.to_string(), "INTERNAL"))?;
-            // Re-pin the marketplace channel in memory. Fetching here would hold
-            // the state lock behind a remote timeout, so the renderer triggers
-            // `market.refresh` after switching channels.
+            // Keep the marketplace channel in memory aligned with settings.
+            // Legacy source values are ignored, so this remains the official
+            // channel; the renderer owns remote refresh timing.
             let (channel, custom_url) =
                 crate::plugins::market_channel_from_settings(Some(&settings));
             st.plugins.set_market_channel(channel, custom_url);
@@ -2608,6 +2640,22 @@ async fn handle_request(
                 .map_err(|e| rpc_err(1000, e.to_string(), "INTERNAL"))?;
             Ok(json!({ "ok": ok }))
         }
+        "session.deriveTitle" => {
+            let id = params
+                .get("id")
+                .and_then(|v| v.as_str())
+                .ok_or_else(|| rpc_err(1002, "id required", "INVALID_PARAMS"))?;
+            let title = params
+                .get("title")
+                .and_then(|v| v.as_str())
+                .ok_or_else(|| rpc_err(1002, "title required", "INVALID_PARAMS"))?;
+            let title = sessions::normalize_session_title(title)
+                .map_err(|e| rpc_err(1002, e.to_string(), "INVALID_PARAMS"))?;
+            let st = state.lock().await;
+            let updated = sessions::derive_session_title(&st.db, id, &title)
+                .map_err(|e| rpc_err(1000, e.to_string(), "INTERNAL"))?;
+            Ok(json!({ "updated": updated }))
+        }
         "session.appendMessage" => {
             let session_id = params
                 .get("sessionId")
@@ -2901,6 +2949,24 @@ async fn handle_request(
             plugin_sessions::list_messages(&st.db, plugin_id, &params)
                 .map_err(plugin_session_rpc_err)
         }
+        "plugin.session.autoTitleContext" => {
+            let plugin_id = params
+                .get("pluginId")
+                .and_then(Value::as_str)
+                .ok_or_else(|| rpc_err(1002, "pluginId required", "INVALID_PARAMS"))?;
+            let st = state.lock().await;
+            plugin_sessions::auto_title_context(&st.db, plugin_id, &params)
+                .map_err(plugin_session_rpc_err)
+        }
+        "plugin.session.setAutoTitle" => {
+            let plugin_id = params
+                .get("pluginId")
+                .and_then(Value::as_str)
+                .ok_or_else(|| rpc_err(1002, "pluginId required", "INVALID_PARAMS"))?;
+            let st = state.lock().await;
+            plugin_sessions::set_auto_title(&st.db, plugin_id, &params)
+                .map_err(plugin_session_rpc_err)
+        }
         "plugin.session.rename" => {
             let plugin_id = params
                 .get("pluginId")
@@ -3145,8 +3211,17 @@ async fn handle_request(
                 ));
             }
             let offset = params.get("offset").and_then(|v| v.as_i64()).unwrap_or(0);
+            // The desktop merges this cursor with the sidecar's cursorless
+            // native catalog, so it asks for the whole prefix in one reply
+            // instead of walking the query from the beginning once per page.
+            // The default keeps the thirty-row contract for every other
+            // caller, and host-core clamps the request to a bounded maximum.
+            let limit = params
+                .get("limit")
+                .and_then(|v| v.as_i64())
+                .unwrap_or(crate::session_search::SEARCH_PAGE_SIZE);
             let st = state.lock().await;
-            let page = crate::session_search::search(&st.db, query, offset)
+            let page = crate::session_search::search(&st.db, query, offset, limit)
                 .map_err(|e| rpc_err(1000, e.to_string(), "INTERNAL"))?;
             Ok(json!(page))
         }
@@ -4801,6 +4876,15 @@ async fn handle_request(
             Ok(json!({ "id": id, "enabled": enabled }))
         }
 
+        "network.configureSystemProxyRelay" => {
+            let url = params
+                .get("url")
+                .and_then(Value::as_str)
+                .ok_or_else(|| rpc_err(1002, "url required", "INVALID_PARAMS"))?;
+            crate::network_proxy::set_system_proxy_relay(url)
+                .map_err(|message| rpc_err(1002, message, "INVALID_PARAMS"))?;
+            Ok(json!({ "ok": true }))
+        }
         "market.refresh" => {
             let force = params
                 .get("force")
@@ -4982,8 +5066,8 @@ mod tests {
     use super::{
         capability_err, handle_request, parse_capability_query, parse_capability_target,
         peek_jsonrpc_id, provider_rpc_err, request_budget_ms, resolve_plan_workspace,
-        resolve_tool_workspace, resolve_tool_workspace_for_call, scope_err, skill_err,
-        with_request_budget, JsonRpcError, RPC_REQUEST_BUDGET_MS,
+        resolve_tool_workspace, resolve_tool_workspace_for_call, response_for, rpc_err, scope_err,
+        skill_err, with_request_budget, JsonRpcError, RPC_REQUEST_BUDGET_MS,
     };
     use crate::agent_capabilities::CapabilityLevel;
     use crate::plans::{PlanResolveParams, PlanSubmitParams};
@@ -5225,6 +5309,39 @@ mod tests {
             capability_err("missing project").data.unwrap()["errorCode"],
             "CAPABILITY_INVALID"
         );
+    }
+
+    /// A request whose transcript lines never reached the device must not answer
+    /// success, and a handler that failed anyway keeps its own error.
+    #[test]
+    fn a_request_that_could_not_flush_its_transcript_does_not_answer_success() {
+        let device = Err(anyhow::anyhow!(
+            "flush /data/sessions/s1.jsonl: Input/output error"
+        ));
+        let unflushed = response_for(Value::Null, Ok(json!({ "ok": true })), device);
+        assert!(
+            unflushed.result.is_none(),
+            "a request whose bytes never reached the device cannot succeed"
+        );
+        assert_eq!(unflushed.error.unwrap().code, 1000);
+
+        let handler_error = || rpc_err(1000, "db is locked", "INTERNAL");
+        let handler_failed = response_for(Value::Null, Err(handler_error()), Ok(()));
+        assert_eq!(handler_failed.error.unwrap().message, "db is locked");
+
+        // Only one error fits in a response; the device error is logged rather
+        // than answered, and the request still does not report success.
+        let both_failed = response_for(
+            Value::Null,
+            Err(handler_error()),
+            Err(anyhow::anyhow!("flush failed")),
+        );
+        assert!(both_failed.result.is_none());
+        assert_eq!(both_failed.error.unwrap().message, "db is locked");
+
+        let answered = response_for(Value::Null, Ok(json!({ "ok": true })), Ok(()));
+        assert!(answered.error.is_none());
+        assert_eq!(answered.result.unwrap()["ok"], true);
     }
 
     #[test]
@@ -8680,6 +8797,75 @@ mod tests {
         .await
         .unwrap_err();
         assert_eq!(missing.data.unwrap()["errorCode"], "NOT_FOUND");
+    }
+
+    #[tokio::test]
+    async fn edit_self_move_rpc_preserves_file_and_read_provenance() {
+        let data_dir = tempfile::tempdir().unwrap();
+        let project = data_dir.path().join("project");
+        fs::create_dir_all(&project).unwrap();
+        let source = project.join("source.txt");
+        fs::write(&source, "original\n").unwrap();
+        let mut app_state = AppState::open(data_dir.path()).unwrap();
+        app_state.handshook = true;
+        let session = sessions::create_session(
+            &app_state.db,
+            Some("Self move".into()),
+            Some("agent".into()),
+            None,
+            None,
+            Some(project.to_string_lossy().into_owned()),
+        )
+        .unwrap();
+        sessions::configure_session_with_thinking(
+            &app_state.db,
+            &session.id,
+            "agent",
+            None,
+            None,
+            None,
+            Some("auto"),
+        )
+        .unwrap();
+        let state = Arc::new(Mutex::new(app_state));
+        let (tx, _rx) = mpsc::unbounded_channel();
+        let read = handle_request(
+            state.clone(),
+            "tools.execute",
+            json!({"sessionId": session.id, "toolCallId": "read-source",
+                "toolName": "Read", "args": {"path": "source.txt"}, "mode": "agent"}),
+            tx.clone(),
+        )
+        .await
+        .unwrap();
+        assert_eq!(read["ok"], true, "{read}");
+        let tag = &read["content"]["tag"];
+        let rejected = handle_request(
+            state.clone(),
+            "tools.execute",
+            json!({"sessionId": session.id, "toolCallId": "self-move",
+                "toolName": "Edit", "args": {"path": "source.txt", "tag": tag,
+                    "ops": "PUT 1.=1:\n+must not land\nMV ./source.txt\n"}, "mode": "agent"}),
+            tx.clone(),
+        )
+        .await
+        .unwrap();
+        assert_eq!(rejected["ok"], false, "{rejected}");
+        assert_eq!(rejected["errorCode"], "EDIT_NO_CHANGE", "{rejected}");
+        assert_eq!(fs::read(&source).unwrap(), b"original\n");
+        // Failure must not invalidate the Read snapshot or poison later edits.
+        let edited = handle_request(
+            state,
+            "tools.execute",
+            json!({"sessionId": session.id, "toolCallId": "valid-edit",
+                "toolName": "Edit", "args": {"path": "source.txt", "tag": tag,
+                    "ops": "PUT 1.=1:\n+changed\n"}, "mode": "agent"}),
+            tx,
+        )
+        .await
+        .unwrap();
+        assert_eq!(edited["ok"], true, "{edited}");
+        assert_eq!(fs::read(&source).unwrap(), b"changed\n");
     }
 
     /// D137: the audit row for a tool call must carry the three segments

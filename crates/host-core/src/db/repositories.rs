@@ -115,6 +115,14 @@ impl Database {
         PRAGMA trusted_schema = ON;
         "#,
         )?;
+        // rusqlite's default plan cache is 16 statements and its eviction is
+        // LRU, while this crate prepares well over a hundred distinct ones. The
+        // write path alone runs four lookups per appended message, and an
+        // evicted plan is a fresh `sqlite3_prepare` — a parse of the SQL text
+        // and a query-plan search on the thread that holds the single
+        // `Mutex<AppState>`. 128 keeps the hot paths resident with a bounded,
+        // per-connection cost.
+        conn.set_prepared_statement_cache_capacity(128);
         let version: i64 = conn.query_row("PRAGMA user_version", [], |r| r.get(0))?;
         match version {
             0 => {
@@ -186,6 +194,12 @@ impl Database {
             20 => {
                 migrate_v20_to_v21(&conn, path)?;
             }
+            21 => {
+                crate::db::migrations::migrate_v21_to_v22(&conn, path)?;
+            }
+            22 => {
+                migrate_v22_to_v23(&conn, path)?;
+            }
             legacy @ 1..=6 => {
                 let _ = conn.execute_batch("PRAGMA wal_checkpoint(TRUNCATE);");
                 drop(conn);
@@ -224,6 +238,14 @@ impl Database {
         }
         if migrated_version == 20 {
             migrate_v20_to_v21(&conn, path)?;
+            migrated_version = conn.query_row("PRAGMA user_version", [], |r| r.get(0))?;
+        }
+        if migrated_version == 21 {
+            crate::db::migrations::migrate_v21_to_v22(&conn, path)?;
+            migrated_version = conn.query_row("PRAGMA user_version", [], |row| row.get(0))?;
+        }
+        if migrated_version == 22 {
+            migrate_v22_to_v23(&conn, path)?;
         }
         let db = Self { conn, data_dir };
         db.boot_maintenance()?;

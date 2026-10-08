@@ -16,12 +16,14 @@ A plugin can contribute one or more of these capabilities:
 | Floating widget | A transparent, frameless companion window — a round orb, not a rectangle | `ui.panel` permission, `"ui": { "shape": "widget" }`, `window.pluginBridge` |
 | Work panel view | An interface docked in the app's right work panel | `contributes.views`, `ui.view` permission, `window.pluginBridge` |
 | Agent tool | A function the Agent can call | `contributes.agentTools`, `pi.agent.registerTool` |
+| OAuth provider | A provider row with host-owned sign-in and encrypted credentials | `contributes.providers`, `provider.oauth`, `onProviderOAuth` |
 | One-shot completion | A host-owned completion against the user's models | `pi.models.list`, `pi.session.getLlmContext`, `pi.agent.complete` |
 | Skill | Instructions loaded by the Agent on demand | `contributes.skills`, `agent.prompt.inject` permission |
 | Theme | Design-token overrides | `contributes.themes`, `ui.theme` permission |
 | MCP server | Tools discovered from a local or remote MCP server | `contributes.mcpServers`, an MCP permission |
 | Service | Resident work supervised by the host | `contributes.services`, `background.service` permission |
 | Message bus | Typed-by-convention events between plugins | `contributes.bus`, bus permissions |
+| Renderer slot | UI drawn inside the app's own window: composer controls, message action bars, blocks below a reply, tool cards, code-block renderers, corner layers | `renderer`, `renderer.extension` permission, `packages/plugin-sdk/src/renderer.ts` |
 
 Plugin entry code runs in a dedicated Node process. Panels run in sandboxed,
 context-isolated Electron windows with no Node integration. Calls from either
@@ -189,6 +191,15 @@ promptly.
 
 Only `onLoad` and `onUnload` are fired today. Other lifecycle names in the
 manifest are reserved for the planned full lifecycle.
+
+`onProviderOAuth` is a separate operation callback for OAuth provider
+contributions, not a lifecycle hook. It handles login and refresh only for its
+own declared provider. The host stores its returned credential encrypted and
+passes only the access token to model requests; the callback can also use
+`pi.providers.oauth.prompt` and `.notify` for host-rendered login steps. The
+permission `provider.oauth` is high risk, and token egress still requires
+`net.fetch` plus the manifest's network domains. See the provider OAuth section
+in the [Plugin API](spec/07-plugins/03-plugin-api.md).
 
 ### `renderer/index.html`
 
@@ -670,8 +681,9 @@ remote server requires `mcp.server.remote`:
 A stdio command must be a bare command found on `PATH` or a plugin-relative
 executable; absolute paths are rejected. `npx` and `uvx` are resolved to the
 real Node.js / uv binaries (PATH, official Node, fnm, nvm, Volta, default uv
-install). Remote URLs may use HTTP or HTTPS, and the host must be listed in
-`net.domains`; non-loopback HTTP is unencrypted, so use it only on a trusted
+install). On Windows, `python3` and `python` skip the Microsoft Store alias for
+a real interpreter on `PATH`, falling back to `py -3`. Remote URLs may use
+HTTP or HTTPS, and the host must be listed in `net.domains`; non-loopback HTTP is unencrypted, so use it only on a trusted
 network. Setting references read only this plugin's settings—the host
 environment and provider secrets are never forwarded. MCP tools follow the
 same Agent-only policy and namespacing as hand-written plugin tools.
@@ -798,6 +810,77 @@ What to know before you use it:
   warning toast without blocking the import; the row shows a load error only if
   the extension actually fails to load.
 
+
+### 6.12 Renderer slots
+
+Every surface above is a window or a page the plugin owns. A **renderer module**
+draws inside PI-Desktop's own window instead: controls in the composer toolbar,
+items on a message's action bar, a block below an assistant reply, the card for
+one of your own Agent tools, a renderer for a fenced code block, or a corner
+layer you manage yourself.
+
+```json
+{
+  "permissions": ["renderer.extension"],
+  "renderer": "renderer/index.mjs",
+  "rendererActions": ["plugin.call", "composer.insertText"],
+  "rendererCallMethods": ["openWorkspace"]
+}
+```
+
+The entry exports `onLoad(pi)`, the host evaluates it in its own window, and
+every load is handed a fresh `pi`. Components read the host through the module's
+own copy of it, because a component's props carry data and nothing else:
+
+```js
+import React from "react";
+
+let host = null;
+
+function InsertButton() {
+  return React.createElement(
+    "button",
+    { onClick: () => host.dispatch("composer.insertText", { text: "hello" }) },
+    "Insert",
+  );
+}
+
+export function onLoad(pi) {
+  host = pi;
+  pi.slots.register({ slot: "composerControl", component: InsertButton, positions: ["right"] });
+}
+```
+
+- `composerControl` — controls in the composer toolbar; `positions: ["left"]`
+  or `["right"]` selects a side, omitted means both
+- `composerTrigger` — the item list behind one of the composer's trigger
+  symbols: `{ slot: "composerTrigger", trigger: "#", items }`, and the host draws
+  the list
+- `userAction` / `assistantAction` — items on a message's action bar
+- `entryExtra` — a block below an assistant reply
+- `toolCard` — the card for calls of one of your own Agent tools; `toolName`
+  names it
+- `blockRenderer` — a fenced block tagged `<your-plugin-id>:<lang>`; `language`
+  names the tag
+
+A dialog you draw yourself is not a slot: `pi.ui.openLayer()` hands you a layer
+to render into, and the component draws inside it. Styles go through
+`pi.ui.injectStyle`, and `react` / `react-dom` resolve to the app's copies
+through the window's import map, so no bundled React is needed.
+
+`rendererActions` whitelists what a component may dispatch — `plugin.call`,
+`composer.insertText`, `composer.readDraft`, `composer.replaceDraft`,
+`attachments.add`, `attachments.list`, `attachments.remove`, at most 16 — and
+`rendererCallMethods` whitelists the method names `onRendererCall` answers for
+`plugin.call`, at most 32. A dispatch outside those lists is refused with
+`PLUGIN_ACTION_UNDECLARED` and a word outside the vocabulary with
+`PLUGIN_ACTION_UNKNOWN`. The module runs in the app's own document with the
+app's own React, so `renderer.extension` is a high-risk permission: grant it
+only to code you trust.
+
+`examples/plugins/ui-slots-lab` mounts a sample on every slot.
+`packages/plugin-sdk/src/renderer.ts` carries the types and each slot's props,
+and the manifest side is [spec 07-plugins/02 §3.2](spec/07-plugins/02-plugin-manifest-schema.md).
 ## 7. Permission design
 
 Permissions are both declared in `manifest.json` and granted by the user.
@@ -807,7 +890,7 @@ Undeclared or ungranted API calls fail with `PERMISSION_DENIED`.
 |---|---|
 | Low | `ui.panel`, `ui.view`, `ui.theme`, `notify` |
 | Medium | `clipboard.read`, `clipboard.write`, `fs.read`, `shell.openExternal`, `background.service`, `bus.publish`, `bus.subscribe`, `audio.playback.background`, `keyboard.globalShortcut` |
-| High | `fs.write`, `fs.delete`, `agent.tool.register`, `agent.prompt.inject`, `net.fetch`, `mcp.server.local`, `mcp.server.remote`, `audio.capture.background`, `net.websocket` |
+| High | `fs.write`, `fs.delete`, `agent.tool.register`, `agent.prompt.inject`, `renderer.extension`, `net.fetch`, `mcp.server.local`, `mcp.server.remote`, `audio.capture.background`, `net.websocket` |
 
 `keyboard.globalShortcut` and `net.websocket` are implemented. `pi.audio.*`
 exists and is callable, and its methods keep their permission gate, but this
@@ -953,10 +1036,14 @@ Before sharing a package:
 8. Run `pi-plugin pack` and install the resulting package in a clean app state.
 9. Record the printed SHA-256 next to the release artifact.
 
-For the official marketplace, submit the package and catalog metadata to
-[`vastsa/pi-desktop-plugins`](https://github.com/vastsa/pi-desktop-plugins) and
-follow that repository's `CONTRIBUTING.md`. The marketplace catalog is a
-separate repository; adding a plugin here does not publish it.
+For the official marketplace, publish on the plugin center,
+[plugins.aiuo.net](https://plugins.aiuo.net): create the plugin, bind the repository it lives in,
+tag the version and submit it — from the console, or with the publishing skill over MCP. The
+center packs the files, audits the source, records the SHA-256 and publishes the version, then
+mirrors the catalog and packages to
+[AIUO-Net/pi-desktop-plugins](https://github.com/AIUO-Net/pi-desktop-plugins) for the GitHub
+backup channel. Plugin sources are never hosted in the distribution repository, and pull requests
+that add them are closed.
 
 Signatures are not the current trust primitive. Package SHA-256 and explicit
 permission review are the implemented baseline; follow the

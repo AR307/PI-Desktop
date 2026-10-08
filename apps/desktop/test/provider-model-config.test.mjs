@@ -31,6 +31,18 @@ const apiSource = await read("../src/lib/api.ts");
 const catalogContractSource = await read("../../../packages/shared/src/model-catalog.ts");
 const styles = await loadStyles();
 
+test("model configuration places AI services before Jev and image generation", () => {
+  const services = pageSource.indexOf('className="model-config-section-head"');
+  const catalogStatus = pageSource.indexOf('className="model-catalog-status"');
+  const jev = pageSource.indexOf("<JevSettingsCard");
+  const image = pageSource.indexOf("<ImageGenerationModelRow");
+
+  assert.ok(services >= 0, "the AI services section is present");
+  assert.ok(catalogStatus > services, "catalog actions stay with AI services");
+  assert.ok(jev > catalogStatus, "Jev follows AI services");
+  assert.ok(image > jev, "image generation follows Jev");
+});
+
 test("the model list comes from the AI service, not from a browsable catalog", () => {
   assert.match(hookSource, /api\.listProviderModels\(/);
   // The rejected surface and its host-side search must be gone.
@@ -359,7 +371,9 @@ test("settings match complete case-normalized wire ids, not proxy suffixes", () 
   const sameWireId = new Function("left", "right", `return ${identity[1]}`);
   assert.equal(sameWireId("PROXY/model", "proxy/MODEL"), true);
   assert.equal(sameWireId("proxy/model", "model"), false);
-  assert.match(pageSource, /isImageCandidate\(imageModels, provider\.id, id\)/);
+  // Image candidates are excluded by the same complete-id membership rule the
+  // picker row and the page's own selection check share.
+  assert.ok(pageSource.includes("isImageGenerationPickerCandidate(imageModels, provider.id, id)"));
   assert.match(pageSource, /!models\.some\(\(model\) => sameWireId\(model\.id, settings\.defaultModelId/);
   assert.doesNotMatch(pageSource, /modelIdsMatch|isImageGenerationModel/);
   assert.doesNotMatch(setupSource, /modelIdsMatch/);

@@ -1,5 +1,8 @@
+import { mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
-import { type Agent, type AgentMessage } from "@earendil-works/pi-agent-core";
+import { type Agent, type AgentMessage, type AgentTool } from "@earendil-works/pi-agent-core";
 import {
   createAssistantMessageEventStream,
   getCurrentTools,
@@ -25,7 +28,7 @@ import {
 import { estimateOutputCapInputTokens } from "./output-cap.js";
 
 import { COMPACTION_SUMMARY_MAX_RETRIES } from "./compaction-summary-input.js";
-import type { ProjectInstructions } from "./project-instructions.js";
+import { loadInstructionChain, type ProjectInstructions } from "./project-instructions.js";
 import { classifyAgentError } from "./agent-errors.js";
 import {
   PROVIDER_RATE_LIMIT_MAX_RETRIES,
@@ -174,6 +177,7 @@ function createRuntime(
     subagentModelKeys: string[];
     pluginSkills: import("./plugin-skills-prompt.js").PluginSkillDef[];
     commandShell: CommandShellOption;
+    jevApiKey: string;
     turnId: string;
     host: { call: ReturnType<typeof vi.fn>; onNotification?: ReturnType<typeof vi.fn> };
     onEvent: (envelope: unknown) => void;
@@ -183,6 +187,7 @@ function createRuntime(
     host: (overrides.host ?? { call: vi.fn(), onNotification: vi.fn(() => () => {}) }) as never,
     sessionId: "session-1",
     mode: overrides.mode === "chat" ? "plan" : overrides.mode ?? "agent",
+    jevApiKey: overrides.jevApiKey,
     turnId: overrides.turnId,
     provider: overrides.provider ?? provider,
     commandShell: overrides.commandShell ?? commandShell,
@@ -203,6 +208,13 @@ function createRuntime(
     pluginSkills: overrides.pluginSkills,
     onEvent: overrides.onEvent ?? vi.fn(),
   });
+}
+
+function runtimeTool(runtime: DesktopAgentRuntime, name: string): AgentTool {
+  const internal = runtime as unknown as { agent: { state: { tools: AgentTool[] } } };
+  const tool = internal.agent.state.tools.find((entry) => entry.name === name);
+  if (!tool) throw new Error(`Runtime tool not found: ${name}`);
+  return tool;
 }
 
 /** Minimal pi-ai assistant message; overrides carry the shape under test. */
@@ -695,6 +707,151 @@ describe("DesktopAgentRuntime configuration matching", () => {
     await runtime.dispose();
   });
 
+  it.each(["lexical", "directory-link", ...(process.platform === "win32" ? ["windows-case"] : [])])(
+    "shares Edit failure counts across %s file aliases", async (aliasKind) => {
+      const root = await mkdtemp(join(tmpdir(), "pi-edit-identity-"));
+      await mkdir(join(root, "src"));
+      await writeFile(join(root, "src", "example.ts"), "original\n");
+      let aliases = ["src/example.ts", "src/./example.ts", join(root, "src", "..", "src", "example.ts")];
+      if (aliasKind === "directory-link") {
+        await symlink(join(root, "src"), join(root, "linked"), process.platform === "win32" ? "junction" : "dir");
+        aliases = ["src/example.ts", "linked/example.ts", join(root, "linked", "example.ts")];
+      } else if (aliasKind === "windows-case") {
+        aliases = ["src/example.ts", "SRC/EXAMPLE.TS", join(root, "SRC", "example.ts")];
+      }
+      const host = { call: vi.fn(async (method: string, _params?: unknown) => method === "tools.execute"
+        ? { ok: false, isError: true, errorCode: "EDIT_PARSE_FAILED", content: {} }
+        : undefined) };
+      const runtime = createRuntime({ host, projectPath: root });
+      const edit = runtimeTool(runtime, "Edit");
+      try {
+        for (const [index, path] of aliases.entries()) {
+          const result = await edit.execute(`alias-${index}`, { path, tag: "ABCD", ops: "bad ops" });
+          expect(result.terminate).toBe(index === 2 ? true : undefined);
+        }
+        // Bookkeeping must not rewrite arguments or replace Host authority.
+        expect(host.call.mock.calls.filter(([method]) => method === "tools.execute").map(([, params]) => (params as { args: { path: string } }).args.path)).toEqual(aliases);
+      } finally {
+        await runtime.dispose();
+        await rm(root, { recursive: true, force: true });
+      }
+    },
+  );
+
+  it("shares recoverable Edit grace across file aliases", async () => {
+    const root = await mkdtemp(join(tmpdir(), "pi-edit-grace-"));
+    await writeFile(join(root, "example.ts"), "original\n");
+    const host = { call: vi.fn(async (method: string) => method === "tools.execute"
+      ? { ok: false, isError: true, errorCode: "EDIT_TAG_MISMATCH", content: {} }
+      : undefined) };
+    const runtime = createRuntime({ host, projectPath: root });
+    const edit = runtimeTool(runtime, "Edit");
+    try {
+      const aliases = ["example.ts", "./example.ts", join(root, "example.ts"), "sub/../example.ts"];
+      for (const [index, path] of aliases.entries()) {
+        const result = await edit.execute(`grace-${index}`, { path, tag: "ABCD", ops: "PUT 1.=1:\n+fresh" });
+        expect(result.terminate).toBe(index === 3 ? true : undefined);
+      }
+    } finally {
+      await runtime.dispose();
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it.each(["Edit", "Write"])("clears alias failure counts and graces after successful %s", async (toolName) => {
+    const root = await mkdtemp(join(tmpdir(), "pi-edit-reset-"));
+    await writeFile(join(root, "example.ts"), "original\n");
+    let callIndex = 0;
+    const host = { call: vi.fn(async (method: string) => {
+      if (method !== "tools.execute") return undefined;
+      return ++callIndex === 4
+        ? { ok: true, content: { tag: "CDEF" } }
+        : { ok: false, isError: true, errorCode: "EDIT_TAG_MISMATCH", content: {} };
+    }) };
+    const runtime = createRuntime({ host, projectPath: root });
+    const edit = runtimeTool(runtime, "Edit");
+    const succeedingTool = runtimeTool(runtime, toolName);
+    try {
+      const args = { path: "example.ts", tag: "ABCD", ops: "PUT 1.=1:\n+fresh", content: "fresh" };
+      for (let i = 0; i < 3; i++) expect((await edit.execute(`before-${i}`, args)).terminate).toBeUndefined();
+      expect((await succeedingTool.execute("success", { ...args, path: join(root, "example.ts") })).isError).toBe(false);
+      for (let i = 0; i < 4; i++) {
+        const result = await edit.execute(`after-${i}`, args);
+        expect(result.terminate).toBe(i === 3 ? true : undefined);
+      }
+    } finally {
+      await runtime.dispose();
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it("keeps different files' Edit failure budgets independent", async () => {
+    const root = await mkdtemp(join(tmpdir(), "pi-edit-independent-"));
+    await writeFile(join(root, "a.ts"), "a\n");
+    await writeFile(join(root, "b.ts"), "b\n");
+    const host = { call: vi.fn(async (method: string) => method === "tools.execute"
+      ? { ok: false, isError: true, errorCode: "EDIT_PARSE_FAILED", content: {} }
+      : undefined) };
+    const runtime = createRuntime({ host, projectPath: root });
+    const edit = runtimeTool(runtime, "Edit");
+    try {
+      for (const [index, path] of ["a.ts", "./a.ts", "b.ts", join(root, "a.ts")].entries()) {
+        const result = await edit.execute(`independent-${index}`, { path, tag: "ABCD", ops: "bad ops" });
+        expect(result.terminate).toBe(index === 3 ? true : undefined);
+      }
+    } finally {
+      await runtime.dispose();
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it("uses the scratch root for temporary-session Edit aliases", async () => {
+    const root = await mkdtemp(join(tmpdir(), "pi-scratch-edit-"));
+    await writeFile(join(root, "example.ts"), "original\n");
+    const host = { call: vi.fn(async (method: string) => method === "tools.execute"
+      ? { ok: false, isError: true, errorCode: "EDIT_PARSE_FAILED", content: {} }
+      : undefined) };
+    const runtime = createRuntime({ host, scratchDir: root });
+    const edit = runtimeTool(runtime, "Edit");
+    try {
+      for (const [index, path] of ["example.ts", join(root, "example.ts"), "./example.ts"].entries()) {
+        const result = await edit.execute(`scratch-${index}`, { path, tag: "ABCD", ops: "bad ops" });
+        expect(result.terminate).toBe(index === 2 ? true : undefined);
+      }
+    } finally {
+      await runtime.dispose();
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it("clears the pre-mutation identity when a successful Edit removes a linked target", async () => {
+    const root = await mkdtemp(join(tmpdir(), "pi-remove-edit-"));
+    await mkdir(join(root, "src"));
+    await writeFile(join(root, "src", "example.ts"), "original\n");
+    await symlink(join(root, "src"), join(root, "linked"), process.platform === "win32" ? "junction" : "dir");
+    let callIndex = 0;
+    const host = { call: vi.fn(async (method: string) => {
+      if (method !== "tools.execute") return undefined;
+      if (++callIndex === 3) {
+        await rm(join(root, "linked", "example.ts"));
+        return { ok: true, content: {} };
+      }
+      return { ok: false, isError: true, errorCode: "EDIT_PARSE_FAILED", content: {} };
+    }) };
+    const runtime = createRuntime({ host, projectPath: root });
+    const edit = runtimeTool(runtime, "Edit");
+    try {
+      const args = { path: "src/example.ts", tag: "ABCD", ops: "bad ops" };
+      expect((await edit.execute("remove-before-1", args)).terminate).toBeUndefined();
+      expect((await edit.execute("remove-before-2", args)).terminate).toBeUndefined();
+      expect((await edit.execute("remove-success", { ...args, path: "linked/example.ts", ops: "REM" })).isError).toBe(false);
+      expect((await edit.execute("remove-after", args)).terminate).toBeUndefined();
+    } finally {
+      await runtime.dispose();
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
   it("terminates repeated failed shell patch recovery", async () => {
     const host = {
       call: vi.fn().mockResolvedValue({
@@ -779,10 +936,47 @@ describe("DesktopAgentRuntime configuration matching", () => {
     await runtime.dispose();
   });
 
+  it.each(["default", "accept-edits"] as const)("keeps %s delegate recovery across a new parent prompt", async (permission) => {
+    const host = {
+      call: vi.fn(async (method: string) => method === "tools.execute"
+        ? { ok: false, isError: true, errorCode: "EDIT_PARSE_FAILED", content: { error: "bad ops" } }
+        : undefined),
+    };
+    const runtime = createRuntime({ host });
+    const internal = runtime as unknown as {
+      agent: Agent;
+      scopeDelegateTools: (tools: AgentTool[], definition: SubagentDefinition, owner: string) => AgentTool[];
+      resetRunRecoveryState: () => void;
+      pendingMutationTermination?: unknown;
+    };
+    const edit = internal.agent.state.tools.find((tool) => tool.name === "Edit")!;
+    const definition: SubagentDefinition = {
+      name: "writer", description: "Edits files", prompt: "Edit the file", source: "user", tools: ["Edit"],
+      ...(permission === "accept-edits" ? { permission } : {}),
+    };
+    const [delegate] = internal.scopeDelegateTools([edit], definition, "writer-run");
+    const args = { path: "src/example.ts", tag: "ABCD", ops: "PUT 1.=1:" };
+    try {
+      expect(await delegate.execute("child-1", args)).not.toHaveProperty("terminate", true);
+      expect(await delegate.execute("child-2", args)).not.toHaveProperty("terminate", true);
+      expect(await edit.execute("parent-1", args)).not.toHaveProperty("terminate", true);
+      internal.resetRunRecoveryState();
+      expect(await delegate.execute("child-3", args)).toHaveProperty("terminate", true);
+      expect(internal.pendingMutationTermination).toBeUndefined();
+      expect(await edit.execute("parent-2", args)).not.toHaveProperty("terminate", true);
+      expect(await edit.execute("parent-3", args)).not.toHaveProperty("terminate", true);
+      expect(await edit.execute("parent-4", args)).toHaveProperty("terminate", true);
+    } finally {
+      await runtime.dispose();
+    }
+  });
+
   it("clears the mutation strike once an edit on that path lands", async () => {
     const results = [
       { ok: false, isError: true, errorCode: "EDIT_PARSE_FAILED", content: {} },
       { ok: true, isError: false, content: { tag: "C3D4" } },
+      { ok: false, isError: true, errorCode: "EDIT_PARSE_FAILED", content: {} },
+      { ok: false, isError: true, errorCode: "EDIT_PARSE_FAILED", content: {} },
       { ok: false, isError: true, errorCode: "EDIT_PARSE_FAILED", content: {} },
     ];
     let editCall = 0;
@@ -805,7 +999,8 @@ describe("DesktopAgentRuntime configuration matching", () => {
     // Without the reset this failure would be strike three and end the turn.
     const afterSuccess = await edit.execute("edit-3", args);
     expect(afterSuccess.terminate).toBeUndefined();
-    expect((runtime as any).mutationFailureCounts.get("src/example.ts")).toBe(1);
+    expect((await edit.execute("edit-4", args)).terminate).toBeUndefined();
+    expect((await edit.execute("edit-5", args)).terminate).toBe(true);
 
     await runtime.dispose();
   });
@@ -950,6 +1145,46 @@ describe("DesktopAgentRuntime configuration matching", () => {
     ).toBe(false);
 
     await runtime.dispose();
+  });
+
+  it("keeps the root prompt after reading a file outside the project", async () => {
+    const root = await mkdtemp(join(tmpdir(), "pi-desktop-instructions-"));
+    const outside = await mkdtemp(join(tmpdir(), "pi-desktop-attachment-"));
+    try {
+      await mkdir(join(root, "nested"));
+      await writeFile(join(root, "AGENTS.md"), "Use root rules.");
+      await writeFile(join(root, "nested", "AGENTS.md"), "Use nested rules.");
+      const globalPath = join(root, "nonexistent-global-file");
+      const host = {
+        call: vi.fn((method: string, params: { path?: string }) =>
+          method === "project.instructions.resolve"
+            ? loadInstructionChain(root, params.path, globalPath)
+            : Promise.resolve({ ok: true, content: "fixture contents" })),
+      };
+      const runtime = createRuntime({
+        host,
+        projectPath: root,
+        projectInstructions: await loadInstructionChain(root, undefined, globalPath),
+      });
+      try {
+        const read = (runtime as any).agent.state.tools.find(
+          (tool: any) => tool.name === "Read",
+        );
+        await read.execute("tool-in", { path: join(root, "nested", "file.ts") });
+        expect((runtime as any).agent.state.systemPrompt).toContain("Use nested rules.");
+
+        await read.execute("tool-out", { path: join(outside, "attached.txt") });
+        expect((runtime as any).agent.state.systemPrompt).toContain("Use root rules.");
+        expect((runtime as any).agent.state.systemPrompt).not.toContain("Use nested rules.");
+        expect(host.call.mock.calls.filter(([method]) => method === "project.instructions.resolve"))
+          .toHaveLength(2);
+      } finally {
+        await runtime.dispose();
+      }
+    } finally {
+      await rm(root, { recursive: true, force: true });
+      await rm(outside, { recursive: true, force: true });
+    }
   });
 
   it("loads newly discovered nested instructions before a file tool runs", async () => {
@@ -1945,6 +2180,83 @@ describe("DesktopAgentRuntime live activity", () => {
 });
 
 describe("DesktopAgentRuntime deferred tool catalog", () => {
+  it("offers Jev only in Agent mode when an API key is supplied", async () => {
+    type ToolResult = {
+      content: Array<{ type: "text"; text: string }>;
+      details: { activated: string[]; addedToolNames: string[] };
+      isError?: boolean;
+    };
+    type RuntimeTestTool = {
+      name: string;
+      execute?: (id: string, input: { query: string }) => Promise<ToolResult>;
+    };
+    type RuntimeTestView = {
+      agent: { state: { tools: RuntimeTestTool[]; systemPrompt: string } };
+      prepareNextTurn: (input: never) => Promise<{
+        context: { tools: RuntimeTestTool[] };
+      }>;
+    };
+
+    const enabled = createRuntime({ jevApiKey: "fixture-key" });
+    try {
+      const view = enabled as unknown as RuntimeTestView;
+      const tools = view.agent.state.tools;
+      const search = tools.find((tool) => tool.name === "ToolSearch");
+      expect(search).toBeDefined();
+      expect(view.agent.state.systemPrompt).toContain("JevClassify");
+
+      const result = await search?.execute?.("search-jev", {
+        query: "JevClassify",
+      });
+      expect(result?.details.activated).toEqual(["JevClassify"]);
+      const next = await view.prepareNextTurn({
+        context: { systemPrompt: "", messages: [], tools },
+        messages: [],
+        newMessages: [],
+        toolResults: [
+          {
+            role: "toolResult",
+            toolCallId: "search-jev",
+            toolName: "ToolSearch",
+            content: result?.content ?? [],
+            details: result?.details,
+            isError: result?.isError ?? false,
+            timestamp: Date.now(),
+          },
+        ],
+      } as never);
+      expect(next.context.tools.map((tool) => tool.name)).toContain(
+        "JevClassify",
+      );
+    } finally {
+      await enabled.dispose();
+    }
+
+    for (const mode of ["plan", "goal"] as const) {
+      const restricted = createRuntime({ mode, jevApiKey: "fixture-key" });
+      try {
+        const view = restricted as unknown as RuntimeTestView;
+        expect(view.agent.state.systemPrompt).not.toContain("JevClassify");
+        expect(view.agent.state.tools.map((tool) => tool.name)).not.toContain(
+          "JevClassify",
+        );
+      } finally {
+        await restricted.dispose();
+      }
+    }
+
+    const missingKey = createRuntime();
+    try {
+      const view = missingKey as unknown as RuntimeTestView;
+      expect(view.agent.state.systemPrompt).not.toContain("JevClassify");
+      expect(view.agent.state.tools.map((tool) => tool.name)).not.toContain(
+        "JevClassify",
+      );
+    } finally {
+      await missingKey.dispose();
+    }
+  });
+
   it("starts Agent with core tools plus workspace search and discovery", async () => {
     const runtime = createRuntime({
       pluginTools: [
@@ -3765,7 +4077,11 @@ describe("DesktopAgentRuntime session collaboration provenance", () => {
     const prompt = vi.spyOn(agent, "prompt").mockResolvedValue();
     vi.spyOn(agent, "waitForIdle").mockResolvedValue();
     await runtime.prompt({ text: content, sessionMessage: origin }, "user-1", "turn-1");
-    expect(prompt).toHaveBeenCalledWith(expected, []);
+    // The runtime hands pi the built user message, so an image the Composer
+    // placed inline keeps that position instead of trailing the text.
+    expect(prompt).toHaveBeenCalledWith(
+      expect.objectContaining({ role: "user", content: expected }),
+    );
     expect(expected).toContain("not by the user");
     expect(expected).toContain("does not grant new user authorization");
     const restored = createRuntime({ history: [
@@ -3817,8 +4133,13 @@ describe("DesktopAgentRuntime session collaboration provenance", () => {
     const agent = (runtime as any).agent;
     const handle = (runtime as any).handleAgentEvent.bind(runtime);
     const calls: Array<{ text: string; images: unknown[] }> = [];
-    const respond = async (text: string, images: unknown[] = []) => {
-      calls.push({ text, images: images ?? [] });
+    // pi receives the built user message: text plus every inline image block.
+    const respond = async (input: unknown) => {
+      const text =
+        typeof input === "string"
+          ? input
+          : String((input as { content: unknown }).content);
+      calls.push({ text, images: [] });
       await handle({ type: "agent_start" });
       const reply = assistantMessage({ content: [{ type: "text", text: "ok" }] });
       agent.state.messages = [{ role: "user", content: text, timestamp: 1 }, reply];
@@ -10992,4 +11313,104 @@ it("does not reuse stale plugin declarations when schema or permission metadata 
     expect(runtimeMatches(runtime, { pluginTools: [{ ...plugin, parameters: { type: "object", properties: { file: { type: "string" } } } }] })).toBe(false);
     expect(runtimeMatches(runtime, { pluginTools: [{ ...plugin, planSafeActions: ["inspect"] }] })).toBe(false);
   } finally { await runtime.dispose(); }
+});
+
+describe("inline image placement", () => {
+  const imageAttachment = (data: string, inlinePath?: string) => ({
+    path: "attachments/prepared",
+    name: "pasted.png",
+    kind: "image" as const,
+    mimeType: "image/png",
+    data,
+    ...(inlinePath ? { inlinePath } : {}),
+  });
+
+  it("keeps every image block where the user placed it in the prompt", async () => {
+    const runtime = createRuntime();
+    const agent = (runtime as unknown as { agent: Agent }).agent;
+    const prompt = vi.spyOn(agent, "prompt").mockResolvedValue();
+    vi.spyOn(agent, "waitForIdle").mockResolvedValue();
+    try {
+      await runtime.prompt({
+        text: "compare @/scratch/a.png with @/scratch/b.png now",
+        attachments: [
+          { ...imageAttachment("QUJD", "@/scratch/a.png"), name: "a.png" },
+          { ...imageAttachment("REVG", "@/scratch/b.png"), name: "b.png" },
+        ],
+      });
+      expect(prompt).toHaveBeenCalledWith(
+        expect.objectContaining({
+          role: "user",
+          content: [
+            { type: "text", text: "compare " },
+            { type: "image", data: "QUJD", mimeType: "image/png" },
+            { type: "text", text: " with " },
+            { type: "image", data: "REVG", mimeType: "image/png" },
+            { type: "text", text: " now" },
+          ],
+        }),
+      );
+    } finally {
+      await runtime.dispose();
+    }
+  });
+
+  it("follows the text with an image the prompt does not name inline", async () => {
+    const runtime = createRuntime();
+    const agent = (runtime as unknown as { agent: Agent }).agent;
+    const prompt = vi.spyOn(agent, "prompt").mockResolvedValue();
+    vi.spyOn(agent, "waitForIdle").mockResolvedValue();
+    try {
+      await runtime.prompt({
+        text: "look at this",
+        attachments: [imageAttachment("QUJD")],
+      });
+      expect(prompt).toHaveBeenCalledWith(
+        expect.objectContaining({
+          role: "user",
+          content: [
+            { type: "text", text: "look at this" },
+            { type: "image", data: "QUJD", mimeType: "image/png" },
+          ],
+        }),
+      );
+    } finally {
+      await runtime.dispose();
+    }
+  });
+
+  it("restores a durable inline placement from the session history", async () => {
+    const runtime = createRuntime({
+      history: [
+        {
+          id: "user-image",
+          role: "user",
+          content: "look @/scratch/a.png please",
+          status: "complete",
+          createdAt: new Date().toISOString(),
+          attachments: [
+            {
+              kind: "image",
+              name: "a.png",
+              ref: "attachments/a",
+              mimeType: "image/png",
+              data: "QUJD",
+              inlinePath: "@/scratch/a.png",
+            },
+          ],
+        },
+      ],
+    });
+    try {
+      const messages = (runtime as unknown as { agent: Agent }).agent.state.messages;
+      const user = messages.find((message) => message.role === "user");
+      expect(user?.content).toEqual([
+        { type: "text", text: "look " },
+        { type: "image", data: "QUJD", mimeType: "image/png" },
+        { type: "text", text: " please" },
+      ]);
+    } finally {
+      await runtime.dispose();
+    }
+  });
 });

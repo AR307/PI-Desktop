@@ -2,7 +2,7 @@ export const PROTOCOL_VERSION = 11 as const;
 export const SCHEMA_VERSION = 16 as const;
 export const APP_ID = "net.aiuo.pi-desktop";
 export const APP_NAME = "PI-Desktop";
-export const APP_VERSION = "0.16.1";
+export const APP_VERSION = "0.17.0";
 
 export const APP_MENU_COMMANDS = [
   "newTask",
@@ -83,7 +83,6 @@ export const IPC = {
     notificationSetViewingSession: "pi-desktop/notification/setViewingSession",
     agentPrompt: "pi-desktop/agent/prompt",
     agentSteer: "pi-desktop/agent/steer",
-    promptEnhance: "pi-desktop/prompt/enhance",
     speechTranscribe: "pi-desktop/speech/transcribe",
     speechSynthesize: "pi-desktop/speech/synthesize",
     speechGetStatus: "pi-desktop/speech/getStatus",
@@ -138,7 +137,8 @@ export const IPC = {
     sessionOpen: "pi-desktop/session/open",
     sessionDelete: "pi-desktop/session/delete",
     sessionRename: "pi-desktop/session/rename",
-    sessionSummarizeTitle: "pi-desktop/session/summarizeTitle",
+    /** Deterministic first-prompt title for a session that is still untitled. */
+    sessionDeriveTitle: "pi-desktop/session/deriveTitle",
     sessionConfigure: "pi-desktop/session/configure",
     sessionImportScan: "pi-desktop/session/importScan",
     sessionImportRun: "pi-desktop/session/importRun",
@@ -235,6 +235,14 @@ export const IPC = {
      */
     providersSetSecret: "pi-desktop/providers/setSecret",
     providersTest: "pi-desktop/providers/testConnection",
+    /**
+     * Check a TypeSafe key before the Jev settings row keeps it.
+     *
+     * Jev is not a provider row, so `providersTest` cannot answer this: the
+     * key is checked by the same System One round trip the Agent's
+     * `JevClassify` tool makes, and only a key that answered is stored.
+     */
+    jevTest: "pi-desktop/jev/test",
     providersListModels: "pi-desktop/providers/listModels",
     /**
      * Look one model id up in the local models.dev snapshot.
@@ -257,6 +265,8 @@ export const IPC = {
     pluginList: "pi-desktop/plugin/list",
     /** A renderer slot component asking its own plugin for one JSON answer. */
     pluginRendererCall: "pi-desktop/plugin/rendererCall",
+    /** Invoke a declared, user-facing Composer transform action. */
+    pluginComposerTransform: "pi-desktop/plugin/composerTransform",
     /** Plugin-contributed agent extensions (D387/D388, ADR 0214). */
     pluginImportExtension: "pi-desktop/plugin/importExtension",
     extensionsCommandRun: "pi-desktop/extensions/commands/run",
@@ -285,6 +295,7 @@ export const IPC = {
     pluginLauncherToggle: "pi-desktop/pluginLauncher/toggle",
     pluginLauncherDismiss: "pi-desktop/pluginLauncher/dismiss",
     pluginThemes: "pi-desktop/plugin/themes",
+    pluginProviderCatalog: "pi-desktop/plugin/providerCatalog",
     pluginScenicThemesDestinations: "pi-desktop/plugin/scenicThemes/destinations",
     pluginScenicThemesSetBlur: "pi-desktop/plugin/scenicThemes/setBlur",
     pluginServices: "pi-desktop/plugin/services",

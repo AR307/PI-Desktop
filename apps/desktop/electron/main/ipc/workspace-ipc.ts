@@ -922,6 +922,10 @@ export function registerWorkspaceIpc({
       const roots = {
         project: projectRootsFor(workspaceRoot),
         scratch: await sessionScratchRoot(input.sessionId),
+        // The read guards accept the whole scratch store, so an absolute image
+        // path from an earlier conversation completes instead of reporting a
+        // restriction; shorthands still search the session's own store alone.
+        containment: [{ kind: "scratch" as const, path: join(dataDir, "scratch") }],
         attachments: join(dataDir, "attachments"),
       };
       if (await isChatRefOutsideRoots(ref, roots)) {

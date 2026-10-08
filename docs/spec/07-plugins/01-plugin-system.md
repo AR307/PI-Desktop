@@ -220,6 +220,10 @@ are reachable there) and CPU/memory limits.
 ### 6.3 Plugin Panel UI
 - Load the plugin page in a dedicated sandboxed `BrowserWindow` and isolated
   per-plugin session partition
+- Keep a newly created panel hidden until its initial page load settles. Bound
+  that wait to 15 seconds; if it does not settle, destroy the hidden window and
+  reject the open request with `PANEL_LOAD_TIMEOUT`. Preserve the original error
+  when the page load fails on its own.
 - Closing a panel (capsule close, disable, uninstall, or crash teardown) must
   not read a destroyed `BrowserWindow` or its `webContents`. The host copies
   any contents identity needed for drop-record cleanup while the window is

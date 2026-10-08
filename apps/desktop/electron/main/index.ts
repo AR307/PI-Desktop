@@ -9,6 +9,8 @@ import { join } from "node:path";
 import {
   applyNetworkProxyFromAppSettings,
   currentNetworkProxy,
+  disposeSystemProxyRelay,
+  ensureSystemProxyRelay,
   testNetworkProxy,
 } from "./network-proxy";
 import { installInsecureEndpointNotice } from "./network-notice";
@@ -282,6 +284,7 @@ const vendorOAuth = new VendorOAuth({
   openExternal: async (url) => {
     await safeOpenExternal(url);
   },
+  getPluginOAuthBridge: () => pluginServices.plugins,
   log: (level, message, data) => logger.app("provider", level, message, { data }),
   onAccountModels: (id, models) => modelsDevCatalog.setAccountModels(id, models),
   onAccountRemoved: (id) => modelsDevCatalog.deleteAccount(id),
@@ -774,6 +777,7 @@ const { startHost } = createHostRuntime({
   importLegacyScheduled,
   superviseRestart,
   isQuitting: () => mainState.quitting,
+  ensureSystemProxyRelay,
 });
 
 runtimeLifecycle = createRuntimeLifecycle({
@@ -1030,6 +1034,7 @@ registerShutdownHandlers({
   activeTurns,
   persistenceOutbox,
   inflightCheckpointer,
+  flushEventPersistence: eventPersistence.flush,
   pluginPanels,
   plugins,
   userMcp,
@@ -1041,6 +1046,7 @@ registerShutdownHandlers({
   confirmQuitDialog,
   disposePowerSaveBlockers,
   liveCallService,
+  disposeSystemProxyRelay,
 });
 
 registerApplicationActivation({

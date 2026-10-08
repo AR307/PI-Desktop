@@ -1,8 +1,7 @@
 import { expandMcpInvocation } from "../composer-mcp";
-import { IPC, ErrorCodes, compactionRecordId, findSkillMentions, isGlobalPermissionMode, isRpcTimeoutError, type AgentEventEnvelope, type AgentPromptRequest, type AgentSteerRequest, type UiMessage, type AgentQueuePushRequest, type AgentStopRequest, type AgentStopSubagentsRequest, type AskToolResolution, type GlobalPermissionMode, type MessageUsage, type PendingInteractiveRequests, type PlanExecutionFinishStatus, type PlanResolutionResult, type PlanResolveRequest, type PromptEnhancementRequest, type SessionSummarizeTitleRequest, type VoiceOrigin, canonicalThinkingLevel, type ThinkingLevel } from "@pi-desktop/shared";
+import { IPC, ErrorCodes, compactionRecordId, findSkillMentions, isGlobalPermissionMode, isRpcTimeoutError, type AgentEventEnvelope, type AgentPromptRequest, type AgentSteerRequest, type UiMessage, type AgentQueuePushRequest, type AgentStopRequest, type AgentStopSubagentsRequest, type AskToolResolution, type GlobalPermissionMode, type MessageUsage, type PendingInteractiveRequests, type PlanExecutionFinishStatus, type PlanResolutionResult, type PlanResolveRequest, type VoiceOrigin } from "@pi-desktop/shared";
 import type { FinishTurn } from "../runtime/plans";
-import { expandSlashInvocation, enhancePromptDraft, summarizeSessionTitle, visionFromModelConfig, type ComposerTemplate, type RuntimeProviderConfig } from "@pi-desktop/agent-runtime";
-import { OAUTH_AUTH_KIND, type VendorOAuth } from "../oauth";
+import { expandSlashInvocation, visionFromModelConfig, type ComposerTemplate } from "@pi-desktop/agent-runtime";
 import { appendPromptFallbackPaths, durableUserMessageId, preparePromptAttachments, type PreparedPromptAttachment } from "../prompt-attachments";
 import { resolveSessionReferences } from "../session-references";
 import { executionFromResponse, resolveSessionMessageInput } from "@pi-desktop/host-runtime";
@@ -14,7 +13,6 @@ import type { Logger } from "../logger";
 import type { PersistenceOutbox } from "../persistence-outbox";
 import type { ComposerCommandService } from "./composer-ipc";
 import type { IpcRegistrar } from "./types";
-import { withPromptEnhancementTimeout } from "../prompt-enhancement-timeout";
 
 export type AgentIpcDependencies = {
   registrar: IpcRegistrar;
@@ -22,7 +20,6 @@ export type AgentIpcDependencies = {
   getSidecar: () => AgentSidecar | null;
   getAgentHostBridge: () => AgentHostBridge | null;
   logger: Pick<Logger, "app">;
-  vendorOAuth: VendorOAuth;
   agentExtensions: AgentExtensionBridge;
   cancelSessionTools: (sessionId: string, reason?: string) => void;
   persistenceOutbox: PersistenceOutbox;
@@ -84,7 +81,6 @@ export function registerAgentIpc({
   getSidecar,
   getAgentHostBridge,
   logger,
-  vendorOAuth,
   agentExtensions,
   cancelSessionTools,
   persistenceOutbox,
@@ -118,155 +114,6 @@ export function registerAgentIpc({
       return fn(...args);
     });
   };
-  handle(IPC.invoke.promptEnhance, async (req: PromptEnhancementRequest) => {
-    if (!host) throw new Error("backend unavailable");
-    const draft = typeof req?.draft === "string" ? req.draft : "";
-    if (!draft.trim()) {
-      throw Object.assign(new Error("Prompt draft must not be empty"), {
-        errorCode: ErrorCodes.INVALID_ARGUMENT,
-      });
-    }
-    if (draft.trim().startsWith("/")) {
-      throw Object.assign(new Error("Slash command drafts cannot be enhanced"), {
-        errorCode: ErrorCodes.INVALID_ARGUMENT,
-      });
-    }
-
-    const sessionId =
-      typeof req.sessionId === "string" ? req.sessionId.trim() : "";
-    const session = sessionId
-      ? (await host.call<{ session?: any }>("session.get", { id: sessionId })).session
-      : {};
-    if (sessionId && !session) {
-      throw Object.assign(new Error("Session not found"), {
-        errorCode: ErrorCodes.NOT_FOUND,
-      });
-    }
-    const settings = await host.call<any>("settings.get");
-    const launchSessionId = sessionId || `prompt-enhancement:${crypto.randomUUID()}`;
-    // A pinned enhancement model is a preference, not a hard requirement: a
-    // pin whose provider was disabled, whose account was signed out, or whose
-    // binding no longer exists must not take the action down. Try the pin,
-    // fall back to the Composer's current model, and record why (ADR 0121).
-    const pinnedProviderId =
-      typeof settings?.promptEnhancementProviderId === "string"
-        ? settings.promptEnhancementProviderId.trim()
-        : "";
-    const pinnedModelId =
-      typeof settings?.promptEnhancementModelId === "string"
-        ? settings.promptEnhancementModelId.trim()
-        : "";
-    const composerProviderId =
-      typeof req.providerId === "string" ? req.providerId.trim() : undefined;
-    const composerModelId =
-      typeof req.modelId === "string" ? req.modelId.trim() : undefined;
-    // The enhancement carries its own reasoning level and never follows the
-    // conversation's: an unset value means "off", because a rewrite rarely
-    // benefits from reasoning and reasoning is the slow path.
-    const enhancementThinkingLevel =
-      typeof settings?.promptEnhancementThinkingLevel === "string"
-        ? settings.promptEnhancementThinkingLevel.trim()
-        : "";
-    const launchFor = (providerId?: string, modelId?: string) =>
-      resolveAgentRuntimeLaunch(launchSessionId, session ?? {}, settings, {
-        mode: "agent",
-        providerId,
-        modelId,
-        thinkingLevel: (enhancementThinkingLevel || "off") as ThinkingLevel,
-      });
-    let launch: Awaited<ReturnType<typeof launchFor>>;
-    if (pinnedProviderId) {
-      try {
-        launch = await launchFor(pinnedProviderId, pinnedModelId || undefined);
-      } catch (error) {
-        logger.app("session", "warn", "prompt enhancement model unavailable", {
-          data: {
-            pinnedProviderId,
-            pinnedModelId: pinnedModelId || undefined,
-            error: error instanceof Error ? error.message : String(error),
-          },
-        });
-        launch = await launchFor(composerProviderId, composerModelId);
-      }
-    } else {
-      launch = await launchFor(composerProviderId, composerModelId);
-    }
-    const runtimeProvider = {
-      ...launch.sidecarParams.provider,
-      ...(launch.sidecarParams.provider.authKind === OAUTH_AUTH_KIND
-        ? { resolveAuth: () => vendorOAuth.resolveAuth(launch.providerId) }
-        : {}),
-    } as RuntimeProviderConfig;
-    // A pin, a slow gateway, or a stalled connection would otherwise hold this
-    // promise open indefinitely. Aborting is best-effort (the transport only
-    // consults the signal between provider retries); racing the promise is what
-    // actually guarantees the caller is released on time.
-    const enhancedDraft = await withPromptEnhancementTimeout((signal) =>
-      enhancePromptDraft(runtimeProvider, draft, canonicalThinkingLevel(launch.sidecarParams.thinkingLevel), {
-        signal,
-        sessionId: launchSessionId,
-        customTemplate: settings?.promptEnhancementCustomTemplate === true,
-        userTemplate:
-          typeof settings?.promptEnhancementUserTemplate === "string"
-            ? settings.promptEnhancementUserTemplate
-            : undefined,
-      }),
-    );
-    logger.app("session", "info", "prompt enhanced", {
-      sessionId: sessionId || undefined,
-      data: { providerId: launch.providerId, modelId: launch.modelId },
-    });
-    return { enhancedDraft };
-  });
-
-  handle(IPC.invoke.sessionSummarizeTitle, async (req: SessionSummarizeTitleRequest) => {
-    if (!host) throw new Error("backend unavailable");
-    const sessionId = typeof req?.sessionId === "string" ? req.sessionId.trim() : "";
-    const userPrompt = typeof req?.userPrompt === "string" ? req.userPrompt.trim() : "";
-    if (!sessionId || !userPrompt) {
-      throw Object.assign(new Error("sessionId and userPrompt required"), {
-        errorCode: ErrorCodes.INVALID_ARGUMENT,
-      });
-    }
-    const session = (await host.call<{ session?: any }>("session.get", { id: sessionId })).session;
-    if (!session) {
-      throw Object.assign(new Error("Session not found"), {
-        errorCode: ErrorCodes.NOT_FOUND,
-      });
-    }
-    const settings = await host.call<any>("settings.get");
-    const launch = await resolveAgentRuntimeLaunch(
-      `title-summary:${sessionId}`,
-      session,
-      settings,
-      {
-        mode: "agent",
-        providerId: typeof req.providerId === "string" ? req.providerId.trim() : undefined,
-        modelId: typeof req.modelId === "string" ? req.modelId.trim() : undefined,
-        thinkingLevel: "off",
-      },
-    );
-    const runtimeProvider = {
-      ...launch.sidecarParams.provider,
-      ...(launch.sidecarParams.provider.authKind === OAUTH_AUTH_KIND
-        ? { resolveAuth: () => vendorOAuth.resolveAuth(launch.providerId) }
-        : {}),
-    } as RuntimeProviderConfig;
-
-    const title = await summarizeSessionTitle(
-      runtimeProvider,
-      userPrompt,
-      req.assistantReply,
-      "off",
-      { sessionId },
-    );
-    logger.app("session", "info", "session title summarized", {
-      sessionId,
-      data: { title, providerId: launch.providerId, modelId: launch.modelId },
-    });
-    return { title };
-  });
-
   handle(IPC.invoke.agentSteer, async (req: AgentSteerRequest) => {
     if (!host || !sidecar) throw new Error("backend unavailable");
     if (
@@ -295,8 +142,12 @@ export function registerAgentIpc({
           Boolean(req.attachments?.length),
         )
       : null;
+    // The inline text the user's draft carried decides both what the message
+    // shows and where each image block sits in the prompt.
+    const steerContent = mcpExpansion?.expanded ?? req.content;
     const prepared = await preparePromptAttachments(
-      dataDir, req.sessionId, context.projectPath, req.attachments ?? [], context.supportsVision,
+      dataDir, req.sessionId, context.projectPath, req.attachments ?? [],
+      context.supportsVision, steerContent,
     );
     const session = await host.call<{ session?: { messages?: UiMessage[] } }>("session.get", {
       id: req.sessionId, messageLimit: 1,
@@ -304,7 +155,7 @@ export function registerAgentIpc({
     const message: UiMessage = {
       id: durableUserMessageId(req.messageId, session.session?.messages ?? []),
       role: "user",
-      content: mcpExpansion?.expanded ?? req.content,
+      content: steerContent,
       ...(mcpExpansion ? { command: mcpExpansion.command } : {}),
       status: "complete",
       createdAt: new Date().toISOString(),
@@ -316,11 +167,12 @@ export function registerAgentIpc({
     // never turn into a normal prompt or alter the next turn's configuration.
     return sidecar.call<{ accepted: boolean; turnId: string }>("agent.steer", {
       sessionId: req.sessionId, expectedTurnId: req.expectedTurnId, message,
-      content: appendPromptFallbackPaths(mcpExpansion?.expanded ?? req.content, prepared),
+      content: appendPromptFallbackPaths(steerContent, prepared),
       ...(mcpExpansion ? { mcpServerIds: mcpExpansion.mcpServerIds, mcpToolNames: mcpExpansion.mcpToolNames } : {}),
       attachments: prepared.filter((attachment) => attachment.inlineData).map((attachment) => ({
         path: attachment.message.ref, name: attachment.message.name, kind: attachment.message.kind,
         mimeType: attachment.message.mimeType, size: attachment.message.size, data: attachment.inlineData,
+        ...(attachment.message.inlinePath ? { inlinePath: attachment.message.inlinePath } : {}),
       })),
     });
   });
@@ -560,6 +412,9 @@ export function registerAgentIpc({
           : undefined,
         req.attachments ?? [],
         supportsVision,
+        // The text the durable message will hold: an image chip the Composer
+        // left inline keeps its place in the prompt and in the transcript.
+        promptContent,
       );
     } catch (error) {
       await finishTurn(req.sessionId, "error", (error as any)?.errorCode, {
@@ -677,6 +532,9 @@ export function registerAgentIpc({
                 mimeType: attachment.message.mimeType,
                 size: attachment.message.size,
                 data: attachment.inlineData,
+                ...(attachment.message.inlinePath
+                  ? { inlinePath: attachment.message.inlinePath }
+                  : {}),
               })),
             // A referenced conversation crosses the sidecar as quoted text for
             // this turn; the durable record above keeps it for later turns.

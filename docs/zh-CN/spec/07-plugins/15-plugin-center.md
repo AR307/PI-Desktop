@@ -53,30 +53,31 @@ vastsa/pi-plugin-center                 # 管理面
 vastsa/pi-desktop-plugins               # 分发面，地址完全不变
 ├─ catalog.json                         # 由插件中心生成
 ├─ packages/<pluginId>-<version>.piplug # 由插件中心发布
-└─ plugins/                             # 第一方源码，历史遗留
+└─ plugins/                             # 已移除——源码归发布者所有
 ```
 
-插件中心绝不把插件源码写进这两个仓库中的任何一个。`plugins/` 存放的是本项目自己的
-示例插件，早于发布者自持源码这一模型；第三方插件只新增一个安装包和一条目录条目，
-不新增源码。
+插件中心绝不把插件源码写进这两个仓库中的任何一个。`plugins/` 存放过本项目自己的示例插件，
+早于发布者自持源码这一模型；2026-10 起每个版本都来自发布者仓库，该目录已删除。第三方插件
+只新增一个安装包和一条目录条目，不新增源码。
 
 ### 3.2 制品 URL
 
 ```text
-https://raw.githubusercontent.com/vastsa/pi-desktop-plugins/main/packages/<pluginId>-<version>.piplug
+https://raw.githubusercontent.com/AIUO-Net/pi-desktop-plugins/main/packages/<pluginId>-<version>.piplug
 ```
 
-目录条目的 `url` 保持为相对路径 `packages/<pluginId>-<version>.piplug`，因此它按
-承载该目录的主机解析：
+目录条目声明 `artifactBaseUrl`，`url` 保持相对路径 `packages/<pluginId>-<version>.piplug`，
+客户端据此按目录声明的基址解析——不管目录是从哪个主机取到的：
 
 ```text
-GitHub  raw.githubusercontent.com/vastsa/pi-desktop-plugins/main/…
-CNB     cnb.cool/aixk/pi-desktop-plugins/-/git/raw/main/…
+中心目录              artifactBaseUrl = raw.githubusercontent.com/AIUO-Net/pi-desktop-plugins/main
+本分发仓库            raw.githubusercontent.com/vastsa/pi-desktop-plugins/main
+CNB 镜像              cnb.cool/aixk/pi-desktop-plugins/-/git/raw/main/…
 ```
 
-由于镜像是 Git 镜像，安装包与目录一起移动并保持逐字节一致。会话中途切换源既不会跨
-提供方，也不会让校验和失效，而且不需要 `artifactBaseUrl`。客户端仍然支持声明基址，
-供确实需要它的镜像和企业源使用。
+由于镜像是 Git 镜像，安装包与目录一起移动并保持逐字节一致，会话中途切换源既不会跨提供方，
+也不会让校验和失效。目录声明 `artifactBaseUrl` 正是为了在「目录所在主机并不托管安装包」时
+依然成立；不声明时会退回按目录自身所在目录解析，可能把下载请求打到错误的域名。
 
 ### 3.3 用什么替代 WORM
 
@@ -325,7 +326,9 @@ POST /v2/webhooks/github
 稳定的设备标识（`deviceId`），让平台能够对下载去重，并按设备而不是按来源地址限流。
 该路由的字节兄弟 `GET /download/{id}/{version}` 供市场页面与控制台使用，不是客户端的
 路径。浏览与检查更新仍然只需要静态文件；当 resolve 请求无法到达平台时，安装会回退到
-目录自身的包地址，因此该 API 不可用不会让已发布插件无法安装。客户端一侧的契约——
+目录自身的包地址，因此该 API 不可用不会让已发布插件无法安装。客户端给 resolve 请求
+三秒时限；超时、限流或 `NO_DOWNLOAD_SOURCE` 会回退到目录地址，并继续校验目录摘要。
+尚未发布、已归档或无此版本等明确发布拒绝仍会直接报错。客户端一侧的契约——
 渠道、镜像、摘要校验以及标识的派生方式——见
 [07-plugin-marketplace.md](/zh-CN/spec/07-plugins/07-plugin-marketplace)。
 

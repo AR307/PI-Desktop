@@ -49,8 +49,11 @@ export const PERMISSION_RISK: Record<string, RiskTier> = {
   "agent.extension": "high",
   // Its code runs in the app's own document, so the grant is the boundary.
   "renderer.extension": "high",
+  // The isolated plugin callback can read its own encrypted OAuth credentials.
+  "provider.oauth": "high",
   "desktop.control": "high",
   "session.read": "high",
+  "session.autoTitle": "high",
   "browser.cdp": "high",
   // Reading is a tier below writing because what makes a read dangerous is
   // where the data can go, and outbound requests are declared separately.
@@ -85,6 +88,7 @@ export const CAPABILITY_ORDER: PluginCapability[] = [
   "panel",
   "views",
   "rendererUi",
+  "composerTransform",
   "commands",
   "tools",
   "agentExtension",

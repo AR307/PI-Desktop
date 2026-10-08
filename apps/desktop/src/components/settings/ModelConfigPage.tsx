@@ -1,6 +1,6 @@
 /**
- * Model configuration tab: image model selection, the AI service list, and the
- * models.dev enrichment snapshot status.
+ * Model configuration tab: AI services, Jev settings, image model selection,
+ * and the models.dev enrichment snapshot status.
  *
  * API services, plugin-declared services and vendor subscription accounts
  * share one list (D625). An account row still lives and dies through the
@@ -10,6 +10,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import {
+  vendorAccountImageCandidates,
   type ImageGenerationBinding,
   type ModelBinding,
   type ProviderPublic,
@@ -23,7 +24,11 @@ import {
   IconServer,
 } from "../icons";
 import { providerServesChatModels } from "./default-model";
-import { planImageGenerationDefaults } from "./image-generation-default";
+import {
+  imageGenerationPickerCandidates,
+  isImageGenerationPickerCandidate,
+  planImageGenerationDefaults,
+} from "./image-generation-default";
 import { copyProviderConfiguration, type ProviderCopyDraft } from "./provider-copy";
 import { ImageGenerationModelRow } from "./ImageGenerationModelRow";
 import { OAuthLoginDialog } from "./OAuthLoginDialog";
@@ -34,6 +39,8 @@ import { useVendorAccounts } from "./useVendorAccounts";
 import { VendorAccountDialog, type VendorAccountForm } from "./VendorAccountDialog";
 import { ModelConfigImportPanel } from "../../features/settings/imports/ModelConfigImportPanel";
 import { ImportToggleButton } from "../../features/settings/import-workbench";
+import { JevSettingsCard } from "./JevSettingsCard";
+import { JEV_SERVICE } from "./service-catalog";
 
 type CatalogStatus = {
   loaded: boolean;
@@ -65,16 +72,12 @@ function imageCandidates(
   return result;
 }
 
-function isImageCandidate(candidates: readonly ImageGenerationBinding[], providerId: string, modelId: string) {
-  return candidates.some((entry) => entry.providerId === providerId && sameWireId(entry.modelId, modelId));
-}
-
 function chatModelOptions(providers: readonly ProviderPublic[], imageModels: readonly ImageGenerationBinding[]) {
   return providers.flatMap((provider) => {
     const ids = provider.models?.length
       ? provider.models.map((model) => model.id)
       : [provider.defaultModelId ?? ""];
-    return ids.filter((id) => !!id.trim() && !isImageCandidate(imageModels, provider.id, id))
+    return ids.filter((id) => !!id.trim() && !isImageGenerationPickerCandidate(imageModels, provider.id, id))
       .map((modelId) => ({ provider, modelId }));
   });
 }
@@ -90,6 +93,15 @@ export function ModelConfigPage() {
   // null = closed, "" = add flow, provider id = edit flow.
   const [copyDraft, setCopyDraft] = useState<ProviderCopyDraft | null>(null);
   const [setupFor, setSetupFor] = useState<string | null>(null);
+  const [pluginCatalogSetup, setPluginCatalogSetup] = useState<{
+    providerId: string;
+    pluginName: string;
+  } | null>(null);
+
+  // The Jev card opens the same dialog, straight on the Jev service.
+  const [jevSetup, setJevSetup] = useState(false);
+  // Bumped when that dialog stored a key, so the card re-reads what exists.
+  const [jevStatusRevision, setJevStatusRevision] = useState(0);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [testingId, setTestingId] = useState<string | null>(null);
   const [changingImageModel, setChangingImageModel] = useState(false);
@@ -123,8 +135,13 @@ export function ModelConfigPage() {
   }, []);
 
   const imageGenerationCandidates = useMemo(
-    () => imageCandidates(settings?.imageGenerationModels, settings?.imageGeneration),
-    [settings?.imageGenerationModels, settings?.imageGeneration],
+    () => imageCandidates([
+      ...imageCandidates(settings?.imageGenerationModels, settings?.imageGeneration),
+      // A signed-in vendor account serves its image model without listing it as
+      // a chat model, so it must reach this list or the picker row never renders.
+      ...vendorAccountImageCandidates(providers),
+    ], null),
+    [settings?.imageGenerationModels, settings?.imageGeneration, providers],
   );
   const providerReady = (provider: ProviderPublic) =>
     providerServesChatModels(provider, imageGenerationCandidates);
@@ -156,10 +173,30 @@ export function ModelConfigPage() {
       settings.defaultProviderId === saved.id && firstModelId &&
       !models.some((model) => sameWireId(model.id, settings.defaultModelId ?? "") &&
         !selectedImageIds.some((id) => sameWireId(id, model.id)))
-        ? firstModelId
-        : undefined;
+    ? firstModelId
+    : undefined;
     try {
-      if (imageModelIds !== undefined) {
+      if (pluginCatalogSetup?.providerId === saved.id) {
+        const defaultsProviders = [...providers.filter((provider) => provider.id !== saved.id), saved];
+        const currentDefault = defaultsProviders.find(
+          (provider) => provider.id === settings.defaultProviderId,
+        );
+        const keepsCurrentDefault = !!currentDefault &&
+          providerServesChatModels(currentDefault, imageGenerationCandidates) &&
+          chatModelOptions([currentDefault], imageGenerationCandidates).some(
+            ({ modelId }) => sameWireId(modelId, settings.defaultModelId ?? ""),
+          );
+        if (!keepsCurrentDefault && firstModelId) {
+          const nextSettings = {
+            ...settings,
+            defaultProviderId: saved.id,
+            defaultModelId: firstModelId,
+          };
+          await api.setSettings(nextSettings);
+          useAppStore.setState({ settings: nextSettings });
+        }
+        showToast(t("settings.pluginProviderKeySaved"), { variant: "success" });
+      } else if (imageModelIds !== undefined) {
         const current = await api.getSettings();
         const plan = planImageGenerationDefaults(
           current,
@@ -207,6 +244,7 @@ export function ModelConfigPage() {
       }
       setSetupFor(null);
       setCopyDraft(null);
+      setPluginCatalogSetup(null);
       await refreshProviders();
     } catch (error) {
       showToast(error instanceof Error ? error.message : String(error), {
@@ -219,11 +257,17 @@ export function ModelConfigPage() {
     setChangingImageModel(true);
     try {
       const current = await api.getSettings();
-      const candidates = imageCandidates(
+      // Exactly the list the picker row offered, so a choice the user could
+      // make is always one this page accepts — including the image model of a
+      // signed-in vendor account, which is never stored as a chat model.
+      const candidates = imageGenerationPickerCandidates(
         current.imageGenerationModels,
         current.imageGeneration,
+        providers,
       );
-      if (!isImageCandidate(candidates, binding.providerId, binding.modelId)) return;
+      if (!isImageGenerationPickerCandidate(candidates, binding.providerId, binding.modelId)) {
+        return;
+      }
       const nextSettings = { ...current, imageGeneration: binding };
       await api.setSettings(nextSettings);
       useAppStore.setState({ settings: nextSettings });
@@ -357,19 +401,6 @@ export function ModelConfigPage() {
 
   return (
     <div className="settings-stack model-config-page">
-      {imageGenerationCandidates.length > 0 ? (
-        <section className="settings-card-block">
-          <div className="settings-panel model-default-panel">
-            <ImageGenerationModelRow
-              settings={settings}
-              providers={providers}
-              busy={changingImageModel}
-              onChange={setImageGenerationDefault}
-            />
-          </div>
-        </section>
-      ) : null}
-
       <section className="settings-card-block">
         <div className="model-config-section-head">
           <div className="settings-card-heading-line">
@@ -494,24 +525,69 @@ export function ModelConfigPage() {
         </Button>
       </div>
 
+      <JevSettingsCard
+        settings={settings}
+        onConfigure={() => {
+          setJevSetup(true);
+          setSetupFor("");
+        }}
+        statusRevision={jevStatusRevision}
+      />
+
+      {imageGenerationCandidates.length > 0 ? (
+        <section className="settings-card-block">
+          <div className="settings-panel model-default-panel">
+            <ImageGenerationModelRow
+              settings={settings}
+              providers={providers}
+              busy={changingImageModel}
+              onChange={setImageGenerationDefault}
+            />
+          </div>
+        </section>
+      ) : null}
+
       {setupFor !== null ? (
         <ProviderSetupDialog
+          key={setupFor}
           provider={editingProvider}
+          pluginCatalogSetup={pluginCatalogSetup?.providerId === editingProvider?.id}
+          pluginCatalogPluginName={pluginCatalogSetup?.pluginName}
           initialDraft={copyDraft}
-          onClose={() => { setSetupFor(null); setCopyDraft(null); }}
+          initialService={jevSetup ? JEV_SERVICE : undefined}
+          onClose={() => {
+            setSetupFor(null);
+            setCopyDraft(null);
+            setPluginCatalogSetup(null);
+            setJevSetup(false);
+          }}
           imageModelIds={editingProvider
             ? imageGenerationCandidates
                 .filter((binding) => binding.providerId === editingProvider.id)
                 .map((binding) => binding.modelId)
             : undefined}
           onSaved={afterSaved}
+          onJevConfigured={() => {
+            setSetupFor(null);
+            setCopyDraft(null);
+            setJevSetup(false);
+            // The card is already mounted: tell it the key it read has changed.
+            setJevStatusRevision((revision) => revision + 1);
+          }}
           vendors={vendors}
           onPickSubscription={(vendor) => {
             setSetupFor(null);
             setCopyDraft(null);
+            setPluginCatalogSetup(null);
             // Started here, not in the dialog: a click happens once, where
             // StrictMode would run a mount effect twice and open two browsers.
             startLogin(vendor);
+          }}
+          onPickPluginProvider={(providerId, pluginName) => {
+            setPluginCatalogSetup({ providerId, pluginName });
+            setCopyDraft(null);
+            setJevSetup(false);
+            setSetupFor(providerId);
           }}
         />
       ) : null}

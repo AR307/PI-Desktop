@@ -118,15 +118,6 @@ export const SETTINGS_NAV: SettingsNavEntry[] = [
       "settings.contextUsageDisplay",
       "settings.contextUsageDisplayRemaining",
       "settings.contextUsageDisplayUsed",
-      "settings.promptEnhancementTitle",
-      "settings.promptEnhancementDesc",
-      "settings.promptEnhancementCustomTemplate",
-      "settings.promptEnhancementEdit",
-      "settings.promptEnhancementUserTemplate",
-      "settings.promptEnhancementModelTitle",
-      "settings.promptEnhancementModel",
-      "settings.promptEnhancementModelFollow",
-      "settings.promptEnhancementThinking",
       "settings.largePasteThreshold",
     ],
   },
@@ -279,6 +270,10 @@ export const SETTINGS_NAV: SettingsNavEntry[] = [
     labelKey: "settings.nav.sync",
     titleKey: "settings.configSync.title",
     group: "system",
+    // Cloud sync (encrypted portable configuration backup) is not open to
+    // users yet: packaged builds hide the destination and its search hits,
+    // development builds keep it. Drop this flag to ship it again.
+    developmentOnly: true,
     keywordKeys: [
       "settings.configSync.connectionTitle",
       "settings.configSync.endpoint",

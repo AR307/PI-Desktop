@@ -74,16 +74,18 @@ ordered shutdown as the Quit menu item.
 
 After host-core is up, Electron main reads `AppSettings.networkProxy` and
 applies it before spawning the agent sidecar (D340). Chromium sessions use
-`session.setProxy`; main-process `fetch` is `net.fetch`; the sidecar receives
-the same config through `sidecar.configure` and `PI_DESKTOP_PROXY_JSON`.
-HTTP(S) provider requests use undici's proxy dispatcher; SOCKS5 provider
-requests use a buffered CONNECT tunnel so a proxy may coalesce the SOCKS
-handshake response without stalling the request. Custom URLs with userinfo
-keep credentials for Node and curl; Chromium is pointed at a loopback SOCKS5
-relay that injects them, because `proxyRules` cannot carry userinfo (issue
-#490).
-host-core marketplace `curl` gets `--proxy` from the stored settings and does
-**not** inherit proxy env, so workspace Bash cannot see proxy credentials.
+`session.setProxy`; main-process `fetch` is `net.fetch`. In System mode, the
+sidecar provider dispatcher and host-core marketplace `curl` use an
+authenticated, loopback-only SOCKS5 relay. Electron resolves each destination
+with `session.defaultSession.resolveProxy`, including PAC rules and their
+ordered fallbacks. The relay's random credential is runtime-only and is sent
+over sidecar configuration / host RPC, never through process environment.
+Custom URLs with userinfo keep credentials for Node and curl; Chromium is
+pointed at a loopback SOCKS5 relay that injects them, because `proxyRules`
+cannot carry userinfo (issue #490). host-core marketplace `curl` gets explicit
+proxy arguments and does **not** inherit proxy env, so workspace Bash cannot
+see proxy credentials. Direct mode bypasses the System relay. TLS certificate
+verification remains enabled on every route.
 Marketplace curl diagnostics prefer UTF-8 and fall back to the active Windows
 ANSI code page before crossing the UTF-8 RPC boundary, so localized Schannel
 errors remain readable instead of becoming replacement characters.
@@ -214,6 +216,10 @@ renderer-facing status):
 
 ## 5. Shutdown order
 
+After a confirmed quit, Electron Main synchronously records `app shutdown`
+before the first awaited teardown step. A force-terminated process therefore
+retains the lifecycle boundary whenever the local log write succeeds.
+
 1. Reject new prompts
 2. Flush the in-flight reply checkpoints, then abort active turns through the
    sidecar and wait, bounded (2 s total), for their aborted final rows to
@@ -223,7 +229,10 @@ renderer-facing status):
 3. Interrupt pending/queued/running Plan and Goal work and reject late responses
 4. Unload plugins
 5. Stop Node agent sidecar
-6. Flush/close Rust host DB
+6. Drain terminal event writes (turn finalization and regenerate archival),
+   checkpoints and the outbox while Rust host-core remains available, then
+   flush/close its DB. Terminal writes use a bounded wait of 2 s; a timeout logs
+   `quit before event persistence settled` and allows quit to proceed.
 7. Stop Rust host
 8. Dispose update polling
 9. Close windows / exit

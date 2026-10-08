@@ -17,10 +17,11 @@ Outbound HTTP is split across processes:
 - Chromium sessions — default session, `persist:work-browser`, plugin panels
 - electron-updater — Chromium / Electron net
 
-None of those surfaces honored a product setting. Users behind Clash, V2Ray,
-corporate HTTP proxies, or SOCKS5 had working OS/TUN proxies for the in-app
-browser but silent failures on model calls, because Node's `fetch` does not
-use the system proxy.
+Custom proxy settings already covered these surfaces, but System mode did not
+reach Node provider calls or host-core marketplace downloads. Users behind
+Clash, V2Ray, corporate HTTP proxies, or SOCKS5 could use the in-app browser
+while model and plugin downloads failed because Node `fetch` and `curl` do not
+resolve Electron's system proxy or PAC configuration.
 
 A single Settings control should apply one proxy to app-owned traffic.
 
@@ -32,9 +33,13 @@ A single Settings control should apply one proxy to app-owned traffic.
    `AppSettings.networkProxy` in the existing host settings blob. No protocol
    or storage schema version bump.
 
-2. **System** (default): Chromium `session.setProxy({ mode: "system" })`.
-   Node sidecar stays direct unless the process already inherited proxy env
-   from the launching shell. This preserves today's GUI-app behavior.
+2. **System** (default): Chromium uses
+   `session.setProxy({ mode: "system" })`. Electron main owns a loopback-only,
+   authenticated SOCKS relay that calls `session.defaultSession.resolveProxy`
+   for each destination and follows the returned proxy fallback list, including
+   PAC decisions. The sidecar's undici dispatcher and host-core marketplace
+   `curl` use that relay, so provider and marketplace requests follow the same
+   OS proxy policy without putting proxy settings in a process environment.
 
 3. **Direct**: Chromium `{ mode: "direct" }`. Proxy env keys are cleared in
    Electron main. host-core marketplace curl uses `--noproxy '*'`.
@@ -57,21 +62,25 @@ A single Settings control should apply one proxy to app-owned traffic.
    action (`pi-desktop/network/testProxy`) runs one bounded Chromium fetch
    through the supplied config and does not persist it.
 
-7. **Secrets.** Proxy userinfo lives in the settings JSON next to other
-   non-API-key preferences. Logs redact passwords. host-core never
-   `set_var`s the URL onto its process env. Chromium `proxyRules` cannot
+7. **Secrets.** Custom proxy userinfo lives in the settings JSON next to other
+   non-API-key preferences. Logs redact passwords. System relay credentials
+   are random, ephemeral, and accepted only on its loopback listener. host-core
+   never `set_var`s proxy URLs onto its process env. Chromium `proxyRules` cannot
    include userinfo (it fails with `net::ERR_NO_SUPPORTED_PROXIES`) and
    cannot speak SOCKS5 username/password, so Electron main points Chromium
-   at a `127.0.0.1` SOCKS5 relay that injects the stored credentials
-   (issue #490). Node, undici, and curl keep the canonical URL with
-   userinfo.
+   at a `127.0.0.1` SOCKS5 relay that injects stored custom credentials
+   (issue #490). In System mode, the relay resolves the route through
+   Electron for each destination and tries PAC fallbacks in order. No proxy
+   credentials are inherited by workspace Bash.
 
 ## Consequences
 
-- LLM, marketplace, updates, and the in-app browser share one proxy.
-- System mode does not magically make Node follow the macOS/Windows system
-  proxy; users who need model calls through Clash still choose Custom
-  (typically `http://127.0.0.1:7890` or `socks5://127.0.0.1:1080`).
+- LLM, marketplace, updates, plugin `net.fetch`, and the in-app browser honor
+  the selected route. System mode uses Electron's OS/PAC resolution for
+  provider and marketplace requests as well as Chromium-owned requests.
+- System proxies that require an interactive or OS-integrated authentication
+  challenge are not answered by the raw socket relay; those requests fail
+  closed. Users can use Custom mode when they have explicit proxy credentials.
 - Adding `undici` to the sidecar bundle keeps the dispatcher and `fetch`
   implementation on one package.
 
