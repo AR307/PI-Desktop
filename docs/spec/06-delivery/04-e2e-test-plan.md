@@ -16998,6 +16998,20 @@ host-created files. The full app's file-preview viewer is covered separately.
   with optional `--single` and `--patch`; runtime tests cover parent restart.
 
 
+## Mutation recovery file aliases
+
+- Retry a failing Edit using relative, absolute, `.`/`..`, directory-link and
+  Windows case-alias spellings of the same existing file. The third counted
+  failure terminates; changing spelling does not grant another recoverable-code
+  grace. Distinct files retain independent budgets.
+- Successfully Edit or Write through an alias and retry: the count and grace
+  reset. Removing the file through a linked path clears its pre-mutation identity.
+- Repeat relative/absolute aliases in a temporary session: its scratch root is
+  the relative base. Probe the directory's actual case sensitivity: distinct
+  case-sensitive files remain separate, while case aliases share an identity.
+- Automated filesystem/runtime boundary coverage: `runtime.test.ts` and
+  `mutation-recovery.test.ts`; no UI, production profile or real provider is used.
+
 ## Regenerate archival during quit
 
 - Regenerate a completed answer and quit as soon as the terminal event arrives.

@@ -3244,6 +3244,9 @@ Do not invent objections or turn speculative risks into blockers. Stop when the 
         signal,
         onUpdate,
       ) => {
+        const mutationPath = PATH_MUTATING_TOOLS.has(toolName) && isRecord(params) && typeof params.path === "string"
+          ? await mutationFailureKey(params.path, this.projectPath ?? this.scratchDir)
+          : undefined;
         await this.loadPathInstructions(toolName, params);
         const isBash = toolName === "Bash";
         const timeoutMs = isBash ? commandTimeoutMs(params) : undefined;
@@ -3398,7 +3401,7 @@ Do not invent objections or turn speculative risks into blockers. Stop when the 
           toolName === "Edit" &&
           failedToolExecution &&
           typeof recordParams?.path === "string"
-            ? mutationFailureKey(recordParams.path)
+            ? recordParams.path
             : undefined;
         const failedPatchCommand =
           toolName === "Bash" &&
@@ -3406,7 +3409,7 @@ Do not invent objections or turn speculative risks into blockers. Stop when the 
           isPatchCommand(recordParams?.command);
         const mutationOwner = this.mutationOwners.get(toolCallId);
         const targetKey = failedEditPath
-          ? failedEditPath
+          ? mutationPath
           : failedPatchCommand
             ? BASH_PATCH_FAILURE_KEY
             : undefined;
@@ -3449,7 +3452,7 @@ Do not invent objections or turn speculative risks into blockers. Stop when the 
         if (!failureKey && result.ok) {
           const succeededTarget =
             PATH_MUTATING_TOOLS.has(toolName) && typeof recordParams?.path === "string"
-              ? mutationFailureKey(recordParams.path)
+              ? mutationPath
               : toolName === "Bash" && isPatchCommand(recordParams?.command)
                 ? BASH_PATCH_FAILURE_KEY
                 : undefined;
