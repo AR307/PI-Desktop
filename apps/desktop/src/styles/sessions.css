@@ -61,8 +61,11 @@
 
 .import-toolbar-actions {
   display: flex;
-  flex: 0 0 auto;
+  min-width: 0;
+  flex: 1 1 auto;
+  flex-wrap: wrap;
   align-items: center;
+  justify-content: flex-end;
   gap: 8px;
   margin-left: auto;
 }
@@ -81,15 +84,30 @@
 
 .import-option {
   display: inline-flex;
-  min-width: 0;
+  min-width: min(100%, 240px);
+  flex: 1 1 240px;
   align-items: center;
-  gap: 7px;
+  gap: 10px;
+}
+
+.import-option-copy {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 2px;
 }
 
 .import-option-label {
   color: var(--ds-text-muted);
   font-size: var(--text-sm);
-  white-space: nowrap;
+}
+
+.import-option-hint {
+  max-width: 360px;
+  color: var(--ds-text-muted);
+  font-size: var(--text-2xs);
+  line-height: var(--leading-normal);
+  overflow-wrap: anywhere;
 }
 
 .import-option-select .settings-menu-select-trigger {
@@ -281,11 +299,12 @@
   color: var(--ds-text-faint);
 }
 
-/* The idle action, with the help icon that says what a scan will cover. */
-.import-idle-actions {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
+.import-idle-description {
+  max-width: 680px;
+  margin: 0;
+  color: var(--ds-text-muted);
+  font-size: var(--text-sm);
+  line-height: var(--leading-normal);
 }
 
 /* A scan that found nothing keeps its action in the toolbar above. */

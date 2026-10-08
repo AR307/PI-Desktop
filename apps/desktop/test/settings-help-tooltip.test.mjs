@@ -109,13 +109,22 @@ test("one settings row renderer owns the layout", () => {
   );
 });
 
-test("an import hint is reachable from the control it explains", () => {
-  // The standalone hint line is gone; skill mode keeps its help text beside
-  // the option, while the retired session-only cap note leaves Settings too.
+test("import explanations are visible in the expanded workbench", () => {
+  // Scan scope is readable before starting a scan; skill mode copy stays beside
+  // the choice it explains without adding another help-icon interaction.
   assert.doesNotMatch(importWorkbench, /className="import-hint"/);
   assert.match(importWorkbench, /hint\?: string;/);
   assert.match(skillImport, /hint=\{t\("settings\.importAgentScanModeHint"\)\}/);
   assert.doesNotMatch(modelImport, /codexCap|importCodexCapped/);
-  assert.match(importWorkbench, /\{help \? <HelpIcon label=\{help\} \/> : null\}/);
-  assert.match(importWorkbench, /<HelpIcon label=\{hint\} \/>/);
+  assert.match(
+    importWorkbench,
+    /<p className="import-idle-description">\{copy\}<\/p>/,
+  );
+  assert.match(
+    importWorkbench,
+    /<span className="import-option-hint">\{hint\}<\/span>/,
+  );
+  assert.doesNotMatch(importWorkbench, /<HelpIcon/);
+  assert.match(cssRule(".import-idle-description"), /color:\s*var\(--ds-text-muted\)/);
+  assert.match(cssRule(".import-option-hint"), /overflow-wrap:\s*anywhere/);
 });
