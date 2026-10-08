@@ -61,11 +61,8 @@
 
 .import-toolbar-actions {
   display: flex;
-  min-width: 0;
-  flex: 1 1 auto;
-  flex-wrap: wrap;
+  flex: 0 0 auto;
   align-items: center;
-  justify-content: flex-end;
   gap: 8px;
   margin-left: auto;
 }
@@ -84,30 +81,15 @@
 
 .import-option {
   display: inline-flex;
-  min-width: min(100%, 240px);
-  flex: 1 1 240px;
-  align-items: center;
-  gap: 10px;
-}
-
-.import-option-copy {
-  display: flex;
   min-width: 0;
-  flex-direction: column;
-  gap: 2px;
+  align-items: center;
+  gap: 7px;
 }
 
 .import-option-label {
   color: var(--ds-text-muted);
   font-size: var(--text-sm);
-}
-
-.import-option-hint {
-  max-width: 360px;
-  color: var(--ds-text-muted);
-  font-size: var(--text-2xs);
-  line-height: var(--leading-normal);
-  overflow-wrap: anywhere;
+  white-space: nowrap;
 }
 
 .import-option-select .settings-menu-select-trigger {
