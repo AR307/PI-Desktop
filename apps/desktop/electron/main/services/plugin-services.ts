@@ -626,7 +626,7 @@ export function createPluginServices({
       action: (action, sessionId, tabId) => browserHost.action(action, sessionId, tabId),
       setBounds: (pluginId, hole) => browserHost.setGuestHole(pluginId, hole),
       setVisible: (pluginId, visible) => browserHost.setGuestVisible(pluginId, visible),
-      getState: () => browserHost.getState(),
+      getState: () => browserHost.getStateForPlugin(),
       openExternal: (sessionId, tabId) => browserHost.openExternal(sessionId, tabId),
       snapshot: () => browserHost.snapshot(),
       screenshot: (input, sessionId) => browserHost.screenshot(input, sessionId),

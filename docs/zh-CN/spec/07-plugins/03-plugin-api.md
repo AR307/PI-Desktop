@@ -585,6 +585,9 @@ pi.browser.cdp(input: { method: string; params?: unknown }): Promise<unknown>
 `setBounds` 相对调用插件视图的内容区，并被夹紧，因此访客页不能盖住聊天/输入框。
 `cdp` 默认拒绝；cookie、storage、target 和网络拦截方法以 `PERMISSION_DENIED` 失败。
 代理调用的会话身份来自进行中的 `plugins.execute` `sessionId`，而不是插件参数（D333 / ADR 0170）。
+页面操作（`navigate`、`action`、`openExternal`、`getState`、snapshot、screenshot 和 CDP 调用）
+仅在 Browser 视图可见时可用。视图隐藏时调用会以 `UNAVAILABLE` 失败；应通过 `BrowserPreview`
+请求宿主显示 Browser 视图后再继续。
 
 `getHistory` 返回由主机明确记录的条目，按最新优先排列，文本和图片按捕获时间混排。
 通过 `writeText` 写入的内容，以及 Composer 用户主动粘贴事件提供的内容会被记录；主机
