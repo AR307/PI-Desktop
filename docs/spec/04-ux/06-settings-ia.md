@@ -371,6 +371,10 @@ a usage tab.
     override is folded into it when the map is read (D438, D439)
 
 ### Model configuration (`agent` tab)
+- The model configuration page groups its sections in this order: **AI
+  services** (including model-catalog status and refresh), **Jev**, then the
+  image-generation model selector. The sections use one consistent vertical
+  spacing rhythm.
 - **Defaults** card: a compact settings row shows the provider name and exact
   model ID beneath the Default model label. A quiet Change action opens the
   picker without duplicating the current value. The picker groups model-level
@@ -557,9 +561,11 @@ contract modes are intent boundaries, not strict read-only security profiles.
   and the actions that replace or remove the key; removing the key takes the
   switch down first, then the card. The key itself is entered only in the
   service dialog, which is also where it is checked. It stays in Host secure
-  storage; the renderer only learns whether one exists.
-- Explain that `JevClassify` sends only the state and questions the Agent passes
-  to TypeSafe, and warn users not to include secrets or personal information.
+  storage; the renderer only learns whether one exists. Keep the card free of
+  persistent explanatory paragraphs: its heading help icon provides integration
+  and data-handling details, while the switch help icon explains Agent-mode
+  availability. The setup form keeps the privacy notice visible before a key
+  is stored.
 - The tool is on demand and unavailable in Plan and Goal modes. Removing the
   key turns Jev off first, then deletes it.
 

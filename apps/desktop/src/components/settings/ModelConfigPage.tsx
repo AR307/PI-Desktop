@@ -1,6 +1,6 @@
 /**
- * Model configuration tab: image model selection, the AI service list, and the
- * models.dev enrichment snapshot status.
+ * Model configuration tab: AI services, Jev settings, image model selection,
+ * and the models.dev enrichment snapshot status.
  *
  * API services, plugin-declared services and vendor subscription accounts
  * share one list (D625). An account row still lives and dies through the
@@ -401,28 +401,6 @@ export function ModelConfigPage() {
 
   return (
     <div className="settings-stack model-config-page">
-      {imageGenerationCandidates.length > 0 ? (
-        <section className="settings-card-block">
-          <div className="settings-panel model-default-panel">
-            <ImageGenerationModelRow
-              settings={settings}
-              providers={providers}
-              busy={changingImageModel}
-              onChange={setImageGenerationDefault}
-            />
-          </div>
-        </section>
-      ) : null}
-
-      <JevSettingsCard
-        settings={settings}
-        onConfigure={() => {
-          setJevSetup(true);
-          setSetupFor("");
-        }}
-        statusRevision={jevStatusRevision}
-      />
-
       <section className="settings-card-block">
         <div className="model-config-section-head">
           <div className="settings-card-heading-line">
@@ -546,6 +524,28 @@ export function ModelConfigPage() {
           </span>
         </Button>
       </div>
+
+      <JevSettingsCard
+        settings={settings}
+        onConfigure={() => {
+          setJevSetup(true);
+          setSetupFor("");
+        }}
+        statusRevision={jevStatusRevision}
+      />
+
+      {imageGenerationCandidates.length > 0 ? (
+        <section className="settings-card-block">
+          <div className="settings-panel model-default-panel">
+            <ImageGenerationModelRow
+              settings={settings}
+              providers={providers}
+              busy={changingImageModel}
+              onChange={setImageGenerationDefault}
+            />
+          </div>
+        </section>
+      ) : null}
 
       {setupFor !== null ? (
         <ProviderSetupDialog
