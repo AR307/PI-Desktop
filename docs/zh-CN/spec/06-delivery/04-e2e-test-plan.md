@@ -9451,6 +9451,6 @@ host-created files. The full app's file-preview viewer is covered separately.
 
 ### E2E-COMPOSER-configured-context-window
 
-- **Steps:** Save a 500K user context limit for a model whose catalog publishes 1M. Open the Composer model list, then send a short message and inspect context usage. Repeat with a catalog-owned limit and with discovery unavailable.
-- **Expected:** The user-configured row and context inspector show 500K; a catalog-owned row follows the published limit; a configured model without discovery retains its saved context label. Model selection remains unchanged.
-- **Status:** Manual validation scenario; no new automated regression test.
+- **步骤：**为目录发布 1M 的模型保存 500K 用户额度。打开 Composer 模型列表，然后发送一条简短消息并检查上下文用量。对目录管理的额度以及模型发现不可用的情况重复验证。
+- **预期：**用户配置的模型行和上下文检查器显示 500K；目录管理的额度跟随已发布值；没有发现信息的已配置模型仍显示保存的额度。模型选择保持不变。
+- **状态：**手动验证场景；未增加自动回归测试。

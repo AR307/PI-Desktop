@@ -280,7 +280,7 @@ type ModelCatalogItem = {
 
 除非不可能执行，否则警告是非阻塞的。
 
-Composer context-window labels resolve the exact binding with `effectiveContextWindow`: explicit user limits override discovery, catalog-owned limits follow discovery, and legacy bindings preserve their saved limits. A binding with a valid saved limit still displays it when discovery is unavailable. This display resolution does not modify the discovered catalog or runtime safety budgets.
+Composer 模型列表中的上下文窗口标签通过 `effectiveContextWindow` 按对应 binding 解析：显式的用户额度优先于发现信息；由目录管理的额度跟随发现结果；旧版 binding 保留已保存额度。即使模型发现不可用，只要已保存额度有效，也仍会显示该额度。该显示解析不会修改发现目录或运行时安全预算。
 
 ### 11.1 Reasoning capability resolution
 
