@@ -13191,7 +13191,8 @@ are withdrawn with ADR 0165.
   PI-Desktop may already have an equivalent provider.
 - **Steps**:
   1. Open Settings → Models and expand **Import from other tools**. Confirm
-     the inline workbench is idle until Scan is activated.
+     its scan explanation appears as inline text without a help icon, and the
+     workbench remains idle until Scan is activated.
   2. Scan model configuration. Confirm source groups start expanded, rows
      show name, model count, host, and an API key / No API key badge, and no
      secret value appears in the UI or scan IPC payload.
@@ -13207,7 +13208,8 @@ are withdrawn with ADR 0165.
 - **Expected**: Explicit scan only (D007). Stored API keys land in the host
   secret store. Only equivalent providers (normalized URL + API style + same
   credential) skip; different credentials at one endpoint remain separate.
-  No protocol or schema version bump.
+  The expanded importer shows its scan explanation directly without a
+  question-mark control. No protocol or schema version bump.
 - **Specs linked**: `04-ux/06-settings-ia.md`,
   `04-ux/08-component-spec.md` §18.5, `03-runtime/01-ipc-protocol.md`,
   `03-runtime/11-provider-model-system.md`, ADR 0179, D342
@@ -13224,12 +13226,16 @@ are withdrawn with ADR 0165.
   includes userinfo and query credentials.
 - **Steps**:
   1. Open Settings → Skills, select Project and a project, then expand Scan
-     other tools. Confirm opening the panel does not scan. Scan, select a skill,
-     choose its copy or link mode, and import it.
+     other tools. Confirm its scan explanation is visible without a help icon
+     and that opening the panel does not scan. Scan, select a skill, choose its
+     copy or link mode, confirm the mode explanation is visible beside the
+     selector without a help icon, and import it.
   2. Confirm the new skill belongs to the selected project. Change the project
      and confirm the prior candidates and selection are cleared.
   3. Open Settings → MCP, select Project and the same project, expand Scan
-     other tools, scan, select the disabled MCP candidate, and import it.
+     other tools. Confirm its scan explanation is visible without a help icon
+     and that opening the panel does not scan. Scan, select the disabled MCP
+     candidate, and import it.
   4. Confirm the server belongs to that project, remains disabled, and the
      candidate row shows only the URL host without userinfo, path, or query.
   5. Change project scope and confirm the prior MCP candidates and selection
@@ -13237,7 +13243,8 @@ are withdrawn with ADR 0165.
 - **Expected**: Skills and MCP scans start only after an explicit Scan action.
   Project scans and writes carry the selected project path; scope changes clear
   stale candidates. MCP disabled state is preserved and URL credentials never
-  render in candidate metadata.
+  render in candidate metadata. The expanded scan descriptions and skill
+  copy/link guidance are readable inline without a question-mark control.
 - **Specs linked**: `04-ux/06-settings-ia.md`,
   `04-ux/08-component-spec.md` §18.3 / §18.6 / §18.7, ADR 0319 / D645
 - **Acceptance**: F (persistence), Security, Quality
