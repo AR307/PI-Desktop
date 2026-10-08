@@ -1574,15 +1574,20 @@ identify the platform validation still needed.
 - **Preconditions**: Packaged or checkout build with bundled plugins; Agent
   session with a workspace HTML file; Plan session available.
 - **Steps**: 1) Confirm Plugins lists `pi.browser`, enabled, not uninstallable.
-  2) Open the work panel and launch Browser from plugin views. 3) Ask the
-  agent to preview a workspace HTML file (`BrowserPreview`) then snapshot via
-  ToolSearch `cdp` / `Browser`. 4) Switch to Plan and call the plugin Browser
-  tool. 5) Disable `pi.browser`. 6) Call `BrowserPreview` and click an http(s)
-  transcript link. 7) From a third-party or test caller, send
+  2) With the work panel closed, ask the agent to preview a workspace HTML
+  file (`BrowserPreview`) and verify the Browser tab opens in the visible work
+  panel. 3) Use ToolSearch `cdp` / `Browser` to snapshot and interact while the
+  panel remains visible. 4) For an HTTP(S) URL, verify the agent opens or
+  activates Browser before navigating; if it cannot reveal the view, it asks
+  the user to open it before continuing. 5) Switch to Plan and call the plugin
+  Browser tool. 6) Disable `pi.browser`. 7) Call `BrowserPreview` and click an
+  http(s) transcript link. 8) From a third-party or test caller, send
   `Network.getAllCookies` through `pi.browser.cdp`.
 - **Expected**: The launcher has no host Browser row. Preview opens the plugin
-  view and live-reloads the file. Plugin tool `plugin_pi_browser_Browser` can
-  snapshot after ToolSearch. Plan denies the plugin tool
+  view, reveals the work panel, and live-reloads the file. Browser operations
+  are made only while the view is visible; the agent waits for the user to
+  reveal it if necessary. Plugin tool `plugin_pi_browser_Browser` can snapshot
+  after ToolSearch. Plan denies the plugin tool
   (`PLUGIN_DISABLED_IN_PLAN`) while `BrowserPreview` remains callable. Disable
   hides the view and tools; `BrowserPreview` errors; http(s) chips use
   `openExternal`. Cookie CDP is denied. Guest bounds stay inside the plugin
@@ -3159,12 +3164,12 @@ identify the platform validation still needed.
 #### E2E-022C: Check, pack, install round-trip
 
 - **Preconditions**: A scaffolded plugin directory.
-- **Steps**: 1) `pnpm pi-plugin check <dir>`. 2) Delete the file named by `main` and run `check` again. 3) Restore it, declare `contributes.skills` without `agent.prompt.inject`, and run `check` again. 4) `pnpm pi-plugin pack <dir>`. 5) Install the resulting `.piplug` from the plugins page. 6) Ask the agent to run `PluginCheck` and `PluginPack` on the same directory.
-- **Expected**: A scaffolded plugin checks clean and reports its file count and size; the missing `main` is an error that blocks `pack`; the inert-skills case is a warning that does not block; `pack` writes `dist/<id>-<version>.piplug` with store-only entries and prints its sha256; the package installs through the normal permission review and appears under Active; the agent tools produce the same verdicts and refuse any directory outside the session workspace.
+- **Steps**: 1) `pnpm pi-plugin check <dir>`. 2) Delete the file named by `main` and run `check` again; repeat with the file named by `manifest.renderer` in a plugin that declares one. 3) Restore it, declare `contributes.skills` without `agent.prompt.inject`, and run `check` again. 4) `pnpm pi-plugin pack <dir>`. 5) Install the resulting `.piplug` from the plugins page. 6) Ask the agent to run `PluginCheck` and `PluginPack` on the same directory.
+- **Expected**: A scaffolded plugin checks clean and reports its file count and size; the missing `main` or `manifest.renderer` entry is an error that blocks `pack`; the inert-skills case is a warning that does not block; `pack` writes `dist/<id>-<version>.piplug` with store-only entries and prints its sha256; the package installs through the normal permission review and appears under Active; the agent tools produce the same verdicts and refuse any directory outside the session workspace.
 - **Specs linked**: `07-plugins/10-plugin-devex.md` §5–§6, `07-plugins/06-plugin-packaging.md`, ADR 0039
 - **Acceptance**: G (local packaging round-trip)
 - **Milestone**: Post-MVP
-- **Status**: Automated in part (`packages/plugin-devkit` vitest: scaffold→check→pack per template, store-method headers, every check rule); install step Documented
+- **Status**: Automated in part (`packages/plugin-devkit` vitest: scaffold→check→pack per template, store-method headers, every check rule, and a parity test that pins the `permission.high-risk` list to the permissions matrix's high rows); install step Documented
 
 #### E2E-023: Plugin command in global search and executes
 
@@ -9618,7 +9623,7 @@ must keep splitting are covered by `markdown-blocks.test.mjs`.
 | Post-baseline local automation | E2E-220 |
 | Post-baseline local automation (MCP `pi_session_get` large compaction) | E2E-MCP-session-get-projects-large-compaction |
 | Post-MVP remote control | E2E-221, E2E-222, E2E-223, E2E-224, E2E-225, E2E-226, E2E-227, E2E-228, E2E-229, E2E-230, E2E-231, E2E-232 |
-| Trusted extensions (R7 v1) | E2E-DIALOG-long-text-boundaries, E2E-241, E2E-242, E2E-HOOKS-prompt-chain, E2E-HOOKS-cancel-and-dispose, E2E-TRUSTED-EXTENSION-custom-agent-stream-and-binding, E2E-243, E2E-244, E2E-245, E2E-PLUGIN-imported-pi-package-skills, E2E-PLUGIN-import-extension-installs-dependencies, E2E-PLUGIN-import-extension-reports-missing-dependency, E2E-PLUGIN-declared-provider-appears-in-the-native-provider-list |
+| Trusted extensions (R7 v1) | E2E-DIALOG-long-text-boundaries, E2E-241, E2E-242, E2E-HOOKS-prompt-chain, E2E-HOOKS-cancel-and-dispose, E2E-TRUSTED-EXTENSION-custom-agent-stream-and-binding, E2E-243, E2E-TRUSTED-EXTENSION-temporary-session-cwd-is-scratch, E2E-244, E2E-245, E2E-PLUGIN-imported-pi-package-skills, E2E-PLUGIN-import-extension-installs-dependencies, E2E-PLUGIN-import-extension-reports-missing-dependency, E2E-PLUGIN-declared-provider-appears-in-the-native-provider-list |
 | Trusted extensions (R7 v1 npm recovery) | E2E-PLUGIN-import-extension-recovers-missing-npm |
 | Post-MVP regression coverage (plugin tool dispatch) | E2E-PLUGIN-slow-tool-is-not-cut-off-by-host-dispatch |
 | M6+ (Project delete) | E2E-PROJECT-delete-removes-project-and-owned-sessions |
@@ -11196,12 +11201,20 @@ This test plan spec is accepted when:
   6. Emit `Edit` on a path that does not exist but whose basename and tag match
      exactly one file this session recorded, and inspect the warning.
   7. Repeat step 6 with two recorded candidates sharing that basename and tag.
+  8. Emit `MV` to the source itself, `./source`, `sub/../source`, and its
+     absolute path, plus a directory symlink (Windows junction) pointing back
+     to its directory; on a case-insensitive filesystem also use a case-only
+     alias. Repeat with a
+     content-changing `PUT` in the same call, then use the original Read tag
+     for a valid content edit.
 - **Expected**: Step 1 records a source deletion and a destination creation under
   one tool call; step 3 restores both or neither. Step 4's rollback restores the
   captured bytes, hash-guarded on the full digest rather than the 16-bit tag.
   Step 5 fails rather than editing against content the rollback replaced. Step 6
   rebinds to the real file with a warning, and the write-permission gate is
   evaluated against the rebound path; step 7 declines instead of picking one.
+  Step 8 returns `EDIT_NO_CHANGE` without writing or deleting the source, and
+  the original Read tag remains usable for the following valid edit.
 - **Specs linked**: `03-runtime/18-line-anchored-edit-contract.md` §9.2, §13.1,
   `03-runtime/03-tools-and-permissions.md` §4c, ADR 0043, ADR 0087
 - **Acceptance**: E (tools & permissions), Quality
@@ -14700,6 +14713,22 @@ plugin-form fixtures in an isolated temporary directory at runtime.
 - **Milestone**: Post-MVP (R7 v1)
 - **Status**: Partially automated (`pnpm test:e2e:trusted-extensions`); global/composer command discovery, prompt broker round-trip, abort, session rename, exec, and Host-owned queue pass, while no-session and remote-control cases remain additional validation.
 
+#### E2E-TRUSTED-EXTENSION-temporary-session-cwd-is-scratch: Extensions in a temporary session work in its scratch
+
+- **Preconditions**: An enabled fixture extension registering command `where`
+  that reports `ctx.cwd`, `ctx.sessionManager.getCwd()`, and the working
+  directory of a child started with `pi.exec` without a `cwd` option.
+- **Steps**: 1) Start a temporary session (no project) and run `/where`
+  before any tool call. 2) Run `/where` in a project session.
+- **Expected**: In the temporary session all three values are the session's
+  `scratch/<sessionId>` directory, which exists and the child starts in; none
+  is the sidecar's process directory. In the project session all three are
+  the project root, and no scratch directory is created for the extension.
+- **Specs linked**: `07-plugins/16-trusted-extensions.md` §7; D114
+- **Acceptance**: A (app control), Quality
+- **Milestone**: Post-MVP (R7 v1)
+- **Status**: Unit-covered (`packages/agent-runtime/src/extensions/runtime-lifecycle.test.ts`); Electron journey Documented
+
 #### E2E-244: Unsupported APIs, load errors, and handler timeouts degrade to diagnostics
 
 - **Preconditions**: Four enabled fixture extensions: one importing
@@ -17002,6 +17031,20 @@ host-created files. The full app's file-preview viewer is covered separately.
 - Automated provider-boundary flow: `node scripts/e2e-subagent-edit-isolation.mjs`
   with optional `--single` and `--patch`; runtime tests cover parent restart.
 
+
+## Mutation recovery file aliases
+
+- Retry a failing Edit using relative, absolute, `.`/`..`, directory-link and
+  Windows case-alias spellings of the same existing file. The third counted
+  failure terminates; changing spelling does not grant another recoverable-code
+  grace. Distinct files retain independent budgets.
+- Successfully Edit or Write through an alias and retry: the count and grace
+  reset. Removing the file through a linked path clears its pre-mutation identity.
+- Repeat relative/absolute aliases in a temporary session: its scratch root is
+  the relative base. Probe the directory's actual case sensitivity: distinct
+  case-sensitive files remain separate, while case aliases share an identity.
+- Automated filesystem/runtime boundary coverage: `runtime.test.ts` and
+  `mutation-recovery.test.ts`; no UI, production profile or real provider is used.
 
 ## Regenerate archival during quit
 

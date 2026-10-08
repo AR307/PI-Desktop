@@ -264,6 +264,18 @@ dest       := path | quoted_path
 | `REM` | none | Delete the file named by `path`. |
 | `MV DEST` | none | Move/rename to `DEST` after applying every other op to the source. |
 
+Before writing the destination or removing the source, `MV` compares the paths
+returned by the host's permission-aware canonical resolver. If both resolve to
+the same path, the entire call fails with `EDIT_NO_CHANGE` and the source bytes
+stay untouched, including when the payload also contains content edits. This
+covers relative/absolute aliases, `.` and `..`, symlinks, and case-only spellings
+on case-insensitive filesystems. `MV` does not support case-only renaming there;
+use a distinct destination instead. Case-sensitive filesystems retain their
+normal distinction between different files whose names differ only in case.
+This rejection applies after path resolution and permission checks succeed;
+an alias rejected by those checks keeps their error (for example,
+`PATH_OUTSIDE_WORKSPACE`) and does not reach the self-move comparison.
+
 ### 7.3 Anchoring rules
 
 1. All line numbers refer to the **tagged snapshot**. They are never shifted by
@@ -474,6 +486,20 @@ occurrence, because repeating one of those means the model is guessing.
 Counting a grace is per code, not per call, so a stale tag followed by unseen
 lines is two distinct honest failures while the same code twice is not.
 
+The runtime identifies an existing target by its filesystem canonical path,
+resolved against the session project (or scratch root for a temporary session)
+before the mutation runs. Relative and
+absolute spellings, lexical `.`/`..`, directory links, and filesystem-supported
+case aliases therefore share the failure count, per-code grace, and successful
+mutation reset. Case-distinct files retain separate budgets. If canonicalization
+is unavailable (for example, a missing target), the normalized absolute path is
+the bookkeeping fallback. This identity never changes the submitted tool path
+or replaces Host permission and workspace checks; delegate budgets remain
+isolated from the parent and from other delegate runs.
+If a target later becomes canonicalizable (for example, after creation under a
+symlinked root), its identity may change from the lexical fallback; counts are
+not guaranteed to carry across that transition.
+
 Counts and per-code graces belong to the executing parent turn or delegate
 run. Parallel delegates working on the same path do not share failures or
 successful-write resets. A new parent prompt resets only the parent's recovery
@@ -541,7 +567,7 @@ Recovery warnings distinguish cause, because the corrective action differs:
 | `EDIT_REGISTER_EMPTY` | no | paste from an unset register |
 | `EDIT_REGISTER_AMBIGUOUS` | no | anonymous paste with more than one pending anonymous capture |
 | `EDIT_REPAIR_AMBIGUOUS` | no | boundary repair candidates tied at minimum cost |
-| `EDIT_NO_CHANGE` | no | apply produced identical text |
+| `EDIT_NO_CHANGE` | no | apply produced identical text, or `MV` resolved to the source path |
 | `EDIT_AMPLIFICATION_LIMIT` | no | lowering exceeded the expansion cap |
 
 All of these are `Edit`-scoped and additive to
