@@ -353,6 +353,35 @@ pi.session.getLlmContext(): Promise<PluginLlmContext>
 正在飞行的工具调用会从尾部剥掉。compaction 摘要替换检查点之前的历史。
 合计内容上限 200k 字符。
 
+### 会话自动标题（需要 `session.autoTitle`）
+
+此能力与 `session.read` 分开：它不会开放任意转录窗口或消息查询，仅用于在回合完成后生成标题。
+
+```ts
+type PluginAutoTitleContext = {
+  sessionId: string
+  expectedTitle: string
+  userPrompt: string // 第一条用户消息，最多 1,000 个字符
+  assistantReply?: string // 第一条助手回复，最多 500 个字符
+  modelKey?: string // 来自会话配置的 providerId/modelId
+}
+
+pi.session.getAutoTitleContext(input: {
+  sessionId: string
+}): Promise<PluginAutoTitleContext | null>
+
+pi.session.setAutoTitle(input: {
+  sessionId: string
+  expectedTitle: string
+  title: string
+}): Promise<{ updated: boolean }>
+```
+
+只有活动会话且标题来源仍为 `default` 时才返回上下文。宿主不会返回附件、工具调用、后续回合
+或其他转录内容。标题长度为 1–80 个 Unicode 码点，并通过精确的 `expectedTitle` 比较并设置；
+手动重命名或另一项更新发生后返回 `{ updated: false }`。两个方法都需要高风险权限
+`session.autoTitle`，因为持有 `agent.complete` 的插件可能将首轮文本发送给模型。
+
 ### 插件拥有的会话（P0/P1；需要对应权限）
 
 插件只能导入和管理归属于自身的会话。来源必须在

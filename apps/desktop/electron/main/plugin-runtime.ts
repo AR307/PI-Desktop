@@ -472,6 +472,8 @@ export type PluginHostServices = {
     list: (pluginId: string, input: Record<string, unknown>) => Promise<unknown>;
     get: (pluginId: string, input: Record<string, unknown>) => Promise<unknown>;
     listMessages: (pluginId: string, input: Record<string, unknown>) => Promise<unknown>;
+    getAutoTitleContext: (pluginId: string, input: Record<string, unknown>) => Promise<unknown>;
+    setAutoTitle: (pluginId: string, input: Record<string, unknown>) => Promise<unknown>;
     import: (pluginId: string, input: Record<string, unknown>) => Promise<unknown>;
     importBatch: (pluginId: string, input: Record<string, unknown>) => Promise<unknown>;
     rename: (pluginId: string, input: Record<string, unknown>) => Promise<unknown>;
@@ -566,6 +568,8 @@ const HOST_API_ALLOWLIST = new Set([
   "browser.cdp",
   "models.list",
   "session.getLlmContext",
+  "session.getAutoTitleContext",
+  "session.setAutoTitle",
   "session.list",
   "session.get",
   "session.listMessages",
@@ -2830,6 +2834,59 @@ export class PluginRuntime {
       }
       case "session.getLlmContext": {
         return this.readSessionContext(loaded);
+      }
+      case "session.getAutoTitleContext": {
+        this.assertPermission(loaded, "session.autoTitle");
+        const input = normalizePluginSessionInput(args[0] ?? {}, "other");
+        const sessionId = typeof input.sessionId === "string" ? input.sessionId.trim() : "";
+        if (!sessionId || sessionId.length > 128) {
+          throw apiError("INVALID_PARAMS", "sessionId must be a non-empty string");
+        }
+        if (!this.services.session?.getAutoTitleContext) {
+          throw apiError("UNSUPPORTED", "host api not available: session.getAutoTitleContext");
+        }
+        const context = await this.services.session.getAutoTitleContext(
+          loaded.manifest.id,
+          { sessionId },
+        );
+        this.services.audit?.({
+          pluginId,
+          api,
+          ok: true,
+          sessionId,
+          ts: Date.now(),
+        });
+        return context;
+      }
+      case "session.setAutoTitle": {
+        this.assertPermission(loaded, "session.autoTitle");
+        const input = normalizePluginSessionInput(args[0] ?? {}, "other");
+        const sessionId = typeof input.sessionId === "string" ? input.sessionId.trim() : "";
+        const expectedTitle = typeof input.expectedTitle === "string" ? input.expectedTitle : "";
+        const title = typeof input.title === "string" ? input.title : "";
+        if (!sessionId || sessionId.length > 128 || !expectedTitle || !title) {
+          throw apiError("INVALID_PARAMS", "sessionId, expectedTitle and title are required");
+        }
+        if ([...expectedTitle].length > 80 || [...title].length > 80) {
+          throw apiError("LIMIT_EXCEEDED", "session title exceeds 80 characters");
+        }
+        if (!this.services.session?.setAutoTitle) {
+          throw apiError("UNSUPPORTED", "host api not available: session.setAutoTitle");
+        }
+        const result = await this.services.session.setAutoTitle(loaded.manifest.id, {
+          sessionId,
+          expectedTitle,
+          title,
+        }) as { updated?: unknown };
+        this.services.audit?.({
+          pluginId,
+          api,
+          ok: true,
+          sessionId,
+          updated: result?.updated === true,
+          ts: Date.now(),
+        });
+        return result;
       }
       case "session.import": {
         this.assertPermission(loaded, "session.import");

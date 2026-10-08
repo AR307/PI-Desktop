@@ -455,6 +455,40 @@ session (D333 / D336). Calling this outside a tool execution fails with
 plugin's own tool is stripped from the tail. A compaction summary replaces
 pre-checkpoint history. Combined content is capped at 200k characters.
 
+### session auto-title (requires `session.autoTitle`)
+
+This capability is separate from `session.read`: it never exposes a transcript
+window or arbitrary message lookup. It exists for plugins that generate a title
+after a completed turn.
+
+```ts
+type PluginAutoTitleContext = {
+  sessionId: string
+  expectedTitle: string
+  userPrompt: string // first user message, at most 1,000 characters
+  assistantReply?: string // first assistant reply, at most 500 characters
+  modelKey?: string // providerId/modelId from the session configuration
+}
+
+pi.session.getAutoTitleContext(input: {
+  sessionId: string
+}): Promise<PluginAutoTitleContext | null>
+
+pi.session.setAutoTitle(input: {
+  sessionId: string
+  expectedTitle: string
+  title: string
+}): Promise<{ updated: boolean }>
+```
+
+Context is returned only for an active session whose title source is still
+`default`. The host does not return attachments, tool calls, later turns, or
+the rest of the transcript. Title updates accept 1–80 Unicode code points and
+use the exact `expectedTitle` as a compare-and-set; a manual rename or another
+update makes the result `{ updated: false }`. Both methods require
+`session.autoTitle`, which is high risk because the first-turn text can be sent
+to a model by a plugin holding `agent.complete`.
+
 ### plugin-owned sessions (P0/P1; requires the matching permission)
 
 Plugins may import and manage only sessions whose origin belongs to that same

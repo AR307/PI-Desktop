@@ -2193,7 +2193,8 @@ export const ptBR = {
       "bus.publish": "Enviar mensagens a outros plugins",
       "bus.subscribe": "Receber mensagens de outros plugins",
       "browser.cdp": "Controlar o navegador do painel de trabalho",
-      "usage.read": "Ler estatísticas de uso"
+      "usage.read": "Ler estatísticas de uso",
+      "session.autoTitle": "Ler o contexto do primeiro turno e atualizar títulos automáticos"
     },
     permissionHelp: {
       "ui.panel": "Permite que o plugin exiba seu próprio painel no aplicativo.",
@@ -2235,6 +2236,7 @@ export const ptBR = {
       "bus.subscribe": "Pode receber mensagens nos tópicos que declarou.",
       "browser.cdp": "Pode navegar pelo navegador do painel de trabalho, ler páginas, executar JavaScript e enviar comandos permitidos do Chrome DevTools. Métodos de cookies e armazenamento são bloqueados.",
       "usage.read": "Lista dados de uso de rodadas concluídas (contagens paginadas de tokens e títulos de sessões). Nenhum conteúdo das mensagens é incluído.",
+      "session.autoTitle": "Pode ler apenas a primeira solicitação e resposta de sessões elegíveis e atualizar o título se ele não tiver sido alterado manualmente. Não pode ler a transcrição completa.",
     }
   },
   extensions: {

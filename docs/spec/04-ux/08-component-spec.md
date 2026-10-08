@@ -442,9 +442,9 @@ visually distinct from list content.
 | Archived row | Hidden by default; visible in the explicit archived view |
 | No retained project | Compact Open project entry; standalone Sessions rows remain available |
 | Empty group | Muted one-line empty state; group create action remains available |
-| Default session title | New task/New chat (localized where applicable) until the first prompt |
-| First prompt title | A normalized 48-character prompt fallback appears immediately; after the first turn, a successful background summary replaces it |
-| Manual session title | User-defined title remains stable across refresh and renderer restart; automatic summary never overwrites it |
+| Default session title | New task/New chat (localized where applicable) until the user or an installed title plugin sets one |
+| Plugin-generated session title | A title plugin may replace the default after the first completed turn when its permission is granted |
+| Manual session title | User-defined title remains stable across refresh and renderer restart; plugin updates use a host compare-and-set and never overwrite it |
 | Footer idle | Transparent 58px band; build and action controls remain visually quiet |
 | Footer hover/focus | Only the targeted control receives the semantic hover/focus treatment |
 | Profile menu open | Profile trigger is active; 280px menu opens 8px above the footer |

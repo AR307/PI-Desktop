@@ -2228,6 +2228,7 @@ sklm: {
       "bus.subscribe": "接收其他外掛的訊息",
       "browser.cdp": "控制工作面板瀏覽器",
       "usage.read": "讀取用量統計",
+      "session.autoTitle": "讀取首輪標題內容並更新自動標題",
     },
     permissionHelp: {
       "ui.panel": "允許外掛在應用內顯示獨立面板。",
@@ -2271,6 +2272,8 @@ sklm: {
         "可導航工作面板瀏覽器、讀取頁面、執行 JavaScript，併發送白名單內的 Chrome DevTools 命令。Cookie 與儲存相關方法會被拒絕。",
       "usage.read":
         "分頁列出已完成回合的用量事實（每回合的 token 計數）。不包含任何訊息內容。",
+      "session.autoTitle":
+        "僅能讀取符合條件工作階段的首則提示和首則回覆，並只在標題未被手動修改時更新；無法讀取完整對話記錄。",
     },
   },
   extensions: {

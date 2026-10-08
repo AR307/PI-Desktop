@@ -42,7 +42,7 @@ ADR 记录那些不应被静默改变的架构选择。中文入口与英文索�
 | [ADR 0183：P0 国际化应用程序壳语言](/adr/0183-p0-international-shell-locales) | 提供德语、西班牙语和法语完整外壳目录及发版日志 |
 | [ADR 0184：输入框工具栏中的上下文用量检查器](/adr/0184-composer-context-usage-inspector) | 把剩余容量检查器移到模型选择器左侧，答案下方只保留模型徽章 |
 | [ADR 0185：韩语应用程序壳](/adr/0185-korean-shell-locale) | 提供完整韩语外壳、系统语言解析和韩语发版日志目录 |
-| [ADR 0186：用宿主一次性补全总结首轮会话标题](/adr/0186-session-auto-title-summary) | 首轮提示先显示回退标题，结束后由主进程按会话模型生成摘要 |
+| [ADR 0186：用宿主一次性补全总结首轮会话标题](/adr/0186-session-auto-title-summary) | 已由 ADR 0323 取代：标题生成由可配置的独立插件拥有 |
 | [ADR 0187：按焦点区分任务和交互式本机通知](/adr/0187-focus-aware-native-task-notifications) | 任务横幅仅在窗口失焦时出现；交互询问可通知聚焦的其他会话。字段名为 `kind` |
 | [ADR 0188：模型配置导入保留不同凭据](/adr/0188-preserve-distinct-import-credentials) | 同一端点的不同 API 密钥作为独立提供商导入，相同凭据仍保持幂等跳过 |
 | [ADR 0189：父级终态错误中止残留委托](/adr/0189-parent-fatal-error-aborts-leftover-delegates) | 父级空闲仍不中止委托；429 等终态错误会中止残留子智能体，让“继续”不再 AGENT_BUSY |
@@ -50,6 +50,7 @@ ADR 记录那些不应被静默改变的架构选择。中文入口与英文索�
 | [ADR 0191：明确标注两个 macOS 发布架构](/adr/0191-label-both-macos-release-architectures) | macOS DMG/ZIP 统一使用 `-arm64` / `-x64` 后缀，更新源 URL 与校验和保持一致 |
 | [ADR 0192：为已配置模型设置别名并允许复制模型 id](/adr/0192-model-alias) | 别名只用于展示；配置页模型 id 可选择复制，请求仍使用真实 id |
 | [ADR 0193：上下文检查器按最后一次请求计算占用](/adr/0193-last-request-context-occupancy) | 占用、本轮合计和缓存读写取最新一条助手消息，不再把工具循环里的每次请求加总 |
+| [ADR 0323：会话标题由独立插件拥有](/adr/0323-plugin-owned-session-titles) | 核心保留默认标题；独立插件可配置提示词、模型与思考级别，并通过主机 CAS 更新标题 |
 | [ADR 0194：可选的子智能体思考覆盖](/adr/0194-subagent-thinking-parameter-omission) | 子智能体可继承、显式关闭或不发送思考参数 |
 | [ADR 0195：视口固定的工作面板开关](/adr/0195-viewport-fixed-work-panel-toggle) | 非设置页右上角提供与 Cmd/Ctrl+J 等价的指针开关 |
 | [ADR 0196：在进行中重试行显示 provider 原因](/adr/0196-retry-cause-in-active-turn-status) | 悬停或聚焦重试状态行时显示错误摘要、错误码和安全的 provider 消息 |
@@ -252,7 +253,7 @@ ADR 记录那些不应被静默改变的架构选择。中文入口与英文索�
 | 0183 | [P0 国际化应用程序壳语言](/adr/0183-p0-international-shell-locales) | 已接受（修订 ADR 0160 / ADR 0182） |
 | 0184 | [输入框工具栏中的上下文用量检查器](/adr/0184-composer-context-usage-inspector) | 已接受（修订 ADR 0047 / ADR 0103） |
 | 0185 | [韩语应用程序壳](/adr/0185-korean-shell-locale) | 已接受（修订 ADR 0160 / ADR 0183） |
-| 0186 | [用宿主一次性补全总结首轮会话标题](/adr/0186-session-auto-title-summary) | 已接受 |
+| 0186 | [用宿主一次性补全总结首轮会话标题](/adr/0186-session-auto-title-summary) | 已被 ADR 0323 取代 |
 | 0187 | [按焦点区分任务和交互式本机通知](/adr/0187-focus-aware-native-task-notifications) | 已接受（修订 ADR 0107 / D117） |
 | 0188 | [模型配置导入保留不同凭据](/adr/0188-preserve-distinct-import-credentials) | 已接受（修订 ADR 0179 / D342） |
 | 0189 | [父级终态错误中止残留委托](/adr/0189-parent-fatal-error-aborts-leftover-delegates) | 已接受（修订 ADR 0166 / D328） |
@@ -260,6 +261,7 @@ ADR 记录那些不应被静默改变的架构选择。中文入口与英文索�
 | 0191 | [明确标注两个 macOS 发布架构](/adr/0191-label-both-macos-release-architectures) | 已接受（修订 ADR 0145 / D353） |
 | 0192 | [为已配置模型设置别名并允许复制模型 id](/adr/0192-model-alias) | 已接受（修订 D266） |
 | 0193 | [上下文检查器按最后一次请求计算占用](/adr/0193-last-request-context-occupancy) | 已接受（修订 ADR 0047 / ADR 0103 / ADR 0184） |
+| 0323 | [会话标题由独立插件拥有](/adr/0323-plugin-owned-session-titles) | 已接受 |
 | 0194 | [可选的子智能体思考覆盖](/adr/0194-subagent-thinking-parameter-omission) | 已接受待实现 |
 | 0195 | [视口固定的工作面板开关](/adr/0195-viewport-fixed-work-panel-toggle) | 已接受（修订 ADR 0068 / ADR 0085） |
 | 0196 | [在进行中重试行显示 provider 原因](/adr/0196-retry-cause-in-active-turn-status) | 已接受（修订 ADR 0175） |

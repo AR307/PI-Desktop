@@ -2242,7 +2242,8 @@ sklm: {
       "bus.publish": "Nachrichten an andere Plugins senden",
       "bus.subscribe": "Nachrichten von anderen Plugins empfangen",
       "browser.cdp": "Den Arbeitspanel-Browser steuern",
-      "usage.read": "Nutzungsstatistiken lesen"
+      "usage.read": "Nutzungsstatistiken lesen",
+      "session.autoTitle": "Kontext des ersten Durchlaufs lesen und automatische Titel ändern"
     },
     "permissionHelp": {
       "ui.panel": "Lässt das Plugin sein eigenes Panel innerhalb der App anzeigen.",
@@ -2284,6 +2285,8 @@ sklm: {
       "browser.cdp": "Kann im Arbeitsbereichsbrowser navigieren, die Seite lesen, JavaScript ausführen und auf der Zulassungsliste stehende Chrome DevTools-Befehle senden. Cookies und Speichermethoden sind blockiert.",
       "usage.read":
         "Listet Nutzungsdaten abgeschlossener Runden auf (Token-Zähler pro Runde, seitenweise). Nachrichteninhalte sind nicht enthalten.",
+      "session.autoTitle":
+        "Kann nur die erste Eingabe und Antwort geeigneter Sitzungen lesen und den Titel ändern, sofern er nicht manuell geändert wurde. Das vollständige Transkript bleibt unzugänglich.",
     }
   },
   "extensions": {

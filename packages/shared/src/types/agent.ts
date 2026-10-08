@@ -101,19 +101,6 @@ export type PromptEnhancementResponse = {
   enhancedDraft: string;
 };
 
-export type SessionSummarizeTitleRequest = {
-  sessionId: string;
-  userPrompt: string;
-  assistantReply?: string;
-  providerId?: string;
-  modelId?: string;
-  thinkingLevel?: ThinkingLevel;
-};
-
-export type SessionSummarizeTitleResponse = {
-  title: string;
-};
-
 export type AgentExecuteApprovedPlanRequest = {
   sessionId: string;
   turnId: string;

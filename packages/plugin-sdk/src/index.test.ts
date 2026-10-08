@@ -638,6 +638,7 @@ describe("PLUGIN_PERMISSIONS", () => {
       "models.list",
       "project.create",
       "session.read",
+      "session.autoTitle",
       "usage.read",
       "fs.read",
       "fs.write",
