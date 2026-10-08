@@ -226,9 +226,11 @@ as binary content.
 - **Addressing.** In a project session, the model addresses scratch by absolute
   path only; the path is advertised in the system prompt, relative tool paths
   resolve against the project workspace, and `Bash` exports
-  `PI_SCRATCH_DIR`. In a temporary session, that same scratch directory is the
-  session workspace root, so relative Read/Glob/Grep/Write/Edit/Bash paths work
-  there without inheriting a project.
+  `PI_SCRATCH_DIR`. POSIX shells, including Git Bash on Windows, receive the
+  forward-slash path advertised in the prompt; PowerShell and cmd keep the
+  native path spelling. In a temporary session, that same scratch directory is
+  the session workspace root, so relative Read/Glob/Grep/Write/Edit/Bash paths
+  work there without inheriting a project.
 - **Containment.** `resolve_tool_path` tries the workspace root first, then
   the scratch root, applying the identical two-layer defense (lexical `..`
   normalization + canonicalized-ancestor symlink check) to each. A symlink
@@ -370,6 +372,8 @@ Host execution baseline:
 - Default cwd = the originating session's `workspaceRoot`
 - Confirmation required by default
 - Set a mandatory 60s timeout; accept a 1s–21,600s override (D329)
+- A timeout returns `TOOL_TIMEOUT` with the effective `timeoutMs` budget and
+  guidance to raise that budget or split the command
 - Stream stdout and stderr separately, then return bounded final output
 - Truncate large output without mixing the two streams
 - No interactive TTY (MVP)
