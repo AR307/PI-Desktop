@@ -336,6 +336,12 @@ to later refresh and inference; the vendor picker does not collect them.
   title metadata and marks the title source `manual`; it does not update
   `updated_at`, transcript content, message count, or historical notification
   title snapshots.
+- `session.deriveTitle({ id, title })` applies the deterministic first-prompt
+  fallback and returns `{ updated: boolean }`. It validates the title with the
+  same 1–80 code-point rule, then writes only when the stored title is still a
+  recognized placeholder whose title source is `default`. The write keeps that
+  source so a title plugin can still replace the derived text, and it does not
+  update `updated_at`, transcript content, or message count.
 - `session.configure` — atomically persists `mode`, `providerId`, `modelId`,
   and optional `thinkingLevel` (`off|minimal|low|medium|high|xhigh|max|omit`)
   for the next pi turn; omitting/null

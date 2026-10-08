@@ -868,6 +868,10 @@ ID、或会话无法解析出默认目标时，得到 `supportsReasoning: false`
 - `session/get`
 - `session/delete`
 - `session/rename`
+- `session/deriveTitle({ id, title }) -> { updated: boolean }` 应用确定性的首条提示兜底标题。
+  只有当存储标题仍是可识别的占位标题且标题来源为 `default` 时，host-core 才接受它；该写入
+  只改元数据，`updated_at`、转录内容与消息数都不变。派生标题会保留该来源，因此已安装的
+  标题插件仍可替换它；`session/rename` 仍是用户拥有的路径。
 - `session/importScan`
 - `session/importRun(candidates) -> { imported, skipped, failed }`
 

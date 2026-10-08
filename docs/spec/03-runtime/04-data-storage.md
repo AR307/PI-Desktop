@@ -576,9 +576,13 @@ CREATE INDEX idx_session_import_origins_plugin
 - `title_source` records `legacy`, `default`, `manual`, or `generated`. Schema
   v23 classifies pre-existing known placeholder titles as `default` and all
   other titles as `manual`; new session creation and manual rename write the
-  corresponding source. The standalone title plugin can read first-turn text
-  only for `default` sessions and can write only with an exact-title
-  compare-and-set, so a manual rename wins a race.
+  corresponding source. `default` means "not chosen by the user and still
+  replaceable": it covers a new session's placeholder and the deterministic
+  first-prompt fallback, which host-core writes only while the stored title is
+  still a recognized placeholder. A placeholder is recognized in every shipped
+  locale, because the renderer writes its localized `chat.untitledTask` label
+  when it creates a session. The standalone title plugin can read
+  exact-title compare-and-set, so a manual rename wins a race.
 - Import binds every non-empty normalized `projectPath` to `project_id`;
   path-less imports remain `NULL`. Re-importing a deterministic session id
   creates neither another session nor another project row.

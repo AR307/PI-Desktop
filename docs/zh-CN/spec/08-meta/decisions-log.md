@@ -47,8 +47,9 @@
 | D649 | 云备份暂不对外开放 | **修订 D642 / D643：设置中的 `sync` 目的地重新带上 `developmentOnly: true`，因此打包构建会省略其导轨行、页面和设置搜索命中并回落到常规，开发构建则保留该目的地。开发者模式与它无关，它仍不带实验性徽章。同步行为、协议、Host schema 与持久化数据均不变；移除该标记即可对打包构建重新开放。见 `04-ux/06-settings-ia.md` 与 E2E-CONFIG-SYNC-webdav-portable-configuration。** | 加密 WebDAV 备份尚未准备好提供给打包构建用户，因此先保持已实现但不出现在界面上，直到正式开放。 |
 | D650 | 插件提供商出现在添加服务中 | **修订 ADR 0259：`contributes.providers[].category` 是可选分类；`description` 可提供一句简介。已加载且拥有现有 `provider.register` 权限的插件，可向 Host 渲染的添加服务选择器贡献带端点、尚未配置的 API Key 提供商。卡片只显示站名，悬停或键盘聚焦显示一句简介；分类可自定义。每个插件不设服务数量上限。空模型列表仅适用于带端点的 API Key 提供商，用户保存密钥后由 Host 发现并缓存模型。密钥仍通过现有提供商密钥路径保存，已配置的行从选择器隐藏。不提供 OAuth / 无认证行；不新增权限、运行时 API、提供商行或凭据迁移。见 ADR 0322、`07-plugins/02-plugin-manifest-schema.md` 与 E2E-PLUGIN-provider-catalog-add-service。** | 用户无法在常规添加服务流程中发现由清单声明的社区提供商；每个插件也需要自己分组站点，却不应拥有密钥界面。 |
 | D651 | 对话区工具调用行不再自动展开 | **修订 turn-process / thinking-display 决策中的叶子自动展开条款与 ADR `turn-process-and-thinking-display`：工具调用、托管搜索与计划卡片行在两种显示模式下都保持载荷收起，只有用户显式操作才会打开，包括最后一个活动组的字面最后一项。整体过程与普通活动组的默认展开、失败与被拒行为、逐项保留的用户选择，以及思考行自身的叶子默认都保持不变。仅渲染层改动；无 Host 协议、持久化、权限或插件契约变更。见 `04-ux/08-component-spec.md` §9.1/§9.2/§9.5/§9.6、`04-ux/09-interaction-patterns.md` §4.2 与 E2E-040。** | 自动展开最新调用的载荷会把阅读注意力从用户等待的回答上拽走，也让同一轮对话因结束方式不同而呈现不同样子；把载荷交给用户打开可保持行行为可预测。 |
-| D652 | 会话标题生成改为独立插件 | **取代 ADR 0186：移除核心的提示词回退标题和内置标题补全；新会话在用户或插件修改前保留本地化默认标题。新增高风险 `session.autoTitle` 能力，用于读取有界首轮上下文并通过比较并设置写入标题，数据由架构 v23 的 `sessions.title_source` 支撑。独立插件可在面板配置提示词模板、模型和思考级别，并使用 `session:turnEnded`、`models.list` 和 `agent.complete`。见 ADR 0323、E2E-021a 及插件 API/权限规格。** | 标题生成是可选产品策略，且支持模型与提示词配置；宿主需要狭窄、持久的边界来保证手动标题在竞态中胜出。 |
+| D652 | 会话标题生成改为独立插件 *（由 D654 修订）* | **取代 ADR 0186：移除内置标题补全，只保留 D654 恢复的确定性本地兜底标题；否则新会话在用户或插件修改前保留本地化默认标题。新增高风险 `session.autoTitle` 能力，用于读取有界首轮上下文并通过比较并设置写入标题，数据由架构 v23 的 `sessions.title_source` 支撑。独立插件可在面板配置提示词模板、模型和思考级别，并使用 `session:turnEnded`、`models.list` 和 `agent.complete`。见 ADR 0323、E2E-021a 及插件 API/权限规格。** | 标题生成是可选产品策略，且支持模型与提示词配置；宿主需要狭窄、持久的边界来保证手动标题在竞态中胜出。 |
 | D653 | 输入框提示词增强改为可选插件 | **取代 ADR 0121：移除宿主内置提示词增强界面、设置、直接补全 IPC 与 MCP 操作。新增受 `composer.transform` 权限约束的输入框操作贡献项和插件回调；仅传当前草稿与可选模型标识，并提供输入/输出上限、审计、文件引用恢复、单步撤销及草稿/会话过期保护。`vastsa/pi-prompt-enhancement` 保持独立仓库，必须由用户主动安装；宿主不随附或默认启用。插件首次加载时，将有效旧偏好迁移到尚未设置的插件设置并写入私有标记；旧宿主值继续保留以支持回退。见 ADR 0324、E2E-218 / E2E-259 与插件 API/权限规格。** | 提示词增强是可选行为，应由单独安装的插件拥有；宿主提供狭窄、安全的转换契约及一次性旧设置迁移路径。 |
+| D654 | 核心保留确定性的首条提示标题 | **修订 D652 / ADR 0323：当会话存储标题仍是可识别占位标题时，用首条提示派生一个折叠空白、截断为 48 字符的兜底标题，通过主机 RPC 与 IPC `session/deriveTitle` 写入。host-core 只在标题仍是占位标题且来源为 `default` 时接受，派生文本也保留该来源，因此已安装的标题插件仍可替换它，只有手动重命名会退出自动替换。不调用模型、不新增权限、不改架构或协议版本；`updated_at`、转录内容与消息数都不变。见 `03-runtime/01-ipc-protocol.md`、`03-runtime/02-agent-runtime.md`、`03-runtime/06-host-rpc-protocol.md`、`03-runtime/04-data-storage.md`、`04-ux/08-component-spec.md` 与 E2E-021a。** | 移除全部自动写入会让未触碰的会话一直显示占位标题，直到插件运行，从而让离线可读性依赖安装可选软件。 |
 
 ## B. 辅助实现默认值
 
@@ -3511,7 +3512,7 @@ D193 和 D194。
 
 ## 2026-10-08 —— 会话标题生成改为独立插件（D652）
 
-- 核心不再根据首条提示生成标题，也不再运行标题补全。新会话会保留本地化默认标题，直到用户或插件修改。
+- 核心保留一条自动标题路径：确定性首条提示兜底标题（D654）。它不运行标题补全；未安装插件的会话保留派生兜底标题，而不是占位标题。
 - 获得 `session.autoTitle` 权限的插件只能读取默认标题会话的有界首轮提示与回复，并且只能通过主机 CAS 更新标题。架构 v23 持久记录 `default`、`manual`、`generated` 来源；手动重命名会让插件竞态写入失败。
 - 独立 Session Titles 插件从 `session:turnEnded` 触发，可配置提示词模板、模型和思考级别；模型调用使用 `agent.complete`。
 - 见 ADR 0323、`03-runtime/02-agent-runtime.md`、`03-runtime/04-data-storage.md`、`07-plugins/03-plugin-api.md`、`07-plugins/13-plugin-permissions-matrix.md` 和 E2E-021a。
@@ -5340,3 +5341,19 @@ Markdown 源码，不是 `text/html` 负载；对禁用行内 HTML 的外部编�
 - `vastsa/pi-prompt-enhancement` 继续位于独立仓库，必须由用户安装，宿主不默认随附。首次加载时，有效的旧设置会迁移到插件私有设置；旧宿主值保留供回退使用。
 - 转换调用只接收草稿文本和可选模型标识；宿主检查权限与声明、限制输入输出、审计调用，并保护文件引用和过期草稿。
 - 见 ADR 0324、E2E-218 / E2E-259 与插件 API/权限规格。
+
+## 2026-10-08 —— 核心保留确定性的首条提示标题（D654）
+
+- `session/deriveTitle` 恢复新会话过去从首条提示获得即时标签的行为：渲染器折叠空白并把
+  请求截断为 48 字符，host-core 只在存储标题仍是可识别占位标题且来源为 `default` 时写入。
+- 写入会保留该来源，因此派生标题仍可替换：`session.autoTitle` 插件仍可通过其比较并设置
+  升级它，而手动重命名、更早的插件标题以及第二条提示都不会改写它。不调用模型，也不新增
+  权限、架构或协议版本。
+- 占位标题识别现在覆盖所有已发布语言：渲染器创建会话时会写入本地化的 `chat.untitledTask`
+  文案，此前 host-core（以及 v23 迁移）会把韩语、繁体中文、巴西葡语和土耳其语的占位标题判为
+  `manual`，导致这些语言下兜底与插件都失效。识别列表与渲染器目录保持一致。
+- 远程会话在各自的 Host 上派生：remote-host RACP profile 新增 `session/deriveTitle`
+  （controller），因此配对桌面不再对 `remote` 会话关闭兜底；原生 Pi 会话保留其自身标题。
+- 由 `apps/desktop/test/session-title-prompt-fallback.test.mjs`、
+  `apps/desktop/test/queue-pending-actions.test.mjs`、host-core 的 `derive_session_title`
+  单测与 E2E-021a 覆盖。见 ADR 0323。

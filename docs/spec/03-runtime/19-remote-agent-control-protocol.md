@@ -586,6 +586,7 @@ session root as working directory and stream through `terminal.output`.
 | `session/configure` | controller | Change mode, provider/model, thinking level, or permission mode while idle; same rules as `pi-desktop/session/configure` |
 | `session/fork` | controller | Fork an idle session, optionally through a message id, into a new idle session |
 | `session/rename` | controller | Rename a session |
+| `session/deriveTitle` | controller | Apply the Host's deterministic first-prompt title to a still-untitled session; returns `{ updated }` and never overrides a rename |
 | `session/delete` | owner | Delete a session and its transcript on the Host |
 | `session/compact` | controller | Run a manual context checkpoint on the active session |
 | `workspace/list` | viewer | List entries under the session root, bounded, honoring the Host ignore rules |
