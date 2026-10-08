@@ -49,8 +49,7 @@ test("model, skills, and MCP imports are available from their own settings pages
   assert.match(mcpImport, /level,\s*\.\.\./);
   assert.match(mcpImport, /description=\{t\("settings\.importAgentMcpDesc"\)\}/);
   assert.match(workbench, /className="import-idle-description"/);
-  assert.match(workbench, /className="import-option-hint"/);
-  assert.doesNotMatch(workbench, /<HelpIcon/);
+  assert.match(workbench, /<HelpIcon label=\{hint\} \/>/);
 
   for (const [source, panelId] of [
     [modelPage, "model-config-import-panel"],

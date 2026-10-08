@@ -737,8 +737,8 @@ system while preserving their different data ownership:
   Models, Skills, and MCP respectively. Each page keeps an explicit scan and
   selection panel; opening or closing the panel never starts a scan.
 - When an import panel opens, show its scan-scope explanation directly above
-  the Scan action. Skill copy/link mode guidance stays visible beside the
-  selector; these explanations do not require a help icon.
+  the Scan action; it does not require a help icon. Result-specific guidance
+  remains attached to its existing control.
 - Skills and MCP imports use the destination selected by the page's current
   Global / Project filter. Project scans and writes carry the selected project
   path, and the scan panel resets when that scope changes.

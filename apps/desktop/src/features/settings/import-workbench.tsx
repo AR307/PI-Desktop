@@ -1,6 +1,6 @@
 import { useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
-import { Button, Checkbox, cx } from "../../components/ui";
+import { Button, Checkbox, HelpIcon, cx } from "../../components/ui";
 import { IconChevronLeft, IconDownload } from "../../components/icons";
 import { SettingsMenuSelect } from "../../components/settings/SettingsMenuSelect";
 
@@ -90,15 +90,15 @@ export function ImportOption({
   label: string;
   value: string;
   options: { id: string; label: string }[];
-  /** Explains the choice directly below its label. */
+  /** Explains the choice from the label's help icon. */
   hint?: string;
   onChange: (id: string) => void;
 }) {
   return (
     <label className="import-option">
-      <span className="import-option-copy">
-        <span className="import-option-label">{label}</span>
-        {hint ? <span className="import-option-hint">{hint}</span> : null}
+      <span className="import-option-label">
+        {label}
+        {hint ? <HelpIcon label={hint} /> : null}
       </span>
       <SettingsMenuSelect
         className="import-option-select"

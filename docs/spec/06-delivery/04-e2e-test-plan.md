@@ -13228,8 +13228,7 @@ are withdrawn with ADR 0165.
   1. Open Settings → Skills, select Project and a project, then expand Scan
      other tools. Confirm its scan explanation is visible without a help icon
      and that opening the panel does not scan. Scan, select a skill, choose its
-     copy or link mode, confirm the mode explanation is visible beside the
-     selector without a help icon, and import it.
+     copy or link mode, and import it.
   2. Confirm the new skill belongs to the selected project. Change the project
      and confirm the prior candidates and selection are cleared.
   3. Open Settings → MCP, select Project and the same project, expand Scan
@@ -13243,8 +13242,8 @@ are withdrawn with ADR 0165.
 - **Expected**: Skills and MCP scans start only after an explicit Scan action.
   Project scans and writes carry the selected project path; scope changes clear
   stale candidates. MCP disabled state is preserved and URL credentials never
-  render in candidate metadata. The expanded scan descriptions and skill
-  copy/link guidance are readable inline without a question-mark control.
+  render in candidate metadata. Scan explanations render inline; the skill
+  mode explanation remains on its existing help control.
 - **Specs linked**: `04-ux/06-settings-ia.md`,
   `04-ux/08-component-spec.md` §18.3 / §18.6 / §18.7, ADR 0319 / D645
 - **Acceptance**: F (persistence), Security, Quality

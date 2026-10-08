@@ -109,22 +109,21 @@ test("one settings row renderer owns the layout", () => {
   );
 });
 
-test("import explanations are visible in the expanded workbench", () => {
-  // Scan scope is readable before starting a scan; skill mode copy stays beside
-  // the choice it explains without adding another help-icon interaction.
+test("empty import states show scan scope inline while result options keep help", () => {
+  // Scan scope is readable before starting a scan. Result-specific mode
+  // guidance remains available from its existing help control.
   assert.doesNotMatch(importWorkbench, /className="import-hint"/);
   assert.match(importWorkbench, /hint\?: string;/);
   assert.match(skillImport, /hint=\{t\("settings\.importAgentScanModeHint"\)\}/);
   assert.doesNotMatch(modelImport, /codexCap|importCodexCapped/);
+  const idleStart = importWorkbench.indexOf("export function ImportIdle(");
+  const idleEnd = importWorkbench.indexOf("export function ImportResults(", idleStart);
+  const importIdle = importWorkbench.slice(idleStart, idleEnd);
   assert.match(
-    importWorkbench,
+    importIdle,
     /<p className="import-idle-description">\{copy\}<\/p>/,
   );
-  assert.match(
-    importWorkbench,
-    /<span className="import-option-hint">\{hint\}<\/span>/,
-  );
-  assert.doesNotMatch(importWorkbench, /<HelpIcon/);
+  assert.doesNotMatch(importIdle, /<HelpIcon/);
+  assert.match(importWorkbench, /\{hint \? <HelpIcon label=\{hint\} \/> : null\}/);
   assert.match(cssRule(".import-idle-description"), /color:\s*var\(--ds-text-muted\)/);
-  assert.match(cssRule(".import-option-hint"), /overflow-wrap:\s*anywhere/);
 });
