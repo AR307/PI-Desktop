@@ -1612,14 +1612,14 @@
 .settings-font-trigger {
   display: inline-flex;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
   width: max-content;
   max-width: 100%;
   min-width: 0;
-  /* One closed-trigger height for every picker: the metric a text input in the
-     same Settings row resolves to, so the two never disagree (see the token). */
-  height: var(--ds-field-height);
-  padding: 0 10px 0 12px;
+  /* Compact row pickers have less vertical and horizontal chrome; stretched
+     form selects below keep the input-aligned field metric. */
+  height: var(--ds-settings-picker-height);
+  padding: 0 10px;
   border-radius: var(--radius-full);
   background: var(--ds-raised);
   box-shadow: var(--ds-raised-shadow);
