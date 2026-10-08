@@ -1411,7 +1411,7 @@ task-candidate E2E 从请求工作树运行，但使用主工作区已经准备�
 - **链接规格**：`07-plugins/10-plugin-devex.md` §5–§6、`07-plugins/06-plugin-packaging.md`、ADR 0039
 - **承兑**：G（本地包装往返）
 - **里程碑**：后 MVP
-- **状态**：部分自动化（`packages/plugin-devkit` vitest：脚手架→检查→按模板打包，存储方法标头，每个检查规则）；安装步骤已记录
+- **状态**：部分自动化（`packages/plugin-devkit` vitest：脚手架→检查→按模板打包，存储方法标头，每个检查规则，以及把 `permission.high-risk` 列表与权限矩阵 high 行对齐的一致性测试）；安装步骤已记录
 
 #### E2E-023：全局搜索中的插件命令并执行
 
@@ -5677,7 +5677,7 @@ eleven-tool-round desktop paths are verified by
 | 基线后本地自动化 | E2E-220 |
 | 基线后本地自动化（MCP `pi_session_get` 超大 compaction） | E2E-MCP-session-get-projects-large-compaction |
 | MVP 后远程控制 | E2E-221、E2E-222、E2E-223、E2E-224、E2E-225、E2E-226、E2E-227、E2E-228、E2E-229、E2E-230、E2E-231、E2E-232 |
-| 受信任扩展（R7 v1） | E2E-DIALOG-long-text-boundaries、E2E-241、E2E-242、E2E-HOOKS-cancel-and-dispose、E2E-243、E2E-244、E2E-245、E2E-PLUGIN-imported-pi-package-skills、E2E-PLUGIN-import-extension-installs-dependencies、E2E-PLUGIN-import-extension-reports-missing-dependency、E2E-PLUGIN-declared-provider-appears-in-the-native-provider-list |
+| 受信任扩展（R7 v1） | E2E-DIALOG-long-text-boundaries、E2E-241、E2E-242、E2E-HOOKS-cancel-and-dispose、E2E-243、E2E-TRUSTED-EXTENSION-temporary-session-cwd-is-scratch、E2E-244、E2E-245、E2E-PLUGIN-imported-pi-package-skills、E2E-PLUGIN-import-extension-installs-dependencies、E2E-PLUGIN-import-extension-reports-missing-dependency、E2E-PLUGIN-declared-provider-appears-in-the-native-provider-list |
 | 受信任扩展（R7 v1 npm 恢复） | E2E-PLUGIN-import-extension-recovers-missing-npm |
 | Post-MVP 回归覆盖（插件工具调度） | E2E-PLUGIN-slow-tool-is-not-cut-off-by-host-dispatch |
 | M6+（删除项目） | E2E-PROJECT-delete-removes-project-and-owned-sessions |
@@ -7828,6 +7828,21 @@ runner 会在运行时的隔离临时目录中生成六个插件形态 fixture�
 - **验收**：A（应用控制）、质量
 - **里程碑**：MVP 后（R7 v1）
 - **状态**：部分自动化（`pnpm test:e2e:trusted-extensions`）；全局/Composer 命令发现、提示 broker 往返、中止、会话重命名、exec 和 Host 队列已覆盖；无会话与远程控制仍需额外验证
+
+#### E2E-TRUSTED-EXTENSION-temporary-session-cwd-is-scratch：临时会话里的扩展在本会话 scratch 中工作
+
+- **前置条件**：一个已启用的夹具扩展，注册命令 `where`，报告 `ctx.cwd`、
+  `ctx.sessionManager.getCwd()`，以及不带 `cwd` 选项用 `pi.exec` 启动的子进程的
+  工作目录。
+- **步骤**：1）开一个临时会话（无项目），在任何工具调用之前运行 `/where`。
+  2）在项目会话中运行 `/where`。
+- **预期**：临时会话中三个值都是该会话的 `scratch/<sessionId>` 目录，该目录存在且
+  子进程在其中启动；没有一个是 sidecar 的进程目录。项目会话中三个值都是项目根，
+  且不会为扩展创建 scratch 目录。
+- **链接规格**：`07-plugins/16-trusted-extensions.md` §7；D114
+- **验收**：A（应用控制）、质量
+- **里程碑**：MVP 后（R7 v1）
+- **状态**：单元测试覆盖（`packages/agent-runtime/src/extensions/runtime-lifecycle.test.ts`）；Electron 流程已记录
 
 #### E2E-244：不支持的 API、加载错误与处理器超时降级为诊断
 

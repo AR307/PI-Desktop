@@ -486,6 +486,20 @@ occurrence, because repeating one of those means the model is guessing.
 Counting a grace is per code, not per call, so a stale tag followed by unseen
 lines is two distinct honest failures while the same code twice is not.
 
+The runtime identifies an existing target by its filesystem canonical path,
+resolved against the session project (or scratch root for a temporary session)
+before the mutation runs. Relative and
+absolute spellings, lexical `.`/`..`, directory links, and filesystem-supported
+case aliases therefore share the failure count, per-code grace, and successful
+mutation reset. Case-distinct files retain separate budgets. If canonicalization
+is unavailable (for example, a missing target), the normalized absolute path is
+the bookkeeping fallback. This identity never changes the submitted tool path
+or replaces Host permission and workspace checks; delegate budgets remain
+isolated from the parent and from other delegate runs.
+If a target later becomes canonicalizable (for example, after creation under a
+symlinked root), its identity may change from the lexical fallback; counts are
+not guaranteed to carry across that transition.
+
 Counts and per-code graces belong to the executing parent turn or delegate
 run. Parallel delegates working on the same path do not share failures or
 successful-write resets. A new parent prompt resets only the parent's recovery
