@@ -226,6 +226,16 @@ export async function check(dirInput: string): Promise<CheckResult> {
     errors.push({ code: "panel.missing", message: `ui.panel "${panel}" does not exist` });
   }
 
+  // validateManifest has already refused an absolute or ".." spelling; the
+  // installer also refuses an entry that is not a file in the package.
+  const renderer = manifest.renderer;
+  if (renderer && !(await fileExists(join(dir, renderer)))) {
+    errors.push({
+      code: "renderer.missing",
+      message: `manifest.renderer "${renderer}" does not exist`,
+    });
+  }
+
   for (const view of manifest.contributes?.views ?? []) {
     const entry = view?.entry;
     if (typeof entry !== "string" || !entry.trim()) continue;

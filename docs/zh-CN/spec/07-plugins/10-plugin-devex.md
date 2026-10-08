@@ -106,7 +106,7 @@ pnpm pi-plugin publish .
 
 `check` 重现安装程序强制执行的每条规则，因此 `check` 传递意味着
 安装会通过。它报告错误 - 丢失或无法解析的 `manifest.json`，
-缺少 `main` / `ui.panel` / 技能文件，转义插件的技能路径
+缺少 `main` / `ui.panel` / `manifest.renderer` / 技能文件，转义插件的技能路径
 目录，未知权限，符号链接，超过 2000 个文件，超过
 50 MB — 以及警告，不会阻止：高风险权限（[13-plugin-permissions-matrix.md](13-plugin-permissions-matrix.md)
 中标为 high 的全部权限，devkit 测试保证两份列表一致）、权限

@@ -112,7 +112,7 @@ See [15-plugin-center.md](15-plugin-center.md).
 
 `check` reproduces every rule the installer enforces, so `check` passing implies
 install will pass. It reports errors — a missing or unparseable `manifest.json`,
-missing `main` / `ui.panel` / skill files, a skill path escaping the plugin
+missing `main` / `ui.panel` / `manifest.renderer` / skill files, a skill path escaping the plugin
 directory, an unknown permission, a symlink, more than 2000 files, more than
 50 MB — and warnings, which do not block: high-risk permissions (every
 permission [13-plugin-permissions-matrix.md](13-plugin-permissions-matrix.md)
