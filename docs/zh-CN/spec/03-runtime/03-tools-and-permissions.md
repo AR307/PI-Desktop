@@ -178,7 +178,8 @@ Electron 主要低于 `<data_dir>/scratch/<sessionId>/pasted/` 之前的
 
 - **寻址。** 该模型仅通过绝对路径寻址；路径
   在系统提示中公布。相对刀具路径始终解析
-  反对工作区。 `Bash` 还导出 `PI_SCRATCH_DIR`。
+  反对工作区。 `Bash` 还导出 `PI_SCRATCH_DIR`。POSIX shell（包括 Windows 上的
+  Git Bash）收到提示中展示的正斜杠路径；PowerShell 和 cmd 保留原生路径格式。
 - **遏制。** `resolve_tool_path` 首先尝试工作空间根目录，然后
   暂存根，应用相同的两层防御（词汇 `..`
   规范化+规范化祖先符号链接检查）到每个。符号链接
@@ -309,6 +310,7 @@ type ReviewChange = {
 - 默认 cwd = 原始会话的 `workspaceRoot`
 - 默认需要确认
 - 设置强制 60 秒超时；接受 1 秒至 21,600 秒覆盖（D329）
+- 超时返回 `TOOL_TIMEOUT`，错误消息包含实际 `timeoutMs` 预算，并建议延长预算或拆分命令
 - 分别流式传输 stdout 和 stderr，然后返回有界的最终输出
 - 截断大输出而不混合两个流
 - 没有交互式 TTY (MVP)

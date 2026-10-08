@@ -1113,12 +1113,12 @@ task-candidate E2E 从请求工作树运行，但使用主工作区已经准备�
 #### E2E-019a：暂存目录写入不在工作区中 (D114)
 
 - **先决条件**：Agent 模式；项目开放；会议开始。
-- **步骤**： 1) 要求代理生成 temporary/intermediate 文件（例如一次性脚本）。 2）观察其书写位置以及是否出现权限卡。 3) 检查`git status` 和工作面板状态。 4) 删除会话并检查`<data_dir>/scratch/`。
-- **预期**：文件在没有权限卡的情况下登陆 `<data_dir>/scratch/<sessionId>/` 下； `git status` 项目保持干净；没有文件或查看工件选项卡打开用于临时写入；删除会话会删除临时目录。
+- **步骤**：1) 要求代理生成临时文件（例如一次性脚本）。2) 观察写入位置及是否出现权限卡。3) 检查 `git status` 和工作面板。4) 在 Windows 上选择 Git Bash，打印 `$PI_SCRATCH_DIR` 并通过该路径写入文件。5) 删除会话并检查 `<data_dir>/scratch/`。
+- **预期**：文件在没有权限卡的情况下写入 `<data_dir>/scratch/<sessionId>/`；项目 `git status` 保持干净；临时写入不会打开文件或 Review 工件标签；Git Bash 收到与提示一致、可直接使用的正斜杠路径，而 PowerShell 和 cmd 保留原生路径格式；删除会话会删除临时目录。
 - **链接规格**：`03-runtime/03-tools-and-permissions.md §4b`、`03-runtime/04-data-storage.md`
 - **接受**：E（与工作区隔离的临时文件）
 - **里程碑**：M5
-- **状态**：部分自动化（host-core 单元测试：双根解析、暂存 write/read、PI_SCRATCH_DIR、扫描）
+- **状态**：部分自动化（host-core 单元测试：双根解析、暂存读写、Windows Git Bash `PI_SCRATCH_DIR` 路径格式、清理）
 
 #### E2E-019b：划痕遏制与工作空间防御相匹配 (D114)
 
@@ -4391,9 +4391,9 @@ eleven-tool-round desktop paths are verified by
 - **步骤**：1) 在没有超时覆盖的情况下运行。 2) 观察60秒
   截止日期。 3) 以范围内超驰运行。 4) 提交零、负数和
   超过 21,600 秒的覆盖。
-- **预期**：缺少超时正好使用 60 秒并返回
-  进程树关闭后的 `TOOL_TIMEOUT`。范围内的值起作用
-  1–21,600 秒；超出范围的值将无法验证并且永远不会生成。
+- **预期**：缺少超时正好使用 60 秒，并在进程树关闭后返回
+  `TOOL_TIMEOUT`；错误会注明实际 `timeoutMs` 预算，并建议延长预算或拆分命令。
+  范围内的值在 1–21,600 秒内生效；超出范围的值校验失败且不会启动进程。
 - **链接规格**：`03-runtime/03-tools-and-permissions.md`，
   `03-runtime/06-host-rpc-protocol.md`、`03-runtime/08-error-codes.md`、
   `03-runtime/16-tool-result-limits.md`、`05-security/01-security.md`、ADR 0054、
