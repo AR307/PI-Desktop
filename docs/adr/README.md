@@ -364,4 +364,4 @@ Each ADR includes:
 | 0320 | [Host-owned OAuth lifecycle for plugin providers](0320-plugin-oauth-provider-callbacks.md) | Accepted for implementation (D647; amends ADR 0259) |
 | 0321 | [Pin an acceptable address for mixed direct DNS answers](0321-skill-market-direct-dns-pinning.md) | Accepted (D648; amends ADR 0272) |
 | 0322 | [Plugin providers appear in Add Service](0322-plugin-providers-in-add-service.md) | Accepted for implementation (D650; amends ADR 0259) |
-| 0323 | [Make Session Title Generation a Standalone Plugin](0323-plugin-owned-session-titles.md) | Accepted (D651; supersedes ADR 0186) |
+| 0323 | [Make Session Title Generation a Standalone Plugin](0323-plugin-owned-session-titles.md) | Accepted (D652; supersedes ADR 0186) |
