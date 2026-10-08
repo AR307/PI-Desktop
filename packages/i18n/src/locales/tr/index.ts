@@ -1534,6 +1534,7 @@ sklm: {
     modelsFetchFailed: "Modeller yüklenemedi.",
     modelsFetchFailedStatus: "İstek başarısız ({{status}}).",
     modelsFetchNotFound: "Bu adresin model listesi yok.",
+    providerUnavailable: "Seçilen sağlayıcı artık kullanılamıyor.",
     modelsFetchInvalidResponse: "Servis kullanılabilir bir model listesi döndürmedi.",
     modelsEmptyHint: "Modelleri yüklemek için bir temel URL girin.",
     noModelMatches: "Eşleşen model yok.",

@@ -292,6 +292,7 @@ export const IPC = {
     pluginLauncherToggle: "pi-desktop/pluginLauncher/toggle",
     pluginLauncherDismiss: "pi-desktop/pluginLauncher/dismiss",
     pluginThemes: "pi-desktop/plugin/themes",
+    pluginProviderCatalog: "pi-desktop/plugin/providerCatalog",
     pluginScenicThemesDestinations: "pi-desktop/plugin/scenicThemes/destinations",
     pluginScenicThemesSetBlur: "pi-desktop/plugin/scenicThemes/setBlur",
     pluginServices: "pi-desktop/plugin/services",

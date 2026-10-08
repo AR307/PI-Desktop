@@ -1,4 +1,5 @@
 use super::*;
+mod provider_catalog;
 
 pub(crate) fn validate_contributions(root: &Path, manifest: &PluginManifest) -> Result<()> {
     let Some(contributes) = manifest.contributes.as_ref() else {
@@ -217,11 +218,6 @@ pub(crate) fn validate_contributions(root: &Path, manifest: &PluginManifest) -> 
 
     if let Some(providers) = map.get("providers") {
         let entries = array_of(providers, "contributes.providers")?;
-        if entries.len() > MAX_PLUGIN_PROVIDERS {
-            bail!(
-                "PLUGIN_INVALID: contributes.providers allows at most {MAX_PLUGIN_PROVIDERS} entries"
-            );
-        }
         if !entries.is_empty() {
             require_permission(manifest, "provider.register", "contributes.providers")?;
         }
@@ -249,6 +245,7 @@ pub(crate) fn validate_contributions(root: &Path, manifest: &PluginManifest) -> 
             {
                 bail!("PLUGIN_INVALID: provider {id} requires a name");
             }
+            provider_catalog::validate_provider_catalog_fields(id, obj)?;
             if let Some(style) = obj.get("apiStyle") {
                 let style = style.as_str().ok_or_else(|| {
                     anyhow!("PLUGIN_INVALID: provider {id} apiStyle must be a string")
@@ -276,10 +273,17 @@ pub(crate) fn validate_contributions(root: &Path, manifest: &PluginManifest) -> 
                 Some(value) => array_of(value, "contributes.providers.models")?,
                 None => bail!("PLUGIN_INVALID: provider {id} requires models"),
             };
-            if models.is_empty() || models.len() > MAX_PLUGIN_PROVIDER_MODELS {
+            if models.len() > MAX_PLUGIN_PROVIDER_MODELS {
                 bail!(
-                    "PLUGIN_INVALID: provider {id} declares 1 to {MAX_PLUGIN_PROVIDER_MODELS} models"
+                    "PLUGIN_INVALID: provider {id} declares more than {MAX_PLUGIN_PROVIDER_MODELS} models"
                 );
+            }
+            let has_base_url = obj
+                .get("baseUrl")
+                .and_then(Value::as_str)
+                .is_some_and(|value| !value.trim().is_empty());
+            if models.is_empty() && (auth_kind != "api_key" || !has_base_url) {
+                bail!("PLUGIN_INVALID: provider {id} may omit models only for an API-key provider with a baseUrl");
             }
             let mut seen_models: Vec<&str> = Vec::new();
             for model in models {
