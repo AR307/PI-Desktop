@@ -3215,21 +3215,30 @@ identify the platform validation still needed.
 - **Acceptance**: G (remote marketplace source)
 - **Status**: Documented / host-core unit covered
 
-#### E2E-024Z: Windows localized curl diagnostics stay readable
+#### E2E-024Z: Windows curl handles offline revocation checks and localized errors
 
-- **Preconditions**: Windows x64 host. The official catalog request is forced
-  to fail with a localized, non-UTF-8 curl/Schannel diagnostic (a deterministic
-  fake curl in the test PATH may emit GBK stderr and exit 35).
-- **Steps**: 1) Select Extensions → Marketplace with GitHub (official) as the
-  source. 2) Refresh the marketplace. 3) Inspect the error toast. 4) Switch to
-  the CNB mirror and refresh again.
-- **Expected**: The failed request remains a `PLUGIN_NETWORK` failure and
-  retains the readable localized diagnostic without Unicode replacement
-  characters; switching to the mirror can refresh the catalog normally.
+- **Preconditions**: Windows x64 host with curl built against Schannel. For the
+  offline-revocation case, use a proxy route that can reach the HTTPS fixture
+  while its certificate revocation distribution point is unavailable. For the
+  diagnostic case, force the catalog request to fail with localized, non-UTF-8
+  curl output (a deterministic fake curl may emit GBK stderr and exit 35).
+- **Steps**: 1) Select Extensions → Marketplace with Official as the source.
+  2) Refresh the catalog and install a package through the system proxy while
+  the revocation distribution point is offline. 3) Confirm the installed curl
+  advertises `--ssl-revoke-best-effort` and inspect the verified package. 4)
+  Force a localized curl/Schannel failure, refresh again, and inspect the error
+  toast. 5) Switch to the CNB backup and refresh.
+- **Expected**: When the installed Schannel curl supports the option, catalog
+  and package requests tolerate an unavailable revocation distribution point
+  without disabling certificate verification; package size and SHA-256 checks
+  still gate installation. A real network/TLS failure remains
+  `PLUGIN_NETWORK`, with localized diagnostics readable and no Unicode
+  replacement characters; switching to a reachable backup can refresh the
+  catalog normally.
 - **Specs linked**: `07-plugins/07-plugin-marketplace.md`,
-  `03-runtime/07-process-model.md`
+  `03-runtime/07-process-model.md`, ADR 0177
 - **Acceptance**: G (remote marketplace source)
-- **Status**: Documented / host-core unit covered; Windows rendered validation pending
+- **Status**: Documented; host-core unit covered; Windows proxy/TLS validation pending
 
 #### E2E-024B: Marketplace install with permission review
 

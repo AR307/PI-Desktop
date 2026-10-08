@@ -222,6 +222,7 @@ fn post_json(url: &str, body: &str) -> Result<(u16, Vec<u8>, String)> {
         "pi-desktop-host-core".into(),
     ];
     args.extend(crate::network_proxy::curl_proxy_args());
+    args.extend(crate::network_proxy::curl_tls_args());
     if url.starts_with("https://") {
         args.push("--proto".into());
         args.push("=https".into());
