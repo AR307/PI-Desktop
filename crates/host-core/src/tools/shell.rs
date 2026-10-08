@@ -709,6 +709,24 @@ mod tests {
     }
 
     #[test]
+    fn scratch_dir_uses_posix_separators_only_for_posix_shells() {
+        let scratch = PathBuf::from(r"C:\Users\Lan\AppData\Local\PI Desktop\scratch");
+
+        assert_eq!(
+            format_scratch_dir_for_shell(Some("posix"), &scratch).to_string_lossy(),
+            "C:/Users/Lan/AppData/Local/PI Desktop/scratch"
+        );
+        assert_eq!(
+            format_scratch_dir_for_shell(Some("powershell"), &scratch).to_string_lossy(),
+            scratch.to_string_lossy()
+        );
+        assert_eq!(
+            format_scratch_dir_for_shell(Some("cmd"), &scratch).to_string_lossy(),
+            scratch.to_string_lossy()
+        );
+    }
+
+    #[test]
     fn user_login_path_probes_a_real_path() {
         // On any machine with a login shell the probe yields a non-empty
         // PATH of absolute directories; when no shell can be probed the
