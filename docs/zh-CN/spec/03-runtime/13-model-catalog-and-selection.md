@@ -280,6 +280,8 @@ type ModelCatalogItem = {
 
 除非不可能执行，否则警告是非阻塞的。
 
+Composer context-window labels resolve the exact binding with `effectiveContextWindow`: explicit user limits override discovery, catalog-owned limits follow discovery, and legacy bindings preserve their saved limits. A binding with a valid saved limit still displays it when discovery is unavailable. This display resolution does not modify the discovered catalog or runtime safety budgets.
+
 ### 11.1 Reasoning capability resolution
 
 1. Resolve published Pi thinking metadata for the exact physical model.
