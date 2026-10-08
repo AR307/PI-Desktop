@@ -646,8 +646,35 @@ pi.net.fetch(input: {
  headers?: Record<string, string>
  body?: string
  timeoutMs?: number
+ redirect?: "follow" | "error" | "manual"
 }): Promise<{ status: number; headers: Record<string, string>; bodyText: string }>
 ```
+
+`redirect` is optional: omitted or `follow` preserves the existing policy (up to
+five followed 3xx responses with Location, relative to the current URL, each
+checked against the granted egress policy). Existing method/header/body handling
+is unchanged; this is not a promise of browser Fetch redirect rewriting.
+`manual` returns the first response's status, headers (including Location) and
+body without visiting its target. `error` rejects **any 300–399 response** with
+`REDIRECT_DISALLOWED`, even without Location; it never visits the target. Other
+statuses, including 429, remain normal responses. In follow mode a 3xx without
+Location is returned unchanged; a loop exceeds the five-hop cap with
+`UNAVAILABLE`. One timeout covers the whole chain and response body (`TIMEOUT`).
+Invalid redirect values fail with `INVALID_ARGUMENT` before network I/O.
+
+The host owns redirect handling for both the default and injected single-hop
+transport. Every followed hop still passes the existing permission/egress
+checks; these modes grant no additional network access. Policy refusals are
+audited without response bodies or headers.
+
+Before using the option on a potentially older host, query
+`pi.net.getCapabilities(): Promise<{ fetchRedirectModes: string[] }>` and require
+the desired mode. This read-only query needs no network permission and performs
+no network I/O. A missing method, rejected query, or absent mode means
+unsupported: do not send the request. Older hosts may silently ignore unknown
+fetch options, so passing `redirect` alone is **not** capability detection.
+This API is unreleased; released 0.17.0 and older do not advertise it.
+No same-origin-only mode is introduced by this change.
 
 `fetch` 原样返回上游响应 —— `status`、`headers`、`bodyText` —— 所以 `429`
 是插件能读到的数据（`Retry-After` 也在里面），而不是被主机藏起来的错误。宿主
