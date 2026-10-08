@@ -1,6 +1,7 @@
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
 import { check, HIGH_RISK_PERMISSIONS } from "./check.js";
 import { scaffold } from "./templates.js";
@@ -112,6 +113,29 @@ describe("check", () => {
     ]) {
       expect(HIGH_RISK_PERMISSIONS).toContain(permission);
     }
+  });
+
+  it("warns on exactly the permissions the permissions matrix marks high (#1463)", async () => {
+    const matrix = await readFile(
+      fileURLToPath(
+        new URL("../../../docs/spec/07-plugins/13-plugin-permissions-matrix.md", import.meta.url),
+      ),
+      "utf8",
+    );
+    const high = [...matrix.matchAll(/^\| `([A-Za-z0-9.]+)` \| high \|/gm)].map((m) => m[1]);
+    expect(high).toContain("renderer.extension");
+    expect([...HIGH_RISK_PERMISSIONS].sort()).toEqual([...new Set(high)].sort());
+  });
+
+  it("names grants such as desktop.control and session.read in the high-risk warning", async () => {
+    const dir = join(await tempDir(), "high-risk-grants");
+    await scaffold({ dir, template: "panel-basic" });
+    await editManifest(dir, (m) => {
+      m.permissions = [...(m.permissions ?? []), "desktop.control", "session.read"];
+    });
+    const highRisk = (await check(dir)).warnings.find((w) => w.code === "permission.high-risk");
+    expect(highRisk?.message).toContain("desktop.control");
+    expect(highRisk?.message).toContain("session.read");
   });
 
   it("warns when background capability permissions are declared but never called", async () => {
