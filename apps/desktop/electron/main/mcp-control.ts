@@ -200,7 +200,6 @@ const CONTROL_OPERATION_SPECS: OperationSpec[] = [
   spec("agentInstructionsGet", "agent/instructions/get", "Read global or project AGENTS.md instructions.", "read", ["query"]),
   spec("agentInstructionsSave", "agent/instructions/save", "Write global or project AGENTS.md instructions.", "dangerous", ["input"]),
   spec("agentPrompt", "agent/prompt", "Send a prompt to a session's Agent.", "write", ["request"]),
-  spec("promptEnhance", "prompt/enhance", "Enhance a prompt using the configured model.", "write", ["request"]),
   spec("agentCompact", "agent/compact", "Compact an idle session context.", "write", ["request"]),
   spec("agentAbort", "agent/abort", "Abort an active Agent turn.", "write", ["request"]),
   spec("agentStop", "agent/stop", "Request a graceful Agent stop.", "write", ["request"]),

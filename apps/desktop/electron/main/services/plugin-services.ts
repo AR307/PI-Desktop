@@ -25,6 +25,7 @@ import {
   pluginCompleteContext,
   pluginSessionContextFromSession,
 } from "../plugin-agent-complete";
+import type { LegacyPromptEnhancementSettings } from "../plugin-prompt-enhancement-migration";
 import {
   completeOneShot,
   type RuntimeProviderConfig,
@@ -211,6 +212,18 @@ export function createPluginServices({
     getWorkspacePath: () => {
       // Filled after host boots; temporary stub until services rebinding.
       return null;
+    },
+    getLegacyPromptEnhancementSettings: async (): Promise<LegacyPromptEnhancementSettings | null> => {
+      const host = getHost();
+      if (!host?.isAvailable()) return null;
+      const settings = await host.call<AppSettings>("settings.get");
+      return {
+        promptEnhancementProviderId: settings.promptEnhancementProviderId,
+        promptEnhancementModelId: settings.promptEnhancementModelId,
+        promptEnhancementThinkingLevel: settings.promptEnhancementThinkingLevel,
+        promptEnhancementCustomTemplate: settings.promptEnhancementCustomTemplate,
+        promptEnhancementUserTemplate: settings.promptEnhancementUserTemplate,
+      };
     },
     showToast: (message) => sendToRenderer(IPC.event.toast, { message }),
     notify: (input) =>

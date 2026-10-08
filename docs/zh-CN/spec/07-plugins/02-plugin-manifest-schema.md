@@ -158,6 +158,7 @@ type PluginContributes = {
  settings?: PluginSettingContrib[];
  themes?: PluginThemeContrib[];
  windowAppearance?: PluginWindowAppearanceContrib; // 原生窗口背景；需要 `ui.window.appearance`
+ composerTransforms?: PluginComposerTransformContrib[]; // 用户主动触发的输入框文本操作；需要 `composer.transform`
  mcpServers?: PluginMcpServerContrib[];
  services?: PluginServiceContrib[];
   bus?: PluginBusContrib;
@@ -182,6 +183,12 @@ type PluginAgentToolContrib = {
  schema: Record<string, unknown>; // JSON schema object
  timeoutMs?: number;
  permissions?: PluginPermission[];
+};
+
+type PluginComposerTransformContrib = {
+ id: string; // 插件内唯一；[A-Za-z][A-Za-z0-9_-]{0,63}
+ title: string | { en: string; "zh-CN": string };
+ undoTitle?: string | { en: string; "zh-CN": string };
 };
 
 type PluginSettingContrib = {
@@ -314,6 +321,8 @@ type PluginPermission =
  | "fs.delete"
  | "agent.tool.register"
  | "agent.prompt.inject"
+ | "agent.complete"
+ | "composer.transform"
  | "renderer.extension"
  | "provider.register"
  | "net.fetch"
@@ -476,11 +485,13 @@ MVP 只能实现：
 1. `schemaVersion` 必须是 `1`
 2. 需要 `id` / `name` / `version`
 3. 声明 `ui.panel` 的清单是否需要隐式（自动填充）或通过显式声明获得 `ui.panel` 权限是一个 **悬而未决的问题**（在 [08-meta/open-questions.md](/zh-CN/spec/08-meta/open-questions) 中跟踪）
-4. 如果存在 `agentTools`，则必须声明 `agent.tool.register`
+4. 如果存在 `agentTools`，则必须声明 `agent.tool.register`。
+   `composerTransforms` 需要 `composer.transform`；每个操作 id 必须匹配
+   `[A-Za-z][A-Za-z0-9_-]{0,63}`，并在插件内保持唯一
 5. 路径字段不得使用绝对路径或 `..`
 6. `main` / `ui.panel` / 技能 / `views[].entry` 路径必须存在
 7.工具`name`仅允许`[a-zA-Z][a-zA-Z0-9_]*`
-8. 贡献 ID（`themes`、`mcpServers`、`services`、`views`）必须匹配
+8. 贡献 ID（`themes`、`mcpServers`、`services`、`views`、`composerTransforms`）必须匹配
    `[a-zA-Z][a-zA-Z0-9_-]{0,63}` 并在自己的列表中保持唯一；
    `sessionSources` 允许额外使用 `.`
 9. `themes[].path` 必须存在且以 `.css` 结尾； `themes[].base` 可能只是
@@ -493,8 +504,8 @@ MVP 只能实现：
    有效模式（§5.1）
 12. 需要权限的贡献在权限验证时失败
    缺少：`themes` → `ui.theme`，`views` → `ui.view`，`providers` →
-   `provider.register`，stdio 服务器 → `mcp.server.local`，远程
-   服务器 → `mcp.server.remote`、`services` → `background.service`、
+   `provider.register`，`composerTransforms` → `composer.transform`，stdio
+   服务器 → `mcp.server.local`，远程服务器 → `mcp.server.remote`、`services` → `background.service`、
    `bus.publish` → `bus.publish`，`bus.subscribe` → `bus.subscribe`。
 `skills` 是一个例外 - 它早于权限门，因此清单
    没有 `agent.prompt.inject` 仍然有效并且运行时只是跳过

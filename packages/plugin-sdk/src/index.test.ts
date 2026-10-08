@@ -283,6 +283,33 @@ describe("validateContributions", () => {
     expect(validateContributions({ services: [{ id: "1bad" }] })).toMatch(/id must match/);
   });
 
+  it("validates Composer transform declarations and their permission", () => {
+    const transform = {
+      id: "enhance",
+      title: { en: "Enhance prompt", "zh-CN": "增强提示词" },
+      undoTitle: { en: "Undo enhancement", "zh-CN": "撤销增强" },
+    };
+    expect(validateContributions({ composerTransforms: [transform] })).toBeUndefined();
+    expect(
+      validateContributions({ composerTransforms: [transform, transform] }),
+    ).toMatch(/duplicate composer transform id/);
+    expect(
+      validateContributions({
+        composerTransforms: [{ ...transform, title: undefined } as never],
+      }),
+    ).toMatch(/requires a title/);
+    expect(
+      validateManifest({ ...base, contributes: { composerTransforms: [transform] } }),
+    ).toMatchObject({ ok: false, error: expect.stringContaining("composer.transform permission") });
+    expect(
+      validateManifest({
+        ...base,
+        permissions: ["composer.transform"],
+        contributes: { composerTransforms: [transform] },
+      }).ok,
+    ).toBe(true);
+  });
+
   it("reports a null or malformed command entry instead of throwing", () => {
     expect(() => validateContributions({ commands: [null as never] })).not.toThrow();
     expect(validateContributions({ commands: [null as never] })).toMatch(/commands entries/);
@@ -635,6 +662,7 @@ describe("PLUGIN_PERMISSIONS", () => {
       "bus.subscribe",
       "agent.prompt.inject",
       "agent.complete",
+      "composer.transform",
       "models.list",
       "project.create",
       "session.read",

@@ -312,13 +312,6 @@ export const tr = {
     moveQueuedPromptDown: "Aşağı taşı",
     editQueuedPrompt: "Düzenle",
     editQueuedPromptBusy: "Bu sıradaki iletiyi düzenlemeden önce giriş alanını temizle",
-    enhancePrompt: "İstemi iyileştir",
-    enhancingPrompt: "İyileştiriliyor…",
-    undoEnhancement: "İyileştirmeyi geri al",
-    enhancementFailed: "İstem iyileştirilemedi",
-    enhancementTimeout:
-      "Yeniden yazma zaman aşımına uğradı. Yeniden deneyin veya Ayarlar'dan daha hızlı bir iyileştirme modeli seçin.",
-    dismissEnhancementError: "İyileştirme hatasını kapat",
     sendWhileRunning: "Takip mesajı gönder · {{shortcut}} ile yönlendir",
     steeringUnavailable: "Bu tur artık yönlendirme kabul edemiyor. Taslağınız korundu.",
     nativeSessionBusy: "Bu yerel Pi oturumu hâlâ yanıtlıyor. Göndermeden önce durdurun veya yanıtın bitmesini bekleyin.",
@@ -1629,33 +1622,6 @@ sklm: {
     fontSizeXl: "Trenta",
     fontSizeScale: "Metin ölçeği",
     fontSizePercent: "%{{value}}",
-    promptEnhancementTitle: "Prompt iyileştirme",
-    promptEnhancementDesc:
-      "Bestekinin Promtu iyileştir eylemi için geçerlidir. Sistem promptu yerleşiktir; kullanıcı şablonu ve model özelleştirilebilir.",
-    promptEnhancementCustomTemplate: "Özel şablon kullan",
-    promptEnhancementCustomTemplateDesc:
-      "Yerleşik kullanıcı şablonunu kendi şablonunuzla değiştirir. Sistem promptu yerleşik kalır.",
-    promptEnhancementCustomTemplateActive: "Özel şablon etkin",
-    promptEnhancementCustomTemplateNeedsTemplate:
-      "Önce özel bir şablon kaydedin; ardından anahtar yerleşik şablon ile kendi şablonunuz arasında geçiş yapar.",
-    promptEnhancementEdit: "Düzenle",
-    promptEnhancementModelTitle: "Prompt iyileştirme",
-    promptEnhancementModel: "Varsayılan model",
-    promptEnhancementThinking: "Akıl yürütme",
-    promptEnhancementThinkingDesc:
-      "Yeniden yazma için akıl yürütme düzeyi. Varsayılan kapalıdır ve en hızlısıdır.",
-    promptEnhancementThinkingOff: "Kapalı (akıl yürütme yok)",
-    promptEnhancementModelFollow: "Geçerli modeli izle",
-    promptEnhancementModelUnavailable: "Kullanılamıyor — iyileştirme geçerli modele düşer",
-    promptEnhancementUserTemplate: "Kullanıcı şablonu",
-    promptEnhancementUserTemplateDesc:
-      "Taslağı sarar. Taslak değişkenini içermelidir; ekleme düğmesini kullanın.",
-    promptEnhancementInsertDraft: "Taslak değişkenini ekle",
-    promptEnhancementRestore: "Varsayılanı geri yükle",
-    promptEnhancementMissingDraftVariable:
-      "Kullanıcı şablonu taslak değişkenini içermelidir, aksi halde taslak gönderilemez.",
-    promptEnhancementTooLong: "Kullanıcı şablonu en fazla 8000 karakter olabilir.",
-    promptEnhancementSaveError: "Prompt iyileştirme ayarları kaydedilemedi.",
   },
   project: {
     open: "Proje aç",
@@ -2187,6 +2153,7 @@ importConfirm: "İçe aktarılan uzantılar ajan sürecinde, ajanın kendi araç
       tools: "Ajan araçları",
       agentExtension: "Ajan uzantısı",
       rendererUi: "Sohbet arayüzü uzantısı",
+      composerTransform: "Oluşturucu işlemleri",
       skills: "Beceriler",
       themes: "Tema",
       mcp: "MCP sunucusu",
@@ -2225,6 +2192,7 @@ importConfirm: "İçe aktarılan uzantılar ajan sürecinde, ajanın kendi araç
       "agent.tool.register": "Ajan için araç ekle",
       "agent.prompt.inject": "Ajan yönergelerini ayarla",
       "agent.complete": "Modellerinizle tek seferlik tamamlatma çalıştır",
+      "composer.transform": "Oluşturucudaki metni dönüştür",
       "agent.extension": "Ajanın içinde kod çalıştır",
       "renderer.extension": "Sohbet yuvalarında arayüz çiz",
       "provider.register": "Model listesine servis ekle",
@@ -2273,6 +2241,7 @@ importConfirm: "İçe aktarılan uzantılar ajan sürecinde, ajanın kendi araç
       "agent.prompt.inject": "AI ajanına gönderilen yönergeleri değiştirebilir.",
       "agent.complete":
         "Model kotanızı tek seferlik bir tamamlatma için harcayabilir. Eklenti API anahtarlarınızı almaz.",
+      "composer.transform": "Eklentinin Oluşturucu'da açıkça seçtiğiniz metni dönüştürmesine izin verir. Eklenti yalnızca taslağı ve seçili model anahtarını alır; konuşma geçmişini veya ekleri almaz.",
       "agent.extension": "ExtensionAPI modüllerini ajan sürecinde, ajanın kendi araçlarıyla aynı erişimle çalıştırır. Yalnızca güvendiğiniz kodu etkinleştirin.",
       "renderer.extension": "Bu eklentinin işleyici modülünü uygulama penceresine yükler; mesaj eylem çubukları, yanıt ek alanları, araç kartları, kod bloğu işleyicileri ve besteleyici kontrolleri gibi arayüz yuvası bileşenleri çizer. Modül PI-Desktop ile aynı belgede çalışır. Yalnızca güvendiğiniz kodu etkinleştirin.",
       "provider.register":

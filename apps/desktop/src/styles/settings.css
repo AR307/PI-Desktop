@@ -1084,7 +1084,7 @@
 }
 
 /*
-  A toggle paired with an icon action (prompt enhancement). The control column
+  A toggle paired with an icon action. The control column
   has no gap of its own, so the two would otherwise touch.
 */
 .settings-row-control:has(> .settings-toggle + .settings-icon-button) {

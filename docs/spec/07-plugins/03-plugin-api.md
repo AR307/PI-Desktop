@@ -128,6 +128,55 @@ pi.commands.register(def: {
 pi.commands.unregister(id: string): Promise<void>
 ```
 
+### Composer text transforms (`composer.transform`)
+
+A plugin may contribute explicit, user-invoked text actions through
+`manifest.contributes.composerTransforms`. A non-empty contribution requires
+the `composer.transform` permission. The host only lists actions from a loaded
+plugin whose permission is currently granted; the manifest supplies the action
+title and optional undo title.
+
+```ts
+type PluginComposerTransformInput = {
+  id: string;
+  text: string;
+  modelKey?: string; // current Composer provider/model key; no credentials
+};
+
+type PluginModule = {
+  onComposerTransform?: (
+    input: PluginComposerTransformInput,
+  ) => Promise<string> | string;
+};
+```
+
+The callback receives only the draft text and optional model key. It does not
+receive a session id, transcript, or separate attachment and file-reference
+metadata. The host removes inline file-reference tokens before dispatch and
+restores them after success.
+The callback returns a string; input and output are each capped at 100,000
+characters and the call uses the 110-second plugin-tool timeout. The host
+rechecks the plugin load, declaration, and grant, and audits both outcomes.
+Composer discards results that arrive after an edit, send, or session switch and
+provides one-step undo after success. A plugin that makes a model request
+separately declares the permissions required by that API, such as
+`agent.complete` and `models.list`.
+
+```json
+{
+  "permissions": ["composer.transform"],
+  "contributes": {
+    "composerTransforms": [
+      {
+        "id": "enhance",
+        "title": { "en": "Enhance prompt", "zh-CN": "增强提示词" },
+        "undoTitle": { "en": "Undo", "zh-CN": "撤销" }
+      }
+    ]
+  }
+}
+```
+
 ### speech (`speech.adapter.register`)
 ```ts
 pi.speech.registerAdapter(adapter: {
@@ -708,9 +757,9 @@ pi.agent.complete(input: {
 }>
 ```
 
-The host resolves credentials and runs a one-shot completion with `tools: []`
-through the same path as Composer prompt enhancement. The plugin never receives
-a secret. `includeSessionContext: true` also requires `session.read` and an
+The host resolves credentials and runs a one-shot completion with `tools: []`.
+The plugin never receives a secret. The standalone prompt-enhancement plugin
+uses this API from its `onComposerTransform` callback. `includeSessionContext: true` also requires `session.read` and an
 in-flight tool session; the host serializes that context and, if `messages` is
 empty, appends `Please respond to the request.` System prompt
 ≤ 32 KiB; combined messages ≤ 200k characters; eight calls per plugin per

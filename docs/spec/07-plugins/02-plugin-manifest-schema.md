@@ -194,6 +194,7 @@ providers?: PluginProviderContrib[]; // Host-owned provider rows; needs `provide
  themes?: PluginThemeContrib[];
  scenicThemes?: PluginScenicThemesContrib;
  windowAppearance?: PluginWindowAppearanceContrib; // native window background and Windows corner radius; needs `ui.window.appearance`
+ composerTransforms?: PluginComposerTransformContrib[]; // explicit Composer text actions; needs `composer.transform`
  mcpServers?: PluginMcpServerContrib[];
   services?: PluginServiceContrib[];
   bus?: PluginBusContrib;
@@ -218,6 +219,12 @@ type PluginAgentToolContrib = {
  schema: Record<string, unknown>; // JSON schema object
  timeoutMs?: number;
  permissions?: PluginPermission[];
+};
+
+type PluginComposerTransformContrib = {
+ id: string; // plugin-local; [A-Za-z][A-Za-z0-9_-]{0,63}
+ title: string | { en: string; "zh-CN": string };
+ undoTitle?: string | { en: string; "zh-CN": string };
 };
 
 type PluginSettingContrib = {
@@ -378,6 +385,8 @@ type PluginPermission =
  | "fs.delete"
  | "agent.tool.register"
  | "agent.prompt.inject"
+ | "agent.complete"
+ | "composer.transform"
  | "renderer.extension"
  | "provider.register"
  | "provider.oauth"
@@ -579,7 +588,8 @@ MVP may implement only:
 5. Path fields must not use absolute paths or `..`
 6. `main` / `ui.panel` / skills / `views[].entry` paths must exist
 7. tool `name` allows only `[a-zA-Z][a-zA-Z0-9_]*`
-8. Contribution ids (`themes`, `mcpServers`, `services`, `views`) must match
+8. Contribution ids (`themes`, `mcpServers`, `services`, `views`,
+   `composerTransforms`) must match
    `[a-zA-Z][a-zA-Z0-9_-]{0,63}` and be unique within their own list;
    `sessionSources` uses the same rule with `.` additionally allowed
 9. `themes[].path` must exist and end in `.css`; `themes[].base` may only be
@@ -593,8 +603,9 @@ MVP may implement only:
    valid patterns (§5.1)
 12. A contribution that needs a permission fails validation when the permission
    is missing: `themes` → `ui.theme`, `views` → `ui.view`, `providers` →
-   `provider.register`, OAuth providers → `provider.oauth`, stdio servers → `mcp.server.local`, remote
-   servers → `mcp.server.remote`, `services` → `background.service`,
+   `provider.register`, OAuth providers → `provider.oauth`, `composerTransforms` →
+   `composer.transform`, stdio servers → `mcp.server.local`, remote servers →
+   `mcp.server.remote`, `services` → `background.service`,
    `bus.publish` → `bus.publish`, `bus.subscribe` → `bus.subscribe`.
    `skills` is the exception — it predates the permission gate, so a manifest
    without `agent.prompt.inject` still validates and the runtime simply skips

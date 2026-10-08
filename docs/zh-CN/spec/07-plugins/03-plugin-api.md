@@ -107,6 +107,48 @@ pi.commands.register(def: {
 pi.commands.unregister(id: string): Promise<void>
 ```
 
+### 输入框文本转换（`composer.transform`）
+
+插件可通过 `manifest.contributes.composerTransforms` 声明由用户主动触发的文本操作。
+非空贡献需要 `composer.transform` 权限。宿主只会列出已加载且当前获得该权限的插件操作；
+操作标题和可选的撤销标题来自 manifest。
+
+```ts
+type PluginComposerTransformInput = {
+  id: string;
+  text: string;
+  modelKey?: string; // 当前 Composer 提供商/模型 key；不含凭据
+};
+
+type PluginModule = {
+  onComposerTransform?: (
+    input: PluginComposerTransformInput,
+  ) => Promise<string> | string;
+};
+```
+
+回调只收到草稿文本和可选模型 key，不会收到会话 id、转录内容或单独的附件/文件引用元数据。
+宿主在调用前移除行内文件引用 token，成功后再恢复。回调返回字符串；输入与输出各限制为
+100,000 个字符，调用超时为 110 秒。宿主会重新检查插件是否仍已加载、操作是否仍在声明中、
+权限是否仍获授，并审计成功与失败。若用户在等待时编辑、发送或切换会话，Composer 会丢弃
+过期结果；成功后提供一步撤销。若插件还要请求模型，必须另外声明对应 API 所需权限，例如
+`agent.complete` 与 `models.list`。
+
+```json
+{
+  "permissions": ["composer.transform"],
+  "contributes": {
+    "composerTransforms": [
+      {
+        "id": "enhance",
+        "title": { "en": "Enhance prompt", "zh-CN": "增强提示词" },
+        "undoTitle": { "en": "Undo", "zh-CN": "撤销" }
+      }
+    ]
+  }
+}
+```
+
 ### 语音（`speech.adapter.register`）
 ```ts
 pi.speech.registerAdapter(adapter: {
@@ -565,8 +607,8 @@ pi.agent.complete(input: {
 }>
 ```
 
-宿主解析凭据，并通过与 Composer 提示增强相同的路径发起 `tools: []` 的一次性补全。
-插件拿不到密钥。`includeSessionContext: true` 还需要 `session.read` 以及进行中的
+宿主解析凭据，并发起 `tools: []` 的一次性补全；插件拿不到密钥。独立提示词增强插件会在
+`onComposerTransform` 回调中使用此 API。`includeSessionContext: true` 还需要 `session.read` 以及进行中的
 工具会话。system ≤ 32 KiB；消息合计 ≤ 200k 字符；每个插件每滚动 60 秒 8 次
 （`RATE_LIMITED`）；预算 90 秒（`TIMEOUT`）。
 

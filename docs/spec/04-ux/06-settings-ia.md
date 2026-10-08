@@ -260,23 +260,13 @@ Settings is a **full-window page** that replaces the app sidebar + main chrome (
   is remaining. The threshold controls when a text-only paste becomes a
   temporary session-scratch file; it defaults to 600 characters and accepts
   integer values from 1 through 1,000,000.
-- **Prompt enhancement** is a card controlling the Composer's Enhance prompt
-  action (ADR 0121). It carries a `Use a custom template` switch and the settings
-  icon button the subagent rows use for editing, which opens an editor sheet
-  (the subagent editor's pattern). The switch gates whether a stored template
-  applies, is disabled until one is saved, and turns on when a template is
-  saved; turning it off keeps the stored text. The sheet holds the user-template
-  editor, which shows the built-in default text when no override is stored and
-  offers an insert action for the draft variable; a save that would leave the
-  template without that variable is refused. The system prompt is built in and
-  exposes no field. The same card also has a `Default model` row using the same
-  anchored, searchable menu as the Models tab's default-model row; empty means
-  "follow the Composer's current model". Two rows therefore read `Default
-  model`, distinguished by their card headings (Prompt enhancement vs Models
-  Defaults). The reasoning row is a menu select listing the levels the selected
-  model actually supports (the row is disabled when it supports none), defaults
-  to Off, and has no follow-the-session entry. Settings search indexes the card,
-  its switch, the template row, the default-model row, and the reasoning row.
+- Composer text actions are contributed by explicitly installed plugins and
+  appear only while their plugin is enabled and its `composer.transform`
+  permission is granted. The host does not include a prompt-enhancement card or
+  install the standalone `pi.prompt-enhancement` plugin by default. Plugin-owned
+  settings are edited on the Plugins page; the one-time migration of legacy
+  prompt-enhancement preferences is specified in
+  `04-ux/12-prompt-enhancement.md`.
 - **Thinking display mode** uses a menu select with Detailed (default) and
   Compact. Both modes use one whole-process disclosure. Detailed starts the
   process open, keeps reasoning visible, opens the active multi-item activity

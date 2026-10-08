@@ -87,20 +87,6 @@ export type AgentPromptResponse = {
   turnId: string;
 };
 
-/** One-shot Composer draft enhancement; this never reads session history. */
-export type PromptEnhancementRequest = {
-  sessionId?: string | null;
-  draft: string;
-  /** Renderer snapshot of the model currently shown in the Composer. */
-  providerId?: string;
-  modelId?: string;
-  thinkingLevel?: ThinkingLevel;
-};
-
-export type PromptEnhancementResponse = {
-  enhancedDraft: string;
-};
-
 export type AgentExecuteApprovedPlanRequest = {
   sessionId: string;
   turnId: string;

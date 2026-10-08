@@ -1,5 +1,9 @@
 use super::*;
+mod composer_transforms;
+mod contribution_ids;
 mod provider_catalog;
+
+use contribution_ids::is_contrib_id;
 
 pub(crate) fn validate_contributions(root: &Path, manifest: &PluginManifest) -> Result<()> {
     let Some(contributes) = manifest.contributes.as_ref() else {
@@ -171,6 +175,7 @@ pub(crate) fn validate_contributions(root: &Path, manifest: &PluginManifest) -> 
             }
         }
     }
+    composer_transforms::validate(map, manifest)?;
     if let Some(skills) = map.get("skills") {
         let entries = array_of(skills, "contributes.skills")?;
         for entry in entries {
@@ -699,7 +704,7 @@ fn is_shortcut_shape(value: &Value) -> bool {
         .all(|part| matches!(*part, "Mod" | "Ctrl" | "Alt" | "Shift"))
 }
 
-fn array_of<'a>(value: &'a Value, field: &str) -> Result<&'a [Value]> {
+pub(super) fn array_of<'a>(value: &'a Value, field: &str) -> Result<&'a [Value]> {
     value
         .as_array()
         .map(|a| a.as_slice())
@@ -829,17 +834,6 @@ fn is_window_background_color(value: &str) -> bool {
         .all(|character| character.is_ascii_hexdigit())
 }
 
-fn is_contrib_id(value: &str) -> bool {
-    if value.is_empty() || value.len() > 64 {
-        return false;
-    }
-    let mut chars = value.chars();
-    match chars.next() {
-        Some(c) if c.is_ascii_alphabetic() => {}
-        _ => return false,
-    }
-    chars.all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
-}
 /// Grammar shared with `contributes.globalShortcuts[].id` in the plugin SDK.
 /// Dots are allowed here (unlike `is_contrib_id`): a shortcut id names a
 /// namespace inside the plugin, e.g. `voice.pushToTalk`.

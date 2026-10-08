@@ -51,6 +51,7 @@ ADR 记录那些不应被静默改变的架构选择。中文入口与英文索�
 | [ADR 0192：为已配置模型设置别名并允许复制模型 id](/adr/0192-model-alias) | 别名只用于展示；配置页模型 id 可选择复制，请求仍使用真实 id |
 | [ADR 0193：上下文检查器按最后一次请求计算占用](/adr/0193-last-request-context-occupancy) | 占用、本轮合计和缓存读写取最新一条助手消息，不再把工具循环里的每次请求加总 |
 | [ADR 0323：会话标题由独立插件拥有](/adr/0323-plugin-owned-session-titles) | 核心保留默认标题；独立插件可配置提示词、模型与思考级别，并通过主机 CAS 更新标题 |
+| [ADR 0324：提示词增强由可选插件拥有](/adr/0324-plugin-owned-composer-prompt-enhancement) | 输入框只提供受权限约束的通用文本转换扩展点；提示词增强需用户单独安装，旧设置在首次加载时迁移 |
 | [ADR 0194：可选的子智能体思考覆盖](/adr/0194-subagent-thinking-parameter-omission) | 子智能体可继承、显式关闭或不发送思考参数 |
 | [ADR 0195：视口固定的工作面板开关](/adr/0195-viewport-fixed-work-panel-toggle) | 非设置页右上角提供与 Cmd/Ctrl+J 等价的指针开关 |
 | [ADR 0196：在进行中重试行显示 provider 原因](/adr/0196-retry-cause-in-active-turn-status) | 悬停或聚焦重试状态行时显示错误摘要、错误码和安全的 provider 消息 |
@@ -189,7 +190,7 @@ ADR 记录那些不应被静默改变的架构选择。中文入口与英文索�
 | 0118 | [队列中的提示由渲染器拥有，并在回合边界停止运行](/adr/0118-renderer-owned-queued-prompts) | 已接受 |
 | 0119 | [事件驱动的子智能体超时](/adr/0119-event-driven-subagent-timeouts) | 已接受待实现 |
 | 0120 | [有界的会话历史窗口](/adr/0120-bounded-session-history-windows) | 已接受 |
-| 0121 | [输入框提示增强保持一次性且由主进程拥有](/adr/0121-one-shot-composer-prompt-enhancement) | 已接受 |
+| 0121 | [输入框提示增强保持一次性且由主进程拥有](/adr/0121-one-shot-composer-prompt-enhancement) | 已由 ADR 0324 取代 |
 | 0122 | [工作面板可见时预留原生宽度](/adr/0122-reserve-native-width-while-work-panel-visible) | 已被 ADR 0151 取代 |
 | 0123 | [Windows/Linux 窗口控制使用原生任务栏最小化](/adr/0123-native-taskbar-minimize-controls) | 已接受 |
 | 0124 | [将临时会话绑定到独立的临时工作区](/adr/0124-temporary-session-scratch-workspace) | 已接受 |
@@ -262,6 +263,7 @@ ADR 记录那些不应被静默改变的架构选择。中文入口与英文索�
 | 0192 | [为已配置模型设置别名并允许复制模型 id](/adr/0192-model-alias) | 已接受（修订 D266） |
 | 0193 | [上下文检查器按最后一次请求计算占用](/adr/0193-last-request-context-occupancy) | 已接受（修订 ADR 0047 / ADR 0103 / ADR 0184） |
 | 0323 | [会话标题由独立插件拥有](/adr/0323-plugin-owned-session-titles) | 已接受 |
+| 0324 | [提示词增强由可选插件拥有](/adr/0324-plugin-owned-composer-prompt-enhancement) | 已接受（修订 ADR 0121） |
 | 0194 | [可选的子智能体思考覆盖](/adr/0194-subagent-thinking-parameter-omission) | 已接受待实现 |
 | 0195 | [视口固定的工作面板开关](/adr/0195-viewport-fixed-work-panel-toggle) | 已接受（修订 ADR 0068 / ADR 0085） |
 | 0196 | [在进行中重试行显示 provider 原因](/adr/0196-retry-cause-in-active-turn-status) | 已接受（修订 ADR 0175） |

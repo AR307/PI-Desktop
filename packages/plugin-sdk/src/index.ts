@@ -166,6 +166,8 @@ export type PluginManifest = {
      * host registers, conflict-checks, and releases it with the plugin.
      */
     globalShortcuts?: PluginGlobalShortcutContrib[];
+    /** User-invoked text actions beside the Composer controls. */
+    composerTransforms?: PluginComposerTransformContrib[];
   };
   permissions?: string[];
   /**
@@ -198,6 +200,20 @@ export type PluginLocalizedString = {
 export type PluginSessionSourceContrib = {
   id: string;
   label?: string | PluginLocalizedString;
+};
+
+/** A user-invoked transformation of the current Composer text. */
+export type PluginComposerTransformContrib = {
+  id: string;
+  title: string | PluginLocalizedString;
+  undoTitle?: string | PluginLocalizedString;
+};
+
+/** Input excludes conversation history, attachments, and file paths. */
+export type PluginComposerTransformInput = {
+  id: string;
+  text: string;
+  modelKey?: string;
 };
 
 export type PluginSessionMessage =
@@ -1360,6 +1376,10 @@ export type PluginModule = {
    * be JSON. Throw an `Error` with a `code` to hand that code to the caller.
    */
   onRendererCall?: (method: string, args: unknown) => Promise<unknown> | unknown;
+  /** Handle one explicitly invoked Composer text action. */
+  onComposerTransform?: (
+    input: PluginComposerTransformInput,
+  ) => Promise<string> | string;
 };
 
 /** Upper bound on ExtensionAPI modules one plugin may contribute. */
@@ -1383,6 +1403,7 @@ export const PLUGIN_PERMISSIONS = [
   "agent.tool.register",
   "agent.prompt.inject",
   "agent.complete",
+  "composer.transform",
   "agent.extension",
   // Renderer slots (`docs/plugin-plan/ui/`): the entry module loads into the
   // host renderer's own document, so the surface it can touch is the
@@ -1541,6 +1562,16 @@ export function validateManifest(raw: unknown): {
       error: "contributes.globalShortcuts requires the keyboard.globalShortcut permission",
     };
   }
+  if (
+    !contributesError &&
+    (m.contributes?.composerTransforms?.length ?? 0) > 0 &&
+    !(m.permissions ?? []).includes("composer.transform")
+  ) {
+    return {
+      ok: false,
+      error: "contributes.composerTransforms requires the composer.transform permission",
+    };
+  }
   if (contributesError) {
     return { ok: false, error: contributesError };
   }
@@ -1632,6 +1663,45 @@ export function validateContributions(
     }
     if (shortcut.default !== undefined && !isValidShortcutShape(shortcut.default)) {
       return `global shortcut "${shortcut.id}" has an invalid default`;
+    }
+  }
+  const composerTransforms = contributes.composerTransforms ?? [];
+  if (!Array.isArray(composerTransforms)) {
+    return "contributes.composerTransforms must be an array";
+  }
+  const transformIds = new Set<string>();
+  for (const transform of composerTransforms) {
+    if (!transform || typeof transform !== "object" || Array.isArray(transform)) {
+      return "contributes.composerTransforms entries must be objects";
+    }
+    if (
+      typeof transform.id !== "string" ||
+      !/^[a-zA-Z][a-zA-Z0-9_-]{0,63}$/.test(transform.id)
+    ) {
+      return "composer transform id is missing or invalid";
+    }
+    if (transformIds.has(transform.id)) {
+      return `duplicate composer transform id "${transform.id}"`;
+    }
+    transformIds.add(transform.id);
+    if (transform.title === undefined) {
+      return `composer transform "${transform.id}" requires a title`;
+    }
+    const titleError = localizedStringError(
+      transform.title,
+      `composer transform "${transform.id}" title`,
+    );
+    if (titleError) return titleError;
+    if (typeof transform.title === "string" && !transform.title.trim()) {
+      return `composer transform "${transform.id}" title must not be empty`;
+    }
+    const undoTitleError = localizedStringError(
+      transform.undoTitle,
+      `composer transform "${transform.id}" undoTitle`,
+    );
+    if (undoTitleError) return undoTitleError;
+    if (typeof transform.undoTitle === "string" && !transform.undoTitle.trim()) {
+      return `composer transform "${transform.id}" undoTitle must not be empty`;
     }
   }
   for (const setting of settings) {
