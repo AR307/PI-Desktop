@@ -99,6 +99,37 @@ describe("check", () => {
     expect(result.errors.map((e) => e.code)).toContain("manifest.invalid-id");
   });
 
+  it("fails a manifest.renderer entry that does not exist, as the installer does (#1464)", async () => {
+    const dir = join(await tempDir(), "renderer-entry");
+    await scaffold({ dir, template: "panel-basic" });
+    await editManifest(dir, (m) => {
+      m.renderer = "renderer/index.mjs";
+      m.permissions = [...(m.permissions ?? []), "renderer.extension"];
+    });
+    const missing = await check(dir);
+    expect(missing.ok).toBe(false);
+    const error = missing.errors.find((e) => e.code === "renderer.missing");
+    expect(error?.message).toContain("renderer/index.mjs");
+
+    // A directory with a module name is not an entry either.
+    await mkdir(join(dir, "renderer/index.mjs"), { recursive: true });
+    expect((await check(dir)).errors.map((e) => e.code)).toContain("renderer.missing");
+
+    await rm(join(dir, "renderer"), { recursive: true });
+    await mkdir(join(dir, "renderer"), { recursive: true });
+    await writeFile(join(dir, "renderer/index.mjs"), "export function activate() {}\n", "utf8");
+    const present = await check(dir);
+    expect(present.errors.map((e) => e.code)).not.toContain("renderer.missing");
+
+    // An entry outside the package is already refused by the manifest validator.
+    await editManifest(dir, (m) => {
+      m.renderer = "../renderer/index.mjs";
+    });
+    const escaping = await check(dir);
+    expect(escaping.ok).toBe(false);
+    expect(escaping.errors.map((e) => e.code)).toEqual(["manifest.invalid"]);
+  });
+
   it("treats background audio and websocket access as high risk", () => {
     for (const permission of [
       "net.fetch",
