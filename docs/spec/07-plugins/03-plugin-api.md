@@ -531,7 +531,10 @@ pi.session.setAutoTitle(input: {
 ```
 
 Context is returned only for an active session whose title source is still
-`default`. The host does not return attachments, tool calls, later turns, or
+`default`. That source covers both a new session's placeholder and the
+deterministic first-prompt fallback the core writes itself, so a plugin must
+expect `expectedTitle` to be the current derived text rather than a localized
+placeholder. The host does not return attachments, tool calls, later turns, or
 the rest of the transcript. Title updates accept 1–80 Unicode code points and
 use the exact `expectedTitle` as a compare-and-set; a manual rename or another
 update makes the result `{ updated: false }`. Both methods require

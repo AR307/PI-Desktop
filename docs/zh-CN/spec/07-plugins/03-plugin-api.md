@@ -419,7 +419,9 @@ pi.session.setAutoTitle(input: {
 }): Promise<{ updated: boolean }>
 ```
 
-只有活动会话且标题来源仍为 `default` 时才返回上下文。宿主不会返回附件、工具调用、后续回合
+只有活动会话且标题来源仍为 `default` 时才返回上下文。该来源既覆盖新会话的占位标题，也覆盖
+核心自己写入的确定性首条提示兜底标题，因此插件应预期 `expectedTitle` 是当前已派生的文本，
+而不是本地化占位标题。宿主不会返回附件、工具调用、后续回合
 或其他转录内容。标题长度为 1–80 个 Unicode 码点，并通过精确的 `expectedTitle` 比较并设置；
 手动重命名或另一项更新发生后返回 `{ updated: false }`。两个方法都需要高风险权限
 `session.autoTitle`，因为持有 `agent.complete` 的插件可能将首轮文本发送给模型。

@@ -45,8 +45,9 @@ This log freezes previously open questions into concrete decisions.
 | D649 | Cloud backup stays closed to users | **Amend D642 / D643: the Settings `sync` destination carries `developmentOnly: true` again, so a packaged build omits its rail row, page, and settings-search hits and falls back to General, while development builds keep it. Developer mode stays irrelevant to the destination and it still carries no Experimental badge. Sync behavior, protocol, host schema, and persisted data are unchanged; dropping the flag reopens it for packaged builds. See `04-ux/06-settings-ia.md` and E2E-CONFIG-SYNC-webdav-portable-configuration.** | The encrypted WebDAV backup is not ready to be offered to packaged-build users yet, so it stays implemented but out of the way until it opens. |
 | D650 | Plugin providers appear in Add Service | **Amend ADR 0259: optional `category` groups manifest-owned provider rows; optional localized `description` supplies one-sentence hover/focus copy. Loaded plugins with `provider.register` contribute unconfigured API-key providers with endpoints. Tiles display provider names only; the Host saves keys through the existing provider secret path. There is no per-plugin provider-count cap. An empty model list is allowed only for an API-key provider with a base URL; after explicit key save, Host discovery populates its cached model choices. Configured rows remain in the provider list and leave the chooser. OAuth / no-auth rows are omitted; no new permission, runtime plugin API, provider row, or credential migration is added. See ADR 0322, `07-plugins/02-plugin-manifest-schema.md`, and E2E-PLUGIN-provider-catalog-add-service.** | Users could not discover manifest-owned community providers in the normal Add Service flow, and each plugin needed to group its own sites without owning credential UI. |
 | D651 | Transcript tool rows never auto-open | **Amend the leaf auto-open provision of the turn-process / thinking-display decisions and ADR `turn-process-and-thinking-display`: a tool-call, hosted-search or plan row keeps its payload collapsed in both display modes and only an explicit user action opens it, including the literal final item of the last activity group. Whole-process and ordinary-group defaults, failed/denied behavior, retained per-item choices, and the thinking row's own leaf default are unchanged. Renderer-only; no host protocol, persistence, permission or plugin contract change. See `04-ux/08-component-spec.md` §9.1/§9.2/§9.5/§9.6, `04-ux/09-interaction-patterns.md` §4.2, and E2E-040.** | A payload that opened itself under the newest call pulled attention away from the answer the user was waiting for and made one turn look different depending on how it ended; leaving every payload to the user keeps one predictable row. |
-| D652 | Make session title generation a standalone plugin | **Supersede ADR 0186: remove core prompt-derived fallback and built-in title completion; new sessions keep their localized default title until a user or plugin changes it. Add the high-risk `session.autoTitle` capability for bounded first-turn context and compare-and-set title updates, backed by schema v23 `sessions.title_source`; manual rename marks `manual`, plugin output marks `generated`. The standalone plugin configures its prompt template, model, and thinking level through its panel and uses `session:turnEnded`, `models.list`, and `agent.complete`. See ADR 0323, E2E-021a, and the plugin API/permission specs.** | Title generation is optional product policy with model and prompt settings, and the host needs a narrow durable boundary that makes manual titles win races. |
+| D652 | Make session title generation a standalone plugin *(amended by D654)* | **Supersede ADR 0186: remove the built-in title completion and keep only the deterministic local fallback restored by D654; new sessions otherwise keep their localized default title until a user or plugin changes it. Add the high-risk `session.autoTitle` capability for bounded first-turn context and compare-and-set title updates, backed by schema v23 `sessions.title_source`; manual rename marks `manual`, plugin output marks `generated`. The standalone plugin configures its prompt template, model, and thinking level through its panel and uses `session:turnEnded`, `models.list`, and `agent.complete`. See ADR 0323, E2E-021a, and the plugin API/permission specs.** | Title generation is optional product policy with model and prompt settings, and the host needs a narrow durable boundary that makes manual titles win races. |
 | D653 | Make Composer prompt enhancement an optional plugin | **Supersede ADR 0121: remove host-owned prompt-enhancement UI, settings, direct completion IPC, and MCP action. Add the permission-gated `composer.transform` contribution and plugin callback, passing only the current draft plus an optional model key, with bounded input/output, audit, file-reference restoration, one-step undo, and stale session/draft guards. Keep `vastsa/pi-prompt-enhancement` in its own repository and require explicit user installation; do not bundle or enable it by default. On first plugin load, copy valid legacy preferences into unset plugin settings and write a private migration marker; preserve old host values for rollback. See ADR 0324, E2E-218 / E2E-259, and the plugin API/permission specs.** | Prompt enhancement is optional behavior that belongs to a separately installed plugin, while the host needs a narrow safe transform contract and a one-time path for existing settings. |
+| D654 | Keep the deterministic first-prompt session title in the core | **Amend D652 / ADR 0323: a session whose stored title is still a recognized placeholder derives a whitespace-collapsed 48-character fallback from the first prompt, written through the host RPC and IPC `session/deriveTitle`. Host-core applies it only while the title is still a placeholder with the `default` source, and the derived text keeps that source, so an installed title plugin may still replace it and only a manual rename opts out. No model call, no new permission, no schema or protocol version change; `updated_at`, transcript content, and message count stay unchanged. See `03-runtime/01-ipc-protocol.md`, `03-runtime/02-agent-runtime.md`, `03-runtime/06-host-rpc-protocol.md`, `03-runtime/04-data-storage.md`, `04-ux/08-component-spec.md`, and E2E-021a.** | Removing every automatic write left an untouched session showing a placeholder until a plugin ran, so offline readability depended on installing optional software. |
 
 ## B. Secondary implementation defaults
 
@@ -7551,9 +7552,9 @@ must keep splitting are covered by `markdown-blocks.test.mjs`.
   `07-plugins/02-plugin-manifest-schema.md` §5.4.
 ## 2026-10-08 — Make session title generation a standalone plugin (D652)
 
-- The core no longer derives a title from the first prompt or runs a title
-  completion. New sessions remain at their localized default until the user or
-  an installed plugin changes the title.
+- The core keeps one automatic title path: the deterministic first-prompt
+  fallback (D654). It runs no title completion, and a session without the plugin
+  keeps the derived fallback instead of a placeholder.
 - The `session.autoTitle` permission exposes only bounded first-turn text for a
   default-titled session and a host compare-and-set title update. Schema v23
   tracks default, manual, and generated title ownership.
@@ -7577,3 +7578,25 @@ must keep splitting are covered by `markdown-blocks.test.mjs`.
   leaf-ownership helper is retired. See `04-ux/08-component-spec.md`
   §9.1/§9.2/§9.5, `04-ux/09-interaction-patterns.md` §4.2, ADR
   `turn-process-and-thinking-display`, and E2E-040.
+
+## 2026-10-08 — Keep the deterministic first-prompt session title (D654)
+
+- `session.deriveTitle` restores the immediate label a new session used to get
+  from its first prompt: the renderer collapses whitespace and caps the request
+  at 48 characters, and host-core writes it only while the stored title is still
+  a recognized placeholder with the `default` source.
+- The write keeps that source, so the derived title stays replaceable: the
+  `session.autoTitle` plugin can still upgrade it through its compare-and-set,
+  while manual renames, earlier plugin titles, and second prompts never change
+  it. No model call, permission, schema, or protocol version changes.
+- Placeholder recognition now covers every shipped locale: the renderer creates a
+  session with its localized `chat.untitledTask` label, so host-core (and the
+  v23 migration) had classified Korean, Traditional-Chinese, Brazilian
+  Portuguese, and Turkish placeholders as `manual` and blocked both the fallback
+  and the plugin there. The recognized list mirrors the renderer catalog.
+- Remote sessions derive on their own Host: the remote-host RACP profile gains
+  `session/deriveTitle` (controller), so a paired desktop no longer gates the
+  fallback off for a `remote` session. A native Pi session keeps its own title.
+- Covered by `apps/desktop/test/session-title-prompt-fallback.test.mjs`,
+  `apps/desktop/test/queue-pending-actions.test.mjs`, the host-core
+  `derive_session_title` tests, and E2E-021a. See ADR 0323.

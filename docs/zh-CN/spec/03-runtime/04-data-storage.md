@@ -376,8 +376,12 @@ CREATE INDEX idx_sessions_deleted ON sessions(deleted_at) WHERE deleted_at IS NO
 
 `title_source` 记录 `legacy`、`default`、`manual` 或 `generated`。架构 v23 会将已有的
 已知占位标题归类为 `default`，其余标题归类为 `manual`，不改写标题。新建会话和手动重命名
-会写入相应来源。独立标题插件只能读取 `default` 会话的首轮文本，并且只能用精确标题
-比较并设置，因此并发手动重命名会胜出。
+会写入相应来源。`default` 表示“非用户选择、仍可替换”：它既覆盖新会话的占位标题，也覆盖
+确定性的首条提示兜底标题（host-core 只在存储标题仍是可识别占位标题时才写入）。占位标题在
+所有已发布的语言下都会被识别，因为渲染器创建会话时会写入本地化的 `chat.untitledTask` 文案。
+独立标题插件只能读取 `default` 会话的首轮文本，并且只能用精确标题比较并设置，因此并发手动
+重命名会胜出。
+会胜出。
 
 插件导入增加一个由主机拥有的来源 sidecar。它与核心会话身份分离，
 每次插件读写都必须匹配创建该行的 `plugin_id`：

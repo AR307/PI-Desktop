@@ -2842,18 +2842,21 @@ identify the platform validation still needed.
   an over-80-Unicode-code-point title. 6) Open **Session Titles: Configure**,
   set the prompt to return a fixed test title, choose the deterministic test
   model, and save. 7) Send the first prompt in the default-title session. 8)
-  Confirm the title stays at its localized default while the turn runs, then
-  wait for `session:turnEnded` and the plugin completion. 9) Manually rename
-  that session and complete another turn.
+  Confirm the Sidebar and topbar immediately show the normalized
+  48-character prompt fallback, then wait for `session:turnEnded` and the
+  plugin completion, which replaces that fallback with the deterministic test
+  title. 9) Manually rename that session and complete another turn. 10) Send
+  the first prompt in another default-title session with the plugin disabled.
 - **Expected**: The saved title is trimmed, displayed across every current
   session-summary surface, and persists after restart. The session stays in
   the same project or Temporary group, its transcript/message count and
   recent-activity ordering do not change, and historical notification title
-  snapshots are unchanged. Empty and overlong values are rejected. Sending a
-  prompt does not change the core title. The enabled plugin replaces a
-  still-default title with the deterministic test title after the completed
-  turn; after a manual rename, a later plugin completion cannot replace it. A
-  session without the plugin remains at its localized default title.
+  snapshots are unchanged. Empty and overlong values are rejected. Sending the
+  first prompt immediately persists the normalized 48-character prompt fallback
+  as a still-replaceable automatic title. With the plugin enabled, that fallback
+  is replaced by the deterministic test title after the completed turn; after a
+  manual rename, a later plugin completion cannot replace it. A session without
+  the plugin keeps its prompt fallback, and a second prompt never changes it.
 - **Specs linked**: `03-runtime/01-ipc-protocol.md`,
   `03-runtime/04-data-storage.md`, `03-runtime/06-host-rpc-protocol.md`,
   `03-runtime/02-agent-runtime.md`, `07-plugins/03-plugin-api.md`,

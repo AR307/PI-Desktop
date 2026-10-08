@@ -245,6 +245,10 @@ type ToolBudgetHealth = {
 - `session.getScratchPath` — 会话的 scratch 目录（D114），按需创建
 - `session.rename` — 在主机边界裁剪并校验标题，接受 1–80 个 Unicode 码点；成功后将标题来源
   标记为 `manual`，但不更新 `updated_at`、转录内容、消息数或历史通知标题快照。
+- `session.deriveTitle` — `{ id, title }`：应用确定性的首条提示兜底标题，返回
+  `{ updated: boolean }`。标题按同样的 1–80 码点规则校验，且只在存储标题仍是可识别占位
+  标题、标题来源为 `default` 时写入；写入后仍保留该来源，因此标题插件还能替换派生文本，
+  并且不更新 `updated_at`、转录内容或消息数。
 - `session.configure` — 以原子方式持久保存 `mode`、`providerId`、`modelId`，
   以及可选的 `thinkingLevel` 用于下一个 pi 回合； omitting/null
   `thinkingLevel` 保留当前值；返回无效模式或级别

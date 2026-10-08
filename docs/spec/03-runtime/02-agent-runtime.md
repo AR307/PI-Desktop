@@ -92,18 +92,26 @@ finalization. A steering failure must not terminate the active run.
 
 ### 4.1 Session title generation
 
-The core keeps new sessions at their localized default title. It does not
-derive a title from the first prompt or run a title completion. An optional
-standalone plugin may subscribe to `session:turnEnded`; with the dedicated
+The core keeps new sessions readable without any model call. Sending the first
+prompt into a session whose stored title is still a recognized placeholder asks
+the host for a deterministic fallback title through `session/deriveTitle`. The
+renderer collapses whitespace and caps its request at 48 characters; host-core
+accepts it only while the stored title is still a placeholder with the `default`
+source, so the fallback never replaces a manual rename or an earlier automatic
+title, and the write does not change `updated_at`.
+
+That fallback keeps the source `default`: the derived text is not a user choice,
+so the session stays eligible for automatic replacement. An optional standalone
+plugin may subscribe to `session:turnEnded`; with the dedicated
 `session.autoTitle` permission it can read only the first user prompt and first
 assistant reply for a session whose title is still default, then use
 `agent.complete` with its configured prompt, model, and thinking level.
 
 The plugin writes through a host compare-and-set that succeeds only while the
-exact default title is still current. Manual renames and another generated
+exact title it read is still current. Manual renames and another generated
 title therefore win concurrent updates. Host-core owns the title source in
 schema v23; this state survives renderer restart and does not expose a general
-transcript-read API.
+transcript-read API. The core runs no title completion of its own.
 
 ## 5. Prompt flow
 

@@ -1067,6 +1067,13 @@ Minimal interface:
   `INVALID_PARAMS`; a successful rename changes only session metadata and does
   not alter transcript content, message count, or activity timestamps. It marks
   the title source as manual so an installed title plugin cannot replace it.
+- `session/deriveTitle({ id, title }) -> { updated: boolean }` applies the
+  deterministic first-prompt fallback. Host-core accepts it only while the
+  stored title is still a recognized placeholder with the `default` title
+  source, and it is applied only to metadata: `updated_at`, transcript content,
+  and message count are unchanged. The derived title keeps that source, so an
+  installed title plugin may still replace it; `session/rename` remains the
+  user-owned path.
 - `session/getScratchPath({ sessionId }) -> { path }` returns the session
   scratch directory `<data_dir>/scratch/<sessionId>/` without creating it.
 - `session/openScratchPath({ sessionId }) -> { ok, path }` resolves that same
