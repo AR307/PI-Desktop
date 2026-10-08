@@ -22,6 +22,7 @@ mod project_groups;
 mod repositories;
 mod schema;
 mod session_collaboration_migration;
+mod session_title_source_migration;
 pub(crate) use migrations::{
     archive_legacy_db, create_migration_backup, migrate_and_validate_top_level_mode,
     migrate_app_settings, migrate_v10_to_v15, migrate_v11_to_v15, migrate_v12_to_v15,
@@ -38,6 +39,7 @@ pub(crate) use repositories::{
     OBSOLETE_PLAN_APPROVAL_PERMISSION_MODE,
 };
 pub(crate) use schema::{PLAN_APPROVALS_SCHEMA, SCHEMA_LATEST, SESSION_TODO_DDL};
+pub(crate) use session_title_source_migration::migrate_v22_to_v23;
 
 pub fn now_ms() -> i64 {
     chrono::Utc::now().timestamp_millis()
