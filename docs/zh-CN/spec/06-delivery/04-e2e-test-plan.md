@@ -9449,3 +9449,9 @@ preload, API normalization, store events, ToolRow, and Markdown renderer.
 No provider credentials or paid model calls are required. The fixture ends at
 work-panel file-request routing; artifact bytes are verified from the real
 host-created files. The full app's file-preview viewer is covered separately.
+
+### E2E-COMPOSER-configured-context-window
+
+- **步骤：**为目录发布 1M 的模型保存 500K 用户额度。打开 Composer 模型列表，然后发送一条简短消息并检查上下文用量。对目录管理的额度以及模型发现不可用的情况重复验证。
+- **预期：**用户配置的模型行和上下文检查器显示 500K；目录管理的额度跟随已发布值；没有发现信息的已配置模型仍显示保存的额度。模型选择保持不变。
+- **状态：**`apps/desktop/test/composer-models.test.mjs` 自动覆盖用户覆盖值、目录继承值及发现不可用时保留额度；完整的“保存 → 模型列表 → 发送消息 → 上下文检查器”路径仍需手动验证。
