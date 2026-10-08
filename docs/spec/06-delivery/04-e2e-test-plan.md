@@ -17013,7 +17013,10 @@ host-created files. The full app's file-preview viewer is covered separately.
   its own Classifiers group and absent when an existing row changes service,
   and that no Jev card is on the model configuration page yet. 2) Open the Jev
   form, paste a sentinel key and Check and save: the fixture answers the check,
-  the key reaches Host secure storage, Jev is on, and the card appears.
+  the key reaches Host secure storage, Jev is on, and the card appears. Confirm
+  AI services (with catalog status and refresh) precede Jev and image generation,
+  and that the card's privacy explanation is available from its heading help
+  control instead of as a persistent paragraph.
   3) Resolve a session launch with Jev enabled, then disabled and in Plan mode.
   4) Through the runtime's deferred catalog, request Jev in Agent mode and
   inspect Plan/Goal catalogs. 5) Call `JevClassify` with one choice, one score
@@ -17027,7 +17030,10 @@ host-created files. The full app's file-preview viewer is covered separately.
   the refusal is reported with TypeSafe's status. The card is on the page only
   once Jev has been added, and it leaves when the key does. The UI never returns
   the key to settings state, and removal disables Jev before deleting it. Only
-  an enabled Agent launch reads the key and passes it ephemerally to the sidecar.
+  the Jev title, key status and controls occupy the card; explanatory privacy
+  copy appears on demand from the heading help control. AI services stay above
+  Jev, followed by image generation. An enabled Agent launch reads the key and
+  passes it ephemerally to the sidecar.
   `JevClassify` appears in the Agent's deferred catalog only with a key and
   never in Plan or Goal. Closing the dialog cancels an in-flight check the same
   way a refused key does: nothing stored, nothing enabled. The fixture receives
