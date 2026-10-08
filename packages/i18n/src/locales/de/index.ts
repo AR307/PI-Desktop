@@ -352,6 +352,7 @@ export const de = {
     "fileRefMissing": "Keine Datei entspricht {{name}}",
     "fileRefRestricted": "{{name}} liegt außerhalb der für die App zugänglichen Orte",
     "fileRefLookupFailed": "Dieser Dateiverweis konnte nicht geprüft werden.",
+    "fileManagerUnavailable": "Der Dateimanager ist nicht verfügbar. Die Datei wurde im integrierten Viewer geöffnet.",
     "revealFileInFolder": "Im Ordner anzeigen",
     "fileRevealFailed": "Die Datei konnte nicht im Ordner angezeigt werden.",
     "copyFullPath": "Vollständigen Pfad kopieren",

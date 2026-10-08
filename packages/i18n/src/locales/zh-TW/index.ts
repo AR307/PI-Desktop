@@ -356,6 +356,7 @@ export const zhTW = {
     fileRefMissing: "沒有匹配 {{name}} 的檔案",
     fileRefRestricted: "{{name}} 不在應用程式允許存取的範圍內",
     fileRefLookupFailed: "無法檢查此檔案參照。",
+    fileManagerUnavailable: "檔案管理器目前無法使用，已在內建檔案檢視器中開啟。",
     revealFileInFolder: "在資料夾中顯示",
     fileRevealFailed: "無法在資料夾中開啟該檔案。",
     copyFullPath: "複製完整位址",

@@ -9002,17 +9002,18 @@ must keep splitting are covered by `markdown-blocks.test.mjs`.
   7. Click a conversation reference to `src/example.ts:42`. Confirm the host
      `file:` tab opens at line 42 even though the File Manager plugin is enabled.
   8. Disable the File Manager plugin. Confirm the view disappears from the menu
-     and the panel, and that a clicked conversation file path falls back to the
-     host `file:<path>` tab under Open resources.
-  9. Re-enable it, then restart the app. Confirm the enabled state and the tree
-     return, and that the registry did not gain a duplicate row.
+     and the panel. Click a project file path in the conversation; the host
+     should enable the bundled plugin and open that file in its view.
+  9. Restart the app. Confirm the enabled state and the tree return, and that
+     the registry did not gain a duplicate row.
 - **Expected**: A panel surface runs entirely on the public plugin contribution
   channel, is user-disableable, cannot be uninstalled, and survives restart. Its
   host-mediated actions obey the declared `fs.read` scope, and its own reads and
   writes stay inside the jail of the one project folder it is browsing
-  (ADR 0241, ADR 0263). Plain project-file links open in the bundled view; a
-  positioned `path:line` reference opens the host file tab and scrolls the
-  requested line even while the plugin view is available.
+  (ADR 0241, ADR 0263). Plain project-file links open in the bundled view,
+  bringing it up on demand after a direct click when its scope and permission
+  allow it; a positioned `path:line` reference opens the host file tab and
+  scrolls the requested line even while the plugin view is available.
 - **Specs linked**: `07-plugins/03-plugin-api.md` §3,
   `07-plugins/13-plugin-permissions-matrix.md` §2,
   `04-ux/08-component-spec.md` §5, ADR 0104, ADR 0109, ADR 0111,
@@ -12892,12 +12893,14 @@ are withdrawn with ADR 0165.
 
 - **Preconditions**: An Agent session in a workspace that contains
   `apps/desktop/src/App.tsx`, `docs/adr/0163-transcript-file-reference-chips.md`,
-  `docs/spec/00-baseline.md`, and a Unicode-named file such as `报告.pdf`.
+  `docs/spec/00-baseline.md`, `核查报告.md`, and a Unicode-named file such as
+  `报告.pdf`.
 - **Steps**: 1) Open an existing session whose transcript already contains
   assistant markdown. 2) Prompt a turn whose assistant reply mentions
   `apps/desktop/src/App.tsx` as a bare path, as inline code, a Unicode path such
-  as `报告.pdf`, and as a markdown link. 3) Click each. 4) Open the ADR markdown
-  file in the work-panel files viewer and click a `../spec/00-baseline.md` link.
+  as `报告.pdf`, and as a markdown link; also include
+  `[核查报告.md](核查报告.md)`. 3) Click each. 4) Open the ADR markdown file
+  in the work-panel files viewer and click a `../spec/00-baseline.md` link.
   5) Include an absolute path under the workspace, an outside absolute path,
   and a `~/` path in chat; confirm only the under-root path becomes a target.
   6) Send a user message `使用llama.cpp，给我迁移步骤，只读。`, then a user
@@ -12911,6 +12914,8 @@ are withdrawn with ADR 0165.
   - Each chat path opens `apps/desktop/src/App.tsx` in the File Manager
     work-panel view — the file view a chat click prefers — not a host `file:`
     tab.
+  - Clicking `[核查报告.md](核查报告.md)` in the assistant reply opens that
+    project Markdown file in the File Manager work-panel view.
   - Unicode filenames and multi-segment paths inside the workspace become
     targets, while an outside absolute path and a `~/` path stay plain text.
   - An absolute path under the workspace resolves to its workspace-relative

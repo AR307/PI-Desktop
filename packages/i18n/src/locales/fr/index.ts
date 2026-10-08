@@ -352,6 +352,7 @@ export const fr = {
     "fileRefMissing": "Aucun fichier ne correspond à {{name}}",
     "fileRefRestricted": "{{name}} se trouve hors des emplacements accessibles à l'application",
     "fileRefLookupFailed": "Impossible de vérifier cette référence de fichier.",
+    "fileManagerUnavailable": "Le gestionnaire de fichiers est indisponible. Le fichier a été ouvert dans le lecteur intégré.",
     "revealFileInFolder": "Afficher dans le dossier",
     "fileRevealFailed": "Impossible d'afficher le fichier dans son dossier.",
     "copyFullPath": "Copier le chemin complet",

@@ -352,6 +352,7 @@ export const es = {
     "fileRefMissing": "Ningún archivo coincide con {{name}}",
     "fileRefRestricted": "{{name}} está fuera de las ubicaciones a las que puede acceder la aplicación",
     "fileRefLookupFailed": "No se pudo comprobar esta referencia de archivo.",
+    "fileManagerUnavailable": "El administrador de archivos no está disponible. El archivo se abrió en el visor integrado.",
     "revealFileInFolder": "Mostrar en carpeta",
     "fileRevealFailed": "No se pudo mostrar el archivo en su carpeta.",
     "copyFullPath": "Copiar ruta completa",

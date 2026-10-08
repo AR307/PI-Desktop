@@ -364,6 +364,7 @@ export const ko = {
     fileRefMissing: "{{name}}과(와) 일치하는 파일이 없습니다",
     fileRefRestricted: "{{name}}은(는) 앱이 접근할 수 있는 위치 밖에 있습니다",
     fileRefLookupFailed: "이 파일 참조를 확인할 수 없습니다.",
+    fileManagerUnavailable: "파일 관리자를 사용할 수 없어 내장 파일 보기에서 열었습니다.",
     revealFileInFolder: "폴더에서 보기",
     fileRevealFailed: "폴더에서 파일을 표시할 수 없습니다.",
     copyFullPath: "전체 경로 복사",

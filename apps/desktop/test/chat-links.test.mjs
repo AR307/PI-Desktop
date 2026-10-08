@@ -216,6 +216,10 @@ test("resolvePreviewTarget classifies urls and workspace files", () => {
     kind: "file",
     path: "docs/README.md",
   });
+  assert.deepEqual(resolvePreviewTarget("核查报告.md", ROOT), {
+    kind: "file",
+    path: "核查报告.md",
+  });
   assert.deepEqual(resolvePreviewTarget(`${ROOT}/src/a.ts`, ROOT), {
     kind: "file",
     path: `${ROOT}/src/a.ts`,
@@ -740,6 +744,12 @@ test("markdown linkification encodes a Windows file path without losing its sour
   const uncLink = uncTree.children[0].children.find((node) => node.type === "link");
   assert.equal(uncLink.url, encodeURIComponent(unc));
   assert.equal(uncLink.children[0].value, unc);
+});
+
+test("a relative Unicode Markdown anchor reaches the local file opener", () => {
+  const markup = renderSanitizedMarkdown("[核查报告.md](核查报告.md)");
+  assert.match(markup, /<a href="[^"]+">核查报告\.md<\/a>/);
+  assertMarkdownLinkClick(markup, "核查报告.md");
 });
 
 test("splitChatText keeps unknown extensions literal", () => {

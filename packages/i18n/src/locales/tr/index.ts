@@ -364,6 +364,7 @@ export const tr = {
     fileRefMissing: "{{name}} ile eşleşen dosya yok",
     fileRefRestricted: "{{name}} uygulamanın erişebildiği konumların dışında",
     fileRefLookupFailed: "Bu dosya başvurusu denetlenemedi.",
+    fileManagerUnavailable: "Dosya yöneticisi kullanılamıyor. Dosya yerleşik görüntüleyicide açıldı.",
     revealFileInFolder: "Klasörde göster",
     fileRevealFailed: "Dosya klasörde gösterilemedi.",
     copyFullPath: "Tam yolu kopyala",
