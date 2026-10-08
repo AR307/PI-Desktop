@@ -157,6 +157,7 @@ so "Modify the files it lists" is followed by the list.
 | `session.delete.own` | Trash or purge sessions imported by this plugin | 将此插件导入的会话移入回收站或清除 |
 | `usage.read` | Read usage statistics | 读取用量统计 |
 | `agent.complete` | Run a one-shot completion with your models | 用你的模型发起一次补全 |
+| `composer.transform` | Transform text in the Composer | 转换输入框中的文本 |
 | `speech.adapter.register` | Register a speech adapter | 注册语音适配器 |
 | `audio.capture.background` | Use the microphone in the background | 后台使用麦克风 |
 | `audio.playback.background` | Play audio in the background | 后台播放声音 |
