@@ -3,12 +3,9 @@ import type { ActivationScope } from "../activation.js";
 import type { TrustedExtensionDiagnostic } from "../trusted-extensions.js";
 
 /**
- * Where the marketplace catalog comes from.
- *
- * `official` keeps its meaning — the official one — and the official one is the
- * plugin center, so a settings row written before the center existed keeps
- * meaning what its author picked instead of needing a migration. `github` and
- * `mirror` are the two backup channels, and `custom` is a URL the user typed.
+ * Legacy persisted marketplace-source values. The application ignores these
+ * values and always uses the official plugin center, but the union remains so
+ * existing settings can be read without a schema migration.
  */
 export type PluginMarketSource = "official" | "github" | "mirror" | "custom";
 

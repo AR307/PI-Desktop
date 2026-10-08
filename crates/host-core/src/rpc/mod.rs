@@ -2230,9 +2230,9 @@ async fn handle_request(
             st.db
                 .set_setting("app", &settings)
                 .map_err(|e| rpc_err(1000, e.to_string(), "INTERNAL"))?;
-            // Re-pin the marketplace channel in memory. Fetching here would hold
-            // the state lock behind a remote timeout, so the renderer triggers
-            // `market.refresh` after switching channels.
+            // Keep the marketplace channel in memory aligned with settings.
+            // Legacy source values are ignored, so this remains the official
+            // channel; the renderer owns remote refresh timing.
             let (channel, custom_url) =
                 crate::plugins::market_channel_from_settings(Some(&settings));
             st.plugins.set_market_channel(channel, custom_url);

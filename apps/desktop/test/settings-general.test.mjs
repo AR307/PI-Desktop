@@ -31,13 +31,6 @@ const scheduledFormatSource = await readFile(
   "utf8",
 );
 const pluginsPageSource = await readPluginsSource();
-const marketplaceSettingsSource = await readFile(
-  new URL(
-    "../src/components/plugins/MarketplaceSourceSettings.tsx",
-    import.meta.url,
-  ),
-  "utf8",
-);
 // API services and vendor accounts share one list (D625).
 const serviceListSource = await readFile(
   new URL("../src/components/settings/ServiceList.tsx", import.meta.url),
@@ -487,12 +480,13 @@ test("settings rail uses short parallel labels and descriptive page titles", () 
   assert.match(settingsPageSource, /titleKey: entry\.titleKey/);
 });
 
-test("marketplace source settings live inside the Plugins marketplace surface", () => {
-  assert.match(pluginsPageSource, /<MarketplaceSourceSettings/);
-  assert.match(marketplaceSettingsSource, /api\.marketRefresh\(true\)/);
-  assert.match(marketplaceSettingsSource, /settings\.marketProvider/);
-  assert.match(marketplaceSettingsSource, /<SettingsMenuSelect/);
-  assert.doesNotMatch(marketplaceSettingsSource, /<Select/);
+test("Plugins marketplace keeps official refresh without source settings", () => {
+  assert.doesNotMatch(
+    pluginsPageSource,
+    /MarketplaceSourceSettings|pluginMarketSource|pluginMarketCustomUrl|marketProvider|marketCustomUrl|marketSource/,
+  );
+  assert.match(pluginsPageSource, /api\.marketRefresh\(true\)/);
+  assert.match(pluginsPageSource, /refreshMarket\(query, \{ refreshRemote: true \}\)/);
   assert.doesNotMatch(settingsPageSource, /ExtensionMarketSection/);
   assert.doesNotMatch(settingsPageSource, /tab === "extensions"/);
 });

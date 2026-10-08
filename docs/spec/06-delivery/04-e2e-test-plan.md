@@ -3210,20 +3210,20 @@ identify the platform validation still needed.
 
 - **Focus regression**: In light and dark themes, open a marketplace card and press Escape. Like pointer dismissal, Escape leaves no line or focus ring on the card. Then use Tab and Shift+Tab: the detail button shows a complete, unclipped ring, and Install remains separately focusable. Automated focus-state regression: `node scripts/e2e-plugin-detail-focus.mjs`; verify the rendered ring visually.
 
-#### E2E-024F: Refresh official remote marketplace repository
+#### E2E-024F: Refresh the official marketplace catalog
 
-- **Preconditions**: Network available to GitHub raw content.
-- **Steps**: 1) Open Extensions → Marketplace. 2) Use the header Refresh marketplace action. 3) Confirm the source line names the official channel (`plugins.aiuo.net`) and that the GitHub and CNB backups are selectable.
-- **Expected**: Catalog refreshes from the selected channel; card grid updates; offline fallback still works if fetch fails.
+- **Preconditions**: Network available to `plugins.aiuo.net`.
+- **Steps**: 1) Open Extensions → Marketplace. 2) Use the header Refresh marketplace action. 3) Confirm the official catalog refreshes and the card grid updates.
+- **Expected**: The marketplace uses `plugins.aiuo.net/catalog.json`; the page has no source selector; the cached official catalog remains available if refresh fails.
 - **Specs linked**: `07-plugins/07-plugin-marketplace.md`
 - **Acceptance**: G (remote marketplace source)
 - **Status**: Documented / host-core unit covered
 
-#### E2E-024P: Switch the marketplace catalog source
+#### E2E-024P: The marketplace ignores legacy source settings
 
-- **Preconditions**: Network available to `plugins.aiuo.net`, `raw.githubusercontent.com`, and `cnb.cool`.
-- **Steps**: 1) Open Extensions → Marketplace on a clean profile and confirm the source line reads Official channel. 2) Switch to GitHub backup, then CNB backup, then Custom with a URL, then back to Official channel. 3) After each switch, confirm the catalog refreshes in the same surface. 4) Install a plugin from the official channel, then one from the CNB backup. 5) Choose Custom URL with an empty value.
-- **Expected**: A fresh profile opens on the official channel, whose catalog comes from `plugins.aiuo.net/catalog.json`; the four choices are labelled Official channel / GitHub backup / CNB backup / Custom in that order; switching triggers a refresh and reports the new plugin count; the source selector remains the only source-status control, with no redundant provider explanation or active-source status line; the official install resolves through the platform while the CNB install downloads from the mirror and passes the same shasum verification as before, so the two backup paths are unchanged; switching back to a source reuses its cached snapshot instead of deleting it and never rounds trips; the installed record names the channel the plugin came from; choosing Custom URL with an empty value falls back to the official default rather than an empty endpoint.
+- **Preconditions**: Profiles can be seeded with legacy `pluginMarketSource` values `github`, `mirror`, and `custom`, including a custom URL. Network or a local request stub is available for the official catalog.
+- **Steps**: 1) Start the app with each seeded profile. 2) Open Extensions → Marketplace and refresh. 3) Inspect the catalog request. 4) Install a published plugin from the marketplace.
+- **Expected**: The page has no source controls; every profile requests `https://plugins.aiuo.net/catalog.json` and ignores the persisted source and custom URL; install uses the official platform resolve path, with the official catalog URL as the verified fallback; legacy settings remain readable and require no migration.
 - **Specs linked**: `07-plugins/07-plugin-marketplace.md` §2
 - **Acceptance**: G (remote marketplace source)
 - **Status**: Documented / host-core unit covered
@@ -3233,12 +3233,11 @@ identify the platform validation still needed.
 - **Preconditions**: Windows x64 host. The official catalog request is forced
   to fail with a localized, non-UTF-8 curl/Schannel diagnostic (a deterministic
   fake curl in the test PATH may emit GBK stderr and exit 35).
-- **Steps**: 1) Select Extensions → Marketplace with GitHub (official) as the
-  source. 2) Refresh the marketplace. 3) Inspect the error toast. 4) Switch to
-  the CNB mirror and refresh again.
+- **Steps**: 1) Open Extensions → Marketplace. 2) Refresh the marketplace.
+  3) Inspect the error toast.
 - **Expected**: The failed request remains a `PLUGIN_NETWORK` failure and
   retains the readable localized diagnostic without Unicode replacement
-  characters; switching to the mirror can refresh the catalog normally.
+  characters; the marketplace remains on the official source.
 - **Specs linked**: `07-plugins/07-plugin-marketplace.md`,
   `03-runtime/07-process-model.md`
 - **Acceptance**: G (remote marketplace source)
@@ -3253,19 +3252,19 @@ identify the platform validation still needed.
 - **Acceptance**: G (marketplace install + permission review)
 - **Status**: Documented / host-core covered by unit tests + protocol methods
 
-#### E2E-024R: Install a center-published plugin from the unchanged distribution source
+#### E2E-024R: Install a center-published plugin from the official marketplace
 
 - **Preconditions**: A `schemaVersion: 2` catalog served from the distribution repository, with one plugin carrying provenance and an approved review verdict, its package under `packages/`. A second fixture declares `artifactBaseUrl` for the mirror/enterprise case.
-- **Steps**: 1) Keep the marketplace source at its default. 2) Open a plugin's detail sheet. 3) Read the Source section. 4) Install the selected version. 5) Switch to the CNB mirror and repeat the install. 6) Repeat against the fixture that declares a base.
-- **Expected**: No settings change or client update is needed to see center-published plugins, because the catalog URL is unchanged; the relative package URL resolves against the catalog directory, so GitHub serves it from `raw.githubusercontent.com` and the mirror from `cnb.cool` with an identical checksum; a declared `artifactBaseUrl` takes precedence when present; the detail sheet shows the source repository, commit, and builder before install; the installed record keeps publisher, trust tier, and source pin.
+- **Steps**: 1) Open a plugin's detail sheet. 2) Read the Source section. 3) Install the selected version through the official resolve path. 4) Repeat with a local resolve stub that returns no source, exercising the official catalog URL fallback and an `artifactBaseUrl` fixture.
+- **Expected**: Center-published plugins appear in the fixed official catalog; the detail sheet shows the source repository, commit, and builder before install; resolve mirror bytes match the platform digest, while catalog fallback bytes match the catalog digest; the installed record keeps publisher, trust tier, and source pin.
 - **Specs linked**: `07-plugins/07-plugin-marketplace.md`, `07-plugins/15-plugin-center.md`
 - **Acceptance**: G (publisher-owned source distribution)
 - **Status**: Documented / host-core covered by unit tests
 
 #### E2E-024S: Package host allowlist refuses an untrusted download
 
-- **Preconditions**: A catalog fixture whose version URL points at a host outside the allowlist, plus one with embedded credentials and one on plain HTTP.
-- **Steps**: 1) Refresh the marketplace. 2) Inspect the plugin card and detail sheet. 3) Attempt an install. 4) Repeat with a private catalog whose packages sit on its own host.
+- **Preconditions**: An isolated host-core test uses `PI_DESKTOP_PLUGIN_MARKET_URL` to load a catalog fixture whose version URL points at a host outside the allowlist, plus fixtures with embedded credentials and plain HTTP.
+- **Steps**: 1) Refresh the fixture catalog. 2) Inspect the plugin card and detail sheet. 3) Attempt an install. 4) Repeat with a private catalog whose packages sit on its own host.
 - **Expected**: The row does not offer an install action for an off-allowlist URL; an attempted install fails with `PLUGIN_MARKET_UNTRUSTED_HOST` naming the rejected host before any request leaves the machine; a credentialed URL and non-loopback plain HTTP are refused the same way; a private catalog can still serve packages from the host that served it, without widening the allowlist for third-party hosts.
 - **Specs linked**: `07-plugins/07-plugin-marketplace.md`, `07-plugins/04-plugin-security.md`
 - **Acceptance**: G (marketplace download boundary)
@@ -3282,8 +3281,8 @@ identify the platform validation still needed.
 
 #### E2E-024U: Trust tier and host version bound are enforced by the client
 
-- **Preconditions**: A custom-source catalog claiming `trust: "verified"`, a catalog with an unrecognised tier, and a version whose `minPiDesktop` exceeds the running host.
-- **Steps**: 1) Point the marketplace at the custom source. 2) Inspect the card and detail sheet badges. 3) Attempt to install the version pinned to a newer host. 4) Repeat with a `minPiDesktop` that is a range expression rather than a version.
+- **Preconditions**: Test runs use `PI_DESKTOP_PLUGIN_MARKET_URL` for a catalog claiming `trust: "verified"`, a catalog with an unrecognised tier, and a version whose `minPiDesktop` exceeds the running host.
+- **Steps**: 1) Load the fixture catalog. 2) Inspect the card and detail sheet badges. 3) Attempt to install the version pinned to a newer host. 4) Repeat with a `minPiDesktop` that is a range expression rather than a version.
 - **Expected**: A `verified` claim from a non-official source renders as community with no shield; an unrecognised tier renders as unknown; the version requiring a newer host is not offered and an explicit install fails with `PLUGIN_HOST_TOO_OLD` naming both versions; an unparseable bound is ignored rather than making the plugin uninstallable.
 - **Specs linked**: `07-plugins/07-plugin-marketplace.md`, `07-plugins/15-plugin-center.md`
 - **Acceptance**: G (trust presentation)
@@ -10040,9 +10039,8 @@ This test plan spec is accepted when:
   an outside press, or scrolling the trigger out of view closes it while focus
   returns to Change.
 - Plugin load/enable/disable/uninstall remains available from the app shell's
-  independent Extensions destination; its Marketplace tab also owns the
-  official/mirror/custom catalog source picker, so Settings has no duplicate
-  Extensions destination.
+  independent Extensions destination; its Marketplace tab always uses the
+  official catalog, so Settings has no duplicate Extensions destination.
 - Dark: rail `#000`, main `#181818`, cards elevated `#212121`.
 
 ### US-UI-38 Composer workspace context omitted
@@ -16106,11 +16104,11 @@ plugin-form fixtures in an isolated temporary directory at runtime.
   marked); `packages/shared/src/model-catalog.test.ts` covers the four source rules;
   `crates/host-core/src/providers/catalog.rs` covers the config round trip, the
   unmarked record, and the dropped unknown marker. The end-to-end settings journey
-#### E2E-PLUGIN-official-channel-resolves-through-the-platform: An official-channel install resolves through the platform and installs from the first working mirror
+#### E2E-PLUGIN-official-channel-resolves-through-the-platform: An official-channel install uses platform mirrors when resolve answers promptly
 
 - **Preconditions**: A clean profile on the official channel, a plugin present in `plugins.aiuo.net/catalog.json`, and a request log for the platform and both mirror hosts (a local stub may stand in for each).
-- **Steps**: 1) Open Extensions → Marketplace and confirm the source line reads Official channel and that the catalog came from `plugins.aiuo.net`. 2) Install the plugin. 3) Capture the request the platform received. 4) Inspect which mirror served the package. 5) Install a second plugin, then install the same version of the first one again.
-- **Expected**: Exactly one `POST /api/v1/download/resolve` is sent per install or update, with a JSON body carrying `deviceId`, `pluginId`, and the version when one was picked; the package comes from the first entry in `downloads` that answers, and its bytes match the returned `sha256` and `sizeBytes` before anything is extracted; a mirror that is unreachable or fails is abandoned and the next one is used without user interaction; reinstalling the same version issues a fresh resolve call rather than reusing the earlier answer, because the response is never cached; the installed plugin passes the ordinary permission review and its record names the official channel as its provider.
+- **Steps**: 1) Open Extensions → Marketplace and confirm the catalog loads. 2) Capture the catalog request and verify it used `plugins.aiuo.net`. 3) Install the plugin. 4) Capture the request the platform received. 5) Inspect which mirror served the package. 6) Install a second plugin, then install the same version of the first one again.
+- **Expected**: The marketplace UI has no source selector; exactly one `POST /api/v1/download/resolve` is sent per install or update, with a JSON body carrying `deviceId`, `pluginId`, and the version when one was picked; when resolve answers within three seconds, the package comes from the first entry in `downloads` that answers, and its bytes match the returned `sha256` and `sizeBytes` before anything is extracted; a mirror that is unreachable or fails is abandoned and the next one is used without user interaction; if resolve exceeds its deadline, the install switches to the catalog URL and verifies its catalog digest; reinstalling the same version issues a fresh resolve call rather than reusing the earlier answer, because the response is never cached; the installed plugin passes the ordinary permission review and its record names the official channel as its provider.
 - **Specs linked**: `07-plugins/07-plugin-marketplace.md` §2, `07-plugins/15-plugin-center.md` §10
 - **Acceptance**: G (remote marketplace source)
 - **Milestone**: M6+
@@ -16120,17 +16118,17 @@ plugin-form fixtures in an isolated temporary directory at runtime.
 
 - **Preconditions**: An official-channel install whose `downloads` list has at least two entries, with the first mirror serving bytes that do not match the returned `sha256` (a stale distribution, or a stub that serves the CNB-era bytes for `pi.todo-0.6.5`), plus a view of the install cache and the plugin directory.
 - **Steps**: 1) Start the install. 2) Watch the first mirror's download and the digest check. 3) Inspect the install cache and the plugin directory before the install finishes. 4) Let the install continue. 5) Repeat with a stub whose first mirror fails only the announced `sizeBytes`.
-- **Expected**: The mismatching bytes are discarded without being extracted or handed to the installer, nothing lands in the plugin directory, and the rejection is reported in the install progress instead of being swallowed; the next mirror's bytes are verified against the same digest and the install completes from there; the size-mismatch case behaves identically; when every entry fails, the install ends as a reported failure rather than a partially installed plugin.
+- **Expected**: The mismatching bytes are discarded without being extracted or handed to the installer, nothing lands in the plugin directory, and the rejection is reported in the install progress instead of being swallowed; the next mirror's bytes are verified against the same digest and the install completes from there; the size-mismatch case behaves identically; when every returned mirror fails digest or size validation, the install ends as a reported failure rather than falling back to different bytes or leaving a partial plugin.
 - **Specs linked**: `07-plugins/07-plugin-marketplace.md` §2
 - **Acceptance**: G (remote marketplace source) + Security
 - **Milestone**: M6+
 - **Status**: Draft
 
-#### E2E-PLUGIN-platform-unreachable-install-falls-back-to-the-catalog-url: An install falls back to the catalog URL when the platform cannot be reached
+#### E2E-PLUGIN-platform-unreachable-install-falls-back-to-the-catalog-url: A slow or unavailable platform resolve falls back quickly to the catalog URL
 
-- **Preconditions**: The official catalog is already cached from a successful refresh, and `plugins.aiuo.net` becomes unreachable for the install (a blocked stub, or a refused DNS/proxy route).
-- **Steps**: 1) Refresh the catalog while the platform is reachable, then make it unreachable. 2) Install a plugin whose catalog entry carries a relative `url`. 3) Confirm which host served the package and whether the platform received a resolve request. 4) Restore reachability and install a version the platform refuses in turn with `403 NOT_PUBLISHED`, `403 PLUGIN_ARCHIVED`, `404`, `429`, and `503`.
-- **Expected**: The install resolves the package from the catalog's own URL — `artifactBaseUrl` plus the relative `url` — and completes after the same shasum verification; no resolve request reaches the platform for that install and the fallback install is not counted; the failed resolve call is visible in the install log instead of being hidden; once the platform answers again each refusal produces its own message — not-published with no retry, archived hiding the plugin from install and update selection, not-found, one `Retry-After` wait for the rate limit, and a deployment error for `503` — and no refusal silently switches to another channel or another version.
+- **Preconditions**: The official catalog has been refreshed. A local stub can delay `POST /api/v1/download/resolve` beyond three seconds or return `429`, `503 NO_DOWNLOAD_SOURCE`, and the publication refusals.
+- **Steps**: 1) Install a plugin while the resolve stub delays its response beyond three seconds. 2) Confirm the UI leaves Resolve and begins downloading from the catalog URL. 3) Repeat with a `429` and `503 NO_DOWNLOAD_SOURCE`. 4) Return `403 NOT_PUBLISHED`, `403 PLUGIN_ARCHIVED`, and `404` for a selected version.
+- **Expected**: A slow resolve call is abandoned after three seconds; timeout, `429`, and `503 NO_DOWNLOAD_SOURCE` proceed through the catalog's `artifactBaseUrl` plus relative `url`, and bytes still pass the catalog digest check before installation; rate limiting is not retried or waited out; `403 NOT_PUBLISHED`, `403 PLUGIN_ARCHIVED`, and `404` remain explicit failures and never install the fallback package; archived plugins remain hidden from install and update selection; the selected channel does not change.
 - **Specs linked**: `07-plugins/07-plugin-marketplace.md` §2
 - **Acceptance**: G (remote marketplace source)
 - **Milestone**: M6+

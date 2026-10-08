@@ -129,13 +129,9 @@ export type AppSettings = {
   keybindings?: KeybindingOverrides;
   /** Unlocks the devtools console (settings button, F12, macOS View menu). */
   developerMode?: boolean;
-  /**
-   * Extension marketplace provider. `mirror` targets the cnb.cool copy for
-   * networks that cannot reach `raw.githubusercontent.com`; both serve the
-   * same catalog and packages.
-   */
+  /** @deprecated Retained for persisted settings compatibility; the marketplace always uses the official source. */
   pluginMarketSource?: PluginMarketSource;
-  /** Catalog URL used when `pluginMarketSource` is `custom`. */
+  /** @deprecated Retained for persisted settings compatibility and ignored by the marketplace. */
   pluginMarketCustomUrl?: string;
   /**
    * Outbound proxy for app-owned HTTP (D340). Absent means System: Chromium

@@ -189,7 +189,7 @@ Settings is a **full-window page** that replaces the app sidebar + main chrome (
   - **Relaxed network mode**: one switch persisting as
     `AppSettings.networkPolicy.mode` (`relaxed` | `strict`), **on by default**.
     When it is on, an endpoint the user typed themselves — a model base URL, an
-    MCP server, a market source, a git remote — may be a loopback or LAN address,
+    MCP server, a git remote — may be a loopback or LAN address,
     may use plain `http`, and a transparent proxy's fake-IP answers are
     tolerated. Off returns those endpoints to the public-HTTPS-only boundary.
     The first plaintext hop to such an endpoint shows one informational notice.
@@ -858,8 +858,6 @@ system while preserving their different data ownership:
 - Plugin management remains available from the app shell's independent
   **Plugins** destination, including load, enable, disable, and uninstall; it is
   not duplicated in Settings
-- The marketplace source selector lives inside **Plugins → Marketplace**, next
-  to the catalog controls; it is not a separate Settings destination.
 - Project archive is indexed by Settings search and is not duplicated as a home
   sidebar destination or standalone global-search page
 - Back to app returns to chat shell from the rail's pinned footer action
