@@ -2,6 +2,19 @@ import type { ChangelogEntry } from "./changelog.js";
 
 export const deEntries: ChangelogEntry[] = [
   {
+    "version": "0.18.0",
+    "date": "2026-10-09",
+    "highlights": [
+      "Richten Sie den Jev-Klassifizierer von TypeSafe über „Dienst hinzufügen“ ein; der API-Schlüssel wird vor dem Speichern geprüft.",
+      "Fügen Sie über „Dienst hinzufügen“ Plugin-eigene API-Schlüssel-Dienste hinzu, mit lokalisierten Beschreibungen und Modellerkennung nach der Einrichtung.",
+      "Autorisierte Plugin-Aktionen können den Composer-Entwurf ändern und lassen sich rückgängig machen; die Prompt-Verbesserung steckt jetzt in einem optionalen Plugin.",
+      "Tool-Details bleiben eingeklappt, bis Sie sie öffnen, damit die fertige Antwort im Blick bleibt.",
+      "Erzeugen Sie Sitzungstitel mit einem optionalen Plugin; die erste Eingabe bleibt als Ersatz erhalten und manuelle Umbenennungen haben Vorrang.",
+      "Öffnen Sie lokale Markdown-Links aus dem Chat im integrierten Dateimanager, auch relative Links und Zeilenverweise.",
+      "Die Modellliste im Composer zeigt jetzt konfigurierte Kontextfensterlimits.",
+    ],
+  },
+  {
     "version": "0.17.0",
     "date": "2026-10-07",
     "highlights": [

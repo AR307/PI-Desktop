@@ -2,6 +2,19 @@ import type { ChangelogEntry } from "./changelog.js";
 
 export const enEntries: ChangelogEntry[] = [
   {
+    version: "0.18.0",
+    date: "2026-10-09",
+    highlights: [
+      "Set up TypeSafe's Jev classifier from Add Service and verify its API key before saving.",
+      "Add plugin-owned API-key services from Add Service, with localized descriptions and model discovery after setup.",
+      "Authorized plugin actions can transform a Composer draft with undo; prompt enhancement now runs as an optional plugin.",
+      "Tool details stay collapsed until opened, keeping the completed answer in view.",
+      "Generate session titles with an optional plugin while keeping first-prompt fallback and manual renames.",
+      "Open local Markdown links from chat in the bundled File Manager, including relative links and line references.",
+      "Show configured context-window limits in the Composer's model list.",
+    ],
+  },
+  {
     version: "0.17.0",
     date: "2026-10-07",
     highlights: [

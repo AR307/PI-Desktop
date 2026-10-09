@@ -2,6 +2,19 @@ import type { ChangelogEntry } from "./changelog.js";
 
 export const zhCNEntries: ChangelogEntry[] = [
   {
+    version: "0.18.0",
+    date: "2026-10-09",
+    highlights: [
+      "可从「添加服务」接入 TypeSafe 的 Jev 分类器；保存前会先验证 API 密钥。",
+      "可从「添加服务」添加插件提供的 API 密钥服务；提供本地化说明，并在配置密钥后发现模型。",
+      "获准的插件操作可改写 Composer 草稿并支持撤销；提示词增强现由可选插件提供。",
+      "工具详情默认收起，展开后再查看，让已完成的回答保持在视野中。",
+      "可通过可选插件生成会话标题；首条提示仍可作为回退，手动重命名优先。",
+      "从聊天打开本地 Markdown 文件链接，包括相对链接和行号引用；文件管理器不可用时会显示说明。",
+      "Composer 的模型列表现在会显示已配置的上下文窗口上限。",
+    ],
+  },
+  {
     version: "0.17.0",
     date: "2026-10-07",
     highlights: [

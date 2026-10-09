@@ -2,6 +2,19 @@ import type { ChangelogEntry } from "./changelog.js";
 
 export const trEntries: ChangelogEntry[] = [
   {
+    "version": "0.18.0",
+    "date": "2026-10-09",
+    "highlights": [
+      "TypeSafe Jev sınıflandırıcısını Hizmet Ekle'den kurun ve kaydetmeden önce API anahtarını doğrulayın.",
+      "Yerelleştirilmiş açıklamalar ve anahtar kurulumundan sonra model keşfiyle eklenti kaynaklı API anahtarlı hizmetleri ekleyin.",
+      "İzin verilen eklenti işlemleri Composer taslağını dönüştürebilir ve geri alınabilir; istem iyileştirme artık isteğe bağlı bir eklentide sunulur.",
+      "Yanıt görünür kalsın diye araç ayrıntıları siz açana kadar kapalı kalır.",
+      "İsteğe bağlı bir eklentiyle oturum başlığı oluşturun; ilk istem yedek başlık olarak kalır ve elle yeniden adlandırmalar önceliklidir.",
+      "Göreli bağlantılar ve satır başvuruları dahil yerel Markdown dosya bağlantılarını sohbetten yerleşik Dosya Yöneticisi'nde açın.",
+      "Composer'ın model listesi artık yapılandırılmış bağlam penceresi sınırlarını gösterir.",
+    ],
+  },
+  {
     "version": "0.17.0",
     "date": "2026-10-07",
     "highlights": [
