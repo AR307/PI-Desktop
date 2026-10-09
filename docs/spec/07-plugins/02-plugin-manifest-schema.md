@@ -194,6 +194,7 @@ providers?: PluginProviderContrib[]; // Host-owned provider rows; needs `provide
  themes?: PluginThemeContrib[];
  scenicThemes?: PluginScenicThemesContrib;
  windowAppearance?: PluginWindowAppearanceContrib; // native window background and Windows corner radius; needs `ui.window.appearance`
+ composerTransforms?: PluginComposerTransformContrib[]; // explicit Composer text actions; needs `composer.transform`
  mcpServers?: PluginMcpServerContrib[];
   services?: PluginServiceContrib[];
   bus?: PluginBusContrib;
@@ -218,6 +219,12 @@ type PluginAgentToolContrib = {
  schema: Record<string, unknown>; // JSON schema object
  timeoutMs?: number;
  permissions?: PluginPermission[];
+};
+
+type PluginComposerTransformContrib = {
+ id: string; // plugin-local; [A-Za-z][A-Za-z0-9_-]{0,63}
+ title: string | { en: string; "zh-CN": string };
+ undoTitle?: string | { en: string; "zh-CN": string };
 };
 
 type PluginSettingContrib = {
@@ -323,6 +330,7 @@ type PluginBusContrib = {
 type PluginProviderContrib = {
  id: string; // ^[a-zA-Z][a-zA-Z0-9_-]{0,63}$, unique within the plugin
  name: string; // display name in the native provider list
+ category?: string | { en: string; "zh-CN": string }; // Add Service group; defaults to plugin name
  vendorKey?: string; // models.dev vendor key, default `custom`
  baseUrl?: string; // absolute http(s) URL
  apiStyle?: PluginProviderApiStyle; // wire style, default `chat_completions`
@@ -377,6 +385,8 @@ type PluginPermission =
  | "fs.delete"
  | "agent.tool.register"
  | "agent.prompt.inject"
+ | "agent.complete"
+ | "composer.transform"
  | "renderer.extension"
  | "provider.register"
  | "provider.oauth"
@@ -496,12 +506,18 @@ and `**` matches one or more trailing segments (final segment only).
 
 ## 5.4 providers — provider rows the plugin declares
 
-`contributes.providers` declares at most 8 providers that the Host materializes
-as rows in the native provider list, owned by the plugin ([ADR 0259](../../adr/0259-plugin-declared-providers.md)):
+`contributes.providers` declares provider rows that the Host materializes in
+the native provider list, owned by the plugin ([ADR 0259](../../adr/0259-plugin-declared-providers.md)). There is no per-plugin provider-count cap; the existing 50 MiB plugin package limit remains the outer size bound:
 
 - the declaration `id` matches `[a-zA-Z][a-zA-Z0-9_-]{0,63}` and is unique
   within the plugin; the row id is `plugin:<pluginId>:<declaredId>`
 - `name` is required and is what Settings shows
+- `category` is optional Add Service group metadata. It accepts a non-empty
+  plain string or both localized labels (`en` and `zh-CN`); each label is at
+  most 128 characters. When omitted, the plugin name is the group label.
+- `description` is an optional short introduction shown in an Add Service
+  tooltip on hover or keyboard focus. It accepts a non-empty string or both
+  localized labels (`en` and `zh-CN`), each at most 280 characters.
 - `baseUrl` is optional, but must be an absolute `http(s)` URL
 - `apiStyle` is optional and defaults to `chat_completions`; the accepted values
   are the provider-config styles except `auto`
@@ -510,7 +526,10 @@ as rows in the native provider list, owned by the plugin ([ADR 0259](../../adr/0
   `onProviderOAuth` module export. Optional `oauth.loginLabel` is a
   non-empty string of at most 128 characters; `oauth.isSubscription` is a
   boolean. The host stores one encrypted credential per provider contribution.
-- `models` requires 1..64 entries with unique ids of 1..256 characters
+- `models` accepts up to 64 entries with unique ids of 1..256 characters. An
+  empty list is valid only for an API-key provider with `baseUrl`; after the
+  user saves a key, the Host discovers and caches that endpoint's models and
+  exposes the cached models for the plugin-owned row.
 
 `thinkingLevels` is optional. The Host trims entries, drops unknown canonical
 names, removes duplicates, and preserves the remaining declaration order. An
@@ -524,6 +543,16 @@ The declaration is re-read on every plugin load and is authoritative for its own
 fields; disabling the plugin keeps the rows and turns them off, while dropping a
 declaration or uninstalling the plugin deletes the row with its stored
 credentials.
+
+An API-key provider with a `baseUrl` appears in the Host's **Add Service**
+chooser while its plugin is loaded with `provider.register` and the provider has
+no saved key. Entries are grouped by `category`, or by plugin name when it is
+omitted. Selecting an entry opens the Host-owned key form and saves through the
+existing provider secret path. Once configured, the provider stays in the
+provider list and is omitted from Add Service so the same row is not offered as
+a second add action. OAuth and no-auth contributions do not appear in this
+chooser. Existing plugin-owned row reconciliation and credential retention are
+unchanged; category is display metadata only and does not grant a capability.
 
 OAuth contributions use the host-owned vendor-account UI. `onProviderOAuth`
 handles `login` and `refresh`; `pi.providers.oauth.prompt` and `.notify` provide
@@ -559,7 +588,8 @@ MVP may implement only:
 5. Path fields must not use absolute paths or `..`
 6. `main` / `ui.panel` / skills / `views[].entry` paths must exist
 7. tool `name` allows only `[a-zA-Z][a-zA-Z0-9_]*`
-8. Contribution ids (`themes`, `mcpServers`, `services`, `views`) must match
+8. Contribution ids (`themes`, `mcpServers`, `services`, `views`,
+   `composerTransforms`) must match
    `[a-zA-Z][a-zA-Z0-9_-]{0,63}` and be unique within their own list;
    `sessionSources` uses the same rule with `.` additionally allowed
 9. `themes[].path` must exist and end in `.css`; `themes[].base` may only be
@@ -573,8 +603,9 @@ MVP may implement only:
    valid patterns (§5.1)
 12. A contribution that needs a permission fails validation when the permission
    is missing: `themes` → `ui.theme`, `views` → `ui.view`, `providers` →
-   `provider.register`, OAuth providers → `provider.oauth`, stdio servers → `mcp.server.local`, remote
-   servers → `mcp.server.remote`, `services` → `background.service`,
+   `provider.register`, OAuth providers → `provider.oauth`, `composerTransforms` →
+   `composer.transform`, stdio servers → `mcp.server.local`, remote servers →
+   `mcp.server.remote`, `services` → `background.service`,
    `bus.publish` → `bus.publish`, `bus.subscribe` → `bus.subscribe`.
    `skills` is the exception — it predates the permission gate, so a manifest
    without `agent.prompt.inject` still validates and the runtime simply skips

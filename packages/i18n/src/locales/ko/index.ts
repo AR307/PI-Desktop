@@ -312,13 +312,6 @@ export const ko = {
     moveQueuedPromptDown: "아래로",
     editQueuedPrompt: "편집",
     editQueuedPromptBusy: "대기 중인 메시지를 편집하려면 먼저 입력란을 비우세요",
-    enhancePrompt: "프롬프트 개선",
-    enhancingPrompt: "개선 중…",
-    undoEnhancement: "개선 취소",
-    enhancementFailed: "프롬프트 개선 실패",
-    enhancementTimeout:
-      "재작성 시간이 초과되었습니다. 다시 시도하거나 설정에서 더 빠른 향상 모델로 바꾸세요.",
-    dismissEnhancementError: "프롬프트 개선 오류 닫기",
     sendWhileRunning: "후속 메시지 보내기 · {{shortcut}}로 방향 수정",
     steeringUnavailable: "현재 턴에 지시를 추가할 수 없습니다. 초안은 유지됩니다.",
     nativeSessionBusy: "이 네이티브 Pi 세션이 아직 응답 중입니다. 중지하거나 응답이 끝난 뒤 보내세요.",
@@ -1544,6 +1537,7 @@ sklm: {
     modelsFetchFailed: "모델을 불러올 수 없습니다.",
     modelsFetchFailedStatus: "요청 실패 ({{status}}).",
     modelsFetchNotFound: "이 주소에 모델 목록이 없습니다.",
+    providerUnavailable: "선택한 제공자를 더 이상 사용할 수 없습니다.",
     modelsFetchInvalidResponse: "서비스가 모델 목록을 반환하지 않았습니다.",
     modelsEmptyHint: "모델을 불러오려면 기본 URL을 입력하세요.",
     noModelMatches: "일치하는 모델이 없습니다.",
@@ -1638,33 +1632,6 @@ sklm: {
     fontSizeXl: "Trenta",
     fontSizeScale: "텍스트 크기 배율",
     fontSizePercent: "{{value}}%",
-    promptEnhancementTitle: "프롬프트 향상",
-    promptEnhancementDesc:
-      "입력창의 '프롬프트 향상' 동작에 적용됩니다. 시스템 프롬프트는 내장이며 사용자 템플릿과 모델을 사용자 지정할 수 있습니다.",
-    promptEnhancementCustomTemplate: "사용자 템플릿 사용",
-    promptEnhancementCustomTemplateDesc:
-      "내장 사용자 템플릿을 직접 만든 템플릿으로 교체합니다. 시스템 프롬프트는 내장으로 유지됩니다.",
-    promptEnhancementCustomTemplateActive: "사용자 템플릿 활성",
-    promptEnhancementCustomTemplateNeedsTemplate:
-      "먼저 사용자 템플릿을 저장하세요. 저장한 뒤에는 스위치로 내장 템플릿과 사용자 템플릿을 전환할 수 있습니다.",
-    promptEnhancementEdit: "편집",
-    promptEnhancementModelTitle: "프롬프트 향상",
-    promptEnhancementModel: "기본 모델",
-    promptEnhancementThinking: "추론 강도",
-    promptEnhancementThinkingDesc:
-      "재작성에 사용할 추론 강도입니다. 기본값은 끄기이며 가장 빠릅니다.",
-    promptEnhancementThinkingOff: "끄기(추론 없음)",
-    promptEnhancementModelFollow: "현재 모델 따르기",
-    promptEnhancementModelUnavailable: "사용할 수 없음 — 향상 시 현재 모델로 대체됩니다",
-    promptEnhancementUserTemplate: "사용자 템플릿",
-    promptEnhancementUserTemplateDesc:
-      "초안을 감쌉니다. 초안 변수를 반드시 포함해야 하며, 삽입 버튼으로 넣으세요.",
-    promptEnhancementInsertDraft: "초안 변수 삽입",
-    promptEnhancementRestore: "기본값 복원",
-    promptEnhancementMissingDraftVariable:
-      "사용자 템플릿에 초안 변수가 있어야 하며, 없으면 초안을 보낼 수 없습니다.",
-    promptEnhancementTooLong: "사용자 템플릿은 최대 8000자입니다.",
-    promptEnhancementSaveError: "프롬프트 향상 설정을 저장하지 못했습니다.",
   },
   project: {
     open: "프로젝트 열기",
@@ -2196,6 +2163,7 @@ importConfirm: "가져온 확장은 에이전트 프로세스 안에서 에이�
       tools: "에이전트 도구",
       agentExtension: "에이전트 확장",
       rendererUi: "채팅 UI 확장",
+      composerTransform: "작성기 작업",
       skills: "스킬",
       themes: "테마",
       mcp: "MCP 서버",
@@ -2234,6 +2202,7 @@ importConfirm: "가져온 확장은 에이전트 프로세스 안에서 에이�
       "agent.tool.register": "에이전트 도구 추가",
       "agent.prompt.inject": "에이전트 지침 조정",
       "agent.complete": "모델로 일회성 완성 실행",
+      "composer.transform": "작성기의 텍스트 변환",
       "agent.extension": "에이전트 안에서 코드 실행",
       "renderer.extension": "채팅 슬롯에 UI 그리기",
       "provider.register": "모델 목록에 프로바이더 추가",
@@ -2258,6 +2227,7 @@ importConfirm: "가져온 확장은 에이전트 프로세스 안에서 에이�
       "bus.subscribe": "다른 플러그인의 메시지 받기",
       "browser.cdp": "작업 패널 브라우저 제어",
       "usage.read": "사용량 통계 읽기",
+      "session.autoTitle": "첫 턴 제목 맥락 읽기 및 자동 제목 업데이트",
     },
     permissionHelp: {
       "ui.panel": "플러그인이 앱 안에 자체 패널을 표시할 수 있습니다.",
@@ -2281,6 +2251,7 @@ importConfirm: "가져온 확장은 에이전트 프로세스 안에서 에이�
       "agent.prompt.inject": "AI 에이전트에 전송되는 지침을 변경할 수 있습니다.",
       "agent.complete":
         "모델 할당량을 사용해 일회성 완성을 실행할 수 있습니다. 플러그인은 API 키를 받지 않습니다.",
+      "composer.transform": "작성기에서 직접 선택한 텍스트를 변환하도록 허용합니다. 플러그인은 초안과 선택된 모델 키만 받으며 대화 기록이나 첨부 파일은 받지 않습니다.",
       "agent.extension": "ExtensionAPI 모듈을 에이전트 프로세스 안에서 에이전트 자체 도구와 같은 권한으로 실행합니다. 신뢰하는 코드만 켜세요.",
       "renderer.extension": "이 플러그인의 렌더러 모듈을 앱 창에 로드하여 메시지 작업 표시줄, 응답 추가 영역, 도구 카드, 코드 블록 렌더러, 작성기 컨트롤 등 UI 슬롯 구성 요소를 그립니다. 모듈은 PI-Desktop과 같은 문서에서 실행됩니다. 신뢰하는 코드만 활성화하세요.",
       "provider.register":
@@ -2312,6 +2283,8 @@ importConfirm: "가져온 확장은 에이전트 프로세스 안에서 에이�
         "작업 패널 브라우저를 탐색하고 페이지를 읽으며 JavaScript를 실행하고 허용 목록에 있는 Chrome DevTools 명령을 보낼 수 있습니다. 쿠키 및 저장소 메서드는 차단됩니다.",
       "usage.read":
         "완료된 턴의 사용량 팩트를 페이지별로 나열합니다(턴당 토큰 카운터). 메시지 내용은 포함되지 않습니다.",
+      "session.autoTitle":
+        "대상 세션의 첫 요청과 첫 답변만 읽고, 사용자가 직접 바꾸지 않은 경우에만 자동 제목을 업데이트할 수 있습니다. 전체 대화 기록은 읽을 수 없습니다.",
     },
   },
   /**

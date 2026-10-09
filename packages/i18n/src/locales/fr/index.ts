@@ -303,13 +303,6 @@ export const fr = {
     "moveQueuedPromptDown": "Descendre",
     "editQueuedPrompt": "Modifier",
     "editQueuedPromptBusy": "Videz le champ avant de modifier ce message en attente",
-    "enhancePrompt": "Améliorer l'invite",
-    "enhancingPrompt": "Amélioration…",
-    "undoEnhancement": "Annuler l'amélioration",
-    "enhancementFailed": "L'amélioration de l'invite a échoué",
-    "enhancementTimeout":
-      "La réécriture a pris trop de temps. Réessayez, ou choisissez un modèle plus rapide dans les réglages.",
-    "dismissEnhancementError": "Ignorer l'erreur d'amélioration",
     sendWhileRunning: "Envoyer à la suite · {{shortcut}} pour réorienter",
     steeringUnavailable: "Ce tour ne peut plus recevoir de consignes. Votre brouillon a été conservé.",
     nativeSessionBusy: "Cette session Pi native répond encore. Arrêtez-la ou attendez la fin de la réponse avant d'envoyer.",
@@ -1528,6 +1521,7 @@ sklm: {
     "modelsFetchFailed": "Impossible de charger les modèles.",
     "modelsFetchFailedStatus": "La demande a échoué ({{status}}).",
     "modelsFetchNotFound": "Cette adresse n'a pas de liste de modèles.",
+    "providerUnavailable": "Le fournisseur sélectionné n’est plus disponible.",
     "modelsFetchInvalidResponse": "Le service n'a pas renvoyé de liste de modèles.",
     "modelsEmptyHint": "Saisissez une URL de base pour charger les modèles.",
     "noModelMatches": "Aucun modèle correspondant.",
@@ -1622,34 +1616,6 @@ sklm: {
     "fontSizeXl": "Trenta",
     "fontSizeScale": "Échelle de taille du texte",
     "fontSizePercent": "{{value}}%",
-    "promptEnhancementTitle": "Amélioration du prompt",
-    "promptEnhancementDesc":
-      "S'applique à l'action « Améliorer le prompt » du compositeur. Le prompt système est intégré ; le modèle et le modèle de texte sont personnalisables.",
-    "promptEnhancementCustomTemplate": "Utiliser un modèle personnalisé",
-    "promptEnhancementCustomTemplateDesc":
-      "Remplace le modèle utilisateur intégré par le vôtre. Le prompt système reste intégré.",
-    "promptEnhancementCustomTemplateActive": "Modèle personnalisé actif",
-    "promptEnhancementCustomTemplateNeedsTemplate":
-      "Enregistrez d'abord un modèle personnalisé ; l'interrupteur choisit ensuite entre celui-ci et le modèle intégré.",
-    "promptEnhancementEdit": "Modifier",
-    "promptEnhancementModelTitle": "Amélioration du prompt",
-    "promptEnhancementModel": "Modèle par défaut",
-    "promptEnhancementThinking": "Effort de raisonnement",
-    "promptEnhancementThinkingDesc":
-      "Effort de raisonnement pour la réécriture. Désactivé est la valeur par défaut et la plus rapide.",
-    "promptEnhancementThinkingOff": "Désactivé",
-    "promptEnhancementModelFollow": "Suivre le modèle actuel",
-    "promptEnhancementModelUnavailable":
-      "Indisponible — l'amélioration utilisera le modèle actuel",
-    "promptEnhancementUserTemplate": "Modèle utilisateur",
-    "promptEnhancementUserTemplateDesc":
-      "Encadre le brouillon. Doit contenir la variable de brouillon ; utilisez le bouton d'insertion.",
-    "promptEnhancementInsertDraft": "Insérer la variable de brouillon",
-    "promptEnhancementRestore": "Rétablir la valeur par défaut",
-    "promptEnhancementMissingDraftVariable":
-      "Le modèle utilisateur doit contenir la variable de brouillon, sinon le brouillon ne peut pas être envoyé.",
-    "promptEnhancementTooLong": "Le modèle utilisateur ne doit pas dépasser 8000 caractères.",
-    "promptEnhancementSaveError": "Impossible d'enregistrer les paramètres d'amélioration du prompt.",
   },
   "project": {
     "open": "Ouvrir le projet",
@@ -2180,6 +2146,7 @@ sklm: {
       "tools": "Outils d'agent",
       "agentExtension": "Extension de l'agent",
       "rendererUi": "Extension de l'interface du chat",
+      "composerTransform": "Actions du compositeur",
       "skills": "Compétences",
       "themes": "Thème",
       "mcp": "Serveur MCP",
@@ -2218,6 +2185,7 @@ sklm: {
       "agent.tool.register": "Ajouter des outils pour l'agent",
       "agent.prompt.inject": "Ajuster les instructions de l'agent",
       "agent.complete": "Exécuter une complétion unique avec vos modèles",
+      "composer.transform": "Transformer le texte dans le compositeur",
       "agent.extension": "Exécuter du code dans l'agent",
       "renderer.extension": "Dessiner l'interface dans les emplacements du chat",
       "provider.register": "Ajouter des fournisseurs à la liste de modèles",
@@ -2241,7 +2209,8 @@ sklm: {
       "bus.publish": "Envoyer des messages à d'autres plugins",
       "bus.subscribe": "Recevoir des messages d'autres plugins",
       "browser.cdp": "Contrôler le navigateur du panneau de travail",
-      "usage.read": "Lire les statistiques d'utilisation"
+      "usage.read": "Lire les statistiques d'utilisation",
+      "session.autoTitle": "Lire le contexte du premier tour et modifier les titres automatiques"
     },
     "permissionHelp": {
       "ui.panel": "Permet au plugin d'afficher son propre panneau dans l'application.",
@@ -2258,6 +2227,7 @@ sklm: {
       "agent.tool.register": "Permet à l'IA d'appeler des outils supplémentaires fournis par ce plugin.",
       "agent.prompt.inject": "Peut modifier les instructions envoyées à l'agent IA.",
       "agent.complete": "Peut dépenser votre quota de modèle pour une réalisation unique. Le plugin ne reçoit jamais vos clés API.",
+      "composer.transform": "Permet à ce plugin de transformer le texte que vous sélectionnez explicitement dans le compositeur. Il reçoit le brouillon et la clé du modèle sélectionné, mais ni l'historique de la conversation ni les pièces jointes.",
       "agent.extension": "Exécute des modules ExtensionAPI dans le processus de l'agent avec le même accès que ses propres outils. N'activez que du code auquel vous faites confiance.",
       "renderer.extension": "Charge le module de rendu de ce plugin dans la fenêtre de l'app pour dessiner des composants d'interface (barres d'actions des messages, extras de réponse, cartes d'outils, rendus de blocs de code, contrôles du composeur). Le module s'exécute dans le même document que PI-Desktop. N'activez que du code de confiance.",
       "provider.register": "Ajoute les fournisseurs définis par ce plugin à la liste des fournisseurs des Paramètres. Le plugin fournit le point de terminaison et les modèles ; votre clé API reste dans PI-Desktop.",
@@ -2283,6 +2253,8 @@ sklm: {
       "browser.cdp": "Peut naviguer dans le navigateur du panneau de travail, lire la page, exécuter JavaScript et envoyer des commandes Chrome DevTools sur liste autorisée. Les cookies et les méthodes de stockage sont bloqués.",
       "usage.read":
         "Liste les données d'utilisation des tours terminés (compteurs de tokens par tour, paginés). Aucun contenu de message n'est inclus.",
+      "session.autoTitle":
+        "Peut lire uniquement le premier message et la première réponse des sessions admissibles, puis modifier le titre s'il n'a pas été changé manuellement. Ne peut pas lire la transcription complète.",
     }
   },
   "extensions": {

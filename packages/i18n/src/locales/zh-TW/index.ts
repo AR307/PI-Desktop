@@ -305,12 +305,6 @@ export const zhTW = {
     moveQueuedPromptDown: "下移",
     editQueuedPrompt: "編輯",
     editQueuedPromptBusy: "請先清空輸入框，再編輯這則待傳送訊息",
-    enhancePrompt: "增強提示詞",
-    enhancingPrompt: "增強中…",
-    undoEnhancement: "撤回增強",
-    enhancementFailed: "提示詞增強失敗",
-    enhancementTimeout: "改寫逾時。請重試，或在設定中改用更快的增強模型。",
-    dismissEnhancementError: "關閉增強錯誤",
     sendWhileRunning: "傳送後續訊息 · {{shortcut}} 立即轉向",
     steeringUnavailable: "目前回合已無法接收轉向輸入，草稿已保留。",
     nativeSessionBusy: "此原生 Pi 工作階段仍在回覆中，請先停止或等待回覆結束後再傳送。",
@@ -1511,6 +1505,7 @@ sklm: {
     modelsFetchFailed: "無法獲取模型列表。",
     modelsFetchFailedStatus: "請求失敗（{{status}}）。",
     modelsFetchNotFound: "該地址沒有模型列表。",
+    providerUnavailable: "所選服務已無法使用。",
     modelsFetchInvalidResponse: "服務未返回可用的模型列表。",
     modelsEmptyHint: "填寫地址即可獲取模型列表。",
     refreshModelCatalog: "更新模型目錄",
@@ -1609,33 +1604,6 @@ sklm: {
     fontSizeXl: "超超大杯",
     fontSizeScale: "文字縮放比例",
     fontSizePercent: "{{value}}%",
-    promptEnhancementTitle: "提示詞增強",
-    promptEnhancementDesc:
-      "作用於輸入框的「增強提示詞」操作。系統提示詞為內建，可自訂使用者範本與增強模型。",
-    promptEnhancementCustomTemplate: "使用自訂提示詞",
-    promptEnhancementCustomTemplateDesc:
-      "用你自己的使用者範本取代內建範本。系統提示詞維持內建。",
-    promptEnhancementCustomTemplateActive: "自訂範本已啟用",
-    promptEnhancementCustomTemplateNeedsTemplate:
-      "請先儲存自訂範本；儲存後即可用開關在內建範本與自訂範本之間切換。",
-    promptEnhancementEdit: "編輯",
-    promptEnhancementModelTitle: "增強提示詞",
-    promptEnhancementModel: "預設模型",
-    promptEnhancementThinking: "思考強度",
-    promptEnhancementThinkingDesc:
-      "改寫時使用的思考強度。預設關閉，最快。",
-    promptEnhancementThinkingOff: "關閉思考",
-    promptEnhancementModelFollow: "跟隨目前模型",
-    promptEnhancementModelUnavailable: "無法使用 — 增強時會回退到目前模型",
-    promptEnhancementUserTemplate: "使用者範本",
-    promptEnhancementUserTemplateDesc:
-      "用於包裹草稿。必須包含草稿變數，請用插入按鈕寫入。",
-    promptEnhancementInsertDraft: "插入草稿變數",
-    promptEnhancementRestore: "恢復預設",
-    promptEnhancementMissingDraftVariable:
-      "使用者範本必須包含草稿變數，否則草稿無法傳送給模型。",
-    promptEnhancementTooLong: "使用者範本最多 8000 個字元。",
-    promptEnhancementSaveError: "無法儲存提示詞增強設定。",
   },
   project: {
     open: "開啟專案",
@@ -2166,6 +2134,7 @@ sklm: {
       tools: "智慧體工具",
       agentExtension: "Agent 擴充",
       rendererUi: "對話介面擴充",
+      composerTransform: "輸入框操作",
       skills: "技能",
       themes: "主題",
       mcp: "MCP 服務",
@@ -2203,6 +2172,7 @@ sklm: {
       "agent.tool.register": "為智慧體新增工具",
       "agent.prompt.inject": "調整智慧體指令",
       "agent.complete": "用你的模型發起一次補全",
+      "composer.transform": "轉換輸入框中的文字",
       "agent.extension": "在 agent 內執行程式碼",
       "renderer.extension": "在聊天插槽繪製介面",
       "provider.register": "將服務新增到模型列表",
@@ -2227,6 +2197,7 @@ sklm: {
       "bus.subscribe": "接收其他外掛的訊息",
       "browser.cdp": "控制工作面板瀏覽器",
       "usage.read": "讀取用量統計",
+      "session.autoTitle": "讀取首輪標題內容並更新自動標題",
     },
     permissionHelp: {
       "ui.panel": "允許外掛在應用內顯示獨立面板。",
@@ -2244,6 +2215,7 @@ sklm: {
       "agent.tool.register": "允許 AI 呼叫此外掛提供的額外工具。",
       "agent.prompt.inject": "可能修改傳送給智慧體的指令。",
       "agent.complete": "會消耗你的模型額度發起一次補全。外掛拿不到 API 金鑰。",
+      "composer.transform": "允許外掛轉換你在輸入框中主動選擇的文字。外掛會收到草稿文字和所選模型識別碼，不會收到對話歷史或附件。",
       "agent.extension": "在 agent 程序內執行 ExtensionAPI 模組，擁有與 agent 自身工具相同的權限。只啟用你信任的程式碼。",
       "renderer.extension": "把該外掛的渲染模組載入應用視窗，在訊息操作列、回覆追加區、工具卡、程式碼區塊、輸入區等插槽繪製介面。模組與 PI-Desktop 同文件執行，只啟用你信任的程式碼。",
       "provider.register": "把此外掛定義的服務新增到設定的服務列表。介面地址和模型由外掛提供，API 金鑰則留在 PI-Desktop 中。",
@@ -2270,6 +2242,8 @@ sklm: {
         "可導航工作面板瀏覽器、讀取頁面、執行 JavaScript，併發送白名單內的 Chrome DevTools 命令。Cookie 與儲存相關方法會被拒絕。",
       "usage.read":
         "分頁列出已完成回合的用量事實（每回合的 token 計數）。不包含任何訊息內容。",
+      "session.autoTitle":
+        "僅能讀取符合條件工作階段的首則提示和首則回覆，並只在標題未被手動修改時更新；無法讀取完整對話記錄。",
     },
   },
   extensions: {

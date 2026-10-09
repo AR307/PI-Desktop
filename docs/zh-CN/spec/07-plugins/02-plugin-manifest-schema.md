@@ -158,6 +158,7 @@ type PluginContributes = {
  settings?: PluginSettingContrib[];
  themes?: PluginThemeContrib[];
  windowAppearance?: PluginWindowAppearanceContrib; // 原生窗口背景；需要 `ui.window.appearance`
+ composerTransforms?: PluginComposerTransformContrib[]; // 用户主动触发的输入框文本操作；需要 `composer.transform`
  mcpServers?: PluginMcpServerContrib[];
  services?: PluginServiceContrib[];
   bus?: PluginBusContrib;
@@ -182,6 +183,12 @@ type PluginAgentToolContrib = {
  schema: Record<string, unknown>; // JSON schema object
  timeoutMs?: number;
  permissions?: PluginPermission[];
+};
+
+type PluginComposerTransformContrib = {
+ id: string; // 插件内唯一；[A-Za-z][A-Za-z0-9_-]{0,63}
+ title: string | { en: string; "zh-CN": string };
+ undoTitle?: string | { en: string; "zh-CN": string };
 };
 
 type PluginSettingContrib = {
@@ -314,6 +321,8 @@ type PluginPermission =
  | "fs.delete"
  | "agent.tool.register"
  | "agent.prompt.inject"
+ | "agent.complete"
+ | "composer.transform"
  | "renderer.extension"
  | "provider.register"
  | "net.fetch"
@@ -427,12 +436,17 @@ type PluginNetDomains = string[]; // "api.example.com" 或 "*.example.com"
 
 ## 5.4 providers —— 插件声明的 provider 行
 
-`contributes.providers` 最多声明 8 个 provider，宿主会把每一项落成原生 provider
-列表中的一行，并归该插件所有（[ADR 0259](../../../adr/0259-plugin-declared-providers.md)）：
+`contributes.providers` 声明的 provider 行由宿主写入原生 provider 列表，并归该插件所有
+（[ADR 0259](../../../adr/0259-plugin-declared-providers.md)）。每个插件不设 provider 数量上限，
+插件包现有的 50 MiB 限制仍是总量边界：
 
 - 声明的 `id` 匹配 `[a-zA-Z][a-zA-Z0-9_-]{0,63}` 且在插件内唯一；行 id 为
   `plugin:<pluginId>:<declaredId>`
 - `name` 必填，是设置页显示的名称
+- `category` 可选，用作“添加服务”分组；可填写普通字符串或同时提供 `en` 与 `zh-CN`
+  的本地化名称，每个名称最多 128 个字符。省略时使用插件名称
+- `description` 可选，是“添加服务”中悬停或键盘聚焦时显示的一句话简介；可填写普通字符串
+  或同时提供 `en` 与 `zh-CN` 的本地化内容，每条最多 280 个字符
 - `baseUrl` 可选，但必须是绝对 `http(s)` URL
 - `apiStyle` 可选，默认 `chat_completions`；可取值是 provider 配置中除 `auto`
   以外的风格
@@ -440,7 +454,8 @@ type PluginNetDomains = string[]; // "api.example.com" 或 "*.example.com"
 - OAuth provider 需要 `provider.register` 和独立高风险权限 `provider.oauth`，还需要
   绝对 HTTP(S) `baseUrl` 及插件主模块导出的 `onProviderOAuth`；`oauth` 元数据可设置
   `loginLabel` 和 `isSubscription`
-- `models` 要求 1..64 条，id 唯一且长度为 1..256
+- `models` 最多 64 条，id 唯一且长度为 1..256。仅当 provider 使用 API Key 且配置了
+  `baseUrl` 时，才允许为空；用户保存 Key 后，宿主会发现并缓存该端点提供的模型
 
 非空的 `contributes.providers` 需要高风险权限 `provider.register`
 （[13-plugin-permissions-matrix.md](/zh-CN/spec/07-plugins/13-plugin-permissions-matrix)）。
@@ -470,11 +485,13 @@ MVP 只能实现：
 1. `schemaVersion` 必须是 `1`
 2. 需要 `id` / `name` / `version`
 3. 声明 `ui.panel` 的清单是否需要隐式（自动填充）或通过显式声明获得 `ui.panel` 权限是一个 **悬而未决的问题**（在 [08-meta/open-questions.md](/zh-CN/spec/08-meta/open-questions) 中跟踪）
-4. 如果存在 `agentTools`，则必须声明 `agent.tool.register`
+4. 如果存在 `agentTools`，则必须声明 `agent.tool.register`。
+   `composerTransforms` 需要 `composer.transform`；每个操作 id 必须匹配
+   `[A-Za-z][A-Za-z0-9_-]{0,63}`，并在插件内保持唯一
 5. 路径字段不得使用绝对路径或 `..`
 6. `main` / `ui.panel` / 技能 / `views[].entry` 路径必须存在
 7.工具`name`仅允许`[a-zA-Z][a-zA-Z0-9_]*`
-8. 贡献 ID（`themes`、`mcpServers`、`services`、`views`）必须匹配
+8. 贡献 ID（`themes`、`mcpServers`、`services`、`views`、`composerTransforms`）必须匹配
    `[a-zA-Z][a-zA-Z0-9_-]{0,63}` 并在自己的列表中保持唯一；
    `sessionSources` 允许额外使用 `.`
 9. `themes[].path` 必须存在且以 `.css` 结尾； `themes[].base` 可能只是
@@ -487,8 +504,8 @@ MVP 只能实现：
    有效模式（§5.1）
 12. 需要权限的贡献在权限验证时失败
    缺少：`themes` → `ui.theme`，`views` → `ui.view`，`providers` →
-   `provider.register`，stdio 服务器 → `mcp.server.local`，远程
-   服务器 → `mcp.server.remote`、`services` → `background.service`、
+   `provider.register`，`composerTransforms` → `composer.transform`，stdio
+   服务器 → `mcp.server.local`，远程服务器 → `mcp.server.remote`、`services` → `background.service`、
    `bus.publish` → `bus.publish`，`bus.subscribe` → `bus.subscribe`。
 `skills` 是一个例外 - 它早于权限门，因此清单
    没有 `agent.prompt.inject` 仍然有效并且运行时只是跳过

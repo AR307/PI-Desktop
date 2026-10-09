@@ -90,22 +90,28 @@ from pi's steering queue so it cannot execute independently on a later turn.
 An ordinary follow-up stays in the separate Host-owned FIFO until durable turn
 finalization. A steering failure must not terminate the active run.
 
-### 4.1 Session title summarization
+### 4.1 Session title generation
 
-The renderer applies a short first-prompt fallback immediately so sending a
-prompt never waits on title generation. After the first turn emits `agent_end`,
-Electron main resolves the session's effective provider/model and invokes the
-runtime's `summarizeSessionTitle` one-shot path with thinking disabled. The
-runtime supplies the initial user prompt and an optional assistant reply,
-returns only sanitized title text, and treats an empty/failing completion as a
-non-fatal result. The renderer persists a successful title through the existing
-`session.rename` path.
+The core keeps new sessions readable without any model call. Sending the first
+prompt into a session whose stored title is still a recognized placeholder asks
+the host for a deterministic fallback title through `session/deriveTitle`. The
+renderer collapses whitespace and caps its request at 48 characters; host-core
+accepts it only while the stored title is still a placeholder with the `default`
+source, so the fallback never replaces a manual rename or an earlier automatic
+title, and the write does not change `updated_at`.
 
-The renderer also persists a `manualTitle` marker in its local session metadata.
-Automatic summarization is skipped for that marker and for any persisted title
-that is neither a recognized default nor the deterministic first-prompt
-fallback, which protects manual and already-summarized titles after restart.
-No host RPC or storage schema change is required.
+That fallback keeps the source `default`: the derived text is not a user choice,
+so the session stays eligible for automatic replacement. An optional standalone
+plugin may subscribe to `session:turnEnded`; with the dedicated
+`session.autoTitle` permission it can read only the first user prompt and first
+assistant reply for a session whose title is still default, then use
+`agent.complete` with its configured prompt, model, and thinking level.
+
+The plugin writes through a host compare-and-set that succeeds only while the
+exact title it read is still current. Manual renames and another generated
+title therefore win concurrent updates. Host-core owns the title source in
+schema v23; this state survives renderer restart and does not expose a general
+transcript-read API. The core runs no title completion of its own.
 
 ## 5. Prompt flow
 
@@ -252,7 +258,7 @@ must remain valid without enabling retries; non-boolean writes stay invalid.
 Each retry is abortable and reports its current backoff through the normalized
 status event. The `retrying` activity carries the classified error code, the
 bounded/redacted provider message, and the HTTP status when known. The main
-session, builtin subagents, and one-shot composer enhancement use the same
+session, builtin subagents, and plugin one-shot completions use the same
 codes, budget size, and precedence.
 
 When the retry budget is exhausted, the final assistant error and lifecycle
@@ -1249,22 +1255,22 @@ Runtime responsibilities:
 
 Local models are supported through OpenAI-compatible endpoints (Ollama, LM Studio, vLLM, etc.).
 
-### 6.1 One-shot Composer enhancement
+### 6.1 Plugin-owned Composer transforms
 
-Composer enhancement uses the same resolved provider binding and retry
-classification as an agent request, but creates a separate completion context
-with exactly one user message and the static enhancement system prompt. It
-does not instantiate a session agent, include transcript history, expose tools,
-or persist a turn. The renderer receives only the trimmed text result; API
-keys and vendor refresh credentials remain in Electron main. OpenCode Go
-one-shots reuse the conversation id as `x-opencode-session` when a session is
-present; otherwise the runtime synthesizes a per-call id so the gateway
-accepts the request.
+Composer text transforms are contributed by explicitly installed plugins
+through the permission-gated `composer.transform` capability. The host sends
+the selected draft and optional model key to the plugin, without transcript
+history or attachment data. A plugin may use the generic `agent.complete`
+capability to request a one-shot completion; that path creates a separate
+completion context and does not instantiate a session agent, expose tools, or
+persist a turn. API keys and vendor refresh credentials remain in Electron
+main. OpenCode Go one-shots reuse the conversation id as `x-opencode-session`
+when a session is present; otherwise the runtime synthesizes a per-call id.
 
 ### 6.2 OpenCode session routing headers
 
-Chat, subagent, context-compaction summary, prompt-enhancement, and plugin
-one-shot completions whose provider is `apiStyle: opencode_go`, whose
+Chat, subagent, context-compaction summary, plugin-owned prompt-enhancement,
+and other plugin one-shot completions whose provider is `apiStyle: opencode_go`, whose
 `vendorKey` is `opencode` or `opencode-go`, whose pi-ai provider id is one of
 those values, or whose base URL host is `opencode.ai` send:
 
@@ -1599,8 +1605,13 @@ All discovery stays within the session project root. A target path outside the
 project root, or the root path itself, resolves to the root's own chain instead
 of an empty result. File tools on attachments or other locations therefore
 keep the root chain (which may itself be empty). Empty, unreadable, and
-out-of-root files are skipped. The combined UTF-8 content is capped at 32 KiB
-and source paths are labelled under `# Project instructions`.
+out-of-root files are skipped. The global file and the combined project
+entries have independent 32 KiB UTF-8 budgets, so an oversized global file
+never removes project instructions. A file that exceeds its remaining budget is
+cut on a UTF-8 character boundary and followed by a
+`[PI-Desktop truncated <source>: loaded the first <n> of <total> bytes; ...]`
+notice; project files after a truncated one are not loaded. Source paths are
+labelled under `# Project instructions`.
 The sidecar never reads workspace instructions directly. A changed root chain
 recreates an idle runtime on its next prompt; nested instructions are resolved
 again when a relevant file tool runs. The resolver's timeout and fallback

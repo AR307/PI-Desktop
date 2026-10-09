@@ -83,7 +83,6 @@ export const IPC = {
     notificationSetViewingSession: "pi-desktop/notification/setViewingSession",
     agentPrompt: "pi-desktop/agent/prompt",
     agentSteer: "pi-desktop/agent/steer",
-    promptEnhance: "pi-desktop/prompt/enhance",
     speechTranscribe: "pi-desktop/speech/transcribe",
     speechSynthesize: "pi-desktop/speech/synthesize",
     speechGetStatus: "pi-desktop/speech/getStatus",
@@ -137,7 +136,8 @@ export const IPC = {
     sessionOpen: "pi-desktop/session/open",
     sessionDelete: "pi-desktop/session/delete",
     sessionRename: "pi-desktop/session/rename",
-    sessionSummarizeTitle: "pi-desktop/session/summarizeTitle",
+    /** Deterministic first-prompt title for a session that is still untitled. */
+    sessionDeriveTitle: "pi-desktop/session/deriveTitle",
     sessionConfigure: "pi-desktop/session/configure",
     sessionImportScan: "pi-desktop/session/importScan",
     sessionImportRun: "pi-desktop/session/importRun",
@@ -264,6 +264,8 @@ export const IPC = {
     pluginList: "pi-desktop/plugin/list",
     /** A renderer slot component asking its own plugin for one JSON answer. */
     pluginRendererCall: "pi-desktop/plugin/rendererCall",
+    /** Invoke a declared, user-facing Composer transform action. */
+    pluginComposerTransform: "pi-desktop/plugin/composerTransform",
     /** Plugin-contributed agent extensions (D387/D388, ADR 0214). */
     pluginImportExtension: "pi-desktop/plugin/importExtension",
     extensionsCommandRun: "pi-desktop/extensions/commands/run",
@@ -292,6 +294,7 @@ export const IPC = {
     pluginLauncherToggle: "pi-desktop/pluginLauncher/toggle",
     pluginLauncherDismiss: "pi-desktop/pluginLauncher/dismiss",
     pluginThemes: "pi-desktop/plugin/themes",
+    pluginProviderCatalog: "pi-desktop/plugin/providerCatalog",
     pluginScenicThemesDestinations: "pi-desktop/plugin/scenicThemes/destinations",
     pluginScenicThemesSetBlur: "pi-desktop/plugin/scenicThemes/setBlur",
     pluginServices: "pi-desktop/plugin/services",

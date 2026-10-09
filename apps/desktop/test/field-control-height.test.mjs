@@ -76,7 +76,6 @@ test("a stretched trigger takes the field metric without outranking a denser sur
 test("dropdowns that act as form fields take the field metric", () => {
   for (const [css, selector] of [
     [pluginsCss, ".plugins-setting-control .settings-menu-select-trigger"],
-    [pluginsCss, ".plugins-market-settings-control .settings-menu-select-trigger"],
     [scheduledCss, ".scheduled-fields .settings-menu-select-trigger"],
   ]) {
     assert.equal(

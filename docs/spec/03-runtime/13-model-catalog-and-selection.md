@@ -442,6 +442,8 @@ retain the existing session configuration and permission boundaries.
 
 Warnings are non-blocking unless execution is impossible.
 
+Composer context-window labels resolve the exact binding with `effectiveContextWindow`: explicit user limits override discovery, catalog-owned limits follow discovery, and legacy bindings preserve their saved limits. A binding with a valid saved limit still displays it when discovery is unavailable. This display resolution does not modify the discovered catalog or runtime safety budgets.
+
 ### 11.1 Reasoning capability resolution
 
 1. Resolve published Pi thinking metadata for the exact physical model.

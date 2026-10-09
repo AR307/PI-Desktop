@@ -303,13 +303,6 @@ export const es = {
     "moveQueuedPromptDown": "Bajar",
     "editQueuedPrompt": "Editar",
     "editQueuedPromptBusy": "Vacía el campo antes de editar este mensaje en cola",
-    "enhancePrompt": "Mejorar mensaje",
-    "enhancingPrompt": "Mejorando...",
-    "undoEnhancement": "Deshacer mejora",
-    "enhancementFailed": "Error en la mejora de solicitud",
-    "enhancementTimeout":
-      "La reescritura tardó demasiado. Vuelve a intentarlo o elige un modelo más rápido en Ajustes.",
-    "dismissEnhancementError": "Descartar error de mejora",
     sendWhileRunning: "Enviar seguimiento · {{shortcut}} para orientar",
     steeringUnavailable: "Este turno ya no acepta indicaciones. Se conservó el borrador.",
     nativeSessionBusy: "Esta sesión nativa de Pi sigue respondiendo. Detenla o espera a que termine antes de enviar.",
@@ -1528,6 +1521,7 @@ sklm: {
     "modelsFetchFailed": "No se pudieron cargar los modelos.",
     "modelsFetchFailedStatus": "La solicitud falló ({{status}}).",
     "modelsFetchNotFound": "Esta dirección no tiene lista de modelos.",
+    "providerUnavailable": "El proveedor seleccionado ya no está disponible.",
     "modelsFetchInvalidResponse": "El servicio no devolvió una lista de modelos.",
     "modelsEmptyHint": "Ingresar una URL base para cargar modelos.",
     "noModelMatches": "No hay modelos coincidentes.",
@@ -1622,34 +1616,6 @@ sklm: {
     "fontSizeXl": "Trenta",
     "fontSizeScale": "Escala de tamaño de texto",
     "fontSizePercent": "{{value}}%",
-    "promptEnhancementTitle": "Mejora de prompts",
-    "promptEnhancementDesc":
-      "Se aplica a la acción «Mejorar prompt» del compositor. El prompt del sistema es integrado; la plantilla y el modelo se pueden personalizar.",
-    "promptEnhancementCustomTemplate": "Usar una plantilla propia",
-    "promptEnhancementCustomTemplateDesc":
-      "Reemplaza la plantilla de usuario integrada por la suya. El prompt del sistema sigue integrado.",
-    "promptEnhancementCustomTemplateActive": "Plantilla personalizada activa",
-    "promptEnhancementCustomTemplateNeedsTemplate":
-      "Guarde primero una plantilla propia; el interruptor elegirá entonces entre ella y la plantilla integrada.",
-    "promptEnhancementEdit": "Editar",
-    "promptEnhancementModelTitle": "Mejora de prompts",
-    "promptEnhancementModel": "Modelo predeterminado",
-    "promptEnhancementThinking": "Esfuerzo de razonamiento",
-    "promptEnhancementThinkingDesc":
-      "Esfuerzo de razonamiento para la reescritura. Desactivado es el valor predeterminado y el más rápido.",
-    "promptEnhancementThinkingOff": "Desactivado",
-    "promptEnhancementModelFollow": "Seguir el modelo actual",
-    "promptEnhancementModelUnavailable":
-      "No disponible: la mejora usará el modelo actual",
-    "promptEnhancementUserTemplate": "Plantilla de usuario",
-    "promptEnhancementUserTemplateDesc":
-      "Envuelve el borrador. Debe incluir la variable del borrador; use el botón de inserción.",
-    "promptEnhancementInsertDraft": "Insertar variable del borrador",
-    "promptEnhancementRestore": "Restaurar predeterminado",
-    "promptEnhancementMissingDraftVariable":
-      "La plantilla de usuario debe contener la variable del borrador; de lo contrario el borrador no puede enviarse.",
-    "promptEnhancementTooLong": "La plantilla de usuario no puede superar los 8000 caracteres.",
-    "promptEnhancementSaveError": "No se pudo guardar la configuración de mejora de prompts.",
   },
   "project": {
     "open": "Abrir proyecto",
@@ -2180,6 +2146,7 @@ sklm: {
       "tools": "Herramientas del agente",
       "agentExtension": "Extensión del agente",
       "rendererUi": "Extensión de la interfaz del chat",
+      "composerTransform": "Acciones del compositor",
       "skills": "Habilidades",
       "themes": "Tema",
       "mcp": "Servidor MCP",
@@ -2218,6 +2185,7 @@ sklm: {
       "agent.tool.register": "Agregar herramientas para el agente",
       "agent.prompt.inject": "Ajustar instrucciones del agente",
       "agent.complete": "Ejecutar una finalización de una sola vez con sus modelos",
+      "composer.transform": "Transformar texto en el compositor",
       "agent.extension": "Ejecutar código dentro del agente",
       "renderer.extension": "Dibujar interfaz en los slots del chat",
       "provider.register": "Agregar proveedores a la lista de modelos",
@@ -2241,7 +2209,8 @@ sklm: {
       "bus.publish": "Enviar mensajes a otros complementos",
       "bus.subscribe": "Recibir mensajes de otros complementos",
       "browser.cdp": "Controlar el navegador del panel de trabajo",
-      "usage.read": "Leer estadísticas de uso"
+      "usage.read": "Leer estadísticas de uso",
+      "session.autoTitle": "Leer el contexto del primer turno y actualizar títulos automáticos"
     },
     "permissionHelp": {
       "ui.panel": "Permite que el complemento muestre su propio panel dentro de la aplicación.",
@@ -2258,6 +2227,7 @@ sklm: {
       "agent.tool.register": "Permite que la IA llame a herramientas adicionales proporcionadas por este complemento.",
       "agent.prompt.inject": "Puede cambiar las instrucciones enviadas al agente de IA.",
       "agent.complete": "Puede gastar su cuota de modelo en una finalización única. El complemento nunca recibe sus claves API.",
+      "composer.transform": "Permite que este complemento transforme el texto que selecciones explícitamente en el compositor. Recibe el borrador y la clave del modelo seleccionado, pero no el historial de conversación ni los adjuntos.",
       "agent.extension": "Ejecuta módulos ExtensionAPI dentro del proceso del agente con el mismo acceso que sus propias herramientas. Activa solo código en el que confíes.",
       "renderer.extension": "Carga el módulo de renderizado de este complemento en la ventana de la app para dibujar componentes en los slots de la interfaz (barras de acción de mensajes, extras de respuesta, tarjetas de herramientas, renderizadores de bloques de código, controles del compositor). El módulo se ejecuta en el mismo documento que PI-Desktop. Activa solo código de confianza.",
       "provider.register": "Agregue los proveedores que define este complemento a la lista de proveedores de Configuración. El complemento aporta el punto final y los modelos; su clave API permanece en PI-Desktop.",
@@ -2283,6 +2253,8 @@ sklm: {
       "browser.cdp": "Puede navegar por el navegador del panel de trabajo, leer la página, ejecutar JavaScript y enviar comandos de Chrome DevTools incluidos en la lista permitida. Las cookies y los métodos de almacenamiento están bloqueados.",
       "usage.read":
         "Enumera los datos de uso de los turnos completados (contadores de tokens por turno, paginados). No incluye el contenido de los mensajes.",
+      "session.autoTitle":
+        "Solo puede leer el primer mensaje y la primera respuesta de las sesiones aptas y actualizar el título si nadie lo cambió manualmente. No puede leer la transcripción completa.",
     }
   },
   "extensions": {
