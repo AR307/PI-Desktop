@@ -7,7 +7,7 @@ import { useAppStore } from "../../stores/app-store";
 import { useFollowScroll } from "../../hooks/use-follow-scroll";
 import { useTranscriptView } from "../../hooks/use-transcript-view";
 import { useTranscriptSearchFocus } from "../../hooks/use-transcript-search-focus";
-import { IconArrowDown } from "../icons";
+import { IconArrowDown, IconBot, IconChevronDown } from "../icons";
 import { Textarea, TooltipButton } from "../ui";
 import { DisclosureAnchorContext } from "../../lib/disclosure-anchor-context";
 import { TranscriptDisclosureProvider } from "../../features/chat/transcript/disclosure";
@@ -21,6 +21,7 @@ import {
 } from "../ReviewChangeCard";
 import { ToolRow } from "../../features/chat/transcript/ToolRow";
 import { Markdown } from "../Markdown";
+import { delegateModelId, delegateThinkingLevel } from "../../features/chat/transcript/model";
 
 /**
  * The work-panel tab showing one delegation as a conversation (issue #917).
@@ -62,6 +63,18 @@ function SubagentTranscriptSurface({ delegationId }: { delegationId: string }) {
         "delegationId" in payload && payload.delegationId === delegationId &&
         subagentOutcome(message, statuses) === "running";
     });
+  }, [messages, delegationId]);
+  const delegateSettings = useMemo(() => {
+    const result = messages.find((message) => {
+      if (message.role !== "tool") return false;
+      const payload = toolResultPayload(message);
+      return payload && typeof payload === "object" && !Array.isArray(payload) &&
+        "delegationId" in payload && payload.delegationId === delegationId;
+    });
+    return {
+      modelId: result ? delegateModelId(result) : "",
+      thinkingLevel: result ? delegateThinkingLevel(result) : undefined,
+    };
   }, [messages, delegationId]);
   const isRunning = useAppStore(
     (state) => (activeSessionId ? state.runningSessions[activeSessionId] ?? false : false),
@@ -114,11 +127,6 @@ function SubagentTranscriptSurface({ delegationId }: { delegationId: string }) {
   return (
     <DisclosureAnchorContext.Provider value={disclosureAnchorNotifier}>
       <div className="subagent-transcript-tab" data-testid="subagent-transcript-tab">
-        {delegateRunning ? (
-          <div className="subagent-transcript-actions">
-            <SubagentStopButton delegationId={delegationId} running />
-          </div>
-        ) : null}
         <div
           ref={scrollRef}
           data-scroll-owner="follow"
@@ -202,6 +210,23 @@ function SubagentTranscriptSurface({ delegationId }: { delegationId: string }) {
             aria-label={t("panel.subagentReadOnly")}
             placeholder={t("panel.subagentReadOnly")}
           />
+          <div className="subagent-transcript-composer-controls">
+            <button
+              type="button"
+              className="subagent-transcript-model-picker"
+              disabled
+              aria-label={`${t("chat.model")}: ${delegateSettings.modelId || "—"}. ${t("chat.reasoningLevel")}: ${delegateSettings.thinkingLevel || "—"}`}
+            >
+              <IconBot size={14} aria-hidden="true" />
+              <span>{delegateSettings.modelId || "—"}</span>
+              <span aria-hidden="true">·</span>
+              <span>{delegateSettings.thinkingLevel || "—"}</span>
+              <IconChevronDown size={12} aria-hidden="true" />
+            </button>
+            {delegateRunning ? (
+              <SubagentStopButton delegationId={delegationId} running />
+            ) : null}
+          </div>
         </footer>
       </div>
     </DisclosureAnchorContext.Provider>
