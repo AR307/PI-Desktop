@@ -213,18 +213,19 @@ function SubagentTranscriptSurface({ delegationId }: { delegationId: string }) {
           <div className="subagent-transcript-composer-controls">
             <button
               type="button"
-              className="subagent-transcript-model-picker"
+              className="icon-btn composer-model-thinking-chip subagent-transcript-model-picker"
               disabled
+              aria-haspopup="listbox"
               aria-label={`${t("chat.model")}: ${delegateSettings.modelId || "—"}. ${t("chat.reasoningLevel")}: ${delegateSettings.thinkingLevel || "—"}`}
             >
-              <IconBot size={14} aria-hidden="true" />
-              <span>{delegateSettings.modelId || "—"}</span>
-              <span aria-hidden="true">·</span>
-              <span>{delegateSettings.thinkingLevel || "—"}</span>
-              <IconChevronDown size={12} aria-hidden="true" />
+              <span className="composer-model-thinking-icon" aria-hidden="true"><IconBot size={14} /></span>
+              <span className="composer-model-thinking-model">{delegateSettings.modelId || "—"}</span>
+              <span className="composer-model-thinking-dot" aria-hidden="true">·</span>
+              <span className="composer-model-thinking-level">{delegateSettings.thinkingLevel || "—"}</span>
+              <IconChevronDown size={12} aria-hidden="true" className="composer-model-thinking-chevron" />
             </button>
             {delegateRunning ? (
-              <SubagentStopButton delegationId={delegationId} running />
+              <SubagentStopButton delegationId={delegationId} running compact />
             ) : null}
           </div>
         </footer>

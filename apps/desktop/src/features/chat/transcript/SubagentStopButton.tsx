@@ -16,10 +16,12 @@ export function SubagentStopButton({
   delegationId,
   running,
   name,
+  compact = false,
 }: {
   delegationId?: string;
   running: boolean;
   name?: string;
+  compact?: boolean;
 }) {
   const { t } = useTranslation();
   const sessionId = useAppStore(state => state.activeSessionId);
@@ -65,7 +67,7 @@ export function SubagentStopButton({
       : t("chat.stopAllSubagents");
   return (
     <Button
-      className="subagent-stop-button"
+      className={compact ? "stop-btn subagent-stop-button" : "subagent-stop-button"}
       variant="secondary"
       size="sm"
       title={label}
@@ -73,12 +75,10 @@ export function SubagentStopButton({
       disabled={!!busy || stopping}
       onClick={() => void stop()}
     >
-      {stoppingRequest || stopping
-        ? <span className="tool-spinner" aria-hidden />
-        : <IconStop size={9} />}
-      <span>{stoppingRequest || stopping
+      {stoppingRequest || stopping ? <span className="tool-spinner" aria-hidden /> : <IconStop size={compact ? 14 : 9} />}
+      {compact ? null : <span>{stoppingRequest || stopping
         ? t("chat.stoppingSubagents")
-        : t(delegationId ? "chat.stopSubagent" : "chat.stopAllSubagentsShort")}</span>
+        : t(delegationId ? "chat.stopSubagent" : "chat.stopAllSubagentsShort")}</span>}
     </Button>
   );
 }
