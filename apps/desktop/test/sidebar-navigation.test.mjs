@@ -204,6 +204,8 @@ test("portaled sort menu does not stretch to the viewport edge", () => {
 
   assert.match(basePopoverRule, /position:\s*fixed;/);
   assert.doesNotMatch(basePopoverRule, /position:\s*absolute;/);
+  assert.match(basePopoverRule, /max-height:\s*calc\(100vh - 16px\);/);
+  assert.match(basePopoverRule, /overflow-y:\s*auto;/);
   assert.match(floatingPopoverRule, /top:\s*auto;/);
   assert.match(floatingPopoverRule, /right:\s*auto;/);
   assert.match(globalStyles, /\.sidebar-floating-menu\s*\{[^}]*width:\s*max-content;/s);

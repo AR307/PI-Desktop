@@ -103,6 +103,7 @@ type ProjectEntry = {
 };
 
 const VIEWPORT_PADDING = 8;
+const SIDEBAR_FLOATING_MENU_MAX_HEIGHT = 360;
 
 /** Private MIME so a sidebar session drag is never mistaken for an OS file drop. */
 const SESSION_DRAG_MIME = "application/x-pi-desktop-session";
@@ -499,7 +500,10 @@ export function Sidebar({
     setMenuPosition({
       top: Math.max(
         VIEWPORT_PADDING,
-        Math.min(rect.bottom + 4, window.innerHeight - 220),
+        Math.min(
+          rect.bottom + 4,
+          window.innerHeight - SIDEBAR_FLOATING_MENU_MAX_HEIGHT - VIEWPORT_PADDING,
+        ),
       ),
       left: Math.max(VIEWPORT_PADDING, rect.right + 4),
     });
@@ -511,7 +515,10 @@ export function Sidebar({
     setMenuPosition({
       top: Math.max(
         VIEWPORT_PADDING,
-        Math.min(y + 4, window.innerHeight - 220),
+        Math.min(
+          y + 4,
+          window.innerHeight - SIDEBAR_FLOATING_MENU_MAX_HEIGHT - VIEWPORT_PADDING,
+        ),
       ),
       left: Math.max(VIEWPORT_PADDING, x + 4),
     });
