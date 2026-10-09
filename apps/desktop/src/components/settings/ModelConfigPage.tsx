@@ -41,6 +41,7 @@ import { ModelConfigImportPanel } from "../../features/settings/imports/ModelCon
 import { ImportToggleButton } from "../../features/settings/import-workbench";
 import { JevSettingsCard } from "./JevSettingsCard";
 import { JEV_SERVICE } from "./service-catalog";
+import { isPluginCatalogSetupForProvider } from "./provider-setup-mode";
 
 type CatalogStatus = {
   loaded: boolean;
@@ -551,7 +552,10 @@ export function ModelConfigPage() {
         <ProviderSetupDialog
           key={setupFor}
           provider={editingProvider}
-          pluginCatalogSetup={pluginCatalogSetup?.providerId === editingProvider?.id}
+          pluginCatalogSetup={isPluginCatalogSetupForProvider(
+            pluginCatalogSetup,
+            editingProvider,
+          )}
           pluginCatalogPluginName={pluginCatalogSetup?.pluginName}
           initialDraft={copyDraft}
           initialService={jevSetup ? JEV_SERVICE : undefined}
