@@ -128,7 +128,7 @@ try {
   const buttons = () => page.evaluate(`Array.from(document.querySelectorAll('.subagent-topology-node-actions .subagent-stop-button')).map(b=>({text:b.textContent,disabled:b.disabled}))`);
   await until(async () => (await buttons()).length === 2, "two stop buttons");
   await page.evaluate(`document.querySelector('.subagent-topology-node-header').click()`);
-  await until(() => page.evaluate(`!!document.querySelector('.subagent-transcript-composer-controls .subagent-stop-button')`), "detail stop control");
+  await until(() => page.evaluate(`!!document.querySelector('.subagent-transcript-composer-controls .stop-btn')`), "detail stop control");
   await until(() => page.evaluate(`document.body.innerText.includes('Partial output from worker A')`), "worker A partial output rendered");
   const layout = await page.evaluate(`({
     models: [...document.querySelectorAll('.subagent-topology-node-model')].map(e => ({
@@ -145,7 +145,7 @@ try {
   assert.ok(layout.models.length === 2 && layout.models.every(m => m.text === "deepseek-flash medium" && !m.clipped && !m.ellipsis), `model and thinking labels remain readable with the detail panel open: ${JSON.stringify(layout.models)}`);
   assert.ok(layout.stops.length === 2 && layout.stops.every(b => b.text && b.opacity === "1" && Math.abs(b.rightGap - 10) < 1 && Math.abs(b.bottomGap - 10) < 1), "stop actions have visible text without hovering");
   const before = requests.length;
-  await page.evaluate(`document.querySelector('.subagent-transcript-composer-controls .subagent-stop-button').click()`);
+  await page.evaluate(`document.querySelector('.subagent-transcript-composer-controls .stop-btn').click()`);
   await until(() => !workers.has("A") && workers.has("B"), "only worker A cancelled");
   await until(async () => (await buttons()).length === 1, "terminal card removes stop");
   assert.equal(parents.size, 1, "coordinator stays running");
@@ -171,6 +171,8 @@ try {
     await page.evaluate(`window.__PI_DESKTOP__.selectSession(${JSON.stringify(demoId)})`);
     await invoke("agentPrompt", { sessionId: demoId, content: "这是本地模拟模型演示：启动两个子智能体，可以分别停止，或停止全部。主智能体继续运行。" });
     await until(() => workers.size === 2 && parents.size > 0, "demo ready");
+    await page.evaluate(`document.querySelector('.subagent-topology-node-header').click()`);
+    await until(() => page.evaluate(`!!document.querySelector('.subagent-transcript-composer-controls .stop-btn')`), "demo detail stop control");
     const shot = await page.call("Page.captureScreenshot", { format: "png" });
     await writeFile(join(scratch, "demo.png"), Buffer.from(shot.data, "base64"));
     console.log(`DEMO ${JSON.stringify({ scratch, ports, pid: child.pid })}`);
