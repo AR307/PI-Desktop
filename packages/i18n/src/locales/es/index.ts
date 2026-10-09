@@ -1825,6 +1825,9 @@ sklm: {
   },
   "askTool": {
     "title": "Algunas preguntas",
+    "historyTitle": "Preguntas y respuestas",
+    "answerLabel": "Respuesta",
+    "skipped": "Omitida",
     "progress": "Pregunta {{current}} de {{total}}",
     "questionNumber": "Pregunta {{number}}",
     "indicatorLabel": "Estado de la pregunta",

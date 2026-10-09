@@ -1813,6 +1813,9 @@ sklm: {
   },
   askTool: {
     title: "需要回答几个问题",
+    historyTitle: "问答摘要",
+    answerLabel: "回答",
+    skipped: "已跳过",
     progress: "第 {{current}} / {{total}} 题",
     questionNumber: "问题 {{number}}",
     indicatorLabel: "问题状态",

@@ -1788,6 +1788,9 @@ export const ptBR = {
   },
   askTool: {
     title: "Algumas perguntas",
+    historyTitle: "Perguntas e respostas",
+    answerLabel: "Resposta",
+    skipped: "Ignorada",
     progress: "Pergunta {{current}} de {{total}}",
     questionNumber: "Pergunta {{number}}",
     indicatorLabel: "Status da pergunta",
