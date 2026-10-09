@@ -12,6 +12,7 @@ export const enEntries: ChangelogEntry[] = [
       "Generate session titles with an optional plugin while keeping first-prompt fallback and manual renames.",
       "Open local Markdown links from chat in the bundled File Manager, including relative links and line references.",
       "Show configured context-window limits in the Composer's model list.",
+      "Plugins can inspect or refuse network redirects; existing fetch calls still follow redirects by default.",
     ],
   },
   {

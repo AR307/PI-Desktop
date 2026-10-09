@@ -12,6 +12,7 @@ export const ptBREntries: ChangelogEntry[] = [
       "Gere títulos de sessão com um plugin opcional; a primeira mensagem continua como alternativa e renomeações manuais têm prioridade.",
       "Abra links locais para arquivos Markdown pelo chat no Gerenciador de arquivos integrado, incluindo links relativos e referências a linhas.",
       "A lista de modelos do Composer agora mostra os limites de contexto configurados.",
+      "Plugins podem inspecionar ou recusar redirecionamentos de rede; chamadas fetch existentes continuam seguindo redirecionamentos por padrão.",
     ],
   },
   {

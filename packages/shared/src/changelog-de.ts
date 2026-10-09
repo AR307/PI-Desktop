@@ -12,6 +12,7 @@ export const deEntries: ChangelogEntry[] = [
       "Erzeugen Sie Sitzungstitel mit einem optionalen Plugin; die erste Eingabe bleibt als Ersatz erhalten und manuelle Umbenennungen haben Vorrang.",
       "Öffnen Sie lokale Markdown-Links aus dem Chat im integrierten Dateimanager, auch relative Links und Zeilenverweise.",
       "Die Modellliste im Composer zeigt jetzt konfigurierte Kontextfensterlimits.",
+      "Plugins können Netzwerkweiterleitungen prüfen oder ablehnen; bestehende Fetch-Aufrufe folgen Weiterleitungen weiterhin standardmäßig.",
     ],
   },
   {

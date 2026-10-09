@@ -12,6 +12,7 @@ export const esEntries: ChangelogEntry[] = [
       "Genera títulos de sesión con un plugin opcional; el primer mensaje sigue como alternativa y los cambios manuales tienen prioridad.",
       "Abre enlaces locales a archivos Markdown desde el chat en el Administrador de archivos integrado, incluidos enlaces relativos y referencias a líneas.",
       "La lista de modelos del Composer ahora muestra los límites de contexto configurados.",
+      "Los plugins pueden inspeccionar o rechazar redirecciones de red; las llamadas fetch existentes siguen las redirecciones de forma predeterminada.",
     ],
   },
   {

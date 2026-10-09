@@ -12,6 +12,7 @@ export const trEntries: ChangelogEntry[] = [
       "İsteğe bağlı bir eklentiyle oturum başlığı oluşturun; ilk istem yedek başlık olarak kalır ve elle yeniden adlandırmalar önceliklidir.",
       "Göreli bağlantılar ve satır başvuruları dahil yerel Markdown dosya bağlantılarını sohbetten yerleşik Dosya Yöneticisi'nde açın.",
       "Composer'ın model listesi artık yapılandırılmış bağlam penceresi sınırlarını gösterir.",
+      "Eklentiler ağ yönlendirmelerini inceleyebilir veya reddedebilir; mevcut fetch çağrıları varsayılan olarak yönlendirmeleri izlemeyi sürdürür.",
     ],
   },
   {
