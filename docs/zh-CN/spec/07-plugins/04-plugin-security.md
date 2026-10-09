@@ -421,3 +421,11 @@ PI-Desktop 自己当前占用（默认是 `Alt+Space` 与 `Alt+Shift+W`；用户
 - 签名验证（仅对包进行 sha256 检查）
 - 声明的清单权限在加载时自动授予
 - `userSelected` root 不跨重启保留，插件每个会话都得重新问一次
+
+### Fetch redirect policy (unreleased)
+
+The host owns the same redirect loop for default and injected single-hop
+transports. `error` refuses every 3xx with REDIRECT_DISALLOWED; `manual` returns
+it without contacting its target. Default follow retains per-hop egress checks.
+See [the source API contract](/spec/07-plugins/03-plugin-api#net) for capability
+detection, deadline semantics and compatibility. No mode expands network grants.
