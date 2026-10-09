@@ -2,6 +2,20 @@ import type { ChangelogEntry } from "./changelog.js";
 
 export const frEntries: ChangelogEntry[] = [
   {
+    "version": "0.18.0",
+    "date": "2026-10-09",
+    "highlights": [
+      "Configurez le classificateur Jev de TypeSafe depuis Ajouter un service et vérifiez la clé API avant de l'enregistrer.",
+      "Ajoutez depuis Ajouter un service des fournisseurs de plugins avec clé API, descriptions localisées et découverte des modèles après configuration.",
+      "Les actions de plugins autorisées peuvent transformer le brouillon du Composer avec une annulation ; l'amélioration des prompts est désormais un plugin facultatif.",
+      "Les détails des outils restent réduits jusqu'à leur ouverture, afin de garder la réponse terminée visible.",
+      "Générez les titres de session avec un plugin facultatif ; le premier message reste une solution de repli et les renommages manuels sont prioritaires.",
+      "Ouvrez depuis le chat les liens locaux vers des fichiers Markdown dans le gestionnaire intégré, y compris les liens relatifs et les références de ligne.",
+      "La liste des modèles du Composer affiche maintenant les limites de contexte configurées.",
+      "Les plugins peuvent inspecter ou refuser les redirections réseau ; les appels fetch existants continuent de les suivre par défaut.",
+    ],
+  },
+  {
     "version": "0.17.0",
     "date": "2026-10-07",
     "highlights": [

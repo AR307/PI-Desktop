@@ -130,9 +130,8 @@ test("a relay's list reads the shipped publisher's record for a known id", async
   const byId = new Map(result.models.map((model) => [model.modelId, model]));
   const known = byId.get("claude-sonnet-4-5");
   assert.equal(known.catalogSource, "models.dev", "several publishers state this id");
-  // Anthropic's published window, not a median dragged down by resellers that
-  // state a smaller deployment of the same id.
-  assert.equal(known.contextWindow, 1_000_000);
+  // Anthropic's current published window, not larger reseller deployment values.
+  assert.equal(known.contextWindow, 200_000);
   assert.equal(known.maxTokens, 64_000);
   assert.ok(known.capabilities.includes("tools"));
   // An id no publisher states still lands on the generic seed.
@@ -203,16 +202,16 @@ test("a relay enriches official IDs, strips safe deployment labels, and preserve
   assert.ok(tts.capabilities.includes("audio"));
   assert.equal(tts.contextWindow, 8_192);
 
-  // This relay is unanchored and Google / Vertex records conflict, so a `-1m`
-  // alias cannot choose one official endpoint's metadata.
+  // Google and Vertex now publish matching metadata, so the `-1m` alias can
+  // safely use their shared record without changing the served model id.
   const gemini = byId.get("gemini-2.5-pro-1m");
-  assert.equal(gemini.catalogSource, undefined);
-  assert.equal(gemini.contextWindow, 128_000);
+  assert.equal(gemini.catalogSource, "models.dev");
+  assert.equal(gemini.contextWindow, 1_048_576);
 
   // Official Anthropic disambiguation still enriches exact leaves.
   const claude = byId.get("claude-sonnet-4-5");
   assert.equal(claude.catalogSource, "models.dev");
-  assert.equal(claude.contextWindow, 1_000_000);
+  assert.equal(claude.contextWindow, 200_000);
 });
 test("a relay enriches a uniquely published dated leaf without reseller majority voting", async (t) => {
   /*

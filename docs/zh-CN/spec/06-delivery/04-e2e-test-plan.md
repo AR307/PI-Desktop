@@ -52,9 +52,10 @@
 
 - **前提：** 生图配置 UI fixture，中英文界面。
 - **步骤：** 勾选生图模型并保存服务商；从摘要菜单切换默认生图模型；
-  再取消唯一生图模型的标记并保存。
+  选择一项存储候选列表已不再提供的候选；再取消唯一生图模型的标记并保存。
 - **预期：** 服务商编辑确认“服务已更新”，清除生图选择后也不会提示已选择
-  生图模型；摘要菜单切换仍显示生图选择成功提示。绑定保存行为不变。
+  生图模型；摘要菜单切换仍显示生图选择成功提示；页面已无法接受的选择会
+  提示生图模型无法保存，而不是静默保留原默认值。绑定保存行为不变。
 - **规格：** 03-runtime/21-image-generation。**验收：** B。
 - **里程碑：** 维护。**状态：** `scripts/e2e-image-generation-ui.mjs` 自动覆盖。
 
@@ -1190,13 +1191,16 @@ task-candidate E2E 从请求工作树运行，但使用主工作区已经准备�
 
 #### E2E-021：删除会话作品
 
-- **先决条件**：会话存在。
-- **步骤**：1) 删除会话。 2) 观察会话列表。
-- **预期**：会话已从列表中删除；数据不见了。
-- **链接规格**：`03-runtime/04-data-storage.md`
+- **先决条件**：展开的侧边栏底部附近有一个会话。
+- **步骤**：1) 打开该会话的溢出菜单。 2) 确认菜单和“删除”操作均处于窗口范围内。
+  3) 在较短的窗口中重复，并滚动菜单到最后一项。 4) 删除会话并观察会话列表。
+- **预期**：菜单保持在视口内，最后一项可访问；删除后会话从列表消失且数据已移除。
+- **链接规格**：`03-runtime/04-data-storage.md`、
+  `04-ux/09-interaction-patterns.md`
 - **接受**：F（删除会话）
 - **里程碑**：M2
-- **状态**：草案
+- **状态**：单元测试覆盖（`sidebar-floating-menu.test.mjs`、
+  `sidebar-navigation.test.mjs`）；视口交互场景仍为草案
 
 #### E2E-036：设置会话导入目的地已移除
 
@@ -5605,6 +5609,7 @@ eleven-tool-round desktop paths are verified by
 | E——工具和权限 | E2E-008a、E2E-014、E2E-015、E2E-016、E2E-017、E2E-018、E2E-019、E2E-024I、E2E-024K、E2E-040、E2E-049、E2E-074、E2E-093、E2E-097、 E2E-099、E2E-100、E2E-101、E2E-102、E2E-103、E2E-105、E2E-106、E2E-107、E2E-111、E2E-112、E2E-113、E2E-114、E2E-115、E2E-116、 E2E-119、E2E-121、E2E-122、E2E-123、E2E-142、E2E-145、E2E-147、E2E-PLUGIN-imported-pi-package-skills、E2E-166 |
 | F——坚持 | E2E-020、E2E-021、E2E-038、E2E-SETTINGS-inline-capability-imports、E2E-040、E2E-042、E2E-047、E2E-048、E2E-048c、E2E-051、E2E-054、E2E-056、E2E-061、E2E-062、 E2E-064、E2E-066、E2E-068、E2E-071、E2E-072、E2E-073、E2E-082、E2E-084、E2E-096、E2E-098、E2E-102、E2E-102b、E2E-103、E2E-代理-001、 E2E-061a、E2E-073a、E2E-104、E2E-106、E2E-107、E2E-108、E2E-109、E2E-110、E2E-112、E2E-118、E2E-119、E2E-120、E2E-121、E2E-123、E2E-142、E2E-146、E2E-148、E2E-151、E2E-171、E2E-005J |
 | F——持久化（项目排序） | E2E-253 |
+| G / Security — Fetch redirect policy | E2E-PLUGIN-fetch-redirect-policy |
 | G——插件 | E2E-022、E2E-022A、E2E-022B、E2E-022C、E2E-023、E2E-024、E2E-024B、E2E-024C、E2E-024D、E2E-024AA、E2E-024E、E2E-024W、E2E-024F、E2E-024G、E2E-024H、 E2E-024I、E2E-024J、E2E-024K、E2E-024L、E2E-024M、E2E-024N、E2E-024O、E2E-024P、E2E-025、E2E-026、E2E-105、E2E-117、E2E-120、E2E-122、E2E-123、E2E-148、E2E-153、E2E-PLUGIN-imported-pi-package-skills、E2E-PLUGIN-imported-pi-package-wrapper、E2E-PLUGIN-import-extension-installs-dependencies、E2E-PLUGIN-import-extension-reports-missing-dependency、E2E-PLUGIN-global-shortcut-owns-only-its-own-command、E2E-PLUGIN-permission-gate-for-real-time-capabilities、E2E-PLUGIN-background-audio-and-realtime-connection |
 | H——诊断 | E2E-027、E2E-031、E2E-034、E2E-042、E2E-096、E2E-098、E2E-104、E2E-107、E2E-108、E2E-109、E2E-110、E2E-113、E2E-115、E2E-116、 E2E-118、E2E-121、E2E-146、E2E-194、E2E-195 |
 | 安全性 | E2E-SETTINGS-inline-capability-imports、E2E-028、E2E-029、E2E-030、E2E-024J、E2E-024K、E2E-024M、E2E-049、E2E-068、E2E-086、E2E-105、E2E-106、E2E-107、E2E-108、E2E-109、 E2E-110、E2E-112、E2E-113、E2E-115、E2E-116、E2E-117、E2E-119、E2E-121、E2E-122、E2E-123、E2E-142、E2E-148、E2E-151、E2E-153 |
@@ -9449,6 +9454,25 @@ preload, API normalization, store events, ToolRow, and Markdown renderer.
 No provider credentials or paid model calls are required. The fixture ends at
 work-panel file-request routing; artifact bytes are verified from the real
 host-created files. The full app's file-preview viewer is covered separately.
+
+#### E2E-PLUGIN-fetch-redirect-policy
+
+- **Preconditions**: Current-main task candidate, built workspace packages,
+  real Node plugin child process and two loopback HTTP fixtures; no real user
+  profile, provider or credentials.
+- **Steps**: Load the example probe plugin and invoke its `probe.fetch` operation
+  through the production panel bridge. Query capabilities, request error/manual/
+  follow, and repeat against the injected single-hop transport. Exercise invalid
+  modes, missing grants, disallowed targets, relative/missing Location, loops,
+  and timeout. Test 301/302/303/307/308 and default compatibility.
+- **Expected**: Error returns REDIRECT_DISALLOWED and manual returns the original
+  response, both with zero target requests. Follow reaches the target only after
+  egress authorization. Error codes survive child IPC; refusals are audited.
+- **Specs linked**: `07-plugins/03-plugin-api.md`, `07-plugins/04-plugin-security.md`
+- **Acceptance**: G + Security
+- **Milestone**: Post-MVP plugin API
+- **Status**: Automated protocol E2E via `pnpm test:e2e:plugin-fetch-redirect`.
+  The sample panel's native-window gesture remains manual; no desktop is attached.
 
 ### E2E-COMPOSER-configured-context-window
 

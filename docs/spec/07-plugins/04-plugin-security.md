@@ -344,9 +344,11 @@ outbound path the host owns answers to it.
   `window.open`, which would otherwise mint a window outside the filtered session
 - **`pi.net.fetch`.** Checks the allowlist and follows redirects by hand, because
   an allowed host that 30x-es to an undeclared one would carry the request out.
-  The runtime's hop loop is the only fetch path: Electron main supplies no
-  alternative `fetch` service, so nothing can follow a redirect without the
-  per-hop re-check
+  The host's shared hop loop owns both default and injected single-hop
+  transports. `redirect: "error"` rejects 3xx without visiting the target;
+  `manual` returns the original response. The default remains `follow`, with
+  the per-hop re-check. See the [API contract](03-plugin-api.md#net) for
+  capability detection and error codes.
 - **Remote MCP endpoints.** Answer to the same list, not to their permission alone.
   HTTP endpoints may be on a trusted LAN, but plain HTTP is unencrypted and is
   called out during configuration or plugin permission review. The MCP client

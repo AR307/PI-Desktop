@@ -41,6 +41,7 @@ import { ModelConfigImportPanel } from "../../features/settings/imports/ModelCon
 import { ImportToggleButton } from "../../features/settings/import-workbench";
 import { JevSettingsCard } from "./JevSettingsCard";
 import { JEV_SERVICE } from "./service-catalog";
+import { isPluginCatalogSetupForProvider } from "./provider-setup-mode";
 
 type CatalogStatus = {
   loaded: boolean;
@@ -266,6 +267,13 @@ export function ModelConfigPage() {
         providers,
       );
       if (!isImageGenerationPickerCandidate(candidates, binding.providerId, binding.modelId)) {
+        // The row offered this binding when it rendered, but the settings read
+        // above no longer lists it: another window, another agent or a
+        // concurrent provider edit changed the candidates in between. Report
+        // the refusal instead of returning silently — a pick that keeps the
+        // previous default with no message reads as a broken menu, and the
+        // runtime would reject the binding on the next request anyway.
+        showToast(t("settings.imageModelSaveFailed"), { variant: "error" });
         return;
       }
       const nextSettings = { ...current, imageGeneration: binding };
@@ -551,7 +559,10 @@ export function ModelConfigPage() {
         <ProviderSetupDialog
           key={setupFor}
           provider={editingProvider}
-          pluginCatalogSetup={pluginCatalogSetup?.providerId === editingProvider?.id}
+          pluginCatalogSetup={isPluginCatalogSetupForProvider(
+            pluginCatalogSetup,
+            editingProvider,
+          )}
           pluginCatalogPluginName={pluginCatalogSetup?.pluginName}
           initialDraft={copyDraft}
           initialService={jevSetup ? JEV_SERVICE : undefined}
