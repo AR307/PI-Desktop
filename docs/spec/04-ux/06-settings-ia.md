@@ -53,29 +53,35 @@ Settings is a **full-window page** that replaces the app sidebar + main chrome (
   6. **Skills / 技能** — Lucide `BookOpen` (reusable agent instructions)
   7. **MCP** — Lucide `Server` (agent connections)
   8. **Subagents / 子智能体** — Lucide `Bot` (built-in and personal parallel agents)
-  9. **Import / 导入** — Lucide `Download` (bring sessions and model configuration in from other tools)
-  10. **Projects / 项目** — Lucide `Archive` (durable project index)
-  11. **Cloud sync / 云同步** — Lucide `CloudDownload` (encrypted portable configuration backup and bidirectional sync; developer mode only)
-  12. **Remote Hosts / 远程主机** — Lucide `Globe` (SSH bootstrap and pairing inventory; developer mode only)
-  13. **Info / 信息** — Lucide `Info` (versions, logs, updates, developer)
+  9. **Projects / 项目** — Lucide `Archive` (durable project index)
+  10. **Cloud sync / 云同步** — Lucide `CloudDownload` (encrypted portable configuration backup and bidirectional sync; development builds only)
+  11. **Remote Hosts / 远程主机** — Lucide `Globe` (SSH bootstrap and pairing inventory; developer mode only)
+  12. **Info / 信息** — Lucide `Info` (versions, logs, updates, developer)
   Icons are decorative (`aria-hidden` via the SVG default) and stay monochrome
   with the rail label; do not reuse refresh/rotate glyphs here.
 - The directory remains a flat searchable list in the same exact order. For
   scanability, the destinations are shown in four titled visual clusters:
   `Preferences` / `偏好` (General, AI, Shortcuts), `Agent` / `智能体`
   (Instructions, Models, Skills, MCP, Subagents), `Workspace` / `工作区`
-  (Import, Projects), and `System` / `系统` (Cloud sync, Remote Hosts, Info;
-  Cloud sync and Remote Hosts are developer-only). Headings are
+  (Projects), and `System` / `系统` (Cloud sync, Remote Hosts, Info; Cloud sync
+  is development-build-only, Remote Hosts is developer-only). Headings are
   muted, non-interactive labels and use whitespace for separation; no divider
   lines are rendered. These are visual landmarks only, not a second navigation
   level.
   When search filters the directory, empty clusters and their headings disappear.
-- **Cloud sync / 云同步** is a developer-only, Experimental destination: its
-  rail row, page, and settings-search hits exist only while
-  `AppSettings.developerMode` is `true`. With developer mode off the row is
-  absent rather than disabled, settings search returns no hit for it, and a
-  rail position left on it falls back to General. The row and page title carry
-  the Experimental badge (`settings.configSync.experimental`)
+- **Voice** is a regular Preferences destination between AI and Shortcuts,
+  present in every build with no Experimental badge and no developer-mode
+  requirement. Its rail row, page, search hits, and idle Composer entry are
+  available to all users.
+  It is the only place to enable Live Voice. See the Voice section below.
+- **Cloud sync / 云同步** is not open to users yet: it is a
+  development-build-only `System` / `系统` destination. Its rail row, page,
+  and settings-search hits exist in development builds only; a packaged build
+  omits them, and a rail position left on it falls back to General. Developer
+  mode is not a gate either way, neither the rail row nor the page title
+  carries an Experimental badge, and nothing about the sync behavior itself
+  changes. Removing the destination's `developmentOnly` flag reopens it for
+  packaged builds.
 - **Remote Hosts / 远程主机** is a developer-only, Experimental destination: its
   rail row, its page, and its settings-search hits exist only while
   `AppSettings.developerMode` is `true`. With developer mode off the row is
@@ -95,6 +101,25 @@ Settings is a **full-window page** that replaces the app sidebar + main chrome (
 ## 2. Section contents
 
 ### General
+
+- **Storage** shows the effective application data path and the reclaimable cache
+  size. It is included in settings search. Choose directory uses the native picker;
+  confirmation displays both application and browser source paths, the target,
+  migration scope and the restart/backup policy. Cancelling has no side effects.
+  Accepting locks repeat actions until the app exits through ordered shutdown.
+- A separate sandboxed cold-maintenance window shows localized scanning, copying,
+  verifying and internal-path relocation stages, file counts, copied/verified bytes
+  and determinate progress where known. It does not load plugins or agent services.
+  Failure explains that the original profile remains active, then returns to it;
+  settings exposes the error and permits retry. A disconnected selected volume
+  blocks startup with a recovery explanation instead of silently using empty data.
+- **Clear cache** shows a size and requires an inline confirmation describing the
+  retained durable data before clearing and restarting. **Delete old backups** is
+  separate, lists original paths and warns users to check their plugins and old
+  attachments first. Arbitrary plugin-owned absolute references cannot be rewritten
+  by the host. Environment-controlled profiles display why maintenance is disabled.
+  Confirmation gets keyboard focus, asynchronous errors remain visible, and all
+  visible copy is localized. These operations affect only this local installation.
 - **Appearance** card:
   - **Theme**: a searchable picker row (same anchored-menu pattern as
     Language). The closed trigger sizes to the current label, capped by the
@@ -164,7 +189,7 @@ Settings is a **full-window page** that replaces the app sidebar + main chrome (
   - **Relaxed network mode**: one switch persisting as
     `AppSettings.networkPolicy.mode` (`relaxed` | `strict`), **on by default**.
     When it is on, an endpoint the user typed themselves — a model base URL, an
-    MCP server, a market source, a git remote — may be a loopback or LAN address,
+    MCP server, a git remote — may be a loopback or LAN address,
     may use plain `http`, and a transparent proxy's fake-IP answers are
     tolerated. Off returns those endpoints to the public-HTTPS-only boundary.
     The first plaintext hop to such an endpoint shows one informational notice.
@@ -202,6 +227,13 @@ Settings is a **full-window page** that replaces the app sidebar + main chrome (
   Users can sync now, unlock, pause this device, approve/reject staged items,
   and disconnect. The page does not imply convergence from an old successful
   run while a pending state remains.
+- **Fast revisit and drafts**: render the last redacted state and history from
+  a short-lived local cache while the host refresh runs in the background. Keep
+  endpoint, username, remote directory, device label, compatibility mode, and
+  category choices in renderer-local storage so an unfinished form survives
+  navigation or reload. WebDAV app passwords remain in Host-owned secret
+  storage and are reused only for the same endpoint and account; vault
+  passwords are never written to renderer storage.
 
 ### 全局 AI (`ai` tab)
 - **Permissions** card: the global permission-mode control
@@ -228,23 +260,13 @@ Settings is a **full-window page** that replaces the app sidebar + main chrome (
   is remaining. The threshold controls when a text-only paste becomes a
   temporary session-scratch file; it defaults to 600 characters and accepts
   integer values from 1 through 1,000,000.
-- **Prompt enhancement** is a card controlling the Composer's Enhance prompt
-  action (ADR 0121). It carries a `Use a custom template` switch and the settings
-  icon button the subagent rows use for editing, which opens an editor sheet
-  (the subagent editor's pattern). The switch gates whether a stored template
-  applies, is disabled until one is saved, and turns on when a template is
-  saved; turning it off keeps the stored text. The sheet holds the user-template
-  editor, which shows the built-in default text when no override is stored and
-  offers an insert action for the draft variable; a save that would leave the
-  template without that variable is refused. The system prompt is built in and
-  exposes no field. The same card also has a `Default model` row using the same
-  anchored, searchable menu as the Models tab's default-model row; empty means
-  "follow the Composer's current model". Two rows therefore read `Default
-  model`, distinguished by their card headings (Prompt enhancement vs Models
-  Defaults). The reasoning row is a menu select listing the levels the selected
-  model actually supports (the row is disabled when it supports none), defaults
-  to Off, and has no follow-the-session entry. Settings search indexes the card,
-  its switch, the template row, the default-model row, and the reasoning row.
+- Composer text actions are contributed by explicitly installed plugins and
+  appear only while their plugin is enabled and its `composer.transform`
+  permission is granted. The host does not include a prompt-enhancement card or
+  install the standalone `pi.prompt-enhancement` plugin by default. Plugin-owned
+  settings are edited on the Plugins page; the one-time migration of legacy
+  prompt-enhancement preferences is specified in
+  `04-ux/12-prompt-enhancement.md`.
 - **Thinking display mode** uses a menu select with Detailed (default) and
   Compact. Both modes use one whole-process disclosure. Detailed starts the
   process open, keeps reasoning visible, opens the active multi-item activity
@@ -287,6 +309,37 @@ The user-facing dashboard is marketplace plugin `pi.token-insights`, opened from
 the command palette (`usage`, `tokens`, `用量`). Settings search does not index
 a usage tab.
 
+### Voice
+
+- This destination owns Live Voice enablement and provider bindings, and is
+  reachable in every build without developer mode. Its enable card keeps the
+  explanation behind the heading's help mark and the Model configuration link
+  on the card's heading line, so no control floats between the rows. Disabled
+  Live Voice has no Composer voice or work icon; enabling it reveals one
+  preparation entry, never auto-starts a call, and never grants work access.
+- Bind an existing compatible provider account, choose the exact next-call
+  binding, and configure its model, voice, and explicit Realtime profile where
+  applicable. An account card with nothing bound shows only its picker: the
+  next-call, model, voice, and profile rows appear with the binding instead of
+  rendering as empty disabled controls. Readiness describes that selected
+  binding, not whether any other configured provider is ready. Credentials
+  remain in the existing Host/Main systems and are not shown or copied into the
+  renderer.
+- Provider-binding edits remain locked while that binding is active. Turning
+  Live Voice off ends the call, but the global compact call bar remains visible
+  through Main termination and renderer media cleanup, including while Settings
+  replaces the chat shell. An unconfirmed release keeps its error visible and
+  suppresses another Start until the app is restarted.
+- Work authorization belongs to an explicit opt-in and target in next-call
+  preparation, not to the Settings enable switch. Context sharing is a separate
+  unchecked, transient next-call choice. Settings copy distinguishes the
+  default voice-only call from explicitly authorized work requests.
+- Legacy Dictation and Host Speech settings remain hidden and their stored
+  values retain their meaning. No new persisted preference, IPC, provider
+  fallback, or permission rule is introduced. See
+  [Live Voice](../03-runtime/live-voice.md) and
+  [Live Work](../03-runtime/live-work-session.md).
+
 ### Shortcuts (`shortcuts` tab)
 - **Keyboard shortcuts** card:
   - lists navigation, agent, and window actions from one shared shortcut map
@@ -318,6 +371,10 @@ a usage tab.
     override is folded into it when the map is read (D438, D439)
 
 ### Model configuration (`agent` tab)
+- The model configuration page groups its sections in this order: **AI
+  services** (including model-catalog status and refresh), **Jev**, then the
+  image-generation model selector. The sections use one consistent vertical
+  spacing rhythm.
 - **Defaults** card: a compact settings row shows the provider name and exact
   model ID beneath the Default model label. A quiet Change action opens the
   picker without duplicating the current value. The picker groups model-level
@@ -356,12 +413,23 @@ a usage tab.
     row and keeps the global default model in sync when that account is selected
   - Test connection resolves the account's OAuth authorization and reports a
     transient success or failure without probing the provider with an API key
+  - At viewport widths up to 940px, both provider and vendor-account model
+    panes stack without shrinking to the remaining dialog height. Each model
+    list scrolls within its bounded tray; the dialog body scrolls to reach
+    either tray. Short, wide windows retain the side-by-side layout.
 - **Providers** studio:
   - OpenAI-compatible and custom-service add-provider dialog (opened from Add
     provider / empty-state CTA)
   - provider cards with host, first configured model, secret status,
     and test / make-default / delete actions
   - Add account and Add provider use the same primary button treatment
+  - Add Service groups unconfigured API-key providers declared by loaded
+    plugins under each contribution's optional custom category. The category
+    defaults to the plugin name and supports English and Simplified Chinese.
+    Tiles show only the provider name; a one-sentence introduction appears on
+    hover or keyboard focus. Search also matches category, plugin, endpoint,
+    and model IDs. A selection opens the Host-owned API-key form; after saving,
+    that provider remains in the service list and leaves the chooser.
   - the add/edit dialog configures connection identity (name, endpoint, API
     style, and secret). It shrinks to the overlay on a narrow window, and a
     focused credential field keeps its 2px accent ring inside the dialog
@@ -430,8 +498,11 @@ a usage tab.
     `/messages`, `/chat/completions`, or `/responses` when the field loses
     focus. The placeholder is enough — no helper paragraph under the URL.
     Invalid URLs show an inline error and block discovery and save. A failed
-    model-list probe shows a compact classified error in the empty pane, or a
-    one-line banner above a cached list; raw HTTP/JSON dumps are not shown.
+    model-list probe reports one classified sentence through the app toast and
+    leaves a one-line “no list” label in the empty pane, or the rows in place
+    above it; raw HTTP/JSON dumps are shown in neither. A settled probe —
+    connected, catalog, or refused — is announced once instead of holding a
+    status row under the key.
     Named display names and optional custom headers stay behind Advanced settings.
     The dialog header's upper-right actions include an explicit Advanced settings
     button that opens a separate compact modal, keeping the main form focused on
@@ -459,12 +530,44 @@ a usage tab.
   - vendor-account rows are not rendered in the AI services list; a connected
     vendor account can still be selected in Defaults and is managed only in the
     Vendor accounts card
+  - the Providers section header has an **Import from other tools** action.
+    Its inline panel scans only after the user starts a scan, groups local
+    provider drafts by source, and never renders raw credentials. Stored API
+    keys are written to the host secret store; subscription/OAuth logins are
+    not imported. Re-importing an equivalent provider is skipped.
 
 The permission-mode selector remains available in the composer while the
 session is in Agent, Plan, or Goal. In Plan and Goal it controls Bash
 confirmation only: Ask and Accept edits prompt, while Auto may run a mutating
 Bash command without confirmation. The AI Defaults card must describe that both
 contract modes are intent boundaries, not strict read-only security profiles.
+
+### Jev classifier
+
+- Keep Jev out of the chat provider/model list: it is a TypeSafe structured
+  classifier, not a conversation model, and it owns no provider row.
+- Offer it from **Add service**, in its own Classifiers group, on the add path
+  only: changing an existing row's service never turns it into a classifier.
+  The tile carries the TypeSafe address the key is spent on.
+- Adding Jev is one action with two steps: check the key against TypeSafe, then
+  store it and turn the classifier on. Nothing is written when the check fails,
+  and closing the dialog while the check is still running cancels the whole
+  action, so an enabled Jev always has a key the Agent can spend and an
+  abandoned dialog never leaves a credential behind. The credential is a
+  TypeSafe API key; this integration has no OAuth path.
+- The model configuration page shows the Jev card only once Jev has been added:
+  an install without it has nothing there to configure, and adding stays in the
+  service chooser. The card carries the stored-key state, the Agent-mode switch
+  and the actions that replace or remove the key; removing the key takes the
+  switch down first, then the card. The key itself is entered only in the
+  service dialog, which is also where it is checked. It stays in Host secure
+  storage; the renderer only learns whether one exists. Keep the card free of
+  persistent explanatory paragraphs: its heading help icon provides integration
+  and data-handling details, while the switch help icon explains Agent-mode
+  availability. The setup form keeps the privacy notice visible before a key
+  is stored.
+- The tool is on demand and unavailable in Plan and Goal modes. Removing the
+  key turns Jev off first, then deletes it.
 
 ### Agent capability destinations (Skills / MCP / Subagents)
 
@@ -528,6 +631,9 @@ system while preserving their different data ownership:
   Move to Global. With no project selected the Move into <project> item is not
   offered and the project group asks for a project selection instead, so a
   capability is never sent to an unnamed project.
+- The MCP editor's optional connection timeout accepts 1–600 seconds. A blank
+  value clears the server override and restores the default; saving a changed
+  timeout refreshes that server's live connection.
 - Skeleton rows appear on first paint only. A later refresh keeps the rows it
   already has and dims the list instead, announcing the refresh to assistive
   technology, so toggling a switch never replaces the list with skeletons.
@@ -543,7 +649,7 @@ system while preserving their different data ownership:
   the width with evenly divided segments, search sits below it, and the
   actions wrap left-aligned. Group headers drop the resolved path so row copy
   keeps the width.
-- Skills exposes a Market action beside New / Import. Market is a second view
+- Skills exposes a Market action beside New and Scan other tools. Market is a second view
   of the same page, not a new Settings destination: browse catalog sources,
   preview the assembled markdown (including inlined sibling `.md` files), and
   install through `skills.create` into `~/.agents/skills`. Built-in picks are
@@ -556,6 +662,14 @@ system while preserving their different data ownership:
   guard says so instead of calling every source unreachable, because a proxied
   user sees that refusal while the same URL opens in their browser (ADR 0177).
   Back reloads the skill list.
+- Skills also exposes **Scan other tools** in its toolbar. The explicit scan
+  opens inline on the Skills page, and imported entries follow the current
+  Global / Project filter and selected project. The native file and folder
+  import actions remain available in their level groups.
+- MCP exposes **Scan other tools** beside Add and Market. The explicit scan
+  opens inline on the MCP page. Imported servers follow the current Global /
+  Project filter and selected project; secrets and header values are never
+  shown in candidate rows.
 - The Subagents create/edit sheet pins a model with a searchable, provider-
   grouped anchored menu — the same option-menu control the service picker uses
   — over the configured, runnable models the Composer offers, plus an
@@ -618,33 +732,19 @@ system while preserving their different data ownership:
   instruction API; project instructions remain managed from the active project
   menu and are resolved after the global layer.
 
-### Import
-- Scan supported local agent stores for **sessions**, **model configuration**,
-  **skills**, and **MCP servers** through one workbench per kind behind the
-  page's kind switcher. Every kind keeps its own explicit scan: none of them
-  runs automatically, and switching kinds never starts one (D007 / D342).
-- Sessions: review candidates through `SessionImportPanel`. Source and
-  project-path grouping behavior follows
-  [08-component-spec §18](08-component-spec.md#18-import-destination).
-  The Group-by control is the same in-app menu select as the Appearance and
-  Permissions pickers, not a platform-drawn `<select>`. A Codex archive larger
-  than `CODEX_SCAN_MAX_FILES` (250) is truncated to the newest session files by
-  `YYYY/MM/DD` path date; the workbench shows a localized cap note, and omitted
-  Codex files are not in that candidate list.
-
-- Model configuration: review provider drafts through
-  `ModelConfigImportPanel`
-  ([08-component-spec §18.5](08-component-spec.md#185-modelconfigimportpanel)).
-  Stored API keys from those configs are copied into the host secret store;
-  subscription/OAuth logins are not copied. CC Switch (`~/.cc-switch`) is
-  scanned as its own source so saved profiles, not only the currently
-  applied live file, can be imported. Re-importing an equivalent provider
-  (same normalized base URL, API style, and credential) is skipped; profiles
-  with different credentials at one endpoint remain separate. If the app has
-  no default model yet, the first newly created provider becomes the default.
-- Skills and MCP servers reuse the agent capability scanners and their source
-  labels. The skills kind carries the import mode (copy or symlink); the MCP
-  kind writes into the same MCP list the MCP destination manages.
+### Inline import workbenches
+- Model configuration, external skills, and external MCP scans live inside
+  Models, Skills, and MCP respectively. Each page keeps an explicit scan and
+  selection panel; opening or closing the panel never starts a scan.
+- When an import panel opens, show its scan-scope explanation directly above
+  the Scan action; it does not require a help icon. Result-specific guidance
+  remains attached to its existing control.
+- Skills and MCP imports use the destination selected by the page's current
+  Global / Project filter. Project scans and writes carry the selected project
+  path, and the scan panel resets when that scope changes.
+- Settings has no session-import panel. Session ingestion is available to
+  plugins through the existing host-owned plugin session API; project binding
+  and refresh behavior remain documented with the plugin session contracts.
 
 ### Project archive
 - Reuses the durable Projects index as a settings-scale management surface
@@ -666,7 +766,7 @@ system while preserving their different data ownership:
   in the iOS sense: the selected row is the header of its own card, so the
   detail opens under the row and repeats nothing the row already states. One
   toolbar leads the page and nothing is expanded in it: like the capability and
-  Import destinations, the destination carries no description line, so no
+  inline import workbenches, the destination carries no description line, so no
   sentence sits between the page title and the controls. It reuses the same
   composition, control height, and row rhythm as the agent capability pages
   (D257) and adds no page-specific chrome.
@@ -731,18 +831,10 @@ system while preserving their different data ownership:
   - the developer mode switch unlocks the Open console button, F12 on every
     platform, Ctrl+Shift+I on Windows/Linux, the macOS View-menu developer
     tools item, Copy conversation ID / Open session path on the conversation
-    overflow menu, and the Cloud sync / Remote Hosts destinations on the rail
+    overflow menu, and the Remote Hosts destination on the rail
   - disabling developer mode closes an open console and disables or removes
     every entry point; Settings search indexes the card, switch, and console
     action
-- **Easter eggs** card with one row that replays the Mid-Autumn egg: a
-  full-screen Moon Festival canvas animation (moonrise, a mooncake rain, the
-  mooncakes flying up to assemble 「中秋快乐」, and vertical poem lines drifting
-  behind them). The same animation also plays by itself once, at most one time
-  ever per profile, and only after the startup splash has finished — it must
-  never cover the boot splash or appear while the app is still loading.
-  Closing it (top-right close button or Escape) returns to the app; afterwards
-  it is only reachable from this row
 - The Updates row always exposes a Release notes action. It opens a modal
   containing the complete shipped stable changelog in newest-first order,
   localized to the product language and marking the current and available
@@ -752,6 +844,10 @@ system while preserving their different data ownership:
   list under the status text (same notes as the ambient banner; D164). The
   full-history modal remains available when the app is up to date or update
   checks are disabled in development
+- Dismissing an update applies to that version across restarts. In-app
+  dismissal cancels an active download and prevents install-on-quit; discovery
+  continues, and a newer version clears the dismissal and resumes automatic
+  delivery.
 
 ## 3. Navigation rules
 
@@ -761,15 +857,15 @@ system while preserving their different data ownership:
 - Plugin management remains available from the app shell's independent
   **Plugins** destination, including load, enable, disable, and uninstall; it is
   not duplicated in Settings
-- The marketplace source selector lives inside **Plugins → Marketplace**, next
-  to the catalog controls; it is not a separate Settings destination.
 - Project archive is indexed by Settings search and is not duplicated as a home
   sidebar destination or standalone global-search page
 - Back to app returns to chat shell from the rail's pinned footer action
 - Developer-only destinations join and leave the rail, the page, and settings
   search as one unit: while developer mode is off the rail omits the row,
-  settings search returns no hit for it, and an open Cloud sync or Remote Hosts
-  page returns to General
+  settings search returns no hit for it, and an open Remote Hosts page returns
+  to General. Cloud sync is development-build-only for now: packaged builds
+  omit its rail row, page, and settings-search hits and fall back to General,
+  while developer mode never gates it.
 
 ## 4. Acceptance
 
@@ -777,9 +873,11 @@ system while preserving their different data ownership:
 2. Rail shows the search pill at the top, the back-to-app action pinned at the
    foot on the main sidebar's footer icon line, and exactly General / 常规, AI,
    Shortcuts / 快捷键, Instructions / 指令, Models / 模型, Skills / 技能, MCP,
-   Subagents / 子智能体, Import / 导入, Projects / 项目, Cloud sync / 云同步,
-   Remote Hosts / 远程主机, and Info / 信息 in that order. Cloud sync / 云同步
-   and Remote Hosts / 远程主机 appear only while developer mode is on. The rows are grouped under Preferences / 偏好,
+   Subagents / 子智能体, Projects / 项目, Cloud sync / 云同步 (development
+   builds only), Remote Hosts / 远程主机 (developer mode only), and Info / 信息
+   in that order. A packaged build leaves Cloud sync out; Voice
+   appears between AI and Shortcuts only in development builds with developer
+   mode on. The rows are grouped under Preferences / 偏好,
    Agent / 智能体, Workspace / 工作区, and System / 系统. There is no
    Usage / 用量 destination.
 3. Appearance is part of General and has no standalone rail destination

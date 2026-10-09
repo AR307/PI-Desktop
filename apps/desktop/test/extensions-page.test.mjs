@@ -6,9 +6,9 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { loadStyles } from "./helpers/styles.mjs";
-import { en } from "../../../packages/i18n/src/locales/en/index.ts";
-import { zhCN } from "../../../packages/i18n/src/locales/zh-CN/index.ts";
-import { tr } from "../../../packages/i18n/src/locales/tr/index.ts";
+import { en } from "../../../packages/i18n/dist/locales/en/index.js";
+import { zhCN } from "../../../packages/i18n/dist/locales/zh-CN/index.js";
+import { tr } from "../../../packages/i18n/dist/locales/tr/index.js";
 
 const catalogs = { en, "zh-CN": zhCN, tr };
 
@@ -26,8 +26,8 @@ const settingsComponents = new Map(
     .map((name) => [name, readFileSync(join(settingsDir, name), "utf8")]),
 );
 const pageSrc = readPluginsSourceSync();
-const marketSettingsSrc = readFileSync(
-  join(here, "../src/components/plugins/MarketplaceSourceSettings.tsx"),
+const marketPanelSrc = readFileSync(
+  join(here, "../src/features/plugins/MarketplacePanel.tsx"),
   "utf8",
 );
 const settingsPageSrc = readSettingsSourceSync();
@@ -112,13 +112,14 @@ test("the extensions page uses tabs instead of the removed capability overview",
   assert.match(pageSrc, /className="plugins-segment"/);
 });
 
-test("marketplace source settings omit redundant explanatory copy", () => {
-  assert.match(marketSettingsSrc, /marketProviderTitle/);
+test("marketplace keeps refresh and install actions without source switching", () => {
+  const source = `${pageSrc}\n${marketPanelSrc}`;
   assert.doesNotMatch(
-    marketSettingsSrc,
-    /marketProviderDesc|marketProviderMirrorHint|marketActiveSource|plugins-market-settings-active/,
+    source,
+    /MarketplaceSourceSettings|pluginMarketSource|pluginMarketCustomUrl|marketProvider|marketCustomUrl|marketSource/,
   );
-  assert.match(marketSettingsSrc, /marketCustomUrlDesc/);
+  assert.match(marketPanelSrc, /refreshMarket\(query, \{ refreshRemote: true \}\)/);
+  assert.match(marketPanelSrc, /queueInstall/);
 });
 
 test("installed plugin rows keep secondary detail behind a disclosure", () => {
@@ -164,13 +165,13 @@ test("capability sections flow at natural height with skeleton loading", () => {
 });
 
 test("skill import is one native file and physically targets the selected level", () => {
-  const start = electronMainSrc.indexOf("handle(IPC.invoke.skillImport");
-  const end = electronMainSrc.indexOf("handle(\n    IPC.invoke.skillUpdate", start);
-  const handler = electronMainSrc.slice(start, end);
-  assert.ok(start >= 0 && end > start, "skill import handler is missing");
+  const handler = electronMainSrc.match(
+    /handle\(\s*IPC\.invoke\.skillImport[\s\S]*?(?=handle\(\s*IPC\.invoke\.skillUpdate)/,
+  )?.[0];
+  assert.ok(handler, "skill import handler is missing");
   assert.match(handler, /properties: \["openFile"\]/);
-  assert.doesNotMatch(handler, /\bmultiple\b/);
-  assert.match(handler, /host\.call\("skills\.import"/);
+  assert.match(handler, /path: picked\.filePaths\[0\]/);
+  assert.match(handler, /currentHost\.call\("skills\.import"/);
   assert.match(settingsComponents.get("AgentSkillsPage.tsx"), /api\.importUserSkill\(/);
   assert.match(hostCapabilitySources, /fs::copy\(source, target\)/);
 });
@@ -183,6 +184,8 @@ test("MCP management reuses the modal and validates its locked id and transport 
   assert.match(page, /sameLevel/);
   assert.match(sheet, /disabled=\{!!editing\}/);
   assert.match(sheet, /mcpDraftError/);
+  assert.match(sheet, /draft\.timeoutSeconds/);
+  assert.match(sheet, /errorTimeoutRange/);
   assert.match(sheet, /command\.includes\("\.\."\)/);
   assert.match(sheet, /isNonLoopbackHttpMcpUrl/);
   assert.match(sheet, /role="dialog" aria-modal/);

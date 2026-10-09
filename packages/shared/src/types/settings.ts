@@ -9,8 +9,23 @@ import type { GlobalPermissionMode } from "./permissions.js";
 import type { PluginMarketSource } from "./plugins.js";
 import type { SpeechSettings } from "./speech.js";
 import type { ThinkingLevel } from "./models.js";
+import type { UpdatePreference } from "./platform.js";
+import type { LiveVoiceSettings } from "./live-voice.js";
 
 export type ThemePreference = "system" | "light" | "dark" | `plugin:${string}`;
+
+/**
+ * What a TypeSafe key check answered.
+ *
+ * `ok` means the classifier answered this key at its own address. A refusal
+ * carries the HTTP `status` and `message` when TypeSafe sent one; `message` is
+ * provider text with the key already redacted.
+ */
+export type JevKeyCheckResult = {
+  ok: boolean;
+  status?: number;
+  message?: string;
+};
 
 /**
  * What closing the main window does on Windows/Linux. macOS keeps the native
@@ -28,48 +43,35 @@ export type AppSettings = {
   imageGenerationModels?: import("../image-generation.js").ImageGenerationBinding[] | null;
   defaultProviderId?: string;
   defaultModelId?: string;
+  /** Per-install update behavior; absent uses the package's safe default. */
+  updatePreference?: UpdatePreference;
+  /** Last manually announced release; kept local to avoid repeating notices. */
+  lastNotifiedUpdateVersion?: string;
   /** Host speech bindings. Absent means voice actions stay disabled. */
   speech?: SpeechSettings;
+  /** App-owned real-time voice bindings; separate from local dictation. */
+  liveVoice?: LiveVoiceSettings;
   defaultMode: Mode;
   /**
    * Keep retryable provider/network failures retrying until the request succeeds.
    * Absent and false use the bounded ten-retry policy.
    */
   infiniteProviderRetry?: boolean;
+  /** Allow Agent mode to call TypeSafe Jev for explicit structured classifications. */
+  jevEnabled?: boolean;
   /** Prevent idle system sleep while this desktop app runs; off when absent. */
   keepAwakeWhileRunning?: boolean;
   /** Configured command shell for the agent Bash protocol tool. */
   defaultCommandShell?: CommandShellId;
-  /**
-   * Whether the stored user template replaces the built-in one (ADR 0121).
-   * Absent means off. Turning it off keeps `promptEnhancementUserTemplate` so
-   * toggling back on restores the user's text instead of discarding it.
-   */
+  /** @deprecated Retained for one-time migration into pi.prompt-enhancement. */
   promptEnhancementCustomTemplate?: boolean;
-  /**
-   * Composer prompt-enhancement user-template override (ADR 0121). Applied only
-   * while `promptEnhancementCustomTemplate` is on. Host-core rejects a non-blank
-   * value without `{{draft}}` and any value beyond
-   * `PROMPT_ENHANCEMENT_TEMPLATE_MAX_LENGTH`.
-   *
-   * The system prompt is intentionally not overridable: it carries the rewrite
-   * contract the feature is specified against.
-   */
+  /** @deprecated Retained for one-time migration into pi.prompt-enhancement. */
   promptEnhancementUserTemplate?: string;
-  /**
-   * Model the one-shot enhancement runs on. Absent means "follow the Composer's
-   * current model". When the pinned pair is unusable, main falls back to the
-   * Composer model and logs a warning (ADR 0121).
-   */
+  /** @deprecated Retained for one-time migration into pi.prompt-enhancement. */
   promptEnhancementProviderId?: string;
+  /** @deprecated Retained for one-time migration into pi.prompt-enhancement. */
   promptEnhancementModelId?: string;
-  /**
-   * Reasoning effort for the one-shot enhancement. Absent means `off`: the
-   * enhancement never inherits the session's level, because a rewrite rarely
-   * benefits from reasoning and reasoning is the slow path. The value is clamped
-   * onto the resolved model's ladder, and switching model re-clamps it, so a
-   * stored level is always one the model can run.
-   */
+  /** @deprecated Retained for one-time migration into pi.prompt-enhancement. */
   promptEnhancementThinkingLevel?: ThinkingLevel;
   defaultPermissionMode?: GlobalPermissionMode;
   theme: ThemePreference;
@@ -106,13 +108,9 @@ export type AppSettings = {
   keybindings?: KeybindingOverrides;
   /** Unlocks the devtools console (settings button, F12, macOS View menu). */
   developerMode?: boolean;
-  /**
-   * Extension marketplace provider. `mirror` targets the cnb.cool copy for
-   * networks that cannot reach `raw.githubusercontent.com`; both serve the
-   * same catalog and packages.
-   */
+  /** @deprecated Retained for persisted settings compatibility; the marketplace always uses the official source. */
   pluginMarketSource?: PluginMarketSource;
-  /** Catalog URL used when `pluginMarketSource` is `custom`. */
+  /** @deprecated Retained for persisted settings compatibility and ignored by the marketplace. */
   pluginMarketCustomUrl?: string;
   /**
    * Outbound proxy for app-owned HTTP (D340). Absent means System: Chromium

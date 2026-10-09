@@ -23,6 +23,10 @@ const agentRuntimeSrc = readFileSync(
   "utf8",
 );
 const sidecarSrc = readFileSync(join(repoRoot, "packages/agent-runtime/src/sidecar.ts"), "utf8");
+const desktopSidecarSrc = readFileSync(
+  join(desktopRoot, "electron/main/runtime/sidecar.ts"),
+  "utf8",
+);
 const composerAutocompleteSrc = readFileSync(
   join(desktopRoot, "src/components/ComposerAutocomplete.tsx"),
   "utf8",
@@ -87,10 +91,10 @@ test("the composer lists active skills last and routes slash skills to the Skill
   assert.match(mainSrc, /skillId: skill\.id/);
   assert.match(
     mainSrc,
-    /\.\.\.extensionCommands,\s*\.\.\.skillCommands,/,
+    /\.\.\.extensionCommands,\s*\.\.\.mcpCommands,\s*\.\.\.skillCommands,/,
   );
-  assert.match(mainSrc, /command\?\.kind === "skill" && command\.skillId/);
-  assert.match(mainSrc, /Call the \\`Skill\\` tool with id/);
+  assert.match(mainSrc, /findSkillMentions\(req\.content, activeSkills\)/);
+  assert.match(mainSrc, /Call the \\`Skill\\` tool with each of these ids/);
   assert.match(composerAutocompleteSrc, /item\.command\.kind === "skill"/);
 });
 
@@ -119,6 +123,9 @@ test("the built-in skill body loads through the same Skill tool", () => {
     /loadBuiltinSkillBody\(id\) \?\?\s*\(await loadUserSkillBody\(id, projectPath\)\) \?\?\s*plugins\.loadSkillBody\(id\)/,
   );
   assert.match(mainSrc, /const userIds = \(await activeUserSkills/);
+  assert.match(desktopSidecarSrc, /formatSkillToolContent\(skill\)/);
+  assert.match(builtinSrc, /location: raw\.path/);
+  assert.match(runtimeSrc, /location: skill\.path/);
 });
 
 test("the built-in skill ships as a packaged resource with a dev fallback", () => {

@@ -15,6 +15,9 @@ export type WorkPanelTab = {
   location?: string;
   /** Stored attachment mimeType for extension-less `attachments/<sha256>` images. */
   mimeType?: string;
+  /** Optional 1-based line/column for host file tabs (chat `path:line` refs). */
+  line?: number;
+  column?: number;
 };
 
 export type WorkPanelTabsState = {
@@ -24,8 +27,29 @@ export type WorkPanelTabsState = {
 
 export type WorkPanelContext = WorkPanelTabsState & {
   open: boolean;
-  fileRequest: { path: string; seq: number; mimeType?: string } | null;
+  fileRequest: {
+    path: string;
+    seq: number;
+    mimeType?: string;
+    line?: number;
+    column?: number;
+  } | null;
 };
+
+/** Build the file-view request represented by an active file tab. */
+export function createWorkPanelFileRequest(
+  tab: WorkPanelTab,
+  seq: number,
+): WorkPanelContext["fileRequest"] {
+  if (tab.kind !== "file" || !tab.resource) return null;
+  return {
+    path: tab.resource,
+    seq,
+    ...(tab.mimeType ? { mimeType: tab.mimeType } : {}),
+    ...(tab.line != null ? { line: tab.line } : {}),
+    ...(tab.column != null ? { column: tab.column } : {}),
+  };
+}
 
 let newWorkPanelTabSequence = 0;
 
@@ -121,10 +145,14 @@ export const BROWSER_PLUGIN_TAB = {
 } as const;
 
 export function browserPluginTab(location?: string): WorkPanelTab {
-  return {
-    ...pluginWorkPanelTab(BROWSER_PLUGIN_TAB.pluginId, BROWSER_PLUGIN_TAB.viewId),
-    ...(location ? { location } : {}),
-  };
+  const base = pluginWorkPanelTab(BROWSER_PLUGIN_TAB.pluginId, BROWSER_PLUGIN_TAB.viewId);
+  if (!location) return base;
+  const target = location.trim();
+  return { ...base, id: `${base.id}:${Date.now().toString(36)}-${++newWorkPanelTabSequence}`, location: target, label: browserTabLabel(target) };
+}
+
+export function browserTabLabel(location: string): string {
+  try { return new URL(location).host || location; } catch { return location.split(/[\\/]/).at(-1) || location; }
 }
 
 /**
@@ -263,13 +291,19 @@ export function normalizeWorkPanelFilePath(path: string): string {
   return absolute ? `/${normalized}` : normalized;
 }
 
-export function fileWorkPanelTab(path: string, mimeType?: string): WorkPanelTab {
+export function fileWorkPanelTab(
+  path: string,
+  mimeType?: string,
+  position?: { line?: number; column?: number },
+): WorkPanelTab {
   const resource = normalizeWorkPanelFilePath(path);
   return {
     id: `file:${resource}`,
     kind: "file",
     resource,
     ...(mimeType ? { mimeType } : {}),
+    ...(position?.line != null ? { line: position.line } : {}),
+    ...(position?.column != null ? { column: position.column } : {}),
   };
 }
 

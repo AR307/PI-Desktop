@@ -105,6 +105,7 @@ function tabLabel(
   pluginViews: PluginViewMeta[],
 ) {
   if (tab.kind === "plugin") {
+    if (tab.resource === "pi.browser/browser" && tab.label) return tab.label;
     const view = pluginViews.find((candidate) => candidate.ref === tab.resource);
     // A view whose plugin was disabled mid-session no longer resolves; fall
     // back to its id rather than leaving the tab blank until it closes.
@@ -800,7 +801,7 @@ export function WorkPanel({
       />
       <div className="work-panel-main">
         <header className="work-panel-header">
-          <div className="work-panel-tab-strip-wrap no-drag">
+          <div className="work-panel-tab-strip-wrap">
               <div
                 ref={tabStripRef}
                 className="work-panel-tab-strip"
@@ -823,7 +824,7 @@ export function WorkPanel({
                   return (
                     <div
                       className={cx(
-                        "work-panel-tab",
+                        "work-panel-tab no-drag",
                         selected && "active",
                         draggingTabId === tab.id && "is-dragging",
                         dropIndicator?.tabId === tab.id &&
@@ -953,6 +954,7 @@ export function WorkPanel({
                     icon={activePluginView?.icon}
                     sessionId={activeSessionId ?? undefined}
                     location={activeTab.location}
+                    tabId={activeTab.id}
                     // Native WebContentsViews composite above renderer content.
                     blocked={exiting || panelBlocked || blockingOverlayActive}
                   />

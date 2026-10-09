@@ -33,8 +33,8 @@ destination, chat as the home surface, tools and permissions inline.
   **Sessions** section with new-session and sort actions, retained open-project
   groups under a following **Projects** section with a persistent new-project
   action, and the WorkBuddy-inspired footer. The footer keeps compact Settings,
-  Extensions, Scheduled (clock), and notification icon actions; Pull requests
-  remains omitted from the home sidebar. Each retained project is a
+  Extensions, Scheduled (clock), and notification icon actions. Each retained
+  project is a
   path-keyed tab/group that can be
   collapsed independently. Project and conversation rows expose
   non-destructive pin/archive actions, an independent conversation-branch
@@ -100,8 +100,10 @@ destination, chat as the home surface, tools and permissions inline.
 - **Work panel**: docked right column (not an overlay) opened by an artifact,
   the viewport-fixed toggle, or `Cmd/Ctrl + J`. File, URL, browser-preview, and
   successful workspace-edit artifacts create their resources atomically. The
-  46px content header exposes a tablist and a fixed `+` trigger. Its tokenized
-  44px right-side safe lane (the 28px control, its 12px viewport inset, and the
+  46px content header exposes a tablist and a fixed `+` trigger. Unused
+  tab-strip space remains a native window drag region; individual tabs and
+  header actions are no-drag so selection, closing, and reordering still work.
+  Its tokenized 44px right-side safe lane (the 28px control, its 12px viewport inset, and the
   header's 4px control gap) keeps the `+`, maximize, and viewport-fixed
   work-panel toggle one button group, spaced by that same gap, while the trigger
   keeps a distinct hit target. Clicking `+` creates and activates
@@ -145,10 +147,11 @@ destination, chat as the home surface, tools and permissions inline.
   panel across the client area beside the sidebar; leaving preview restores the
   prior panel width and sidebar state without changing native bounds. The
   renderer-measured panel
-  rectangle continues to position the native Browser view. Native window edges
+  rectangle continues to position the native Browser view. Window edges
   resize the app window only; they do not change the panel target. The outer
-  window remains natively resizable from all OS edges and corners, with a
-  minimum supported size of 1040×700. Replaces
+  window remains natively resizable from all OS edges and corners, including
+  Electron's frameless hit regions on Windows, with a minimum supported size
+  of 800×560, capped to the current display's work area (D635). Replaces
   the former context-panel overlay; workspace/model/status info lives in the
   composer chips and Settings instead.
 - **Composer**: workspace-agnostic floating pill anchored to the conversation
@@ -168,8 +171,8 @@ destination, chat as the home surface, tools and permissions inline.
 ## 3. Destinations
 
 ### 3.1 Chat home (default)
-- Empty state: a restrained hero title ("What can I help you build?" — a
-  project-bound session turns the project name into a dotted-underline
+- Empty state: a restrained hero title ("What can I help you build?" — an open
+  project turns its name into a dotted-underline
   switcher that lists the sidebar's open projects, can search them, can
   clone a git repository from a syntactically public remote (ADR 0247 / D416), and can open another local folder), an optional first-run
   checklist, and a bottom-reserved composer. Task entry starts directly in the composer; no
@@ -242,15 +245,12 @@ destination, chat as the home surface, tools and permissions inline.
   session and never change the active session, page, project, or keyboard
   focus.
 
-### 3.3 Pull requests
-Segmented Open/Draft/All filters with counts; rows carry icon plate, number,
-title, status badge, branch meta, external link, and "Review with agent"
-(creates a chat turn). Requires an active workspace and `gh`.
-
-### 3.4 Scheduled
-Tasks and Run history views, with an explicit create/edit form, a cadence dropdown, time,
-next occurrence, saved project, per-task permission/model selection, pause/resume and delete confirmation. Hourly
-schedules repeat at one-hour intervals without a time selector. Daily schedules
+### 3.3 Scheduled
+A task column beside the selected task's page, with an explicit create/edit form, a cadence dropdown, time,
+next occurrence, saved project, per-task permission/model selection, a per-task conversation mode (a new conversation per run, or one conversation every run continues), pause/resume and delete confirmation. Hourly
+schedules repeat at one-hour intervals without a time selector. An interval
+schedule states its own span as a count with a minute or hour unit (5 minutes to
+24 hours) and counts elapsed time from the moment it was armed. Daily schedules
 use a themed time-period dropdown: Morning 09:00, Afternoon 14:00, Evening
 19:00, Night 22:00. The form does not expose hour/minute editing. AI tools may
 set an exact time; a non-preset time displays as Custom with its HH:mm value
@@ -258,10 +258,26 @@ and survives other form edits until the user explicitly selects a preset. Weekly
 separate dropdown listing Monday through Sunday with selection markers.
 Each day toggles independently; there are no preset combinations. An empty
 selection disables saving. The menu supports arrows, Home/End, Enter/Space,
-Escape/outside dismissal, and exposes selected states. The footer clock and global search open
-this route. Run now dispatches in the background and selects Run history; a
-conversation link opens the real transcript. The latest 100 runs show running,
-completed, failed or interrupted status. Automatic runs never steal foreground
+Escape/outside dismissal, exposes selected states, and owns the page while it is
+open: the task column and the task page step aside rather than compete with the
+draft. The form also states an interval as a count with a minute or hour unit
+(5 minutes to 24 hours) and keeps that value while another cadence is selected,
+so switching a task between a calendar and an interval loses neither. The column
+reports each task's cadence and clock, the outcome of that task's own newest run
+— read per task from the host, so a task that has been idle while others ran is
+never reported as never run — with its duration, and whether it is paused or
+running. The task page shows that task's last run, next
+occurrence, project, permission and model, its instruction behind a disclosure,
+its own run history newest first (status, start time, duration, stable error
+code), and the transcript of the selected run read in the page through a bounded
+read. A run's transcript belongs to this route: the SessionList and global
+session search never list it, and Open conversation is the explicit action that
+carries it into the chat route, and the chat top bar then offers that
+conversation's own way back: the row names the task it belongs to, and returning
+restores the same task and the same run, reusing the navigation history when
+this route is directly behind it. The footer clock and global search open
+this route. Run now dispatches in the background, selects the run it admitted,
+and leaves the reader on this page. Automatic runs never steal foreground
 focus. See [desktop automations](../../adr/scheduled-desktop-automations.md).
 
 The application must remain running. The host polls every 30 seconds and skips
@@ -300,21 +316,19 @@ Agent tools can change a Manual task to Hourly by supplying only its id and
 fields and paused state. Daily and Weekly still require a valid saved or supplied
 schedule. Renaming an Hourly task does not restart its interval.
 
-### 3.5 Extensions
+### 3.4 Extensions
 
 The Extensions destination is a focused plugin surface with a compact header and
 only two tabs: **Installed** and **Marketplace**. Installed groups plugin rows
 by state — Needs attention / Updates available / Active / Turned off — as soft
 tiles stacked under a group label (D296). Marketplace remains the browse/install
-card grid. The page draws no dividers: header, toolbar, rows, source settings,
-cards and the detail sheet's sections are set apart by tone and spacing, and
-hairlines are reserved for floating layers (menus, sheet, dialogs). The
-marketplace source settings show the source selector without a redundant
-provider explanation or active-source status line. MCP, Skills, and Subagents
-are not tabs or sections of Extensions.
+card grid and always uses the official catalog. The page draws no dividers:
+header, toolbar, rows, cards and the detail sheet's sections are set apart by
+tone and spacing, and hairlines are reserved for floating layers (menus, sheet,
+dialogs). MCP, Skills, and Subagents are not tabs or sections of Extensions.
 
-### 3.6 Settings (full-page takeover)
-### 3.6 Settings (full-page takeover)
+### 3.5 Settings (full-page takeover)
+### 3.5 Settings (full-page takeover)
 Settings replaces the whole shell (D063): back-to-app + search + a grouped
 settings rail with concise, parallel destination labels. The Agent group
 contains independent Skills, MCP, and Subagents destinations alongside
@@ -323,33 +337,33 @@ changes the page destination rather than a tab inside a shared capability panel.
 Appearance lives inside General; global AI behavior (permissions and context
 management) lives inside 全局 AI; keyboard shortcuts and global/project
 instructions have their own destinations; provider management lives inside
-Model configuration. Import scans supported local agent stores for sessions
-and, independently, for model configuration, and presents candidates in
-collapsible groups. Project path is an alternate grouping for sessions
-alongside the default source grouping, and every scan or grouping change starts
-with all groups collapsed. Model-configuration import copies stored API keys
-and skips subscription logins. Project archive owns the durable D086 Projects index
+Model configuration. Models, Skills, and MCP each open their external-store
+import workbench inline within the owning Settings destination; scans start
+only when the user asks. Skills and MCP imports follow the current Global /
+Project filter and selected project. Session import is provided through the
+plugin API rather than a Settings destination. Project archive owns the durable D086 Projects index
 (search, add, expand, pin, archive/restore, close, and reopen) and always includes
 archived records. Opening or switching a project retains a sidebar tab, selects
 that project as the active workspace, and returns to chat. Other retained tabs
 stay open. Extension management remains solely on the app shell's independent
-Extensions destination described in §3.5. Settings > Agent has the following
+Extensions destination described in §3.4. Settings > Agent has the following
 shared capability contract:
 
 - Each capability destination starts with a quiet localized description and
   scope note, then uses the same neutral elevated Settings surface as the other
   destinations; no capability page has a decorative hero, colored top bar, or
   separate visual theme.
-- Skills and MCP use stacked global/project card blocks in one column. Each
-  block has a quiet heading row with a scope title, scope description,
-  resolved `.agents` path, localized count, and its actions; the project
-  block shows a recent-project picker. Project records take precedence over
-  global records.
-- Skills have one native **Import** action per surface. It accepts exactly one
-  file and physically copies it into the selected `.agents/skills` directory.
+- Skills and MCP use one list filtered by Global / Project in a shared toolbar.
+  The toolbar has a project picker and the current filter determines which
+  capability rows and creation/import destination are active.
+- Skills keep native file and folder import actions in each level group and
+  provide **Scan other tools** in the page toolbar. External skill imports use
+  the active filter and preserve the selected project's scope.
 - MCP has one **Add** action per surface. Add and Edit open the existing
   `McpEditorSheet` as a modal overlay with stdio/HTTP branches, validation,
   duplicate checks, locked edit ids, scope text, and Test connection feedback.
+  **Scan other tools** opens the external MCP workbench inline and uses the
+  active Global / Project filter and selected project for its import target.
 - Subagents use one full-width global surface under `~/.agents/subagents`; they
   have no project picker, project surface, or project-level toggle. Creating or
   editing a subagent picks the pinned model from configured provider models, or
@@ -373,7 +387,7 @@ shared capability contract:
 
 ## 5. Navigation model
 
-- `page` state: `chat | pulls | scheduled | plugins | settings`; `chat` is the
+- `page` state: `chat | scheduled | plugins | settings`; `chat` is the
   conversation-surface route, not an operating mode. The project
   archive is the `projects` settings tab rather than a standalone page.
 - Destination history is linear; `Cmd/Ctrl+[` and `Cmd/Ctrl+]` traverse it
@@ -385,12 +399,14 @@ shared capability contract:
 - Selecting a project-scoped thread activates its project before switching to
   `chat`. Selecting a temporary thread clears the visible active workspace
   before loading it.
-- Empty home has three explicit session states: a project-bound session shows
+- Empty home has four explicit session states: a project-bound session shows
   the project-underlined welcome; clicking the name opens a searchable
-  switcher of the sidebar's open projects instead of the folder picker. A
-  temporary session shows dedicated temporary-chat copy with no project
-  underline or switcher; and no active session keeps the generic welcome
-  title.
+  switcher of the sidebar's open projects instead of the folder picker. An
+  open project with no session yet names the hero the same way, because that
+  empty home already belongs to it and a task started there lands in the
+  project. A temporary session shows dedicated temporary-chat copy with no
+  project underline or switcher; and with no project open the generic welcome
+  title stands.
 - New task resolves the current project or temporary group by its most recent
   session: if that session has `messageCount = 0`, it is selected and reused;
   otherwise a durable empty session is created immediately and appears in the
@@ -416,8 +432,8 @@ shared capability contract:
 
 - No provider configured → blocking guidance toward Settings before first run
   (`MODEL_NOT_CONFIGURED`).
-- No workspace → home hero without project underline; Pull requests shows a
-  workspace-required empty state. The composer never renders a workspace rail.
+- No workspace → home hero without project underline. The Composer never
+  renders a workspace rail.
 - Background project session → the originating project row retains its
   running/error indicator. Selected shell state can move independently while
   the session tool root remains bound to its durable project; its artifacts are
@@ -425,7 +441,7 @@ shared capability contract:
   tabs over the currently selected project. Messages, tool events, permission
   requests, and panel resources remain scoped to that session. Explicitly
   opening the conversation restores its retained panel context and reveals any
-  pending permission card with its original deadline.
+  pending permission card, which remains actionable without a deadline.
 - Completed/failed turn not already visible → host-core appends one durable
   inbox row. A result shown in the visible, focused current chat and every
   `aborted` turn append none. Background sessions and any turn finishing while

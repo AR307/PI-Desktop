@@ -8,13 +8,24 @@ import test from "node:test";
 
 const read = (path) => readFile(new URL(path, import.meta.url), "utf8");
 
-const [transcript, styles, hook, api, toolDetails, toolRow] = await Promise.all([
+const [
+  transcript,
+  styles,
+  hook,
+  api,
+  toolDetails,
+  toolRow,
+  filesTab,
+  markdown,
+] = await Promise.all([
   readTranscriptSource(),
   read("../src/styles/chat-links.css"),
   read("../src/hooks/use-preview-target.ts"),
   read("../src/lib/api.ts"),
   read("../src/components/ToolDetails.tsx"),
   readTranscriptModule("ToolRow.tsx"),
+  read("../src/components/workpanel/FilesTab.tsx"),
+  read("../src/components/Markdown.tsx"),
 ]);
 
 test("sent user-message file refs render as composer-like chips", () => {
@@ -24,6 +35,8 @@ test("sent user-message file refs render as composer-like chips", () => {
   assert.match(transcript, /useOpenChatFileRef/);
   assert.match(transcript, /composer-chip-name/);
   assert.match(styles, /\.chat-file-chip[\s\S]*?appearance: none/);
+  assert.match(transcript, /mimeType=\{attachment\.mimeType\}/);
+  assert.match(transcript, /onOpen\(path, undefined, mimeType, \{ line, column \}\)/);
 });
 
 test("a file chip is routed by where the reference resolved, never optimistically", () => {
@@ -36,23 +49,52 @@ test("a file chip is routed by where the reference resolved, never optimisticall
   // follows the folder that answered: relative for the primary one, absolute
   // for its siblings, and the file view switches to the folder it is given.
   assert.match(hook, /match\.projectRoot \? match\.projectRoot\.primary : true/);
-  assert.match(hook, /inPrimary \? match\.relativePath : match\.absolutePath/);
+  assert.match(hook, /path: primary \? match\.relativePath : match\.absolutePath/);
   // A workspace HTML page is a page to run, not a file to read (ADR 0163), and
   // only the primary folder has a workspace-relative address for the browser.
-  assert.match(hook, /inPrimary && isHtmlFilePath\(match\.relativePath\)/);
-  assert.match(hook, /openUrl\(match\.relativePath\)/);
-  // A project file prefers the bundled file view; without that plugin the
-  // host file tab is the same surface this hook used before.
+  assert.match(hook, /resolved\.primary &&/);
+  assert.match(hook, /isHtmlFilePath\(resolved\.relativePath\)/);
+  assert.match(hook, /openUrl\(resolved\.relativePath\)/);
+  // Plain project files prefer the bundled file view. A path:line reference
+  // uses the host file tab because the bundled view has no line-navigation API.
   assert.match(hook, /FILE_MANAGER_PLUGIN_TAB/);
-  assert.match(hook, /fileManagerPluginTab\(target\)/);
-  assert.match(hook, /openFile\(target, mimeType\)/);
+  const resolvedRefIndex = hook.indexOf("const resolved = await resolveRef(path, baseDir)");
+  const livePluginViewIndex = hook.indexOf("ensureFileManagerView(workspacePath)", resolvedRefIndex);
+  assert.ok(
+    livePluginViewIndex > resolvedRefIndex,
+    "actively ensure the bundled file view after async path resolution",
+  );
+  assert.match(hook, /api\.listPluginViews\(\)/);
+  assert.match(hook, /api\.enablePlugin\(fileManager\.id\)/);
+  assert.match(hook, /api\.reloadPlugin\(fileManager\.id\)/);
+  assert.match(hook, /isActiveInProject\(/);
+  assert.doesNotMatch(hook, /const pluginViews = useAppStore\(\(s\) => s\.pluginViews\)/);
+  assert.match(hook, /const hasPosition = line !== undefined \|\| column !== undefined/);
+  assert.match(hook, /!hasPosition[\s\S]*?isHtmlFilePath/);
+  assert.match(hook, /!hasPosition[\s\S]*?ensureFileManagerView/);
+  assert.match(hook, /fileManagerPluginTab\(resolved\.path\)/);
+  assert.match(filesTab, /data-line=\{i \+ 1\}/);
+  assert.match(filesTab, /viewerBodyRef\.current\?\.querySelector/);
+  assert.match(filesTab, /if \(!file \|\| selectedLine == null\) return/);
+  assert.match(filesTab, /data-line="\$\{selectedLine\}"/);
+  assert.match(filesTab, /return \(\) => cancelAnimationFrame\(frame\)/);
+  assert.match(filesTab, /selectedLine === undefined/);
   // Session scratch and attachment files live outside the plugin's project
-  // roots, so they are addressed by absolute path on the host file tab.
-  assert.match(hook, /openFile\(match\.absolutePath, mimeType\)/);
+  // roots, and positioned references need the host viewer's line navigation.
+  assert.match(hook, /inProject: false/);
+  assert.match(hook, /openFile\(resolved\.path, mimeType, \{ line, column \}\)/);
   // The OS handoff is no longer what a chat click does; the channel itself
   // stays part of the public IPC surface.
   assert.doesNotMatch(hook, /api\.fsOpen\(/);
-  assert.match(api, /fsOpen: \(path: string\) => invoke\(IPC\.invoke\.fsOpen, \{ path \}\)/);
+  assert.match(api, /fsOpen: \(path: string, mimeType\?: string\) =>\s*invoke\(IPC\.invoke\.fsOpen, \{ path, mimeType \}\)/);
+});
+
+test("Markdown file anchors use the same project-file opener as inline references", () => {
+  const anchorStart = markdown.indexOf("function Anchor(");
+  const imageStart = markdown.indexOf("/**\n * Local image references", anchorStart);
+  assert.ok(anchorStart >= 0 && imageStart > anchorStart);
+  const anchor = markdown.slice(anchorStart, imageStart);
+  assert.match(anchor, /handleMarkdownFileLinkClick\(e, href, root, baseDir, openFileRef\)/);
 });
 
 test("a tool row and a tool result row open a file where the message body does", () => {
@@ -62,10 +104,8 @@ test("a tool row and a tool result row open a file where the message body does",
   // row land in the bundled file view too (ADR 0262). The call this replaces is
   // the one that let those surfaces pick the destination themselves.
   assert.match(hook, /const openFileRef = useOpenChatFileRef\(\);/);
-  assert.match(
-    hook,
-    /target\.kind === "file" \? openFileRef\(target\.path\) : openHttpUrl\(target\.url\)/,
-  );
+  assert.match(hook, /target\.kind === "file"[\s\S]*?openFileRef\(target\.path, undefined, undefined, \{/);
+  assert.match(hook, /line: target\.line,[\s\S]*?column: target\.column/);
   assert.doesNotMatch(hook, /openFile\(target\.path\)/);
   // Both surfaces still call that opener, and neither reaches the host viewer's
   // store action directly: the tool row summary carries the call's own path,

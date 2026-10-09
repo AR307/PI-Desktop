@@ -51,6 +51,7 @@ type SecretMeta = {
 ```text
 secret:provider:<providerId>:api_key
 secret:provider:<providerId>:oauth
+secret:app:typesafe-jev
 ```
 
 The two refs are independent, so one provider row may hold an API key, a vendor
@@ -58,6 +59,10 @@ account, or both. The OAuth ref stores the serialized pi-ai `OAuthCredential`
 (access token, refresh token, expiry) written through the generic `secrets.set`
 path, so it is encrypted by the same backend but is not indexed in
 `secrets_meta`; provider delete clears both refs and any metadata row for them.
+The Jev API key uses the fixed `secret:app:typesafe-jev` reference through the
+same encrypted Host store. Renderer access is limited to set/delete/has; Electron
+main reads it only for an explicitly enabled Agent launch and passes it
+ephemerally to the sidecar.
 
 ## 4a. Provider readiness flags
 
@@ -138,6 +143,32 @@ because pi-ai declares it app-owned. `oauth.ts` implements pi-ai's
 assumption holds across concurrent turns. Each OAuth provider row gets its own
 collection and store scope; two rows with the same vendor key never share a
 credential or refresh lock.
+
+Pi login receives an installation context whose `getDeviceId` returns one stable
+UUID v4. Electron main creates it lazily, shares concurrent initialization, and
+persists it through Host secrets under `secret:installation:oauth-device-id`
+before exposing it to the flow. It is independent of provider accounts and
+survives cancellation, account deletion, and service restart. Initialization
+failures remain retryable and use a redacted error. The identity never enters
+provider rows, portable configuration, renderer events, or ordinary diagnostics.
+
+Anthropic login uses pi-ai's browser or copy-code choice through the existing
+Main-to-renderer `select` prompt bridge. Copy-code login returns through the
+generic manual-code prompt with the flow's PKCE state; both paths persist the
+credential through the same provider-scoped Host secret store. The choice does
+not expose refresh tokens or change the account/auth ownership boundary.
+
+Plugin-owned OAuth rows use the same encrypted
+`secret:provider:<providerId>:oauth` reference. The host invokes the owning
+plugin's `onProviderOAuth` callback for login and refresh only after checking
+the `provider.oauth` grant and declared contribution. The callback can read
+that provider's own credential; it receives an abort signal for cancellation,
+plugin unload, or timeout. The host validates and bounds callback results,
+serializes refresh per provider row, and passes only the access token through
+the normal per-request auth resolver. The refresh token never reaches the
+renderer or Agent Runtime. One credential is stored per manifest contribution;
+sign out clears that secret without deleting the provider row. Plugin-owned
+provider rows are omitted from portable configuration and credential capture.
 
 Request auth flows one way only:
 

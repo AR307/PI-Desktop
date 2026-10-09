@@ -13,7 +13,7 @@
 
 import { publishedThinkingLevels } from "./thinking-levels.js";
 import type {
-  ContextWindowSource,
+  ModelLimitSource,
   ModelBinding,
   ModelInfo,
   ThinkingLevel,
@@ -147,14 +147,14 @@ export const CATALOG_DEFAULT_MAX_TOKENS = 8_192;
  * binding that was saved before the fix; a `user` binding is the user's own
  * number and is never replaced, even when it equals the generic fallback.
  *
- * Older provider bindings name no source. They keep the rule this helper has
- * always applied: the generic 128k seed is treated as inherited when a
- * published limit is known, while every other value stays authoritative.
+ * A binding without provenance keeps its stored value. Older records cannot
+ * distinguish an intentional 128k override from the generic seed, so inferring
+ * catalog ownership would risk overwriting a user choice.
  */
 export function effectiveContextWindow(
   publishedContextWindow?: number | null,
   configuredContextWindow?: number | null,
-  source?: ContextWindowSource | null,
+  source?: ModelLimitSource | null,
 ): number | undefined {
   const published = positiveTokenCount(publishedContextWindow);
   const configured = positiveTokenCount(configuredContextWindow);
@@ -162,9 +162,29 @@ export function effectiveContextWindow(
   if (source === "catalog") return published ?? configured;
   if (source === "user") return configured ?? published;
   if (configured === undefined) return published;
-  if (published !== undefined && configured === CATALOG_DEFAULT_CONTEXT_WINDOW) {
-    return published;
-  }
+  return configured;
+}
+
+/**
+ * Resolve a model's effective output cap.
+ *
+ * Output-cap provenance is independent from context-window provenance: a
+ * `catalog` follows the published record and `user` is never replaced. A
+ * legacy binding with no output-cap marker preserves its stored value, including
+ * 8.2k: older records cannot distinguish that seed from an intentional user
+ * choice. Changing a context window never changes output-cap ownership.
+ */
+export function effectiveMaxTokens(
+  publishedMaxTokens?: number | null,
+  configuredMaxTokens?: number | null,
+  source?: ModelLimitSource | null,
+): number | undefined {
+  const published = positiveTokenCount(publishedMaxTokens);
+  const configured = positiveTokenCount(configuredMaxTokens);
+
+  if (source === "catalog") return published ?? configured;
+  if (source === "user") return configured ?? published;
+  if (configured === undefined) return published;
   return configured;
 }
 
@@ -176,52 +196,95 @@ function positiveTokenCount(value?: number | null): number | undefined {
   return Math.round(value);
 }
 
-/** Context-window fields the resolver reads and rewrites on a binding. */
-type BindingContextWindow = Pick<ModelBinding, "contextWindow"> &
-  Partial<Pick<ModelBinding, "contextWindowSource">>;
+/** Binding fields the limits resolver reads and rewrites. */
+type BindingLimits = Pick<ModelBinding, "contextWindow"> &
+  Partial<Pick<ModelBinding, "maxTokens" | "contextWindowSource" | "maxTokensSource">>;
 
 /**
- * Resolve a saved binding against its catalog baseline for
+ * Resolve a saved binding's limits against its catalog baseline for
  * `modelConfigWithBinding`.
  *
  * That runtime helper applies the historical two-argument rule, which cannot
- * tell a hand-edited 128k from the generic seed. Callers that know where a
- * stored value came from resolve it first: the returned baseline and binding
- * both carry the source-aware window, so the two-argument rule lands on the
- * same answer. An exported binding keeps the catalog as its provenance whenever
- * the catalog supplied the value, so a later settings save cannot freeze an
- * inherited value into a snapshot of its own.
+ * tell a hand-edited 128k from the generic seed, and it takes the binding's
+ * output cap as written. Callers that know where a stored value came from
+ * resolve both limits first: the returned baseline and binding carry the
+ * source-aware window and cap, so a saved row reads and runs with the number the
+ * catalog publishes once the model resolves — a row seeded before the record
+ * existed stops showing the generic 8.2k output. An exported binding keeps the
+ * catalog as its provenance whenever the catalog supplied the value, so a later
+ * settings save cannot freeze an inherited value into a snapshot of its own.
+ *
+ * A `generic` baseline is the fallback for a lookup that found no record, not
+ * a published limit, so it never replaces a saved limit: a catalog snapshot
+ * taken while the record still resolved stays in force.
  */
-export function resolveBindingContextWindow<
-  C extends { contextWindow?: number | null },
-  B extends BindingContextWindow,
->(catalogConfig: C, binding: B): { catalogConfig: C; binding: B };
-export function resolveBindingContextWindow<
-  C extends { contextWindow?: number | null },
-  B extends BindingContextWindow,
+export function resolveBindingLimits<
+  C extends { contextWindow?: number | null; maxTokens?: number | null; source?: string },
+  B extends BindingLimits,
+>(catalogConfig: C, binding: B): {
+  catalogConfig: C;
+  binding: B & Partial<Pick<ModelBinding, "contextWindowSource" | "maxTokensSource">>;
+};
+export function resolveBindingLimits<
+  C extends { contextWindow?: number | null; maxTokens?: number | null; source?: string },
+  B extends BindingLimits,
 >(
   catalogConfig: C,
   binding: B | null | undefined,
-): { catalogConfig: C; binding: B | null | undefined };
-export function resolveBindingContextWindow(
-  catalogConfig: { contextWindow?: number | null },
-  binding: BindingContextWindow | null | undefined,
 ): {
-  catalogConfig: { contextWindow?: number | null };
-  binding: BindingContextWindow | null | undefined;
+  catalogConfig: C;
+  binding: (B & Partial<Pick<ModelBinding, "contextWindowSource" | "maxTokensSource">>) | null | undefined;
+};
+export function resolveBindingLimits(
+  catalogConfig: { contextWindow?: number | null; maxTokens?: number | null; source?: string },
+  binding: BindingLimits | null | undefined,
+): {
+  catalogConfig: { contextWindow?: number | null; maxTokens?: number | null; source?: string };
+  binding: BindingLimits | null | undefined;
 } {
   if (!binding) return { catalogConfig, binding };
-  const published = positiveTokenCount(catalogConfig.contextWindow);
-  const source = binding.contextWindowSource ?? undefined;
-  const resolved = effectiveContextWindow(published, binding.contextWindow, source);
-  if (resolved === undefined) return { catalogConfig, binding };
-  const inherited = source !== "user" && published !== undefined;
+  const publishedRecord = catalogConfig.source !== "generic";
+  const published = publishedRecord
+    ? positiveTokenCount(catalogConfig.contextWindow)
+    : undefined;
+  const publishedMax = publishedRecord
+    ? positiveTokenCount(catalogConfig.maxTokens)
+    : undefined;
+  const contextWindowSource = binding.contextWindowSource ?? "user";
+  const resolved = effectiveContextWindow(
+    published,
+    binding.contextWindow,
+    contextWindowSource,
+  );
+  // Older rows lack independent output provenance, so preserve their stored cap
+  // rather than guessing whether the generic seed was a deliberate user choice.
+  const maxTokensSource = binding.maxTokensSource ?? "user";
+  const resolvedMax = effectiveMaxTokens(publishedMax, binding.maxTokens, maxTokensSource);
+  const resolvedMaxSource = maxTokensSource;
+  if (resolved === undefined && resolvedMax === undefined) {
+    return { catalogConfig, binding };
+  }
+  const inherited = contextWindowSource === "catalog" && published !== undefined;
   return {
-    catalogConfig: { ...catalogConfig, contextWindow: resolved },
+    catalogConfig: {
+      ...catalogConfig,
+      ...(resolved !== undefined ? { contextWindow: resolved } : {}),
+      ...(resolvedMax !== undefined ? { maxTokens: resolvedMax } : {}),
+    },
     binding: {
       ...binding,
-      contextWindow: resolved,
-      ...(inherited ? { contextWindowSource: "catalog" as const } : {}),
+      ...(resolved !== undefined
+        ? {
+            contextWindow: resolved,
+            contextWindowSource: inherited ? "catalog" as const : contextWindowSource,
+          }
+        : {}),
+      ...(resolvedMax !== undefined
+        ? {
+            maxTokens: resolvedMax,
+            ...(resolvedMaxSource ? { maxTokensSource: resolvedMaxSource } : {}),
+          }
+        : {}),
     },
   };
 }
@@ -241,10 +304,12 @@ export function bindingFromModelInfo(model: ModelInfo): ModelBinding {
     // correction still reaches this binding.
     contextWindowSource: "catalog",
     maxTokens: model.maxTokens || model.limit?.output || CATALOG_DEFAULT_MAX_TOKENS,
+    maxTokensSource: "catalog",
     thinkingLevels,
     defaultThinkingLevel: thinkingLevels.includes("medium")
       ? "medium"
       : (thinkingLevels[0] ?? null),
+    ...(model.thinkingProtocol ? { thinkingProtocol: model.thinkingProtocol } : {}),
     // Absent overrides keep following models.dev, so a catalog correction still
     // reaches an already saved binding.
     supportsImages: null,
@@ -277,6 +342,7 @@ export function bindingForCustomModel(id: string): ModelBinding {
     contextWindow: CATALOG_DEFAULT_CONTEXT_WINDOW,
     contextWindowSource: "catalog",
     maxTokens: CATALOG_DEFAULT_MAX_TOKENS,
+    maxTokensSource: "catalog",
     thinkingLevels: [],
     defaultThinkingLevel: null,
     supportsImages: null,

@@ -1,8 +1,12 @@
 /**
- * One form to add or edit an AI service.
+ * One dialog to add or edit an AI service, in two views (D625).
  *
- * Named services: pick a vendor and paste a key. Custom: name, URL, key and
- * API format on the common path. Models come from the service endpoint.
+ * A new service opens on the service chooser; picking a tile moves to the
+ * form. Named services: paste a key and the recommended models are chosen as
+ * soon as the service answers. Custom: name, URL, key and API format on the
+ * common path. The service's own list is on the left and the models this
+ * credential will run on the right, both visible from the first paint: a
+ * recommended model is a starting point, never the only thing on screen.
  */
 import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
@@ -10,22 +14,45 @@ import {
   NAMED_ENDPOINT_PRESETS,
   OPENCODE_GO_API_STYLE,
   normalizeApiStyle,
+  type PluginProviderCatalogMeta,
   type CatalogApiStyle,
   type ModelBinding,
+  type OAuthVendor,
   type ProviderPublic,
 } from "@pi-desktop/shared";
 import { api } from "../../lib/api";
+import { useAppStore } from "../../stores/app-store";
 import { pairsToRecord, recordToPairs } from "../extensions/KeyValueRows";
 import { Button, Field, HelpIcon, Input, portalOverlay } from "../ui";
 import { ProviderHeadersEditor } from "./ProviderHeadersEditor";
-import { SettingsMenuSelect } from "./SettingsMenuSelect";
 import { useProviderModels } from "./useProviderModels";
 import { ModelSelectionPanes, useModelSelection } from "./ModelSelectionPanes";
-import { CUSTOM_SERVICE, ServicePicker } from "./ServicePicker";
+import { ProviderConnectionFields } from "./ProviderConnectionFields";
+import { useProbeFeedback } from "./useProbeFeedback";
+import { ServiceChooser } from "./ServiceChooser";
+import { PluginProviderKeySetupForm } from "./PluginProviderKeySetupForm";
+import {
+  CUSTOM_SERVICE,
+  JEV_SERVICE,
+  pluginProviderServiceOptions,
+  type PluginProviderServiceOption,
+} from "./service-catalog";
+import { JevServiceForm } from "./JevServiceForm";
+import { useRecommendedModelSelection } from "./useRecommendedModelSelection";
 import type { ProviderCopyDraft } from "./provider-copy";
-import { API_STYLE_LABEL_KEYS, CUSTOM_PROVIDER_API_STYLES, isAccountOnlyApiStyle, needsCustomApiStyleChoice, providerSetupPreset } from "./provider-api-style";
+import {
+  API_STYLE_LABEL_KEYS,
+  isAccountOnlyApiStyle,
+  needsCustomApiStyleChoice,
+  providerSetupPreset,
+} from "./provider-api-style";
 
-import { getBaseUrlIssue, normalizeBaseUrlInput } from "./provider-endpoint-guidance";
+import {
+  endpointsEqual,
+  getBaseUrlIssue,
+  normalizeBaseUrlInput,
+  resolveEndpointDraft,
+} from "./provider-endpoint-guidance";
 import { ProviderEndpointGuidance } from "./ProviderEndpointGuidance";
 
 function serviceIdFor(provider?: ProviderPublic | null): string {
@@ -41,13 +68,21 @@ function initialBaseUrl(provider?: ProviderPublic | null): string {
   return providerSetupPreset(provider)?.baseUrl ?? provider?.baseUrl ?? "";
 }
 
-function endpointHost(url: string): string {
-  try {
-    const parsed = new URL(url);
-    return `${parsed.host}${parsed.pathname.replace(/\/+$/, "")}`;
-  } catch {
-    return url;
-  }
+/**
+ * Which service the dialog opens on: the caller's own choice first (Jev has no
+ * preset and no row), then a copied draft's format, then the edited row's.
+ */
+function initialServiceId(
+  initialService: string | null | undefined,
+  initialDraft: ProviderCopyDraft | null | undefined,
+  provider: ProviderPublic | null | undefined,
+): string {
+  if (initialService) return initialService;
+  if (!initialDraft) return serviceIdFor(provider);
+  return initialDraft.apiStyle === OPENCODE_GO_API_STYLE
+    ? NAMED_ENDPOINT_PRESETS.find((preset) => preset.apiStyle === OPENCODE_GO_API_STYLE)?.id ??
+        CUSTOM_SERVICE
+    : CUSTOM_SERVICE;
 }
 
 export type ProviderSetupDialogProps = {
@@ -56,6 +91,19 @@ export type ProviderSetupDialogProps = {
   onClose: () => void;
   imageModelIds?: string[];
   onSaved: (provider: ProviderPublic, models: ModelBinding[], imageModelIds?: string[]) => void | Promise<void>;
+  /** Vendors a new row can sign in to instead of pasting a key. */
+  vendors?: OAuthVendor[] | null;
+  /** Leaves this dialog for the vendor's browser sign-in. */
+  onPickSubscription?: (vendor: OAuthVendor) => void;
+  /** Opens straight on this service; Jev has no preset tile to land on. */
+  initialService?: string | null;
+  /** Jev was configured from inside this dialog. */
+  onJevConfigured?: () => void;
+  /** Chooses an existing API-key provider contributed by a plugin. */
+  onPickPluginProvider?: (providerId: string, pluginName: string) => void;
+  /** The dialog is configuring a row selected from the plugin catalog. */
+  pluginCatalogSetup?: boolean;
+  pluginCatalogPluginName?: string;
 };
 
 export function ProviderSetupDialog({
@@ -64,16 +112,21 @@ export function ProviderSetupDialog({
   onClose,
   onSaved,
   imageModelIds,
+  vendors,
+  onPickSubscription,
+  initialService,
+  onJevConfigured,
+  onPickPluginProvider,
+  pluginCatalogSetup = false,
+  pluginCatalogPluginName,
 }: ProviderSetupDialogProps) {
   const { t } = useTranslation();
   const [imageModelDraft, setImageModelDraft] = useState<string[] | undefined>();
   const editing = !!provider;
   const apiKeyRef = useRef<HTMLInputElement>(null);
-  const [service, setService] = useState(() => initialDraft
-    ? initialDraft.apiStyle === OPENCODE_GO_API_STYLE
-      ? NAMED_ENDPOINT_PRESETS.find((preset) => preset.apiStyle === OPENCODE_GO_API_STYLE)?.id ?? CUSTOM_SERVICE
-      : CUSTOM_SERVICE
-    : serviceIdFor(provider));
+  const [service, setService] = useState(() =>
+    initialServiceId(initialService, initialDraft, provider),
+  );
   const [name, setName] = useState(() => initialDraft?.name ?? initialName(provider));
   const [baseUrl, setBaseUrl] = useState(() => initialDraft?.baseUrl ?? initialBaseUrl(provider));
   const [apiKey, setApiKey] = useState("");
@@ -85,16 +138,64 @@ export function ProviderSetupDialog({
   const [models, setModels] = useState<ModelBinding[]>(initialDraft?.models ?? provider?.models ?? []);
   const [saving, setSaving] = useState(false);
   const [testing, setTesting] = useState(false);
-  const [error, setError] = useState("");
-  const [testResult, setTestResult] = useState("");
+  const showToast = useAppStore((state) => state.showToast);
+  const providerRows = useAppStore((state) => state.providers);
+  const [pluginProviderCatalog, setPluginProviderCatalog] = useState<PluginProviderCatalogMeta[]>([]);
   const [baseUrlTouched, setBaseUrlTouched] = useState(false);
+  // A format the user picked by hand outranks every inference about this row.
+  const [apiStyleTouched, setApiStyleTouched] = useState(false);
+  const [choosing, setChoosing] = useState(false);
+  const chooserOpen = choosing || !service;
+
+  useEffect(() => {
+    if (editing || !chooserOpen) return;
+    let current = true;
+    void api.listPluginProviderCatalog().then((entries) => {
+      if (current) setPluginProviderCatalog(entries);
+    }).catch((error) => {
+      if (current) {
+        showToast(error instanceof Error ? error.message : String(error), {
+          variant: "error",
+        });
+      }
+    });
+    return () => {
+      current = false;
+    };
+  }, [chooserOpen, editing, showToast]);
+
+  const pluginProviderOptions: PluginProviderServiceOption[] = pluginProviderServiceOptions(
+    pluginProviderCatalog,
+    providerRows,
+  );
 
   const namedPreset = NAMED_ENDPOINT_PRESETS.find((preset) => preset.id === service);
   const named = Boolean(namedPreset);
   const custom = service === CUSTOM_SERVICE;
+  /** Jev never becomes a provider row, so it is a view of its own. */
+  const jevService = service === JEV_SERVICE;
   const resolvedName = namedPreset ? name.trim() || namedPreset.name : name;
   const resolvedBaseUrl = namedPreset?.baseUrl ?? baseUrl;
-  const resolvedApiStyle: CatalogApiStyle = namedPreset?.apiStyle ?? apiStyle;
+  /*
+    Endpoint resolution decides the format when the endpoint itself names one:
+    a pasted operation, a published service address, or a known host. A format
+    that already has an owner — the user's own pick, a named preset's, or the
+    one stored on the row being edited — is never overridden. Inference is for
+    a row that does not have an answer yet.
+  */
+  const endpointDraft = resolveEndpointDraft(
+    resolvedBaseUrl,
+    namedPreset?.apiStyle ?? apiStyle,
+    named || editing || Boolean(initialDraft) || apiStyleTouched,
+  );
+  const resolvedApiStyle: CatalogApiStyle = endpointDraft.apiStyle;
+  // Said out loud next to the format selector: an automatic decision the user
+  // cannot see would be exactly the hidden rewrite this row must not have.
+  const endpointFormatNote = endpointDraft.autoDetected
+    ? t("settings.apiStyleAutoDetected", {
+        format: t(API_STYLE_LABEL_KEYS[resolvedApiStyle]),
+      })
+    : undefined;
   const baseUrlIssue = getBaseUrlIssue(resolvedBaseUrl);
   const baseUrlError =
     baseUrlTouched && baseUrlIssue ? t("settings.baseUrlInvalid") : undefined;
@@ -104,6 +205,7 @@ export function ProviderSetupDialog({
   // Named add-path waits for a key so picking a vendor does not 401-probe.
   // Editing reuses the stored secret. Custom still probes a valid URL alone.
   const discoveryActive =
+    !pluginCatalogSetup &&
     Boolean(service) &&
     !requiresApiStyleChoice &&
     !baseUrlIssue &&
@@ -119,7 +221,34 @@ export function ProviderSetupDialog({
     },
     provider,
   );
-  const selection = useModelSelection(discovery, models, setModels);
+  // The probe's own answer is reported once as a toast instead of a status row
+  // under the key, which held a line of the dialog open for as long as it stood.
+  useProbeFeedback(discovery, named);
+  const recommended = useRecommendedModelSelection({
+    // A copy keeps the models it was copied with.
+    enabled: !provider && !initialDraft?.models?.length,
+    serviceKey: `${service}|${requestBaseUrl}|${resolvedApiStyle}`,
+    discovery,
+    setModels,
+    namedService: named,
+  });
+  // Every edit made through the picker or the summary ends preselection.
+  const selection = useModelSelection(discovery, models, recommended.setModels);
+
+  /*
+    The address that answered is what the field shows and the row saves. Only a
+    field still holding the address the answer belongs to is updated: a URL
+    typed since that probe belongs to the user, and a named preset carries its
+    own address. Comparing against the address the answer was produced for —
+    not against the field's rewritten form — is what keeps a fresh paste from
+    being reverted to the previous result.
+  */
+  const discoveredBaseUrl = discovery.effectiveBaseUrl;
+  const adoptedFrom = discovery.resolvedFrom;
+  useEffect(() => {
+    if (named || !discoveredBaseUrl || !adoptedFrom) return;
+    setBaseUrl((current) => (endpointsEqual(current, adoptedFrom) ? discoveredBaseUrl : current));
+  }, [named, discoveredBaseUrl, adoptedFrom]);
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
@@ -128,11 +257,16 @@ export function ProviderSetupDialog({
         setAdvancedOpen(false);
         return;
       }
+      // Changing an existing row's service backs out to its form.
+      if (choosing && service) {
+        setChoosing(false);
+        return;
+      }
       onClose();
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [advancedOpen, onClose, saving]);
+  }, [advancedOpen, choosing, onClose, saving, service]);
 
   const nameRef = useRef<HTMLInputElement>(null);
   const focusAfterServiceChange = (next: string) => {
@@ -146,6 +280,9 @@ export function ProviderSetupDialog({
     const previous = namedPreset;
     setService(next);
     setBaseUrlTouched(false);
+    // A format picked for the previous service does not carry over: the new
+    // service's own format, or the new address, decides again.
+    setApiStyleTouched(false);
     const preset = NAMED_ENDPOINT_PRESETS.find((item) => item.id === next);
     if (!preset) {
       if (next === CUSTOM_SERVICE && apiStyle === OPENCODE_GO_API_STYLE) {
@@ -161,32 +298,52 @@ export function ProviderSetupDialog({
     focusAfterServiceChange(next);
   };
 
+  const pickService = (next: string) => {
+    setChoosing(false);
+    if (next === service) {
+      focusAfterServiceChange(next);
+      return;
+    }
+    // A key belongs to the service it was pasted for.
+    if (!provider) setApiKey("");
+    onServiceChange(next);
+  };
+
   const commitBaseUrl = () => {
     setBaseUrlTouched(true);
     const normalized = normalizeBaseUrlInput(baseUrl, resolvedApiStyle);
     if (normalized !== baseUrl) setBaseUrl(normalized);
   };
 
+  /*
+    The outcome of a manual connection test is an event: it is reported through
+    the app toast stack instead of a result line under the credential fields,
+    which used to push the two panes down every time it changed.
+  */
   const testConnection = async () => {
     if (!provider) return;
     setTesting(true);
-    setTestResult("");
     try {
       const result = (await api.testProvider(provider.id)) as {
         ok?: boolean;
         message?: string;
         status?: number;
       };
-      setTestResult(
-        result?.ok
-          ? t("settings.testOk")
-          : result?.message ||
-              (result?.status
-                ? t("settings.testFailedStatus", { status: result.status })
-                : t("settings.testFailed")),
+      if (result?.ok) {
+        showToast(t("settings.testOk"), { variant: "success" });
+        return;
+      }
+      showToast(
+        result?.message ||
+          (result?.status
+            ? t("settings.testFailedStatus", { status: result.status })
+            : t("settings.testFailed")),
+        { variant: "error" },
       );
     } catch (cause) {
-      setTestResult(cause instanceof Error ? cause.message : String(cause));
+      showToast(cause instanceof Error ? cause.message : String(cause), {
+        variant: "error",
+      });
     } finally {
       setTesting(false);
     }
@@ -218,14 +375,11 @@ export function ProviderSetupDialog({
       ? remainingImageModels
       : undefined;
     setSaving(true);
-    setError("");
     try {
       if (provider) {
         const result = await api.updateProvider({
           id: provider.id,
           name: providerName,
-          // A row whose stored wire format differs from the published preset is
-          // no longer that preset, but its catalog identity is still its own.
           // A row whose stored wire format differs from the published preset is
           // no longer that preset, but its catalog identity is still its own.
           vendorKey: namedPreset?.vendorKey ?? provider?.vendorKey ?? "custom",
@@ -254,7 +408,9 @@ export function ProviderSetupDialog({
         await onSaved(result.provider, persisted, imageModelIdsToSave);
       }
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : String(cause));
+      showToast(cause instanceof Error ? cause.message : String(cause), {
+        variant: "error",
+      });
     } finally {
       setSaving(false);
     }
@@ -279,6 +435,155 @@ export function ProviderSetupDialog({
     !baseUrlIssue &&
     models.length > 0;
 
+  const formView = (
+    <>
+      <div className="provider-setup-head">
+        <h3 id="provider-setup-title" className="provider-setup-title">
+          {initialDraft ? t("settings.copyProviderTitle") : editing ? t("settings.editProviderTitle") : t("settings.addProviderTitle")}
+          {/* What a copy does and does not take is the title's own promise. */}
+          {initialDraft ? <HelpIcon label={t("settings.copyProviderHint")} /> : null}
+        </h3>
+        <div className="provider-setup-head-actions">
+          {named || custom ? (
+            <Button
+              variant="ghost"
+              size="sm"
+              disabled={saving}
+              onClick={() => setAdvancedOpen(true)}
+            >
+              {t("settings.advancedSettings")}
+            </Button>
+          ) : null}
+          {provider ? (
+            <Button
+              variant="ghost"
+              size="sm"
+              disabled={testing || saving}
+              onClick={() => void testConnection()}
+            >
+              {testing ? t("settings.testing") : t("settings.testConnection")}
+            </Button>
+          ) : null}
+          <Button variant="ghost" size="sm" disabled={saving} onClick={onClose}>
+            {t("settings.cancel")}
+          </Button>
+          <Button
+            variant="primary"
+            size="sm"
+            disabled={!canSave}
+            onClick={() => void save()}
+          >
+            {saving ? t("settings.saving") : t("settings.saveProvider")}
+          </Button>
+        </div>
+      </div>
+
+      <div className="provider-setup-body">
+
+        <ProviderEndpointGuidance
+          baseUrl={resolvedBaseUrl}
+          apiStyle={resolvedApiStyle}
+          disabled={saving}
+          onApply={(suggestion) => {
+            const preset = NAMED_ENDPOINT_PRESETS.find((item) =>
+              item.baseUrl === suggestion.baseUrl && item.apiStyle === suggestion.apiStyle,
+            );
+            setService(preset?.id ?? CUSTOM_SERVICE);
+            setBaseUrl(suggestion.baseUrl);
+            setApiStyle(suggestion.apiStyle);
+          }}
+        />
+
+        <div className="provider-setup-credentials">
+          <ProviderConnectionFields
+            named={named}
+            custom={custom}
+            editing={editing}
+            saving={saving}
+            serviceLabel={namedPreset ? t(namedPreset.labelKey) : t("settings.presetCustomEndpoint")}
+            serviceBaseUrl={namedPreset?.baseUrl ?? ""}
+            onChangeService={() => setChoosing(true)}
+            apiKeyRef={apiKeyRef}
+            nameRef={nameRef}
+            apiKey={apiKey}
+            onApiKeyChange={setApiKey}
+            name={name}
+            onNameChange={setName}
+            baseUrl={baseUrl}
+            onBaseUrlChange={(value) => {
+              setBaseUrl(value);
+            }}
+            commitBaseUrl={commitBaseUrl}
+            baseUrlError={baseUrlError}
+            apiStyle={apiStyle}
+            onApiStyleChange={(value) => {
+              // A hand-picked format is the user's answer and outranks the
+              // endpoint's own suggestion from here on.
+              setApiStyleTouched(true);
+              setApiStyle(value);
+            }}
+            apiStyleNote={endpointFormatNote}
+            accountOnlyApiStyle={accountOnlyApiStyle}
+            requiresApiStyleChoice={requiresApiStyleChoice}
+          />
+
+        </div>
+
+        <ModelSelectionPanes
+          discovery={discovery}
+          selection={selection}
+          listTitle={t("settings.serviceModels")}
+          busy={saving}
+          onReload={discovery.reload}
+          apiStyle={resolvedApiStyle}
+          imageModelIds={imageModelDraft ?? imageModelIds}
+          onImageModelChange={updateImageModelDraft}
+          lookupContext={{
+            baseUrl: requestBaseUrl,
+            vendorKey: namedPreset?.vendorKey ?? provider?.vendorKey ?? "custom",
+            providerId: provider?.id,
+          }}
+          autoPicked={recommended.autoPicked}
+        />
+      </div>
+    </>
+  );
+
+  const chooserView = (
+    <>
+      <div className="provider-setup-head">
+        <h3 id="provider-setup-title" className="provider-setup-title">
+          {editing ? t("settings.changeServiceTitle") : t("settings.addProviderTitle")}
+        </h3>
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={service ? () => setChoosing(false) : onClose}
+        >
+          {t("settings.cancel")}
+        </Button>
+      </div>
+      <ServiceChooser
+        vendors={editing ? null : vendors}
+        current={service}
+        onPickService={pickService}
+        onPickSubscription={editing ? undefined : onPickSubscription}
+        showClassifiers={!editing}
+        pluginProviders={editing ? [] : pluginProviderOptions}
+        onPickPluginProvider={editing ? undefined : onPickPluginProvider}
+      />
+    </>
+  );
+
+  /*
+    Jev is the one entry here that is not a provider row: a key and no models,
+    so it renders its own half of the dialog instead of the connection form and
+    the model panes.
+  */
+  const jevView = (
+    <JevServiceForm onClose={onClose} onConfigured={() => onJevConfigured?.()} />
+  );
+
   return portalOverlay(
     <div
       className="overlay provider-setup-overlay"
@@ -295,226 +600,23 @@ export function ProviderSetupDialog({
         aria-labelledby="provider-setup-title"
         onClick={(event) => event.stopPropagation()}
       >
-        <div className="provider-setup-head">
-          <h3 id="provider-setup-title" className="provider-setup-title">
-            {initialDraft ? t("settings.copyProviderTitle") : editing ? t("settings.editProviderTitle") : t("settings.addProviderTitle")}
-            {/* What a copy does and does not take is the title's own promise. */}
-            {initialDraft ? <HelpIcon label={t("settings.copyProviderHint")} /> : null}
-          </h3>
-          <div className="provider-setup-head-actions">
-            {named || custom ? (
-              <Button
-                variant="ghost"
-                size="sm"
-                disabled={saving}
-                onClick={() => setAdvancedOpen(true)}
-              >
-                {t("settings.advancedSettings")}
+        {chooserOpen ? chooserView : pluginCatalogSetup ? (
+          provider ? (
+            <PluginProviderKeySetupForm
+              provider={provider}
+              pluginName={pluginCatalogPluginName ?? provider.ownerPluginId ?? ""}
+              onClose={onClose}
+              onSaved={(saved) => onSaved(saved, saved.models)}
+            />
+          ) : (
+            <div className="provider-setup-body">
+              <p role="alert">{t("settings.providerUnavailable")}</p>
+              <Button variant="ghost" size="sm" onClick={onClose}>
+                {t("settings.cancel")}
               </Button>
-            ) : null}
-            {provider ? (
-              <Button
-                variant="ghost"
-                size="sm"
-                disabled={testing || saving}
-                onClick={() => void testConnection()}
-              >
-                {testing ? t("settings.testing") : t("settings.testConnection")}
-              </Button>
-            ) : null}
-            <Button variant="ghost" size="sm" disabled={saving} onClick={onClose}>
-              {t("settings.cancel")}
-            </Button>
-            <Button
-              variant="primary"
-              size="sm"
-              disabled={!canSave}
-              onClick={() => void save()}
-            >
-              {saving ? t("settings.saving") : t("settings.saveProvider")}
-            </Button>
-          </div>
-        </div>
-
-        <div className="provider-setup-body">
-          {error ? <div className="provider-setup-error">{error}</div> : null}
-
-          <ProviderEndpointGuidance
-            baseUrl={resolvedBaseUrl}
-            apiStyle={resolvedApiStyle}
-            disabled={saving}
-            onApply={(suggestion) => {
-              const preset = NAMED_ENDPOINT_PRESETS.find((item) =>
-                item.baseUrl === suggestion.baseUrl && item.apiStyle === suggestion.apiStyle);
-              setService(preset?.id ?? CUSTOM_SERVICE);
-              setBaseUrl(suggestion.baseUrl);
-              setApiStyle(suggestion.apiStyle);
-              setError("");
-              setTestResult("");
-            }}
-          />
-
-          <div className="provider-setup-credentials">
-            <div
-              className={
-                named
-                  ? "provider-setup-fields is-named"
-                  : custom
-                    ? "provider-setup-fields is-custom"
-                    : "provider-setup-fields is-empty"
-              }
-            >
-              <div
-                className={`provider-setup-field-row provider-setup-service-row ${
-                  named ? "is-named" : "is-single"
-                }`}
-              >
-                <div className="provider-setup-service">
-                  <Field label={t("settings.service")}>
-                    <ServicePicker
-                      value={service}
-                      autoFocus={!named && !custom}
-                      disabled={saving}
-                      onChange={onServiceChange}
-                    />
-                  </Field>
-                </div>
-
-                {named ? (
-                  <Field
-                    label={t("settings.apiKey")}
-                    hint={editing ? t("settings.apiKeyKeepHint") : undefined}
-                  >
-                    <Input
-                      ref={apiKeyRef}
-                      type="password"
-                      value={apiKey}
-                      placeholder="sk-…"
-                      className="font-mono text-sm-plus"
-                      autoComplete="off"
-                      autoFocus
-                      onChange={(event) => setApiKey(event.target.value)}
-                    />
-                  </Field>
-                ) : null}
-              </div>
-
-              {named && resolvedBaseUrl ? (
-                <div className="provider-setup-host" title={resolvedBaseUrl}>
-                  {endpointHost(resolvedBaseUrl)}
-                </div>
-              ) : null}
-
-              {custom ? (
-                <>
-                  <div className="provider-setup-field-row provider-setup-custom-identity-row">
-                    <Field label={t("settings.name")}>
-                      <Input
-                        ref={nameRef}
-                        value={name}
-                        autoFocus
-                        onChange={(event) => setName(event.target.value)}
-                      />
-                    </Field>
-                    <div className="provider-setup-base-url">
-                      <Field label={t("settings.baseUrl")}>
-                        <Input
-                          value={baseUrl}
-                          type="url"
-                          inputMode="url"
-                          autoComplete="url"
-                          className="font-mono text-sm-plus"
-                          placeholder="https://api.example.com/v1"
-                          aria-invalid={Boolean(baseUrlError)}
-                          aria-describedby={baseUrlError ? "provider-base-url-error" : undefined}
-                          onChange={(event) => {
-                            setBaseUrl(event.target.value);
-                            setError("");
-                          }}
-                          onBlur={commitBaseUrl}
-                        />
-                        {baseUrlError ? (
-                          <div
-                            id="provider-base-url-error"
-                            className="provider-setup-field-error"
-                            role="alert"
-                          >
-                            {baseUrlError}
-                          </div>
-                        ) : null}
-                      </Field>
-                    </div>
-                  </div>
-                  <div className="provider-setup-field-row provider-setup-custom-auth-row">
-                    <Field
-                      label={t("settings.apiKey")}
-                      hint={editing ? t("settings.apiKeyKeepHint") : undefined}
-                    >
-                      <Input
-                        ref={apiKeyRef}
-                        type="password"
-                        value={apiKey}
-                        placeholder="sk-…"
-                        className="font-mono text-sm-plus"
-                        autoComplete="off"
-                        onChange={(event) => setApiKey(event.target.value)}
-                      />
-                    </Field>
-                    <Field
-                      label={t("settings.apiStyle")}
-                      hint={accountOnlyApiStyle ? t(requiresApiStyleChoice
-                        ? "settings.apiStyleChooseCustom"
-                        : "settings.apiStyleLegacyAccount") : undefined}
-                    >
-                      <SettingsMenuSelect
-                        fullWidth
-                        label={t("settings.apiStyle")}
-                        value={apiStyle}
-                        disabled={saving}
-                        onChange={(id) => setApiStyle(id as CatalogApiStyle)}
-                        options={[
-                          ...(accountOnlyApiStyle
-                            ? [{
-                                id: apiStyle,
-                                label: t(API_STYLE_LABEL_KEYS[apiStyle]),
-                                disabled: true,
-                              }]
-                            : []),
-                          ...CUSTOM_PROVIDER_API_STYLES.map((style) => ({
-                            id: style,
-                            label: t(API_STYLE_LABEL_KEYS[style]),
-                          })),
-                        ]}
-                      />
-                    </Field>
-                  </div>
-                </>
-              ) : null}
             </div>
-
-            {testResult ? (
-              <div className="provider-credential-test">
-                <span className="provider-credential-test-result">{testResult}</span>
-              </div>
-            ) : null}
-          </div>
-
-          <ModelSelectionPanes
-            discovery={discovery}
-            selection={selection}
-            listTitle={t("settings.serviceModels")}
-            busy={saving}
-            onReload={discovery.reload}
-            apiStyle={resolvedApiStyle}
-            imageModelIds={imageModelDraft ?? imageModelIds}
-            onImageModelChange={updateImageModelDraft}
-            lookupContext={{
-              baseUrl: requestBaseUrl,
-              vendorKey: namedPreset?.vendorKey ?? provider?.vendorKey ?? "custom",
-              providerId: provider?.id,
-            }}
-          />
-        </div>
+          )
+        ) : jevService ? jevView : formView}
       </div>
 
       {advancedOpen && (named || custom) ? (

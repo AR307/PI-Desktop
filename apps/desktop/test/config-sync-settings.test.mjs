@@ -14,6 +14,9 @@ const read = (relativePath) =>
 const settingsPage = await read("../src/features/settings/SettingsPage.tsx");
 const settingsIndex = await read("../src/lib/settings-search.ts");
 const syncPage = await read("../src/components/settings/ConfigSyncPage.tsx");
+const syncPreferences = await read(
+  "../src/features/settings/config-sync-preferences.ts",
+);
 const syncIpc = await read("../electron/main/ipc/config-sync-ipc.ts");
 const styles = await loadStyles();
 const syncProtocol = await read("../../../packages/shared/src/protocol.ts");
@@ -23,17 +26,23 @@ const api = await read("../src/lib/api.ts");
 const progressModel = await read(
   "../src/features/settings/config-sync-progress.ts",
 );
+const syncError = await read(
+  "../src/components/settings/ConfigSyncError.tsx",
+);
 
 test("cloud sync rendering follows the settings visibility gate", () => {
   assert.match(settingsPage, /tab === "sync" && !tabHidden && <ConfigSyncPage \/>/);
   assert.match(settingsIndex, /id: "sync"/);
-  assert.match(settingsIndex, /experimentalBadgeKey: "settings\.configSync\.experimental"/);
+  // The cloud backup ships hidden from packaged builds: the destination stays
+  // a development-build surface until it opens.
+  assert.match(settingsIndex, /id: "sync"[\s\S]{0,400}developmentOnly: true/);
+  assert.doesNotMatch(settingsIndex, /experimentalBadgeKey: "settings\.configSync\.experimental"/);
   assert.match(settingsIndex, /settings\.configSync\.connectionTitle/);
 });
 
 test("cloud sync keeps credentials and vault operations on the host boundary", () => {
   assert.match(syncPage, /api\.configSyncConfigure\(/);
-  assert.match(syncPage, /setState\(await api\.configSyncSyncNow\(\)\)/);
+  assert.match(syncPage, /applyState\(await api\.configSyncSyncNow\(\)\)/);
   // The plaintext opt-in is the network mode now, not a WebDAV switch: the page
   // carries no per-endpoint HTTP acknowledgement of its own.
   assert.doesNotMatch(syncPage, /allowInsecureHttp/);
@@ -53,6 +62,19 @@ test("cloud sync keeps credentials and vault operations on the host boundary", (
   assert.match(syncIpc, /callHost\("configSync\.mapProject"/);
   assert.match(syncIpc, /callHost\("configSync\.restore"/);
   assert.match(syncIpc, /callHost\("configSync\.changePassword"/);
+});
+
+test("cloud sync keeps a non-sensitive draft and paints cached state first", () => {
+  assert.match(syncPage, /getCachedConfigSyncState\(\)/);
+  assert.match(syncPage, /getCachedConfigSyncHistory\(\)/);
+  assert.match(syncPage, /writeConfigSyncDraft\(/);
+  assert.match(syncPage, /appPasswordSavedHint/);
+  assert.doesNotMatch(syncPage, /if \(loading\) \{[\s\S]{0,180}return \(/);
+  assert.match(syncPreferences, /passwords are never copied into renderer persistence/);
+  assert.match(syncPreferences, /CONFIG_SYNC_DRAFT_STORAGE_KEY/);
+  assert.match(syncPreferences, /saved\?: boolean/);
+  assert.match(syncPreferences, /store\.setItem\(CONFIG_SYNC_DRAFT_STORAGE_KEY/);
+  assert.doesNotMatch(syncPreferences, /appPassword|backupPassword/);
 });
 
 test("cloud sync settings remain usable on narrow surfaces", () => {
@@ -167,4 +189,44 @@ test("a manual sync outlasts the flat default transport deadline", () => {
   assert.ok(CONFIG_SYNC_RPC_TIMEOUT_MS > DEFAULT_RPC_TIMEOUT_MS);
   // Every other config-sync call keeps the shared default.
   assert.equal(rpcTimeoutMs("configSync.getState", {}), DEFAULT_RPC_TIMEOUT_MS);
+});
+
+test("a failed sync reads as one alert, not a stray paragraph", () => {
+  // The notice is the page's error summary: announced once, with the error
+  // signal carried by a single frame instead of an inline bold label.
+  assert.match(
+    syncError,
+    /className="settings-config-sync-alert" role="alert"/,
+  );
+  assert.match(syncError, /<IconTriangleAlert[\s\S]{0,120}size=\{16\}/);
+  assert.match(syncError, /className="settings-config-sync-alert-title"/);
+  assert.match(syncError, /className="settings-config-sync-alert-text"/);
+  // The raw host text stays opt-in behind the existing disclosure.
+  assert.match(syncError, /className="settings-config-sync-alert-details"/);
+  assert.match(
+    syncError,
+    /<summary>\{t\("settings\.configSync\.errorDetails"\)\}<\/summary>/,
+  );
+  assert.match(syncError, /<pre>\{message\}<\/pre>/);
+});
+
+test("the sync alert paints its surface from theme tokens", () => {
+  assert.match(
+    styles,
+    /\.settings-config-sync-alert \{[\s\S]*?border: 1px solid color-mix\(in srgb, var\(--ds-error\) 30%, transparent\);[\s\S]*?background: color-mix\(in srgb, var\(--ds-error\) 8%, transparent\);/s,
+  );
+  assert.match(styles, /\.settings-config-sync-alert-icon \{[\s\S]*?color: var\(--ds-error\);/s);
+  // The host text keeps its own plate so a long provider detail never widens
+  // the notice.
+  assert.match(
+    styles,
+    /\.settings-config-sync-alert-details > pre \{[\s\S]*?overflow-wrap: anywhere;/s,
+  );
+  // `--ds-danger` is defined by no theme, so the error ink it named silently
+  // fell back to inherited text. Settings errors resolve through `--ds-error`.
+  assert.doesNotMatch(styles, /var\(--ds-danger\)/);
+  assert.match(
+    styles,
+    /\.settings-storage-message\.error \{\n  color: var\(--ds-error\);/,
+  );
 });

@@ -9,7 +9,9 @@ const source = (path) =>
 const ui = await source("components/ui.tsx");
 const primitives = await source("features/settings/primitives.tsx");
 const settingsPage = await source("features/settings/SettingsPage.tsx");
-const importPage = await source("features/settings/import-page.tsx");
+const importWorkbench = await source("features/settings/import-workbench.tsx");
+const modelImport = await source("features/settings/imports/ModelConfigImportPanel.tsx");
+const skillImport = await source("features/settings/imports/AgentSkillImportPanel.tsx");
 const networkProxy = await source("components/settings/NetworkProxySection.tsx");
 const styles = await loadStyles();
 
@@ -107,16 +109,21 @@ test("one settings row renderer owns the layout", () => {
   );
 });
 
-test("an import hint is reachable from the control it explains", () => {
-  // The standalone hint line is gone; the toolbar and its option carry it.
-  assert.doesNotMatch(importPage, /className="import-hint"/);
-  assert.match(importPage, /hint\?: string;/);
-  assert.match(importPage, /hint=\{t\("settings\.importAgentScanModeHint"\)\}/);
-  assert.match(importPage, /hint=\{\n\s+codexCap != null/);
-  assert.match(importPage, /\{hint \? <HelpIcon label=\{hint\} \/> : null\}/);
-  assert.match(importPage, /\{help \? <HelpIcon label=\{help\} \/> : null\}/);
-  // A hint rides beside the controls, so the toolbar must still render them:
-  // a half-migrated prop list silently dropped the grouping and mode pickers
-  // once already, and no source-level assertion caught it.
-  assert.match(importPage, /\{options\}\n\s+\{hint \? <HelpIcon/);
+test("empty import states show scan scope inline while result options keep help", () => {
+  // Scan scope is readable before starting a scan. Result-specific mode
+  // guidance remains available from its existing help control.
+  assert.doesNotMatch(importWorkbench, /className="import-hint"/);
+  assert.match(importWorkbench, /hint\?: string;/);
+  assert.match(skillImport, /hint=\{t\("settings\.importAgentScanModeHint"\)\}/);
+  assert.doesNotMatch(modelImport, /codexCap|importCodexCapped/);
+  const idleStart = importWorkbench.indexOf("export function ImportIdle(");
+  const idleEnd = importWorkbench.indexOf("export function ImportResults(", idleStart);
+  const importIdle = importWorkbench.slice(idleStart, idleEnd);
+  assert.match(
+    importIdle,
+    /<p className="import-idle-description">\{copy\}<\/p>/,
+  );
+  assert.doesNotMatch(importIdle, /<HelpIcon/);
+  assert.match(importWorkbench, /\{hint \? <HelpIcon label=\{hint\} \/> : null\}/);
+  assert.match(cssRule(".import-idle-description"), /color:\s*var\(--ds-text-muted\)/);
 });

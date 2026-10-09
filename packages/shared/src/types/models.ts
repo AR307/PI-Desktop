@@ -9,6 +9,8 @@ export const THINKING_LEVELS = [
   "max",
 ] as const;
 export type ThinkingLevel = (typeof THINKING_LEVELS)[number];
+export const THINKING_PROTOCOLS = ["legacy", "adaptive"] as const;
+export type ThinkingProtocol = (typeof THINKING_PROTOCOLS)[number];
 /**
  * Session and subagent selector values. `omit` leaves the provider default
  * untouched and is not a catalog/binding capability.
@@ -83,6 +85,45 @@ export function stripVariantSuffix(value: string): string {
   }
   return current;
 }
+/**
+ * Release-stamp suffixes a publisher appends to a dated snapshot of a model:
+ * `-20250731`, `-2025-07-31`, `-2025_07_31`, `-2025.07.31` and the bare
+ * `-0731` form.
+ *
+ * Only a plausible calendar date is stripped. A four-digit tail is read as
+ * month/day, so `-1399`, `-9999` and `-0232` are version numbers, not dates,
+ * and stay part of the id. This is a metadata alias only: the wire id a request
+ * is addressed with is never rewritten.
+ */
+const RELEASE_SUFFIX_REGEX =
+  /[-._](\d{4})[-._](\d{1,2})[-._](\d{1,2})$|[-._](\d{8})$|[-._](\d{2})(\d{2})$/;
+
+function isCalendarDate(month: number, day: number): boolean {
+  if (month < 1 || month > 12) return false;
+  if (day < 1 || day > 31) return false;
+  return day <= new Date(Date.UTC(2000, month, 0)).getUTCDate();
+}
+
+/** Drop one trailing release stamp, or return the value unchanged. */
+export function stripReleaseSuffix(value: string): string {
+  const match = RELEASE_SUFFIX_REGEX.exec(value);
+  if (!match) return value;
+  const [year, month, day] = match[1]
+    ? [Number(match[1]), Number(match[2]), Number(match[3])]
+    : match[4]
+      ? [
+          Number(match[4].slice(0, 4)),
+          Number(match[4].slice(4, 6)),
+          Number(match[4].slice(6, 8)),
+        ]
+      : [0, Number(match[5]), Number(match[6])];
+  // A compact stamp is year-month-day too; the leading year is what makes
+  // `-20250731` a date rather than an arbitrary eight digits only when its
+  // month and day are real.
+  if (match[4] && (year < 1900 || year > 2999)) return value;
+  if (!isCalendarDate(month, day)) return value;
+  return value.slice(0, match.index);
+}
 
 function canonicalVendor(prefix: string): string {
   if (prefix === "deepseek-ai") return "deepseek";
@@ -111,22 +152,7 @@ function extractKnownVendor(id: string): string | undefined {
   return undefined;
 }
 
-function pathLeaf(id: string): string {
-  const slash = id.lastIndexOf("/");
-  return slash >= 0 ? id.slice(slash + 1) : id;
-}
-
-function exactPathAliasMatch(left: string, right: string): boolean {
-  // Two independently routed paths cannot be identified by their leaf alone.
-  if (left.includes("/") === right.includes("/")) return false;
-  if (pathLeaf(left) !== pathLeaf(right)) return false;
-
-  const leftVendor = extractKnownVendor(left);
-  const rightVendor = extractKnownVendor(right);
-  return !leftVendor || !rightVendor || leftVendor === rightVendor;
-}
-
-function normalizedMatch(left: string, right: string, allowPathLeaf = false): boolean {
+function normalizedMatch(left: string, right: string): boolean {
   const leftVendor = extractKnownVendor(left);
   const rightVendor = extractKnownVendor(right);
   if (leftVendor && rightVendor && leftVendor !== rightVendor) return false;
@@ -140,7 +166,11 @@ function normalizedMatch(left: string, right: string, allowPathLeaf = false): bo
     }
   }
 
-  return allowPathLeaf && exactPathAliasMatch(left, right);
+  return false;
+}
+function pathLeaf(id: string): string {
+  const slash = id.lastIndexOf("/");
+  return slash >= 0 ? id.slice(slash + 1) : id;
 }
 
 /** Configured-model identity: compare the complete wire ID, not catalog aliases. */
@@ -158,30 +188,26 @@ export function modelIdsMatch(candidate: string, requested: string): boolean {
   return normalizedMatch(stripRegion(left), stripRegion(right));
 }
 
-/** Broader metadata-only aliases; never use for configured binding identity. */
+/**
+ * Catalog enrichment matcher: take the **last `/`-segment** of each side,
+ * compare case-insensitively.  The caller enforces uniqueness (exactly 1
+ * catalog hit ⇒ enrichment; 0 or ≥2 ⇒ no match).
+ *
+ * This deliberately does **not** strip `-thinking`, `-agent`, `-latest`,
+ * vendor-dash prefixes, or any other fuzzy suffix.  The old variant-suffix
+ * and vendor-prefix logic caused cross-model false positives.
+ */
 export function catalogModelIdsMatch(candidate: string, requested: string): boolean {
   const left = candidate.trim().toLowerCase();
   const right = requested.trim().toLowerCase();
   if (!left || !right) return false;
-
-  const cleanLeft = stripRegion(left);
-  const cleanRight = stripRegion(right);
-  if (normalizedMatch(cleanLeft, cleanRight, true)) return true;
-
-  const strippedLeft = stripVariantSuffix(cleanLeft);
-  const strippedRight = stripVariantSuffix(cleanRight);
-  if (strippedLeft === cleanLeft && strippedRight === cleanRight) return false;
-  return normalizedMatch(strippedLeft, strippedRight, true);
+  return pathLeaf(left) === pathLeaf(right);
 }
 
-/**
- * Where a saved context window came from.
- *
- * `catalog` is a metadata snapshot: the value follows the published models.dev
- * record, so a later catalog correction still reaches an already saved binding.
- * `user` is the user's own number and is never overwritten by the catalog.
- */
-export type ContextWindowSource = "catalog" | "user";
+/** Where a saved model limit came from; user-authored values are never replaced. */
+export type ModelLimitSource = "catalog" | "user";
+/** @deprecated Use ModelLimitSource; kept for existing context-window callers. */
+export type ContextWindowSource = ModelLimitSource;
 
 /** Provider-local model settings persisted with the provider configuration. */
 export type ModelBinding = {
@@ -195,18 +221,23 @@ export type ModelBinding = {
    * `effectiveContextWindow`. */
   contextWindowSource?: ContextWindowSource;
   maxTokens: number;
+  /** Provenance of `maxTokens`, independent of `contextWindowSource`. */
+  maxTokensSource?: ModelLimitSource;
   thinkingLevels: ThinkingLevel[];
   /** Canonical enabled level, or `omit` when new sessions should send no override. */
   defaultThinkingLevel: SessionThinkingLevel | null;
+  /** Provider request protocol used when thinking is enabled. */
+  thinkingProtocol?: ThinkingProtocol;
   /**
    * User override for image input. `null` or absent follows the published
-   * models.dev capability; `true` forces image transport on for an endpoint the
-   * catalog describes too narrowly, `false` keeps images out of the request.
+   * models.dev capability. Once explicitly selected, either boolean is pinned
+   * even when it matches today's catalog value.
    */
   supportsImages?: boolean | null;
   /**
    * User override for document (PDF) input, with the same three-state meaning.
-   * Documents are still transported as bounded file references, so this records
+   * An explicit boolean remains pinned if the catalog later changes. Documents
+   * are still transported as bounded file references, so this records
    * the capability the model actually has rather than switching the encoding.
    */
   supportsDocuments?: boolean | null;
@@ -282,6 +313,7 @@ export type ModelInfo = {
   attachment?: boolean;
   reasoning?: boolean;
   reasoningOptions?: ModelReasoningOption[];
+  thinkingProtocol?: ThinkingProtocol;
   thinkingLevelMap?: Partial<Record<ThinkingLevel, string | null>>;
   toolCall?: boolean;
   structuredOutput?: boolean;
@@ -317,7 +349,7 @@ export type ModelInfo = {
   supportedThinkingLevels?: ThinkingLevel[];
   source: "bundled" | "discovered" | "user";
   /** Metadata catalog that supplied this row, when it is a known model. */
-  catalogSource?: "models.dev";
+  catalogSource?: "pi" | "models.dev";
 };
 
 /**

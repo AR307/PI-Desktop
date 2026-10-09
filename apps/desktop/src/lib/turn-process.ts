@@ -54,25 +54,13 @@ export function shouldGroupTurnProcess(mode: ThinkingDisplayMode): boolean {
   return mode === "detailed" || mode === "compact";
 }
 
-/** The last activity chunk of a turn owns detailed-mode's default-open tool. */
-export function isLastActivityPart(
-  parts: readonly AssistantTurnPart[],
-  part: AssistantTurnPart,
-): boolean {
-  if (part.kind !== "activity") return false;
-  for (let index = parts.length - 1; index >= 0; index -= 1) {
-    if (parts[index].kind === "activity") return parts[index] === part;
-  }
-  return false;
-}
-
-/** Detailed keeps narration visible; compact reveals active failures only. */
+/** Active processes open in Detailed; settled processes default closed. */
 export function shouldAutoOpenTurnProcess(
   mode: ThinkingDisplayMode,
   isActive: boolean,
   hasToolFailure: boolean,
 ): boolean {
-  return mode === "detailed" || (isActive && hasToolFailure);
+  return isActive && (mode === "detailed" || hasToolFailure);
 }
 
 /**

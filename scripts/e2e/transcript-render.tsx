@@ -1,25 +1,129 @@
+import { transcriptLongHistoryProbe as runLongHistoryProbe } from "./transcript-long-history";
 import { transcriptEditProbe } from "./transcript-edit";
 import { turnProcessProbe } from "./turn-process";
 import { transcriptStatusProbe } from "./transcript-status";
 import { createRoot } from "react-dom/client";
 import { flushSync } from "react-dom";
+import { useState } from "react";
 import { createInstance } from "i18next";
 import { I18nextProvider } from "react-i18next";
 import { en } from "@pi-desktop/i18n";
-import type { AgentActivity, UiMessage } from "@pi-desktop/shared";
+import type { AgentActivity, AgentEventEnvelope, UiMessage } from "@pi-desktop/shared";
+import { Markdown } from "../../apps/desktop/src/components/Markdown";
 import { AssistantTurn } from "../../apps/desktop/src/features/chat/transcript/AssistantTurn";
 import { ChatTranscript } from "../../apps/desktop/src/features/chat/transcript/ChatTranscript";
 import { buildTranscriptEntries } from "../../apps/desktop/src/lib/assistant-turns";
+import { assistantErrorMessage } from "../../apps/desktop/src/stores/helpers/store-helpers";
+import type { AppState } from "../../apps/desktop/src/stores/app-state";
+import { createSessionRuntime } from "../../apps/desktop/src/stores/runtime/session-runtime";
+import { createEventsSlice } from "../../apps/desktop/src/stores/slices/events-slice";
+import type { StoreSet } from "../../apps/desktop/src/stores/slices/types";
+import { useSmoothText } from "../../apps/desktop/src/hooks/useSmoothText";
+import { MAX_SMOOTH_TEXT_CODE_UNITS } from "../../apps/desktop/src/lib/render-content-limits";
 import { useAppStore } from "../../apps/desktop/src/stores/app-store";
 
 declare global {
   var __activityGroupRenders: string[];
   var transcriptRenderProbe: () => Promise<unknown>;
   var transcriptRuntimeSlotProbe: () => Promise<unknown>;
+  var smoothTextThrottleProbe: () => Promise<unknown>;
+  var transcriptLongHistoryProbe: typeof runLongHistoryProbe;
+  var resetContextOverflowRecoveryProbe: () => Promise<void>;
+  var contextOverflowRecoveryProbe: (events: AgentEventEnvelope[]) => Promise<unknown>;
 }
+
+globalThis.transcriptLongHistoryProbe = runLongHistoryProbe;
 
 function assert(value: unknown, message: string): asserts value {
   if (!value) throw new Error(message);
+}
+
+async function markdownLinkInteractionProbe(
+  i18n: ReturnType<typeof createInstance>,
+) {
+  const destination = "https://github.com/vastsa/PI-Desktop/issues/1106";
+  const initialState = useAppStore.getState();
+  const openedUrls: string[] = [];
+  const host = document.createElement("div");
+  host.style.cssText = "position:fixed;top:24px;left:24px";
+  document.body.append(host);
+  const renderErrors: unknown[] = [];
+  const root = createRoot(host, {
+    onUncaughtError: (error) => renderErrors.push(error),
+  });
+
+  try {
+    useAppStore.setState({
+      activeSessionId: "markdown-link-probe",
+      page: "chat",
+      settings: { ...initialState.settings, linkOpenTarget: "workpanel" },
+      openUrlInWorkPanel: (url) => openedUrls.push(url),
+    });
+    flushSync(() =>
+      root.render(
+        <I18nextProvider i18n={i18n}>
+          <Markdown
+            source="[#1106](([github.com](https://github.com/vastsa/PI-Desktop/issues/1106)))"
+          />
+        </I18nextProvider>,
+      ),
+    );
+
+    const anchor = host.querySelector<HTMLAnchorElement>("a");
+    assert(anchor, "wrapped Markdown destination did not render an anchor");
+    assert(
+      anchor.getAttribute("href") === destination,
+      `wrapped Markdown destination rendered the wrong href: ${anchor.getAttribute("href")}`,
+    );
+
+    let clickWasPrevented = false;
+    flushSync(() => {
+      clickWasPrevented = !anchor.dispatchEvent(
+        new MouseEvent("click", { bubbles: true, cancelable: true }),
+      );
+    });
+    assert(clickWasPrevented, "plain link click was not handled by Markdown");
+    assert(
+      openedUrls[0] === destination,
+      `plain link click opened ${openedUrls[0] ?? "nothing"}`,
+    );
+
+    let contextMenuWasPrevented = false;
+    flushSync(() => {
+      contextMenuWasPrevented = !anchor.dispatchEvent(
+        new MouseEvent("contextmenu", {
+          bubbles: true,
+          cancelable: true,
+          button: 2,
+          clientX: 80,
+          clientY: 80,
+        }),
+      );
+    });
+    await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+    assert(contextMenuWasPrevented, "link context menu did not suppress the native menu");
+
+    const menu = document.body.querySelector<HTMLElement>('[role="menu"]');
+    assert(menu, "link context menu was not rendered");
+    for (const [id, label] of [
+      ["open-external", "Open in default browser"],
+      ["open-workpanel", "Open in work panel"],
+    ]) {
+      const item = menu.querySelector<HTMLElement>(`[data-context-menu-item="${id}"]`);
+      assert(item?.textContent?.includes(label), `link menu is missing ${label}`);
+    }
+    assert(renderErrors.length === 0, `Markdown render failed: ${renderErrors.map(String).join("; ")}`);
+    return { ok: true, href: anchor.href, clickedUrl: openedUrls[0], menuItems: 3 };
+  } finally {
+    flushSync(() => root.unmount());
+    host.remove();
+    useAppStore.setState({
+      activeSessionId: initialState.activeSessionId,
+      page: initialState.page,
+      settings: initialState.settings,
+      openUrlInWorkPanel: initialState.openUrlInWorkPanel,
+    });
+  }
 }
 
 const createdAt = "2026-09-13T00:00:00.000Z";
@@ -29,6 +133,134 @@ const message = (
   content: string,
   extra: Partial<UiMessage> = {},
 ): UiMessage => ({ id, role, content, createdAt, ...extra });
+
+let recoveryState: AppState | undefined;
+let recoveryRoot: ReturnType<typeof createRoot> | undefined;
+let recoveryHost: HTMLDivElement | undefined;
+let recoveryI18n: ReturnType<typeof createInstance> | undefined;
+let recoveryInitialAssistantId: string | undefined;
+
+globalThis.resetContextOverflowRecoveryProbe = async () => {
+  const sessionId = "context-overflow-fixture";
+  const initialStore = useAppStore.getState();
+  const user = message("user-1", "user", "hello", {
+    status: "complete",
+  });
+  recoveryState = {
+    ...initialStore,
+    activeSessionId: sessionId,
+    messages: [user],
+    retainedTranscripts: {
+      ...initialStore.retainedTranscripts,
+      [sessionId]: [user],
+    },
+    runningSessions: {},
+    sessionOutcomes: {},
+    latestTurnResults: {},
+    pendingPermissions: [],
+    pendingAsks: [],
+    isRunning: false,
+  };
+  const get = () => {
+    assert(recoveryState, "overflow fixture state was not initialized");
+    return recoveryState;
+  };
+  const set: StoreSet = (update) => {
+    const previous = get();
+    const patch = typeof update === "function" ? update(previous) : update;
+    recoveryState = { ...previous, ...patch };
+    sessionRuntime.syncTranscriptProjection(recoveryState, previous);
+  };
+  const sessionRuntime = createSessionRuntime({ get, set });
+  sessionRuntime.cacheSessionTranscript(sessionId, [user]);
+  const withoutRecordKey = <T,>(record: Record<string, T>, key: string) => {
+    const next = { ...record };
+    delete next[key];
+    return next;
+  };
+  Object.assign(
+    recoveryState,
+    createEventsSlice({
+      get,
+      set,
+      runtime: sessionRuntime,
+      withoutRecordKey,
+      sessionModeForPlanningState: () => "agent",
+      openPlanArtifact: () => undefined,
+      notifyInteractivePrompt: () => undefined,
+      flushPendingSessionConfiguration: async () => undefined,
+      assistantErrorMessage: (error) =>
+        assistantErrorMessage({
+          code: error.code,
+          message: error.message,
+          retriable: error.retriable === true,
+        }),
+      withCompactionMark: (marks, mark) => [...(marks ?? []), mark],
+    }),
+  );
+  recoveryInitialAssistantId = undefined;
+  recoveryI18n = createInstance();
+  await recoveryI18n.init({
+    lng: "en",
+    resources: { en: { translation: en } },
+    interpolation: { escapeValue: false },
+  });
+  recoveryHost = document.createElement("div");
+  document.body.append(recoveryHost);
+  recoveryRoot = createRoot(recoveryHost);
+  useAppStore.setState({
+    activeSessionId: sessionId,
+    dismissedAssistantErrorMessages: {},
+    settings: {
+      ...initialStore.settings,
+      defaultMode: "agent",
+      theme: "dark",
+      enterToSend: true,
+      onboardingDismissed: false,
+      smoothStreaming: false,
+    },
+  });
+};
+
+globalThis.contextOverflowRecoveryProbe = async (events) => {
+  assert(recoveryState, "overflow fixture state was not initialized");
+  assert(recoveryRoot && recoveryHost && recoveryI18n, "overflow fixture DOM is missing");
+  for (const event of events) recoveryState.handleAgentEvent(event);
+  await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+  const state = recoveryState;
+  const assistantMessages = state.messages.filter((item) => item.role === "assistant");
+  const assistant = assistantMessages.at(-1);
+  const entry = buildTranscriptEntries(state.messages).entries.find(
+    (item) => item.kind === "assistant-turn",
+  );
+  assert(entry?.kind === "assistant-turn", "recovered assistant turn is missing");
+  flushSync(() =>
+    recoveryRoot.render(
+      <I18nextProvider i18n={recoveryI18n}>
+        <AssistantTurn entry={entry} isActive={state.isRunning} />
+      </I18nextProvider>,
+    ),
+  );
+  const visibleErrorCards = recoveryHost.querySelectorAll(".message-error").length;
+  const recovering =
+    state.isRunning && assistant?.status === "streaming" && !assistant.error &&
+    visibleErrorCards === 0 && recoveryHost.textContent?.includes("partial response");
+  const complete =
+    !state.isRunning && assistant?.status === "complete" &&
+    visibleErrorCards === 0 && recoveryHost.textContent?.includes("recovered response");
+  if (!recoveryInitialAssistantId && recovering) recoveryInitialAssistantId = assistant?.id;
+  const phase = recovering ? "recovering" : complete ? "complete" : "invalid";
+  return {
+    ok: phase !== "invalid",
+    phase,
+    assistantId: assistant?.id,
+    initialAssistantId: recoveryInitialAssistantId,
+    assistantStatus: assistant?.status,
+    assistantCount: assistantMessages.length,
+    visibleErrorCards,
+    visibleText: recoveryHost.textContent,
+  };
+};
 
 /** Real React DOM + production transcript components; no component/hook mocks. */
 globalThis.transcriptRenderProbe = async () => {
@@ -233,9 +465,11 @@ globalThis.transcriptRenderProbe = async () => {
     );
 
     const statusLifecycle = await transcriptStatusProbe();
+    const markdownLinks = await markdownLinkInteractionProbe(i18n);
     return {
-      ok: statusLifecycle.ok,
+      ok: statusLifecycle.ok && markdownLinks.ok,
       statusLifecycle,
+      markdownLinks,
       groups,
       textUpdates: 20,
       textUpdateRenders,
@@ -286,8 +520,9 @@ globalThis.transcriptRuntimeSlotProbe = async () => {
     if (!passed) failures.push(message);
   };
   const sessionId = "runtime-slot";
-  const messages: UiMessage[] = [message("user", "user", "Inspect the workspace")];
+  const messages: UiMessage[] = [];
   for (let index = 0; index < 8; index++) {
+    messages.push(message(`user-${index}`, "user", `Inspect step ${index} in the workspace`));
     messages.push(
       message(`tool-${index}`, "tool", "done", {
         toolName: "Bash",
@@ -301,17 +536,9 @@ globalThis.transcriptRuntimeSlotProbe = async () => {
       message(`answer-${index}`, "assistant", `Finished step ${index}.`),
     );
   }
-  // A completed tool row does not finish the turn: the fallback remains until
-  // the runtime reports the next phase or the turn reaches a terminal state.
-  messages.push(
-    message("tool-tail", "tool", "done", {
-      toolName: "Bash",
-      toolCallId: "call-tail",
-      toolStatus: "success",
-      toolArgs: { command: "printf tail" },
-      toolResult: { details: { stdout: "done", exitCode: 0 } },
-    }),
-  );
+  messages.push(message("live-user", "user", "Inspect the next step"));
+  // The live user turn exercises the runtime lane without an active process
+  // disclosure changing geometry when that lane settles.
 
   const frame = () =>
     new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
@@ -558,5 +785,99 @@ globalThis.transcriptRuntimeSlotProbe = async () => {
     flushSync(() => root.unmount());
     host.remove();
     useAppStore.setState({ agentStatuses: {} });
+  }
+};
+
+/** The real streaming hook must not commit above 60 Hz on a 120 Hz display. */
+globalThis.smoothTextThrottleProbe = async () => {
+  const originalRequestAnimationFrame = window.requestAnimationFrame;
+  const originalCancelAnimationFrame = window.cancelAnimationFrame;
+  const callbacks = new Map<number, FrameRequestCallback>();
+  const commits: number[] = [];
+  const sourceText = "streaming-fragment-".repeat(16);
+  let nextFrameId = 0;
+  let frameTime = performance.now();
+  let updateSource: (value: string) => void = () => undefined;
+  let lastText: string | null = null;
+
+  window.requestAnimationFrame = (callback) => {
+    const id = ++nextFrameId;
+    callbacks.set(id, callback);
+    return id;
+  };
+  window.cancelAnimationFrame = (id) => {
+    callbacks.delete(id);
+  };
+
+  function SmoothTextFixture() {
+    const [source, setSource] = useState("");
+    updateSource = setSource;
+    const visible = useSmoothText(source, source.length > 0, true);
+    if (visible !== lastText) {
+      lastText = visible;
+      commits.push(frameTime);
+    }
+    return <div id="smooth-text-probe">{visible}</div>;
+  }
+
+  const host = document.createElement("div");
+  document.body.append(host);
+  const root = createRoot(host);
+  const yieldToEffects = () =>
+    new Promise<void>((resolve) => window.setTimeout(resolve, 0));
+  const flushFrame = (now: number) => {
+    frameTime = now;
+    const scheduled = [...callbacks.values()];
+    callbacks.clear();
+    flushSync(() => {
+      for (const callback of scheduled) callback(now);
+    });
+  };
+
+  try {
+    flushSync(() => root.render(<SmoothTextFixture />));
+    await yieldToEffects();
+    commits.length = 0;
+    flushSync(() => updateSource(sourceText));
+    await yieldToEffects();
+    assert(callbacks.size > 0, "smooth text did not schedule its first frame");
+
+    const start = performance.now();
+    const frameInterval = 1000 / 120;
+    for (let frame = 1; frame <= 360; frame += 1) {
+      flushFrame(start + frame * frameInterval);
+    }
+    assert(
+      host.textContent === sourceText,
+      "smooth text did not reveal the complete streamed source",
+    );
+    assert(commits.length > 1, "smooth text did not reveal progressively");
+    const gaps = commits.slice(1).map((time, index) => time - commits[index]);
+    const minimumGapMs = Math.min(...gaps);
+    assert(
+      minimumGapMs >= 16.5,
+      `smooth text committed faster than 60 Hz (${minimumGapMs.toFixed(2)}ms)`,
+    );
+    flushFrame(start + 361 * frameInterval);
+    assert(callbacks.size === 0, "smooth text kept scheduling frames after catching up");
+
+    const largeSource = "large-stream-".repeat(Math.ceil((MAX_SMOOTH_TEXT_CODE_UNITS + 1) / 13));
+    flushSync(() => updateSource(largeSource));
+    await yieldToEffects();
+    assert(host.textContent === largeSource, "large streaming text was not shown in full immediately");
+    assert(callbacks.size === 0, "large streaming text still scheduled per-frame reveal work");
+    return {
+      ok: true,
+      commits: commits.length,
+      minimumGapMs,
+      largeSourceLength: largeSource.length,
+      largeSourceShownImmediately: host.textContent === largeSource,
+      idleFramesAfterCatchUp: callbacks.size,
+    };
+  } finally {
+    flushSync(() => root.unmount());
+    host.remove();
+    window.requestAnimationFrame = originalRequestAnimationFrame;
+    window.cancelAnimationFrame = originalCancelAnimationFrame;
   }
 };

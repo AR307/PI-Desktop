@@ -26,7 +26,6 @@ const ICON_BUTTON_FILES = [
   "../src/components/Sidebar.tsx",
   "../src/features/chat/composer/ComposerToolbar.tsx",
   "../src/components/workpanel/FilesTab.tsx",
-  "../src/pages/PullRequestsPage.tsx",
   "../src/components/settings/ModelConfigPage.tsx",
 ];
 
@@ -63,18 +62,6 @@ test("composer-right no longer widens its icon-only controls", () => {
     styles.match(/\.composer-right \.icon-btn\s*\{[^}]*\}/)?.[0] ?? "";
   assert.ok(rule, ".composer-right .icon-btn rule is missing");
   assert.doesNotMatch(rule, /padding/);
-});
-
-test("the enhancing state leaves the square geometry for its label", () => {
-  // It carries the label while enhancing, so it must outrank
-  // `.icon-btn.icon-btn-square` — by classes in the selector, not `!important`.
-  const rule =
-    styles.match(
-      /\.icon-btn\.composer-enhance-btn\.is-loading\s*\{[^}]*\}/,
-    )?.[0] ?? "";
-  assert.ok(rule, "the labelled enhancing state rule is missing");
-  assert.match(rule, /flex:\s*0 0 auto;/);
-  assert.match(rule, /padding-inline:\s*8px;/);
 });
 
 test("every icon-only .icon-btn states the square", async () => {

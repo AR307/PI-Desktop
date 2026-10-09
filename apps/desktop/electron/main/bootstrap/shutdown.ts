@@ -1,7 +1,7 @@
 import { app, globalShortcut, type Tray } from "electron";
 import type { CloseBehavior } from "@pi-desktop/shared";
 import type { AgentSidecar } from "../agent-sidecar";
-import type { BrowserPane } from "../browser-view";
+import type { BrowserHost } from "../browser-host";
 import type { HostProcess } from "../host-process";
 import type { InflightCheckpointer } from "@pi-desktop/host-runtime";
 import type { Logger } from "../logger";
@@ -14,6 +14,7 @@ import type { UserMcpRuntime } from "../user-mcp";
 import type { McpControlServer } from "../mcp-control";
 import type { McpOAuthManager } from "../mcp-oauth";
 import { getActiveRemoteHostsBoot, setActiveRemoteHostsBoot } from "./remote-hosts";
+import type { LiveCallService } from "../live-voice/call-service";
 
 const QUIT_TURN_SETTLE_BUDGET_MS = 2_000;
 
@@ -37,16 +38,19 @@ export type ShutdownDependencies = {
   activeTurns: Map<string, string>;
   persistenceOutbox: PersistenceOutbox;
   inflightCheckpointer: InflightCheckpointer;
+  flushEventPersistence: () => Promise<void>;
   pluginPanels: Pick<PluginPanelHost, "closeAll">;
   plugins: Pick<PluginRuntime, "disposeAll">;
   userMcp: Pick<UserMcpRuntime, "disposeAll">;
   mcpOAuth?: Pick<McpOAuthManager, "disposeAll">;
-  browserPane: Pick<BrowserPane, "dispose">;
+  browserHost: Pick<BrowserHost, "dispose">;
   pluginViews: Pick<PluginViewHost, "dispose">;
   updater: Pick<AppUpdaterController, "dispose" | "isInstallingUpdate">;
   logger: Pick<Logger, "app">;
   confirmQuitDialog: () => Promise<boolean>;
   disposePowerSaveBlockers: () => void;
+  liveCallService?: Pick<LiveCallService, "endForLifecycle">;
+  disposeSystemProxyRelay?: () => Promise<void>;
 };
 
 /** Register the last-window and before-quit resource lifecycle handlers. */
@@ -59,16 +63,19 @@ export function registerShutdownHandlers({
   activeTurns,
   persistenceOutbox,
   inflightCheckpointer,
+  flushEventPersistence,
   pluginPanels,
   plugins,
   userMcp,
   mcpOAuth,
-  browserPane,
+  browserHost,
   pluginViews,
   updater,
   logger,
   confirmQuitDialog,
   disposePowerSaveBlockers,
+  liveCallService,
+  disposeSystemProxyRelay,
 }: ShutdownDependencies): void {
   app.on("window-all-closed", () => {
     // The D216 tray is resident on every platform, so its presence says nothing
@@ -118,6 +125,9 @@ export function registerShutdownHandlers({
     }
 
     state.quitting = true;
+    // Persist the confirmed shutdown before any awaited cleanup so a forced
+    // process termination still leaves an observable lifecycle boundary.
+    logger.app("lifecycle", "info", "app shutdown");
     disposePowerSaveBlockers();
     state.tray?.destroy();
     state.tray = null;
@@ -130,6 +140,7 @@ export function registerShutdownHandlers({
       state.toggleWindowAccelerator = null;
     }
     state.shutdownPromise = (async () => {
+      await liveCallService?.endForLifecycle("app-quit");
       // Close every paired remote host before the local host-core so any
       // in-flight remote turn's abort still goes over a live socket. Bounded
       // parallelism inside `closeAll`; safe to run before local disposals.
@@ -147,21 +158,50 @@ export function registerShutdownHandlers({
         persistenceOutbox,
         logger,
       });
+      // Panel windows and docked views are the only pages that call the plugin
+      // runtime over the panel bridge. They are torn down, and their pages are
+      // waited for, before the runtime and the host stop: a call such a page
+      // already sent while its surface was closing is otherwise answered by a
+      // runtime that is already shutting down, and surfaces as a bridge failure
+      // nobody can act on. The wait is bounded inside the hosts, so a page that
+      // refuses to close cannot hold up the quit.
+      const pluginSurfacesShutdown = Promise.allSettled([
+        pluginPanels.closeAll(),
+        pluginViews.dispose(),
+      ]);
+      await pluginSurfacesShutdown;
+      // Stop event production before draining the terminal writes. A finished
+      // turn can already have left activeTurns while its branch archive is
+      // still awaiting the host; closing host-core first loses that archive.
+      const sidecarShutdown = getSidecar()?.dispose();
+      await Promise.allSettled([sidecarShutdown]);
+      await inflightCheckpointer.flushAll();
+      let persistenceTimer: ReturnType<typeof setTimeout> | undefined;
+      try {
+        const settled = await Promise.race([
+          flushEventPersistence().then(() => true),
+          new Promise<boolean>((resolve) => {
+            persistenceTimer = setTimeout(() => resolve(false), QUIT_TURN_SETTLE_BUDGET_MS);
+          }),
+        ]);
+        if (!settled) {
+          logger.app("lifecycle", "warn", "quit before event persistence settled");
+        }
+      } finally {
+        if (persistenceTimer) clearTimeout(persistenceTimer);
+      }
+      await persistenceOutbox.flush(getHost);
       const hostShutdown = getHost()?.dispose();
       const mcpShutdown = getMcpControl()?.stop();
-      const pluginPanelShutdown = pluginPanels.closeAll();
       updater.dispose();
-      logger.app("lifecycle", "info", "app shutdown");
       // Plugin hosts are stopped as a shutdown, not left for the process teardown
       // to kill: an unannounced exit is indistinguishable from a crash, and would
       // end every quit in error logs, toasts, and restarts into a closing app.
       const pluginShutdown = plugins.disposeAll();
       userMcp.disposeAll();
       mcpOAuth?.disposeAll();
-      browserPane.dispose();
-      pluginViews.dispose();
+      browserHost.dispose();
       inflightCheckpointer.dispose();
-      const sidecarShutdown = getSidecar()?.dispose();
 
       try {
         await hostShutdown;
@@ -169,12 +209,12 @@ export function registerShutdownHandlers({
         logger.app("lifecycle", "warn", "host shutdown failed", { data: String(error) });
       }
       await Promise.allSettled([
-        pluginPanelShutdown,
         pluginShutdown,
         sidecarShutdown,
         mcpShutdown,
         remoteHostsShutdown,
       ]);
+      await disposeSystemProxyRelay?.();
     })();
 
     const releaseQuit = () => {

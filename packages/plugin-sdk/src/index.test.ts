@@ -9,6 +9,8 @@ import {
   validateManifest,
   LEGACY_FS_PERMISSIONS,
   MAX_GLOBAL_SHORTCUTS_PER_PLUGIN,
+  MAX_RENDERER_ACTIONS_PER_PLUGIN,
+  MAX_RENDERER_CALL_METHODS_PER_PLUGIN,
   PLUGIN_PERMISSIONS,
   PLUGIN_VIEW_ICONS,
   type PluginProviderContrib,
@@ -119,6 +121,64 @@ describe("validateManifest", () => {
     expect(validateManifest({ ...base, ui: { panel: "renderer/index.html" } }).ok).toBe(true);
   });
 
+  it("couples a renderer entry and its whitelists to renderer.extension", () => {
+    const granted = { ...base, permissions: ["renderer.extension"] };
+    expect(
+      validateManifest({
+        ...granted,
+        renderer: "renderer/index.mjs",
+        rendererActions: ["plugin.call", "demo.future-word"],
+        rendererCallMethods: ["stats.summary"],
+      }).ok,
+    ).toBe(true);
+    expect(validateManifest({ ...base, renderer: "renderer.js" }).error).toMatch(
+      /renderer\.extension permission/,
+    );
+    expect(validateManifest({ ...granted, rendererActions: ["plugin.call"] }).error).toMatch(
+      /require manifest\.renderer/,
+    );
+    // Empty whitelists declare nothing, exactly as host-core reads them.
+    expect(validateManifest({ ...base, rendererActions: [] }).ok).toBe(true);
+    expect(validateManifest({ ...granted, renderer: "../renderer.js" }).error).toMatch(
+      /manifest\.renderer.*\.\./,
+    );
+    expect(validateManifest({ ...granted, renderer: "/abs/renderer.js" }).error).toMatch(
+      /manifest\.renderer.*absolute/,
+    );
+    expect(validateManifest({ ...granted, renderer: "renderer.css" }).error).toMatch(
+      /\.js or \.mjs module/,
+    );
+    expect(validateManifest({ ...granted, renderer: " " }).error).toMatch(/non-empty string/);
+  });
+
+  it("bounds the renderer whitelists", () => {
+    const granted = { ...base, permissions: ["renderer.extension"], renderer: "renderer.js" };
+    const words = (count: number) => Array.from({ length: count }, (_, index) => `word${index}`);
+    expect(
+      validateManifest({
+        ...granted,
+        rendererActions: words(MAX_RENDERER_ACTIONS_PER_PLUGIN),
+        rendererCallMethods: words(MAX_RENDERER_CALL_METHODS_PER_PLUGIN),
+      }).ok,
+    ).toBe(true);
+    expect(
+      validateManifest({ ...granted, rendererActions: words(MAX_RENDERER_ACTIONS_PER_PLUGIN + 1) })
+        .error,
+    ).toMatch(/rendererActions allows at most 16/);
+    expect(
+      validateManifest({
+        ...granted,
+        rendererCallMethods: words(MAX_RENDERER_CALL_METHODS_PER_PLUGIN + 1),
+      }).error,
+    ).toMatch(/rendererCallMethods allows at most 32/);
+    expect(validateManifest({ ...granted, rendererCallMethods: ["ok", ""] }).error).toMatch(
+      /rendererCallMethods must be an array of non-empty strings/,
+    );
+    expect(validateManifest({ ...granted, rendererActions: "plugin.call" }).error).toMatch(
+      /rendererActions must be an array/,
+    );
+  });
+
   it("surfaces contribution errors", () => {
     expect(
       validateManifest({ ...base, contributes: { themes: [{ id: "a", label: "A", path: "a.json" }] } })
@@ -221,6 +281,33 @@ describe("validateContributions", () => {
   it("rejects malformed skill and service entries", () => {
     expect(validateContributions({ skills: [{ path: "" } as never] })).toMatch(/need a path/);
     expect(validateContributions({ services: [{ id: "1bad" }] })).toMatch(/id must match/);
+  });
+
+  it("validates Composer transform declarations and their permission", () => {
+    const transform = {
+      id: "enhance",
+      title: { en: "Enhance prompt", "zh-CN": "增强提示词" },
+      undoTitle: { en: "Undo enhancement", "zh-CN": "撤销增强" },
+    };
+    expect(validateContributions({ composerTransforms: [transform] })).toBeUndefined();
+    expect(
+      validateContributions({ composerTransforms: [transform, transform] }),
+    ).toMatch(/duplicate composer transform id/);
+    expect(
+      validateContributions({
+        composerTransforms: [{ ...transform, title: undefined } as never],
+      }),
+    ).toMatch(/requires a title/);
+    expect(
+      validateManifest({ ...base, contributes: { composerTransforms: [transform] } }),
+    ).toMatchObject({ ok: false, error: expect.stringContaining("composer.transform permission") });
+    expect(
+      validateManifest({
+        ...base,
+        permissions: ["composer.transform"],
+        contributes: { composerTransforms: [transform] },
+      }).ok,
+    ).toBe(true);
   });
 
   it("reports a null or malformed command entry instead of throwing", () => {
@@ -439,6 +526,16 @@ describe("contributed theme assets and window appearance", () => {
       }),
     ).toBeUndefined();
     expect(validateContributions({ windowAppearance: {} })).toBeUndefined();
+    expect(validateContributions({ windowAppearance: { cornerRadius: 4 } })).toBeUndefined();
+  });
+
+  it("bounds the native window corner radius", () => {
+    for (const cornerRadius of [-1, 1.5, 25, "4"]) {
+      expect(validateContributions({ windowAppearance: { cornerRadius } } as never))
+        .toMatch(/cornerRadius/);
+    }
+    expect(validateContributions({ windowAppearance: { cornerRadius: 0 } })).toBeUndefined();
+    expect(validateContributions({ windowAppearance: { cornerRadius: 24 } })).toBeUndefined();
   });
 
   it("rejects a window background that is not #rrggbb or #rrggbbaa", () => {
@@ -460,6 +557,13 @@ describe("contributed theme assets and window appearance", () => {
     );
     expect(
       validateManifest({ ...base, permissions: ["ui.window.appearance"], contributes }).ok,
+    ).toBe(true);
+    const radiusOnly = { windowAppearance: { cornerRadius: 4 } };
+    expect(validateManifest({ ...base, contributes: radiusOnly }).error).toMatch(
+      /ui\.window\.appearance permission/,
+    );
+    expect(
+      validateManifest({ ...base, permissions: ["ui.window.appearance"], contributes: radiusOnly }).ok,
     ).toBe(true);
   });
 });
@@ -558,9 +662,11 @@ describe("PLUGIN_PERMISSIONS", () => {
       "bus.subscribe",
       "agent.prompt.inject",
       "agent.complete",
+      "composer.transform",
       "models.list",
       "project.create",
       "session.read",
+      "session.autoTitle",
       "usage.read",
       "fs.read",
       "fs.write",
@@ -705,6 +811,82 @@ describe("contributes.providers", () => {
     expect(result.manifest?.contributes?.providers?.[0]?.models).toHaveLength(2);
   });
 
+  it("accepts a custom or localized Add Service category", () => {
+    const permission = { ...base, permissions: ["provider.register"] };
+    expect(
+      validateManifest({
+        ...permission,
+        contributes: { providers: [{ ...provider, category: "Community" }] },
+      }).ok,
+    ).toBe(true);
+    expect(
+      validateManifest({
+        ...permission,
+        contributes: {
+          providers: [{
+            ...provider,
+            category: { en: "Community", "zh-CN": "公益站" },
+          }],
+        },
+      }).ok,
+    ).toBe(true);
+    expect(
+      validateManifest({
+        ...permission,
+        contributes: { providers: [{ ...provider, category: { en: "Community" } as never }] },
+      }).error,
+    ).toMatch(/category\.zh-CN is required/);
+    expect(
+      validateManifest({
+        ...permission,
+        contributes: { providers: [{ ...provider, category: "  " }] },
+      }).error,
+    ).toMatch(/category must not be empty/);
+    expect(
+      validateManifest({
+        ...permission,
+        contributes: {
+          providers: [{
+            ...provider,
+            category: { en: "", "zh-CN": "公益站" },
+          }],
+        },
+      }).error,
+    ).toMatch(/category\.en is required/);
+    expect(
+      validateManifest({
+        ...permission,
+        contributes: { providers: [{ ...provider, category: "c".repeat(129) }] },
+      }).error,
+    ).toMatch(/category must be at most 128 characters/);
+    expect(
+      validateManifest({
+        ...permission,
+        contributes: {
+          providers: [{
+            ...provider,
+            category: { en: "Community", "zh-CN": "公".repeat(129) },
+          }],
+        },
+      }).error,
+    ).toMatch(/category\.zh-CN must be at most 128 characters/);
+  });
+
+  it("accepts a short localized introduction and rejects malformed or oversized copy", () => {
+    expect(validateContributions({ providers: [{
+      ...provider,
+      description: { en: "A community API.", "zh-CN": "社区公益 API 服务。" },
+    }] })).toBeUndefined();
+    expect(validateContributions({ providers: [{
+      ...provider,
+      description: { en: "A community API." } as never,
+    }] })).toMatch(/description\.zh-CN is required/);
+    expect(validateContributions({ providers: [{
+      ...provider,
+      description: "x".repeat(281),
+    }] })).toMatch(/description must be at most 280 characters/);
+  });
+
   it("rejects a declaration without the provider.register permission", () => {
     expect(validateManifest({ ...base, contributes: { providers: [provider] } }).error).toMatch(
       /provider\.register permission/,
@@ -728,15 +910,15 @@ describe("contributes.providers", () => {
     ).toMatch(/unsupported authKind/);
   });
 
-  it("rejects a non-http baseUrl, an unbound model list, duplicate ids, and too many entries", () => {
+  it("validates endpoint, model counts, ids, empty dynamic lists and unlimited providers", () => {
     expect(
       validateContributions({
         providers: [{ ...provider, baseUrl: "file:///etc/passwd" }],
       }),
     ).toMatch(/http\(s\) URL/);
-    expect(validateContributions({ providers: [{ ...provider, models: [] }] })).toMatch(
-      /1 to 64 models/,
-    );
+    expect(validateContributions({ providers: [{ ...provider, models: [] }] })).toBeUndefined();
+    expect(validateContributions({ providers: [{ ...provider, authKind: "oauth", models: [] }] }))
+      .toMatch(/may omit models only for an API-key provider/);
     expect(
       validateContributions({
         providers: [{ ...provider, models: [{ id: "m" }, { id: "m" }] }],
@@ -750,9 +932,9 @@ describe("contributes.providers", () => {
     );
     expect(
       validateContributions({
-        providers: Array.from({ length: 9 }, (_, index) => ({ ...provider, id: `p${index}` })),
+        providers: Array.from({ length: 24 }, (_, index) => ({ ...provider, id: `p${index}` })),
       }),
-    ).toMatch(/at most 8 entries/);
+    ).toBeUndefined();
     expect(
       validateContributions({
         providers: [{ ...provider, models: [{ id: "" }] }],
@@ -794,15 +976,32 @@ describe("contributes.providers", () => {
     ).toMatch(/defaultThinkingLevel must be a string/);
   });
 
-  it("rejects oauth, which needs a Host-owned login flow", () => {
+  it("requires provider.oauth and accepts a declared OAuth provider", () => {
+    const oauthProvider: PluginProviderContrib = {
+      ...provider,
+      authKind: "oauth",
+      oauth: { loginLabel: "Continue in browser", isSubscription: true },
+    };
     expect(
-      validateContributions({ providers: [{ ...provider, authKind: "oauth" as never }] }),
-    ).toMatch(/unsupported authKind oauth/);
+      validateManifest({
+        ...base,
+        permissions: ["provider.register"],
+        contributes: { providers: [oauthProvider] },
+      }).error,
+    ).toMatch(/OAuth providers require the provider.oauth permission/);
+    expect(
+      validateManifest({
+        ...base,
+        permissions: ["provider.register", "provider.oauth"],
+        contributes: { providers: [oauthProvider] },
+      }).ok,
+    ).toBe(true);
     expect(
       validateContributions({
-        providers: [{ ...provider, oauth: { label: "Demo" } } as never],
+        providers: [{ ...oauthProvider, oauth: { label: "Demo" } } as never],
       }),
-    ).toMatch(/not supported in this release/);
+    ).toMatch(/oauth has unsupported field label/);
+    expect(PLUGIN_PERMISSIONS).toContain("provider.oauth");
   });
 
   it("requires a name", () => {

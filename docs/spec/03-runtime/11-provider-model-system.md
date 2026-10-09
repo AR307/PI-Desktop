@@ -40,7 +40,7 @@ Settings / UI
       ├─ openai-compatible provider
       └─ custom provider definitions
   → ModelCatalogService
-      ├─ models.dev snapshot (sole model metadata source)
+      ├─ models.dev snapshot (published chat metadata)
       ├─ runtime/provider discovery (IDs only for custom/dynamic models)
       └─ Rust-owned provider cache
 ```
@@ -76,7 +76,14 @@ conversation id (or a per-call UUID when the caller has no session),
 host is `opencode.ai` receives the same headers. pi-ai is not relied on to
 emit `x-opencode-session`. Each provider row (AI service or OAuth account)
 may set optional `headers`; empty keeps adapter defaults. A fetch wrapper is
-the last writer so Codex and Anthropic cannot overwrite them.
+the last writer so Codex and Anthropic cannot overwrite them. pi-ai's Google
+adapters (`google-generative-ai`, `google-vertex`) reject any `fetch` that is
+not `globalThis.fetch`, so a request bound for them carries none — the merged
+`headers` still reach the SDK client — and a caller-supplied `fetch` is cleared
+rather than wrapped (issue #1072). Because those adapters never see the wrapper and never call
+`onResponse`, such a row reports no captured HTTP status and no captured
+transport cause: `Retry-After` falls back to the bounded backoff ladder, and
+the issue-234 transport diagnostics and rebuild do not fire for it.
 
 When an OAuth vendor is rebuilt around a local provider-row id, runtime keeps
 the native pi-ai transport metadata instead of treating the row as a generic
@@ -87,10 +94,15 @@ headers, including `Editor-Version`, `Editor-Plugin-Version`, and
 owns auth binding and transcript identity, and user-supplied provider headers
 remain the final override.
 
+Copilot Anthropic Messages (Claude) requests carry the per-request OAuth token
+as `Authorization: Bearer` with `X-Api-Key` removed, because pi-ai
+only selects Copilot Bearer auth when `model.provider` is `github-copilot`.
+OpenAI-style Copilot wire APIs keep signing the token as the request key; all
+wires retain per-request auth resolution and the account-specific `baseUrl`.
+
 Zhipu / GLM and Z.AI are named OpenAI-compatible endpoint presets among a
-short models.dev-backed Service list of first-party vendors (including
-Xiaomi). The add-provider Service picker persists the matching models.dev
-`vendorKey` and uses the published endpoint without
+short preset-backed Service list of first-party vendors (including Xiaomi).
+The add-provider Service picker persists the matching provider `vendorKey` and uses the published endpoint without
 showing Name, Base URL, or API format on the named-service path. Chat turns
 still use the selected pi-ai adapter (`chat_completions`, `responses`,
 `anthropic_messages`, `google_generative_ai`, or `opencode_go`). Zhipu / Z.AI
@@ -110,16 +122,35 @@ The overlay does not change `thinkingFormat`.
 Anthropic Messages requests set `forceAdaptiveThinking: true` when the
 models.dev record publishes a reasoning `effort` option and no
 `budget_tokens` option (for example Opus 4.7+, Opus 5.x, Fable). Those models
-reject `thinking.type=enabled` with HTTP 400, and models.dev carries no pi-ai
-compat record, so without the flag pi-ai would fall back to budget thinking.
-Models that still publish `budget_tokens` keep budget thinking, and an
-explicit catalog `compat` record is preserved.
+reject `thinking.type=enabled` with HTTP 400, and the model's published
+reasoning options determine that wire shape.
+Models that still publish `budget_tokens`, including those that also publish
+`effort`, keep budget thinking by default. A reasoning-enabled non-OAuth
+generic model config with no `thinkingProtocol` or reasoning options
+also defaults to adaptive thinking when its id contains `claude` and the wire
+API is Anthropic Messages; this covers unpublished Claude relay ids whose
+metadata is missing. Live-only OAuth vendor rows keep their existing fallback.
+An explicit `ModelBinding.thinkingProtocol` selection (`legacy` or `adaptive`)
+takes priority, followed by an explicit per-model
+`compat.forceAdaptiveThinking` value, then catalog metadata or the Claude-id
+fallback. For catalog-published models, model settings display the protocol
+derived from the same effort/budget metadata.
+
+An Anthropic Messages row the catalog cannot identify (for example a custom
+gateway URL serving an id several publishers list) still falls back to the
+generic model shape, but takes `reasoning_options` and the derived
+`thinkingLevelMap` from Anthropic's own models.dev record when that record
+has exactly the same model id. Which thinking shape a Claude id accepts is a
+property of the model, not of the deployment, so only those two fields
+transfer; limits and modalities stay generic, and aliases, renamed ids, other
+wire APIs, and non-Claude ids served over the Anthropic protocol are unchanged
+(#990).
 
 ## 5. Built-in vendor matrix (ship intent)
 
-> Model metadata follows the bundled/in-memory models.dev catalog. Provider adapters remain
-> available through pi-ai, and the OpenAI-compatible path stays open for models
-> that models.dev does not list.
+> Chat model metadata follows the bundled/in-memory models.dev catalog. Provider
+> adapters, OAuth identities and wire transport remain available through pi-ai,
+> and the OpenAI-compatible path stays open for unpublished models.
 
 ### Tier A — always exposed in UI
 - OpenAI
@@ -163,106 +194,47 @@ Any vendor not listed but reachable by:
 PI-Desktop must not permanently restrict users to a short fixed model list.
 
 ### 6.2 Catalog responsibilities
-1. **models.dev** (`https://models.dev/api.json`) is the sole model metadata
-   source. Electron main reads the checked-in release resource at
-   `apps/desktop/resources/models.dev/api.json` in development and the
-   packaged `resources/models.dev/api.json` path in released builds. It never
-   sends provider credentials to the catalog.
-2. The checked-in snapshot is refreshed by `scripts/release.mjs` before a
-   release tag is created. At runtime, Settings → Model configuration may
-   explicitly refetch `https://models.dev/api.json`; a successful response
-   replaces only the in-memory catalog for the current process. A failed fetch
-   keeps the last valid in-memory catalog and never writes user data.
-3. **Runtime/provider discovery** and the Rust-owned cache supply model IDs for
-   custom, local, or authenticated account-specific endpoints. Provider matching
-   accepts the configured vendor key, normalized API URL, models.dev provider
-   identity, and vendor-prefixed IDs such as `deepseek/deepseek-v4`; a provider
-   model ID without the catalog prefix is matched to the exact unprefixed
-   suffix only when the provider identity is unambiguous. Native adapter keys
-   may use a catalog alias — for example, pi-ai's `openai-codex` ChatGPT
-   subscription adapter resolves model metadata through the `openai` record —
-   while the adapter keeps its own transport identity. They cannot invent or
-   replace model metadata. A configured free-form ID remains selectable with
-   the generic text-only, non-reasoning baseline when it is absent from
-   models.dev. Settings still permits an explicit thinking-level override for
-   an endpoint the catalog does not know yet.
-4. The models.dev record maps `id`, `name`, `description`, `family`,
-   `attachment`, `reasoning`, `reasoning_options`, `tool_call`,
-   `structured_output`, `temperature`, `knowledge`, `release_date`,
-   `last_updated`, `modalities.input/output`, `open_weights`,
-   `limit.context/input/output`, `cost`, `interleaved`, `status`,
-   `experimental`, and `provider` into the shared model surfaces.
-5. pi-ai remains only the request/OAuth implementation layer. Its bundled model
-   catalog and model capability functions are not read for names, limits,
-   pricing, modalities, reasoning, or other model configuration.
-6. Input and output modality arrays retain `text`, `image`, `audio`, `video`,
-   and `pdf`. The text agent picker exposes models that can handle text while
-   preserving all raw records in the file for future surfaces. Image input is
-   sent as a transient image content block only when the model accepts image
-   input. PDF capability is surfaced and retained in model metadata; because
-   pi-ai 0.87.1 has no native PDF content block, PDF attachments remain bounded
-   file references rather than being incorrectly encoded as images.
-7. User-edited `ModelBinding` values remain explicit provider configuration:
-   they control selected request limits, enabled thinking levels, the default
-   thinking level applied to a new home draft and newly persisted session
-   (clamped onto the enabled set; strongest-enabled only when the default is
-   unset), and the attachment capability overrides. `models.dev` supplies published metadata and seeds the initial
-   thinking selection for a newly added known model; it is not a runtime gate
-   on a level the user explicitly enables for the endpoint. For compatibility,
-   a binding that still contains the legacy generic `128,000` context seed
-   follows a newly published `limit.context`; a non-default Advanced value
-   remains explicit. This keeps the sidecar and context inspector on the same
-   effective window after a catalog refresh.
-8. Settings renders the seven canonical thinking levels for every binding.
-   Published levels begin selected for a known reasoning model. A non-reasoning
-   or unknown model shows the same choices unselected, with a short manual
-   override note. `defaultThinkingLevel` is chosen from `omit` plus the levels
-   the binding enables, so a stored default is either `omit` or part of that
-   explicit set.
-9. `supportsImages` and `supportsDocuments` are three-state overrides. Absent
-   or `null` follows the published models.dev modality, so a catalog correction
-   still reaches a saved binding; `true` or `false` is the user's explicit
-   answer and survives catalog changes. Unlike thinking levels these overrides
-   are not narrowed to the published capability, because a proxied or
-   self-hosted endpoint routinely accepts input its catalog entry omits.
-   Enabling image input turns on the transient image content block; enabling PDF
-   input records the capability but does not change the encoding, since pi-ai
-   0.87.1 has no PDF content block and PDFs stay bounded file references.
-10. The settings checkboxes show the effective answer against the published
-    baseline, and setting one back to the published value stores "follow the
-    catalog" rather than an equal-valued override. Agreeing with models.dev is
-    therefore the reset, and no separate reset control or per-capability
-    explanatory copy is required.
-10a. `nativeWebSearch` is a two-state opt-in (absent means off; there is no
-    catalog baseline because models.dev publishes no hosted-tool capability).
-    When enabled and the model resolves to `anthropic-messages`,
-    `openai-responses`, `azure-openai-responses`, or
-    `openai-codex-responses` (stored apiStyle `anthropic_messages`, `responses`,
-    or `openai_codex_responses`, or a published official search route from
-    Chat Completions), the adapter attaches the provider's hosted
-    search tool (`web_search_20250305` / `web_search`), extracts activity into
-    `UiMessage.hostedSearch` (`rounds` for display, `replay` for convertMessages),
-    and restores raw blocks on later turns including after restart (ADR 0297).
-    OpenAI OAuth uses the separate Codex Responses adapter and its ChatGPT
-    subscription endpoint, not the public `/v1/responses` transport; it sends
-    the hosted tool in the Codex request body's top-level `tools` list. The
-    settings checkbox remains opt-in and the runtime checks support against the
-    final resolved wire API, so stale flags cannot leak to unsupported adapters.
-    Gateways that reject the tool surface the provider error; the remedy is
-    unchecking. Search runs on the provider: there is no local fetch or permission
-    prompt. Compaction keeps its existing prefix/tail retention strategy. The
-    summary request includes search replay data from the compacted prefix; the
-    generated text summary is not a lossless copy of raw provider search blocks.
-11. `ModelInfo` is the published record the settings surface compares against,
-    so a stored binding must not shape its capabilities or reasoning fields.
-    Effective limits, reasoning and thinking levels are resolved through the
-    exact binding; the effective transport modality arrays additionally apply
-    the explicit attachment overrides.
-12. A model the user has configured keeps its published record even when live
-    discovery no longer lists it, so its capabilities remain visible and
-    editable. Only ids already present in the provider's `models` are re-added,
-    never the catalog at large, and only the rows discovery actually returned
-    are written to the model cache.
+
+1. The bundled and explicitly refreshed models.dev snapshot owns published
+   chat-model limits, modalities, reasoning metadata, display names and prices.
+   The selected provider's official record has priority; if it has no record,
+   another publisher is used only when the exact match is safe and unambiguous.
+   The resolver uses the application's named publisher/endpoint identities;
+   it does not claim a fixed 39-provider set when the checked-in preset keys
+   and aliases do not produce that count.
+2. Startup is cache-only and disables ambient environment/file credentials.
+   models.dev requests carry no provider credentials. Each configured OAuth
+   account has its own Host credential store; same-vendor rows cannot borrow
+   one another's credentials.
+3. Live endpoint/account discovery owns the selectable IDs. A successful OAuth
+   list governs available chat models; a failed list preserves the last usable
+   IDs. A live-only ID without a models.dev record stays generic; it never
+   inherits chat limits, reasoning or price from a pi-ai sibling.
+4. Settings exposes published metadata separately from explicit binding
+   overrides. Effective chat limits and thinking are resolved for sessions,
+   delegates and compaction. Explicit user limits remain pinned, and no saved
+   data is rewritten.
+5. Chat, image and classifier models are selected by operation type even when
+   they share a model ID. pi-ai remains responsible for OAuth, wire identity,
+   transport and typed non-chat operations that models.dev does not describe.
+   PI-Desktop's optional Jev integration uses pi-ai's built-in
+   `typesafe/jev-latest` classifier directly; it is never listed or selectable
+   as a chat provider/model, and it owns no provider row even though it is
+   added from the same service chooser. The key is checked against TypeSafe
+   over that same System One address before settings keeps it, so a saved key
+   and an explicit Jev setting together mean Agent mode receives the on-demand
+   `JevClassify` tool.
+6. Free-form IDs remain configurable. Conservative generic metadata applies
+   when no published model matches; explicit user overrides remain supported.
+   Unknown relay metadata uses exact final-segment matching and an unambiguous
+   publisher. Conflicting third-party records stay generic. No deployment,
+   date or thinking suffix is removed to manufacture a match.
+7. Settings catalog refresh calls models.dev explicitly. The bundled snapshot
+   provides reproducible offline metadata. Refresh does not replace endpoint
+   discovery or account entitlements.
+8. PDF capability remains metadata; attachments use bounded file references
+   until the runtime supports a native PDF content block. Image capability is
+   resolved against the effective selected binding before transport.
 
 ### 6.3 Model families to cover
 Catalog and custom model entry must support common capability classes:
@@ -365,6 +337,7 @@ type ModelBinding = {
   maxTokens: number
   thinkingLevels: ThinkingLevel[]
   defaultThinkingLevel: SessionThinkingLevel | null
+  thinkingProtocol?: "legacy" | "adaptive"
   availableForSubagents?: boolean // opt-in for AI-driven delegation
 }
 
@@ -388,7 +361,8 @@ surface for older clients. PI-Desktop no longer reads them as runtime model
 overrides. `ModelInfo` reasoning support and supported thinking levels describe
 the resolved models.dev record; effective provider/session capability comes from
 the exact `ModelBinding`. Unknown free-form ids start with the generic shape and
-no inferred reasoning capability, but an explicit binding may opt into levels.
+no inferred reasoning capability; an empty binding level array is the generic
+seed, while a non-empty explicit binding may opt into or disable levels.
 
 The provider dialog persists one `ModelBinding` for every selected model. The
 first binding is the effective model for current conversations and legacy
@@ -466,10 +440,13 @@ and the connection test still proves the account by resolving auth. pi-ai
 when the account request fails or the payload is not a model list. The probe
 is the endpoint that vendor actually publishes:
 
-- ChatGPT Plus/Pro (`openai-codex`): `GET {base}/codex/models`, with the
-  account id taken from the access token. A `{ data: [...] }` payload is not
-  accepted. A newly published id such as `gpt-6-luna` is selectable without a
-  client update when that response includes it.
+- ChatGPT Plus/Pro (`openai-codex`): `GET {base}/codex/models?client_version=…`,
+  with the account id taken from the access token. The endpoint requires
+  `client_version` and hides models whose minimum Codex client is newer, so
+  the value is a pinned Codex CLI version (`CODEX_MODELS_CLIENT_VERSION`) that
+  is bumped when an account model goes missing. A `{ data: [...] }` payload is
+  not accepted. A newly published id such as `gpt-6-luna` is selectable
+  without a client update when that response includes it.
 - GitHub Copilot: `GET {base}/models` with the pinned IDE identity headers and
   `X-GitHub-Api-Version`. Only ids with `model_picker_enabled === true` (and
   not policy-disabled) are kept. An id the pin does not know is added only when
@@ -480,20 +457,26 @@ is the endpoint that vendor actually publishes:
   for Kimi). xAI still drops image and video generators.
 - Radius keeps its gateway catalog refresh and is not probed again.
 
-Image, video, speech and embedding ids are dropped. A model models.dev does
-not know yet inherits limits from a pinned sibling of the same tier; xAI uses
-an explicit newest-first sibling (`grok-4.7`, then `grok-4.6`, then
-`grok-4.5`, then `grok-4.3`) so pin order cannot select an older Grok. A different tier is not
-used. models.dev still cannot add an id the account list did not return. A
-vendor may span wire APIs — Copilot serves Anthropic, Chat Completions and
-Responses models — so the row's `apiStyle` follows the selected model.
+A failed account request logs the HTTP status and a short, single-line
+excerpt of the response body with the request's credentials and any
+token-shaped value removed, so an upstream contract change is diagnosable
+from the provider log.
+
+Image, video, speech and embedding ids are dropped from chat-model discovery. A
+live-only chat ID without a models.dev record keeps generic limits and thinking
+metadata; it never inherits those fields from a Pi sibling. Published
+models.dev reasoning options determine supported levels and wire effort, while
+the selected pi-ai adapter still handles transport. Pi's OAuth account list
+cannot add an id the account endpoint did not return. A vendor
+may span wire APIs — Copilot serves Anthropic, Chat Completions and Responses
+models — so the row's `apiStyle` follows the selected model.
 Deleting a row calls the normal host `providers.delete` path, which removes its
 OAuth secret and metadata; it never logs out or deletes another row with the
 same vendor key.
 
 ### Anthropic token endpoint rate limits
 
-The pinned pi-ai 0.87.1 patch gives Anthropic authorization-code exchange and
+The pinned pi-ai 1.0.1 patch gives Anthropic authorization-code exchange and
 refresh a shared, bounded token-request policy: retry only an explicit HTTP
 429, at most three total requests. Wait at least 1 s then 2 s, or longer when
 `Retry-After` gives delta seconds or an HTTP date. A server delay beyond the
@@ -574,13 +557,13 @@ type ModelDescriptor = {
 - keep model cards compact by default, expand metadata/configuration on demand,
   and keep dialog actions outside the independently scrollable content
 - do not expose raw catalog compatibility internals or provider secrets
-- Settings → Import can copy provider/model rows from Claude Code, Codex,
-  OpenCode, Pi, and CC Switch. The scan is explicit. Stored API keys are
-  copied into the host secret store; OAuth/subscription grants are not.
-  An equivalent provider (normalized URL + API style + same credential) is
-  skipped on re-import. Different credentials at one endpoint remain
-  independent providers. No protocol or schema version bump
-  (D342 / ADR 0179 / ADR 0188).
+- Settings → Models → Providers can scan and copy provider/model rows from
+  Claude Code, Codex, OpenCode, Pi, and CC Switch. The inline scan is explicit.
+  Stored API keys are copied into the host secret store; OAuth/subscription
+  grants are not. An equivalent provider (normalized URL + API style + same
+  credential) is skipped on re-import. Different credentials at one endpoint
+  remain independent providers. No protocol or schema version bump
+  (D342 / ADR 0179 / ADR 0188 / D645).
 
 ### Model selector
 - search all models across enabled providers
@@ -600,38 +583,20 @@ type ModelDescriptor = {
 
 When starting a turn with `(providerId, modelId)`:
 
-1. load provider config from host
-2. if missing/disabled → fail (`MODEL_NOT_CONFIGURED`; reserved detail: `PROVIDER_DISABLED`)
-3. resolve the credential: for a keyed row read the secret via `secretRef`
-   (never log it; missing → `PROVIDER_SECRET_MISSING`); for an `oauth` row skip
-   this entirely and launch with an empty key, because auth is resolved per
-   request (§8a)
-4. resolve the models.dev record by matched provider key/API URL and exact model
-   id
-5. copy its complete model configuration — name, description, family,
-   attachment/reasoning/tool/structured-output/temperature flags, knowledge and
-   release dates, input/output modalities, weights, status, interleaving,
-   limits, cost data, and thinking options — into the runtime model snapshot;
-   when absent, use the generic text-only, non-reasoning shape
-6. derive vision transport from models.dev `modalities.input`; provider
-   discovery/cache claims cannot promote an unresolved model, while an explicit
-   attachment binding override can
-7. clamp the session thinking level against the exact binding's enabled levels
-   and build the runtime provider adapter by replacing only provider/model
-   identity, selected API adapter, auth, and an explicitly configured endpoint
-   URL. For `anthropic_messages`, the runtime removes a trailing `/v1` from
-   that URL before passing it to pi-ai because the Anthropic SDK appends `/v1`
-   itself; configured roots with or without `/v1` therefore both reach the
-   same `/v1/messages` route. Subagent providers resolved from a definition pin,
-   the delegation model catalog, or `Task.model` use this same binding-aware
-   model configuration before their thinking level is clamped; models.dev is
-   only the baseline and cannot erase explicit binding levels.
-8. execute stream with abort handle and separate answer/thinking events
-9. translate vendor errors into shared `AppError` codes (§15)
+1. Load the Host provider row; fail for a missing or disabled explicit account.
+2. Resolve credentials only for that account. OAuth refresh remains per request.
+3. Resolve the typed chat model from the account Pi collection, with conservative
+   generic fallback for explicitly configured unknown compatible IDs.
+4. Apply the central effective binding projection and clamp thinking with Pi's
+   public capability helper. Preserve native costs and unknown-price provenance.
+5. Build the transport with the actual vendor/model identity and the configured
+   endpoint. Anthropic roots normalize a trailing `/v1` because its adapter
+   appends `/v1/messages`. Delegates use the same account/binding resolution.
+6. Stream with cancellation and separate answer/thinking events. Attribute usage
+   to each physical request operation, including retries, and translate errors
+   to shared AppError codes. Replay aggregation deduplicates operation IDs.
 
-If the model is absent from models.dev, still allow it when the user explicitly
-enters a model id and the provider accepts unknown ids. Cached/provider
-capability fields do not promote that fallback into a known runtime model.
+An unavailable saved account never silently falls back to the default account.
 
 ## 12. Compatibility tiers
 
@@ -646,18 +611,14 @@ UI may show tier hints, but must not hard-block unknown models by default.
 
 ## 13. Refresh & update policy
 
-1. Electron main reads the bundled release resource before serving model
-   metadata: `apps/desktop/resources/models.dev/api.json` in development and
-   `resources/models.dev/api.json` in packaged builds.
-2. `scripts/release.mjs` fetches `https://models.dev/api.json`, validates it,
-   and atomically replaces the checked-in resource before creating a release
-   tag.
-3. Settings → Model configuration can force a remote refresh at any time; a
-   successful response updates only the current process's in-memory catalog.
-4. Provider endpoint discovery supplies IDs only for models absent from the
-   bundled/in-memory models.dev snapshot; unknown IDs use generic metadata.
-5. Refresh failure must not wipe the bundled file, Rust-owned provider cache, or
-   configured bindings.
+1. Use the bundled models.dev snapshot at startup without network or ambient
+   credentials.
+2. Settings may explicitly refresh models.dev metadata in memory.
+3. Provider endpoint discovery preserves configured IDs and Host caches; OAuth
+   live discovery publishes account entitlements through the same Models owner.
+4. Failed refresh retains available metadata and configured bindings.
+5. Release catalog changes arrive through the reviewed models.dev snapshot;
+   pi-ai version pins continue to control transport and OAuth behavior.
 
 ## 14. Local / offline model support
 
@@ -718,25 +679,25 @@ including reasoning-model routes. A resolved model record may explicitly set
 role; this override is model-scoped and does not change other providers.
 
 A catalog entry may additionally pin a model-level wire API (for example,
-`api: "openai-responses"`). When present it wins over the provider-wide
-`apiStyle`, so responses-only models under an `opencode_go` provider are sent
-through the Responses adapter instead of Chat Completions. Without a
-model-level pin the provider-wide style applies unchanged.
+`api: "openai-responses"`). A custom endpoint uses its saved provider-wide
+`apiStyle` first because that field records the format the user selected for
+that gateway; published model metadata cannot silently retarget it. Other
+provider rows may use a model-level pin when its protocol family is compatible,
+so responses-only models under an `opencode_go` provider use the Responses
+adapter instead of Chat Completions. Foreign catalog wire APIs (such as
+`google-generative-ai` or `anthropic-messages` matched on an OpenAI-compatible
+relay) do not replace the provider's configured wire style (issue #1310).
+Without a model-level pin the provider-wide style applies.
 
 This is the **universal escape hatch** guaranteeing market coverage beyond native integrations.
 
 ### 16.1 Responses stream termination (pi-ai patch)
 
-The OpenAI Responses adapter must treat `response.completed` (and
-`response.incomplete`) as the end of the stream: after finalizing the
-response, it stops consuming the stream instead of awaiting the server's
-TCP FIN. Upstream pi-ai keeps iterating until the server closes the
-connection, which hangs the turn behind reverse proxies that hold the idle
-connection open. Until the fix ships upstream, `patches/` carries a pnpm
-patch on `@earendil-works/pi-ai@0.87.1` that breaks the event loop on the
-terminal event (the OpenAI SDK aborts the underlying request when the
-consumer stops iterating). Drop the patch once a pi-ai release includes the
-fix.
+The OpenAI Responses adapter treats `response.completed` and
+`response.incomplete` as the end of the stream, so a reverse proxy that keeps
+the TCP connection open cannot hold the turn after the final event. Pi-ai
+1.0.0 includes this upstream fix. The 1.0.0 hosted-search patch does not need to
+reapply the old 0.99.1 terminal-event hunk.
 
 ## 17. Multi-provider product rules
 

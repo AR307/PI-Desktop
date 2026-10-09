@@ -1,7 +1,6 @@
 import type {
   MarketPluginSummary,
   PluginCapability,
-  PluginFsPolicy,
   PluginSummary,
 } from "@pi-desktop/shared";
 
@@ -38,6 +37,8 @@ export type RiskTier = "high" | "medium" | "low";
 /** Mirrors the risk column of docs/spec/07-plugins/13-plugin-permissions-matrix.md. */
 export const PERMISSION_RISK: Record<string, RiskTier> = {
   "net.fetch": "high",
+  // Reaches any host the user types in; same tier as the outbound paths.
+  "net.anyHost": "high",
   "fs.write": "high",
   "fs.delete": "high",
   "fs.write.workspace": "high",
@@ -46,8 +47,13 @@ export const PERMISSION_RISK: Record<string, RiskTier> = {
   "agent.tool.register": "high",
   "agent.complete": "high",
   "agent.extension": "high",
+  // Its code runs in the app's own document, so the grant is the boundary.
+  "renderer.extension": "high",
+  // The isolated plugin callback can read its own encrypted OAuth credentials.
+  "provider.oauth": "high",
   "desktop.control": "high",
   "session.read": "high",
+  "session.autoTitle": "high",
   "browser.cdp": "high",
   // Reading is a tier below writing because what makes a read dangerous is
   // where the data can go, and outbound requests are declared separately.
@@ -81,6 +87,8 @@ export const PERMISSION_RISK: Record<string, RiskTier> = {
 export const CAPABILITY_ORDER: PluginCapability[] = [
   "panel",
   "views",
+  "rendererUi",
+  "composerTransform",
   "commands",
   "tools",
   "agentExtension",

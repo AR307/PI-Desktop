@@ -220,6 +220,10 @@ are reachable there) and CPU/memory limits.
 ### 6.3 Plugin Panel UI
 - Load the plugin page in a dedicated sandboxed `BrowserWindow` and isolated
   per-plugin session partition
+- Keep a newly created panel hidden until its initial page load settles. Bound
+  that wait to 15 seconds; if it does not settle, destroy the hidden window and
+  reject the open request with `PANEL_LOAD_TIMEOUT`. Preserve the original error
+  when the page load fails on its own.
 - Closing a panel (capsule close, disable, uninstall, or crash teardown) must
   not read a destroyed `BrowserWindow` or its `webContents`. The host copies
   any contents identity needed for drop-record cleanup while the window is
@@ -306,7 +310,9 @@ Namespace: `pi.plugin.*`
 Skills are contributed declaratively (`contributes.skills` + `agent.prompt.inject`),
 not invoked by the plugin: the host puts the catalog in the system prompt and the
 model loads a body through the built-in `Skill` tool (D174). Planned, not
-currently exposed: `pi.agent.appendSystemHint(text)`.
+currently exposed: `pi.agent.appendSystemHint(text)`. When the body is loaded,
+the tool result also identifies the `SKILL.md` location and the directory to use
+when resolving relative references; the catalog remains metadata-only.
 
 ### Background services (requires `background.service`)
 - `pi.services.register({ id, start, stop? })`
@@ -522,6 +528,12 @@ Rules the control encodes:
   responses are not JSON-RPC replies. Any acknowledgement body is discarded,
   including plain-text `Accepted`; ordinary request replies still follow the
   JSON/SSE parsing and response-size limits.
+- A streamable-HTTP server may write its JSON-RPC reply and keep the SSE stream
+  open afterwards — keep-alives, or a session it ends on its own schedule. Each
+  `text/event-stream` event is dispatched as it arrives, so a handshake or a
+  `tools/list` page completes on its reply instead of on the end of the stream.
+  The request budget still bounds the exchange: a server that never replies
+  still times out, and a stream left open past its request is aborted.
 - The MCP row shows “Authorization required” only when runtime status explicitly
   reports `authRequired`. Missing credentials, an untested connection, and
   non-authentication failures do not imply OAuth is required. A stored OAuth
@@ -532,8 +544,13 @@ Rules the control encodes:
 
 - The Skills page has independent global and selected-project columns rooted at
   `~/.agents/skills` and `<project>/.agents/skills`.
-- Each column has one native single-file Import action; the host physically
-  copies the selected file and scans its frontmatter.
+- Each column has a native single-file Import action and a folder Import action
+  that can select multiple `<name>/SKILL.md` folders at once. The host imports
+  selected folders independently, preserves sibling resources, and reports
+  partial failures without undoing successful imports. The folder picker
+  reopens at the parent of the last successfully imported source folder when
+  that parent still exists; cancellation and all-failed batches leave that
+  machine-local value unchanged.
 - A `SKILL.md` import or scan uses the parent directory as the id when the
   frontmatter name is not an ASCII slug, and folded YAML descriptions still
   enter the catalog. A readable document is never dropped because its title is

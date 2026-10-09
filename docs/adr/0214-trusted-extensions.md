@@ -38,10 +38,8 @@ replace the desktop runtime with `pi-coding-agent`'s `AgentSession`.
    theme and is not reused.)
 2. **Trusted, opt-in, no auto-import.** Extensions are labelled "Trusted
    extension", run with sidecar trust, and are disabled until the user enables
-   each one. D007 forbids silent import. Candidate discovery is limited to
-   installed npm skill packages, with native confirmation before import
-   (ADR pi-npm-skill-discovery); general `~/.pi` discovery is not implemented.
-   Project-scoped extensions are enabled per project.
+   each one. D007 is unchanged: `~/.pi` is scanned for candidates, never
+   imported. Project-scoped extensions are enabled per project.
 3. **Explicit support classes.** Every `ExtensionAPI` member is Supported,
    Deferred, or Unsupported. Unsupported members are inert and produce
    diagnostics; they never throw. Terminal-UI surfaces stay Unsupported.
@@ -52,6 +50,26 @@ replace the desktop runtime with `pi-coding-agent`'s `AgentSession`.
    sidecar-to-main proxy methods and Electron IPC only.
 
 ## Consequences
+
+### Prompt chaining amendment (2026-09-29, issue #1023)
+
+The desktop initially folded `before_agent_start` results while giving every
+handler the original prompt. Two extensions appending to that input therefore
+lost all but the last addition. Chain successful string replacements through a
+turn-local payload, retaining the existing extension and registration order.
+Reuse the runner's isolated handler inputs and lifecycle checks; only timely
+returned strings reach the next handler. Start from a fresh base on each turn.
+
+This matches the sequential prompt replacement behavior of the pinned Pi
+extension runner without sharing mutable handler inputs. A dedicated runner
+entry point keeps this event's composition out of the generic dispatcher and
+leaves other event contracts unchanged. Explicit full replacements still win;
+an additive-only API would require existing extensions to migrate and would not
+fix their current append pattern. Extensions that relied on always seeing the
+original base now see prior successful edits instead. No permissions or message
+roles change, and no provider-cache guarantee is added.
+
+### General consequences
 
 - Users can attach in-process tools, hooks, and commands to the agent loop
   without a new app release.

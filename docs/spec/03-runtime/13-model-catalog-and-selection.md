@@ -14,8 +14,8 @@ Therefore:
 ## 2. Selection UX
 
 Model configuration is **discovery-first**: the AI service is the authority on
-which models it serves, so the service's own endpoint is asked first and
-models.dev is used only to enrich what came back. The bundled catalog is never
+which models it serves, so the service's own endpoint is asked first and the
+models.dev catalog is used only to enrich what came back. The bundled catalog is never
 presented as a browsable list of every published model — a deployment does not
 necessarily host everything its vendor publishes, and a key is not necessarily
 entitled to it.
@@ -69,8 +69,11 @@ entitled to it.
   mapping, the runtime sends that canonical value through to the adapter rather
   than letting the adapter clamp it to `high`. Existing non-null catalog
   mappings remain authoritative for providers that translate the level.
-- The wire API is derived from the provider's published `npm` adapter
-  (`apiStyleForAdapter`) and is only editable inside **Advanced**.
+- Named service defaults may derive their wire API from the provider's
+  published `npm` adapter (`apiStyleForAdapter`). A custom endpoint's saved
+  API style is the selected gateway format and takes precedence over a model's
+  published adapter; named and OAuth providers may keep a model-level wire API
+  pin when their catalog requires it.
 - A custom model ID is always accepted, so a gateway without a `/models` route
   stays usable.
 
@@ -112,8 +115,8 @@ contract changes are required.
 1. The stored secret is resolved, so an edit needs no retyped key.
 2. `discoverProviderModels` asks the service (`/models` or the per-style
    equivalent). A non-empty answer wins, is enriched per model through
-   `modelsDevCatalog.findModel`, is written back to the model cache, and is
-   reported as `source: "remote"`.
+   `modelsDevCatalog.findModel`, replaces what the model cache held for that
+   provider, and is reported as `source: "remote"`.
 3. Only if the endpoint published nothing usable —no route, an auth error, or an
    empty list— does `modelsForProvider` supply the vendor's published models,
    reported as `source: "catalog"` together with any discovery error so the UI
@@ -124,11 +127,35 @@ contract changes are required.
 An OAuth vendor account skips step 2 — it has no key to probe with, and pi-ai
 already knows which models the subscription allows.
 
+The cache belongs to the configuration it was recorded for: saving a provider
+without a binding it used to have deletes that model's cached row, so a deleted
+model's recorded limits, capabilities and display name are not handed back to
+the next add of the same id, and the id leaves the picker's cache-first paint.
+Only the ids a save dropped are touched — the rest of the discovered list is the
+service's answer, and a model the service still publishes is recorded again by
+the next probe, described by the service rather than by a stale answer.
+
+The answer also replaces the previous one. A probe that no longer publishes a
+model drops that model's row, so the pane stops painting a model the endpoint
+retired and a hand-typed id stops inheriting its old limits; a row whose source
+is not discovery — the user's own — is never dropped this way, and a configured
+binding stays visible in the chosen-model pane even when the service stops
+listing it. After a live refresh, the service-model pane displays only rows
+actually served, excluding configured-only rows marked `source: "user"`.
+Catalog enrichment preserves that origin independently of published metadata;
+cache, catalog and manual fallbacks still expose configured rows for editing.
+Cached rows carry
+no endpoint of their own, so a save that moves the base URL or the wire format
+drops the answer the previous endpoint produced, and the next probe records the
+new one. A failed or empty probe is not an answer: it never reaches the cache,
+so it can neither replace nor narrow what is stored.
+
 The picker never dumps the raw host error into the model list. A failed probe
-with no rows shows a classified one-line summary (auth, missing list, rate
-limit, timeout, network, invalid response, or HTTP status) plus a short hint
-to add an ID manually. A failed probe that still has cached rows keeps those
-rows and shows the same summary as a compact banner.
+that leaves no rows shows a one-line "the list is missing" label in the empty
+pane, while the classified reason (auth, missing list, rate limit, timeout,
+network, invalid response, or HTTP status) is reported once through the app
+toast stack. A refused probe that still has cached rows keeps those rows and
+reports the same reason as a toast.
 
 ### Subagent editor
 
@@ -196,19 +223,25 @@ Each session stores:
 - `thinkingLevel` (`off|minimal|low|medium|high|xhigh|max|omit`)
 
 Changing model or thinking level mid-session affects subsequent turns only.
-The stored thinking preference survives restart; the effective request level
-is clamped against the selected model binding's enabled levels at execution
-time, except `omit`, which is preserved on a reasoning model and sends no
-thinking override. An empty binding or a binding containing only `off`
-resolves to `off`.
+The stored thinking preference survives restart. An explicit switch to a
+different provider/model in Composer resets `thinkingLevel` to the target
+binding's `defaultThinkingLevel`, clamped to its enabled levels; if unset, it
+uses the normal new-session fallback. Selecting the already-active
+provider/model preserves a manually selected level. The effective request
+level remains clamped against the selected model binding's enabled levels at
+execution time, except `omit`, which is preserved on a reasoning model and
+sends no thinking override. An empty binding or a binding containing only
+`off` resolves to `off`.
 
-For a newly created session, the renderer resolves the selected (or app-default)
-model's `ModelBinding`. A reasoning model starts at that binding's
-`defaultThinkingLevel` (`omit` is preserved; other values are clamped onto the
-enabled levels). When the default is unset it falls back to the highest enabled
-level seeded from published `supportedThinkingLevels`. A non-reasoning or
-unknown model starts at `off` until the user enables a non-`off` level. This is
-a creation default only and never rewrites an existing session's stored choice.
+For a newly created session or explicit model switch, the renderer resolves the
+selected (or app-default) model's `ModelBinding`. A catalog-matched reasoning
+model starts at that binding's `defaultThinkingLevel` (`omit` is preserved;
+other values are clamped onto the enabled levels); when the default is unset it
+falls back to the highest enabled level. An unmatched model starts at `off`
+unless its binding stores an explicit default, while its Composer ladder stays
+available for manual opt-in. Changing a default in Settings does not rewrite
+existing sessions; an existing session keeps its stored choice until a
+different model is explicitly selected.
 
 Unpinned sessions still advertise that inherited default model's reasoning
 capability on session list/get/create/fork/configure. Enrichment does not pin
@@ -230,37 +263,22 @@ If user selects model tagged without tools while in Agent mode:
 
 ## 6. Refresh behavior
 
-The bundled `apps/desktop/resources/models.dev/api.json` snapshot is the
-startup baseline. It is refreshed by `scripts/release.mjs` before a release tag
-is created; application startup does not fetch or write a catalog. Settings
-invokes the Electron-only `providers.refreshModelCatalog` channel to refetch
-`https://models.dev/api.json`; a successful response replaces only the
-current process's in-memory models.dev catalog and never writes user data.
+The bundled models.dev snapshot is the startup baseline. Startup reads no
+remote catalog and uses no ambient credentials. `providers.refreshModelCatalog`
+refreshes models.dev explicitly; settings metadata lookups themselves are local.
 
-Repeated metadata lookups use a bounded process-local cache keyed by the
-configured vendor key, base URL, and case-insensitive, trimmed model ID. Both
-matches and misses are cached; provider/API preference and candidate ranking
-still apply. Replacing the catalog after a successful bundled load or Settings
-refresh invalidates the cache. A failed refresh preserves the previous catalog
-and its results. Session capability
-enrichment resolves a matching catalog record once per session and then applies
-the current provider/model binding and session defaults, so user overrides are
-never retained as stale cached capabilities. Refreshing a large session list
-must not repeat a full catalog scan for every occurrence of the same lookup.
+For keyed endpoints, live discovery supplies IDs and models.dev enriches their
+metadata. For OAuth, the live account endpoint supplies entitled IDs, which are
+then enriched from models.dev. Successful account lists are authoritative; a
+failed list preserves the last usable IDs. A live-only ID with no models.dev
+match stays generic; pi-ai sibling metadata never supplies its chat limits,
+reasoning or price.
 
-Provider model loading remains stale-while-revalidate:
-
-1. `source: "cache"` hydrates a saved provider's normalized discovery rows from
-   Rust-owned SQLite without provider network access.
-2. The renderer can show those rows immediately in the Composer and provider
-   dialog.
-3. `source: "refresh"` uses the bundled/in-memory models.dev catalog first and
-   probes a provider endpoint only to discover IDs that models.dev does not
-   expose.
-4. Successful provider discovery may update the Rust-owned normalized cache;
-   it cannot replace a matching models.dev record or its metadata.
-5. Configured `ModelBinding` IDs are retained when discovery is partial or
-   unavailable, and an ID absent from models.dev receives generic metadata.
+`source: "cache"` reads Host caches and configured bindings without network.
+`source: "refresh"` probes the selected endpoint/account and decorates returned
+IDs. Saved bindings remain visible when discovery is partial or unavailable.
+Account removal invalidates catalog access; failed Host deletion preserves the
+still-existing account. Refresh does not rewrite configured models or history.
 
 ## 7. Offline behavior
 
@@ -273,8 +291,7 @@ If refresh fails / offline:
 - when a saved provider cache is empty or partial, append every configured
   model binding before applying models.dev metadata decoration, so multi-model
   settings remain editable and per-model capability state stays aligned
-- if the bundled release snapshot is absent or invalid during an offline
-  release, keep the configured IDs visible with generic text-only metadata
+- if no matching bundled models.dev metadata is available offline, keep the configured IDs visible with generic metadata
 
 ## 8. Catalog item schema
 
@@ -316,32 +333,40 @@ When UI/search requests models for picker:
 5. always include "custom model id" entry action
 
 Deduplicate by `(providerId, modelId)` with priority:
-`user > models.dev > provider-discovered > recent-only`. The `catalogSource`
+`user > models.dev catalog > provider-discovered > recent-only`. The `catalogSource`
 field records a models.dev match; a provider cache stores only normalized
 selection fields and is re-decorated from the local raw catalog on the next
 read.
 
-### 9.1 Effective context window
+### 9.1 Effective model limits
 
 The runtime, the context inspector and the settings surface resolve one effective
-model window. Every binding records where its `contextWindow` came from
-(`contextWindowSource`):
+model window and output cap. Bindings record their provenance independently:
+`contextWindowSource` belongs to `contextWindow`, and `maxTokensSource` belongs
+to `maxTokens`.
 
-- `catalog` — the number is a models.dev snapshot, so a later correction to the
-  published `limit.context` replaces it. A refreshed record such as
-  `gpt-5.6-luna` (`1,050,000` tokens) stops appearing as a 128k model, and a limit
-  that models.dev corrects reaches the binding without deleting and re-adding the
-  model.
-- `user` — the number was entered through the per-model Advanced control (or the
-  preset ladder in it) and is never replaced by the catalog, including the
-  `128,000` value that is otherwise the generic seed.
+- `catalog` — that limit is a models.dev snapshot, so a later correction to its
+  published field replaces it. A refreshed context such as `gpt-6.1-sol`
+  (`1,050,000` tokens) stops appearing as a 128k model, and a row added while
+  nothing published its id stops reporting the generic 8.2k output once the
+  record resolves. Only a resolved models.dev record counts as published: when
+  lookup falls back to the generic shape (for example a gateway serving an id
+  several publishers list), its 128k / 8.2k values are not a correction and the
+  stored catalog snapshot stays in force.
+- `user` — the value was entered in that limit's Advanced control or preset
+  ladder and is never replaced by the catalog, including explicit 128,000 and
+  8,192 values that equal the generic seeds. Setting a context window cannot
+  change the output-cap source.
 
-Bindings written before the marker name no source. They keep the historical rule,
-deterministically: a published `limit.context` replaces exactly the generic
-`128,000` seed, and every other stored value stays the explicit value. Unknown
-models still use the conservative 128k generic window and are never promoted from
-an ID pattern alone. The marker is optional in the persisted record, so a config
-written by an older version stays readable and a downgrade ignores it.
+Bindings written before either marker preserve their stored window and output
+cap, including 128,000 and 8,192, because old records cannot distinguish generic
+seeds from user choices. Only explicit `catalog` provenance follows later
+corrections. Unknown models use conservative
+128k / 8.2k runtime limits and are never promoted from an ID pattern alone.
+Settings shows an em dash for an unpublished limit unless the user explicitly
+configured that value; the Advanced inputs retain the conservative runtime
+limits until the user edits them. Both markers are optional, so old configs
+remain readable and downgrade clients ignore them.
 
 The configured user value remains persisted and visible in Advanced settings, but
 provider safety does not trust an enlarged override beyond a known published
@@ -375,35 +400,40 @@ wins over the published record; an absent or `null` value follows it. This lets
 a configured custom or proxied model show the capability the endpoint was
 explicitly configured to use without shaping the published `ModelInfo`.
 An OAuth provider heading uses its non-secret account label when present, so
-duplicate accounts from one vendor remain distinguishable; model rows still
-use the configured model alias or published model name.
+duplicate accounts from one vendor remain distinguishable; Composer model rows
+show the configured wire model ID, while a configured alias remains available
+as the compact selected-chip label.
 
-## 10. Default model policy
+## 10. Recent chat model policy
 
-App-level default:
-- first successfully tested provider + its default/recommended model
-- the Settings default-model picker lists every configured model under its provider; selecting an entry persists both the owning provider and that exact model ID
-- saving that provider preserves the selected app-default model while it remains configured; removing it falls back to the first remaining binding
-- the picker supports local search across provider name and model ID; its result list scrolls within the floating surface and shows an explicit empty state when no model matches
-- the picker uses concise settings-specific search copy; each result gives visual priority to the model ID and keeps the provider as secondary metadata
-- results are grouped by provider so a provider name is shown once per group rather than repeated on every model row
-- a provider is named the same way here as in the Composer menu: an OAuth row
-  uses its non-secret account label when present, so two accounts of one vendor
-  stay distinguishable in the group heading, in the summary line that reports
-  the current default, and in each option's accessible name. Search matches the
-  account label and the vendor name, so either spelling reaches the row
-- the Settings prompt-enhancement model picker reuses this menu and resolves its
-  provider names the same way
-- if none configured, onboarding checklist requires provider setup before first agent run
+New desktop chats inherit the most recently used available chat
+model. An explicit draft selection takes precedence; existing sessions retain
+their pinned provider/model pair. Selecting or submitting an existing chat does
+not change another chat's binding. Opening a chat alone does not reorder history.
 
-Session-level:
-- inherits app default at creation and stores that `providerId`/`modelId` pair
-- later Settings default-model changes apply only to new sessions and the
-  unpersisted home draft, not to already created sessions
-- initializes thinking to the highest level enabled by the inherited model's
-  binding; published levels seed a new binding, while an empty or `off`-only
-  binding starts at `off`
-- can override independently
+The renderer stores up to 20 provider/model pairs in the local UI preferences,
+newest first, deduplicated by provider ID and case-insensitive full wire model ID.
+Only accepted message submission updates history, using that submission's
+provider/model pair. Selecting a model, changing reasoning, or applying deferred
+configuration alone does not count as usage. Rejected submissions do not replace
+the preference. Sending in an older chat does update the recent usage order. This preference survives renderer reload and app
+restart and is not part of cloud configuration sync.
+
+Inheritance skips deleted, disabled, unauthenticated and image-generation
+bindings. With no usable history it uses a valid legacy app selection, otherwise
+the first available configured chat binding. Legacy settings and provider default
+fields remain readable for scheduled jobs and older consumers; no database or
+IPC migration is required. Settings has no fixed chat-default picker or service
+"Make default" action. Image-generation selection remains independent.
+
+The combined Composer model menu shows the three most recent available bindings
+first. Each row identifies the provider as well as the model or alias. Search is
+always visible and searches all configured models. Other models expand inline,
+grouped by provider, without duplicating recent entries. With no history, all
+models are visible immediately. The current model is checked; reasoning controls
+remain below the list. Discovery enriches exact
+configured IDs without adding unconfigured choices. Model and reasoning changes
+retain the existing session configuration and permission boundaries.
 
 ## 11. Capability gating
 
@@ -416,30 +446,21 @@ Session-level:
 
 Warnings are non-blocking unless execution is impossible.
 
+Composer context-window labels resolve the exact binding with `effectiveContextWindow`: explicit user limits override discovery, catalog-owned limits follow discovery, and legacy bindings preserve their saved limits. A binding with a valid saved limit still displays it when discovery is unavailable. This display resolution does not modify the discovered catalog or runtime safety budgets.
+
 ### 11.1 Reasoning capability resolution
 
-1. Resolve models.dev metadata under the matching provider/API URL using the
-   metadata-only ID lookup described in §11.3. This lookup does not change
-   configured model binding identity.
-2. The models.dev record is authoritative for published `reasoning` and
-   `reasoning_options`; cached/provider capability claims cannot replace it.
-3. The provider's exact `ModelBinding.thinkingLevels` is authoritative for the
-   user's effective selection. It may explicitly enable a canonical level that
-   the catalog does not publish.
-4. A free-form ID absent from models.dev starts as an unknown generic model and
-   exposes only `off`; Settings can promote it only after an explicit binding
-   selection, never through discovery or an automatic inference.
-5. The Composer renders the effective binding levels in canonical order. If no
-   binding exists, it falls back to the published model levels and provider
-   defaults.
-6. If a stored/requested level is unavailable, choose the nearest enabled
-   binding level by scanning upward first and then downward. A binding with no
-   non-`off` level resolves to `off`.
-7. Changing to a provider/model with no enabled reasoning level persists `off`;
-   no unconfigured level leaks into the next request.
-8. For explicitly enabled `xhigh`/`max`, an absent or null catalog mapping is
-   materialized as an identity adapter mapping; a non-null catalog mapping is
-   preserved.
+1. Resolve published Pi thinking metadata for the exact physical model.
+2. Project explicit binding levels at the account boundary. Known unsupported
+   levels and native null mappings remain unavailable; saved settings are not
+   rewritten. Clamp the dispatched request using Pi's public helper.
+3. Unknown free-form IDs retain the generic Desktop ladder for manual opt-in,
+   with `off` as the unset default. Explicit binding defaults remain scoped to
+   new drafts/sessions rather than overwriting existing session preferences.
+4. `omit` remains a distinct request choice: no thinking field is sent. Agent
+   bookkeeping may store `off` while the request omits reasoning.
+5. The Composer renders effective enabled levels in canonical order. Dispatch
+   normalization cannot silently enable a native unsupported level.
 
 ### 11.2 Vision capability resolution
 
@@ -463,62 +484,34 @@ window, output limit, capability badges and thinking defaults come from
 `bindingFromModelInfo` over the enriched record, so the common path needs no
 manual token entry. The enrichment lookup is:
 
-1. A matching models.dev provider is preferred by `vendorKey`, then by
-   normalized provider API URL, including explicit native-adapter aliases
-   such as `openai-codex` → `openai`; its exact model record supplies the fields.
-2. A provider endpoint may add custom/account-specific IDs, but cannot replace
-   models.dev metadata. A free-form miss receives the fixed generic defaults
-   from `bindingForCustomModel`.
-3. The lookup does not send API keys to models.dev. Runtime model resolution
-   uses the same models.dev record and the selected pi-ai transport adapter.
+1. Resolve account/vendor identity and normalized endpoint against Pi providers.
+2. Read the published typed chat model separately from effective user overrides.
+3. When Pi has no chat record, display-only operation metadata may describe a
+   non-chat settings entry. It cannot promote that entry into a chat model or
+   grant operation entitlement.
+4. Use generic metadata on a miss; no metadata lookup sends account credentials.
+5. Apply the conservative relay rules in §11.3.1 without rewriting wire IDs.
 
-Catalog enrichment uses `catalogModelIdsMatch`, not the shared
-`modelIdsMatch` used to resolve an exact configured binding. Binding identity
-accepts case-insensitive exact IDs, full slash-path suffixes, known vendor
-`-`/`.` prefixes and a one-sided `@region` alias; it does not collapse two
-different regions, arbitrary routing prefixes or endpoint/thinking suffixes.
-Metadata lookup additionally accepts a complete bare leaf ID through a generic
-route such as `proxy/` or `custom/`, subject to known-vendor conflicts; two
-different full route paths never match solely because they share a leaf. It
-narrowly strips trailing `-` or `:` `thinking`, `think`, `agent` or `latest`
-tokens (including before `@region`). It does not strip arbitrary
-dash-separated proxy prefixes or effort tokens such as `low`, `high` or `max`.
-The catalog index uses bounded candidate keys for these aliases, then checks
-the matcher; a known catalog provider selected by vendor key or API URL limits
-the lookup to that provider, never borrowing another provider's capabilities.
-These aliases attach published metadata only: they do not alter the configured
-wire model ID or prove that a suffix enables reasoning. An unmatched free-form
-ID remains an unknown generic model with no inferred capabilities; only a
-published record or explicit binding settings can supply them.
+These rules attach published metadata only: they never rewrite the configured
+wire model ID or infer reasoning from a suffix. An unmatched free-form ID keeps
+the host's generic capability snapshot, while Composer exposes the canonical
+thinking ladder for explicit manual opt-in.
 
-#### 11.3.1 Cross-provider exact-id fallback
+#### 11.3.1 Relay metadata matching
 
-models.dev indexes a gateway's copy of a model under the vendor that owns the
-weights, so an endpoint serving `Vendor/Model` ids can have no record of its own
-while several other publishers state the identical id. When the row resolves to
-a catalog provider whose own record is missing, `findModel` consults the other
-publishers of the **exact** id instead of leaving the model on the generic
-128k text-only shape (issue #938).
+The Pi adapter preserves the configured wire ID. Unknown endpoints may attach
+metadata from an exact, case-insensitive final `/` segment. A unique official
+publisher compatible with the ID family wins; conflicting capability/thinking
+candidates remain unknown. Exact served IDs are checked first. Only a narrow
+whitelist of deployment-added environment/context labels (for example `-test`
+and `-1m`) may be removed as a fallback to a published base ID. Thinking,
+preview, and dated-release suffixes are not stripped, and spelling is never
+fuzzy-corrected.
 
-The borrow is bounded:
-
-- It runs only for a row with a known catalog provider identity, and only after
-  that provider's own lookup missed. A provider record, or a supported alias of
-  it, stays authoritative.
-- A provider sharing the row's own endpoint is an alias for the row, so its
-  silence is an answer about this deployment and nothing is borrowed past it.
-- Only a case-insensitive identical id transfers; a record reached through an
-  alias (a bare route leaf, a vendor-prefixed variant) is a different id and
-  keeps its own limits.
-- Tool support must be unanimous across those publishers, because a wrong `true`
-  puts tool declarations on the wire that the endpoint may reject. Reasoning,
-  image/PDF input and attachment are the intersection, so a borrow may only
-  under-claim; a user who knows the endpoint does more still enables it in
-  Advanced. Limits are the medians the publishers state, never one host's cap.
-- An id no publisher states stays an unknown generic model.
-
-This changes metadata only. The configured wire id, provider identity, and the
-binding precedence in §11.3 are unchanged.
+Known provider lookup and aliases stay authoritative. An ambiguous known
+same-endpoint miss does not borrow from arbitrary publishers. There is no
+majority-vote capability or median-limit algorithm. Unmatched IDs use conservative
+generic metadata and explicit binding overrides.
 
 ## 12. Refresh strategy
 
@@ -528,10 +521,10 @@ binding precedence in §11.3 are unchanged.
 - refresh failures keep previous cache and surface non-fatal error
 
 Electron decorates cached and freshly returned model rows from the local
-models.dev snapshot. Runtime model resolution passes the same full models.dev
-configuration to the selected pi-ai transport adapter. Provider discovery
-remains an ID-only fallback for custom/account-specific models absent from the
-snapshot.
+models.dev snapshot. Runtime model resolution uses the same resolved metadata
+for limits and capabilities while pi-ai remains the selected transport
+adapter. Provider discovery remains the ID source for custom/account-specific
+models absent from the snapshot.
 
 ## 13. Search behavior
 
@@ -576,14 +569,17 @@ same model to the check mark, the toggle and the duplicate guard.
 - [ ] capability badges visible
 - [ ] session model change applies to next turn only
 - [ ] a newly created session stores the then-current default provider/model, and later default-model changes do not rewrite that session
-- [ ] a new session defaults a reasoning-capable inherited model to that
-      binding's stored default thinking level (clamped onto the enabled set;
-      strongest-enabled only when unset) and otherwise defaults to `off`
+- [ ] a catalog-matched reasoning model defaults a new session to that
+      binding's stored thinking level (clamped onto the enabled set;
+      strongest-enabled only when unset); an unmatched model starts at `off`
+      without an explicit binding default while retaining the manual thinking
+      ladder in Composer
 - [ ] the settings picker always exposes the canonical thinking ladder;
       published levels seed known models and explicit binding levels clamp the
       same way in Composer, Electron main, and the pi sidecar
 - [ ] models.dev metadata wins for a matching provider/model; an ID absent from
-      it uses the generic shape while pi-ai supplies only transport/OAuth
+      it uses the generic shape while pi-ai supplies only transport/OAuth and
+      typed non-chat operation support
 - [ ] provider settings and cached discovery cannot replace known catalog
       capabilities; explicit binding edits remain persisted configuration
 - [ ] a models.dev limit correction reaches an already saved `catalog` binding

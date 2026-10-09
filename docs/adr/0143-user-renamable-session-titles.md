@@ -19,11 +19,13 @@ the Project archive task row. It trims input, accepts 1–80 Unicode code points
 and keeps the Save action unavailable for an empty value. The host validates the
 same rules so direct IPC callers cannot persist invalid titles.
 
-Renaming updates only `sessions.title`. It does not modify the transcript,
-message count, project binding, empty-session predicate, or `updated_at` activity
-timestamp. A non-default title continues to opt out of first-prompt automatic
-title generation. Existing `session.rename` IPC and host RPC channels are used;
-no schema or protocol version change is required.
+Renaming updates `sessions.title` and marks its host-owned `title_source` as
+`manual`. It does not modify the transcript, message count, project binding,
+empty-session predicate, or `updated_at` activity timestamp. Plugin-generated
+titles use a compare-and-set against the automatic title, so a manual rename
+wins a race without renderer-local title state. The core's own first-prompt
+fallback keeps that source `default` and stays replaceable, which is why only a
+`manual` title opts out of automatic replacement.
 
 Historical notification title snapshots remain unchanged. Newly rendered
 surfaces read the current session summary, so the renamed title is shown in the

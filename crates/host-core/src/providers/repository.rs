@@ -75,8 +75,54 @@ pub fn list_providers(
     let mut stmt = db.conn().prepare_cached(&sql)?;
     let rows = stmt.query_map([], |row| provider_from_row(row, secrets))?;
     let mut providers = rows.collect::<rusqlite::Result<Vec<_>>>()?;
+    for provider in &mut providers {
+        hydrate_dynamic_plugin_models(db, provider)?;
+    }
     super::order::apply_saved_order(db, &mut providers)?;
     Ok(providers)
+}
+
+/// An empty model declaration opts an API-key plugin provider into using the
+/// endpoint's cached discovery results. Static manifest models stay authoritative
+/// whenever the plugin declares at least one.
+fn hydrate_dynamic_plugin_models(db: &Database, provider: &mut ProviderPublic) -> Result<()> {
+    if provider.owner_plugin_id.is_none() || !provider.models.is_empty() {
+        return Ok(());
+    }
+    provider.models = list_models(db, Some(&provider.id))?
+        .into_iter()
+        .map(|model| {
+            let alias = (model.display_name != model.model_id).then_some(model.display_name);
+            ModelBinding {
+                id: model.model_id,
+                alias,
+                context_window_source: None,
+                max_tokens_source: None,
+                context_window: model.context_window.unwrap_or(DEFAULT_CONTEXT_WINDOW),
+                max_tokens: DEFAULT_MAX_TOKENS,
+                thinking_levels: Vec::new(),
+                default_thinking_level: None,
+                thinking_protocol: None,
+                supports_images: model
+                    .capabilities
+                    .iter()
+                    .any(|value| value == "vision")
+                    .then_some(true),
+                supports_documents: None,
+                available_for_subagents: None,
+                native_web_search: None,
+            }
+        })
+        .collect();
+    if provider
+        .default_model_id
+        .as_deref()
+        .map(|value| value.is_empty())
+        .unwrap_or(true)
+    {
+        provider.default_model_id = provider.models.first().map(|model| model.id.clone());
+    }
+    Ok(())
 }
 
 pub fn create_provider(
@@ -283,6 +329,19 @@ pub fn update_provider(
     if input.models.is_some() {
         ensure_model_bindings_update_safe(&raw_config)?;
     }
+    // The discovered answer belongs to the endpoint that produced it, and the
+    // cached rows carry no endpoint of their own: an edit that moves the address
+    // or the wire format has to drop that answer, or the picker would paint the
+    // previous service's models as this one's. Read before the update moves the
+    // fields into the row.
+    let endpoint_changed = input
+        .base_url
+        .as_deref()
+        .is_some_and(|value| value.trim() != current.base_url.as_deref().unwrap_or("").trim())
+        || input
+            .api_style
+            .as_deref()
+            .is_some_and(|value| value != current.api_style.as_deref().unwrap_or(""));
     // Derive from the API key ref directly: `has_secret` now also covers an
     // OAuth credential, so reusing it here would stamp an api_key ref onto a
     // provider that only ever signed in with a vendor account.
@@ -366,6 +425,38 @@ pub fn update_provider(
             now_ms(),
             input.id
         ])?;
+    // A save that drops bindings also forgets their cached rows. The cache is
+    // the service's answer, and a model the user removed is no longer part of
+    // the configuration that answer belongs to; keeping the row would feed the
+    // deleted model's recorded limits back to the next add of the same id.
+    if let Some(models) = input.models.as_deref() {
+        let removed: Vec<String> = current
+            .models
+            .iter()
+            .filter(|binding| {
+                let id = binding.id.trim().to_lowercase();
+                !models
+                    .iter()
+                    .any(|model| model.id.trim().to_lowercase() == id)
+            })
+            .map(|binding| binding.id.clone())
+            .collect();
+        forget_cached_models(db, &input.id, &removed)?;
+    }
+    // A save that moves the endpoint drops the answer the previous one
+    // produced. The models the user configured stay: they are the configuration
+    // the save just wrote, not a cached answer.
+    if endpoint_changed {
+        let configured: Vec<String> = match input.models.as_ref() {
+            Some(models) => models.iter().map(|model| model.id.clone()).collect(),
+            None => current
+                .models
+                .iter()
+                .map(|binding| binding.id.clone())
+                .collect(),
+        };
+        forget_missing_discovered_models(db, &input.id, &configured)?;
+    }
     get_provider(db, secrets, &input.id)
 }
 
@@ -468,9 +559,28 @@ pub fn get_provider(
     id: &str,
 ) -> Result<Option<ProviderPublic>> {
     let sql = format!("{PROVIDER_SELECT} WHERE id = ?1");
-    db.conn()
+    let mut provider = db
+        .conn()
         .prepare_cached(&sql)?
         .query_row(params![id], |row| provider_from_row(row, secrets))
-        .optional()
-        .map_err(Into::into)
+        .optional()?;
+    if let Some(provider) = provider.as_mut() {
+        hydrate_dynamic_plugin_models(db, provider)?;
+    }
+    Ok(provider)
+}
+
+/// Whether `id` names a row, whoever owns it.
+///
+/// Reference checks ask this instead of `get_provider` because they only need
+/// to know whether the row still exists: an existing row that is disabled or
+/// carries no credential keeps its references, since the user can repair that
+/// in Settings.
+pub(crate) fn provider_exists(db: &Database, id: &str) -> Result<bool> {
+    Ok(db
+        .conn()
+        .prepare_cached("SELECT 1 FROM providers WHERE id = ?1")?
+        .query_row(params![id], |_| Ok(()))
+        .optional()?
+        .is_some())
 }

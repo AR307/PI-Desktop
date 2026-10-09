@@ -202,13 +202,18 @@ test("declared theme assets are served over a host-owned scheme", () => {
     join(desktopRoot, "electron/main/bootstrap/startup.ts"),
     "utf8",
   );
+  const schemesSrc = readFileSync(
+    join(desktopRoot, "electron/main/plugin-schemes.ts"),
+    "utf8",
+  );
   const htmlSrc = readFileSync(join(desktopRoot, "index.html"), "utf8");
 
   // The scheme is reserved before the app is ready, then handled by a resolver
   // that only answers for paths the loaded plugin actually declared.
-  assert.match(startupSrc, /registerPluginAssetScheme\(\);/);
+  assert.match(startupSrc, /registerPluginSchemes\(\);/);
   assert.match(startupSrc, /installPluginAssetProtocol\(/);
-  assert.match(protocolSrc, /registerSchemesAsPrivileged/);
+  assert.match(protocolSrc, /scheme: THEME_ASSET_SCHEME/);
+  assert.match(schemesSrc, /registerSchemesAsPrivileged\(\[[^\]]*PLUGIN_ASSET_SCHEME_PRIVILEGES/);
   assert.match(protocolSrc, /protocol\.handle\(THEME_ASSET_SCHEME/);
   assert.match(protocolSrc, /resolve\(pluginId, assetPath\)/);
   assert.match(protocolSrc, /x-content-type-options/);
@@ -235,7 +240,9 @@ test("a contributed window background needs its own grant", () => {
   const register = runtimeSrc.slice(runtimeSrc.indexOf("private registerThemes"));
   assert.match(register, /permissions\.has\("ui\.window\.appearance"\)/);
   assert.match(register, /resolveWindowBackground\(/);
+  assert.match(register, /resolveWindowCornerRadius\(/);
   assert.match(runtimeSrc, /windowBackground\?: \{ light\?: string; dark\?: string \}/);
+  assert.match(runtimeSrc, /windowCornerRadius\?: number/);
 });
 
 test("the shipped example theme survives sanitation", () => {

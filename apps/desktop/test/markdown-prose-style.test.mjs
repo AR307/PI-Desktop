@@ -51,7 +51,9 @@ test("chat prose keeps a refined hierarchy and quieter chrome", () => {
 });
 
 test("markdown renderer still streams by memoized blocks", () => {
-  assert.match(markdownSource, /function useBlocks\(source: string\)/);
+  assert.match(markdownSource, /function useBlocks\(source: string, maxTailCodeUnits: number\)/);
+  assert.match(markdownSource, /advanceMarkdownBlocks\(/);
+  assert.match(markdownSource, /MAX_STREAMING_MARKDOWN_TAIL_CODE_UNITS/);
   assert.match(markdownSource, /const markdownComponents: Components =/);
   assert.match(markdownSource, /className="code-block"/);
   assert.match(markdownSource, /className="table-wrap"/);
@@ -62,8 +64,9 @@ test("markdown resolves relative file links against a base directory", () => {
   assert.match(markdownSource, /remarkChatFileLinks/);
   assert.match(
     markdownSource,
-    /toWorkspaceRel\(safeDecodeUri\(href\), root, baseDir\)/,
+    /toWorkspaceRel\(decoded, root, baseDir\)/,
   );
+  assert.match(markdownSource, /safeDecodeUri\(href\)/);
   assert.match(filesTabSource, /baseDir=\{fileDirOf\(selected\)\}/);
 });
 

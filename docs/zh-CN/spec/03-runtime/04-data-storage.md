@@ -1,4 +1,4 @@
-# 04. 数据存储（架构 v17）
+# 04. 数据存储（架构 v23）
 
 > **翻译说明：** 本页是与 [英文源规格](/spec/03-runtime/04-data-storage) 一一对应的机器辅助翻译。代码、协议字段和标识符保持原文；如翻译与英文源事实有歧义，以英文版本为准。
 
@@ -355,6 +355,8 @@ CREATE TABLE sessions (
   provider_id TEXT,                            -- loose ref, see below
   model_id    TEXT,
   mode        TEXT NOT NULL DEFAULT 'agent',   -- plan | agent
+  title_source TEXT NOT NULL DEFAULT 'legacy'  -- legacy | default | manual | generated
+               CHECK (title_source IN ('legacy', 'default', 'manual', 'generated')),
   thinking_level TEXT NOT NULL DEFAULT 'off'
                 CHECK (thinking_level IN ('off', 'minimal', 'low', 'medium',
                                           'high', 'xhigh', 'max', 'omit')),
@@ -367,10 +369,19 @@ CREATE TABLE sessions (
   created_at  INTEGER NOT NULL,
   updated_at  INTEGER NOT NULL
 );
-CREATE INDEX idx_sessions_updated ON sessions(updated_at DESC);
+CREATE INDEX idx_sessions_updated_id ON sessions(updated_at DESC, id DESC);
 CREATE INDEX idx_sessions_project ON sessions(project_id) WHERE project_id IS NOT NULL;
 CREATE INDEX idx_sessions_deleted ON sessions(deleted_at) WHERE deleted_at IS NOT NULL;
 ```
+
+`title_source` 记录 `legacy`、`default`、`manual` 或 `generated`。架构 v23 会将已有的
+已知占位标题归类为 `default`，其余标题归类为 `manual`，不改写标题。新建会话和手动重命名
+会写入相应来源。`default` 表示“非用户选择、仍可替换”：它既覆盖新会话的占位标题，也覆盖
+确定性的首条提示兜底标题（host-core 只在存储标题仍是可识别占位标题时才写入）。占位标题在
+所有已发布的语言下都会被识别，因为渲染器创建会话时会写入本地化的 `chat.untitledTask` 文案。
+独立标题插件只能读取 `default` 会话的首轮文本，并且只能用精确标题比较并设置，因此并发手动
+重命名会胜出。
+会胜出。
 
 插件导入增加一个由主机拥有的来源 sidecar。它与核心会话身份分离，
 每次插件读写都必须匹配创建该行的 `plugin_id`：
@@ -591,6 +602,28 @@ CREATE UNIQUE INDEX idx_turn_queue_idempotency
 - 重启后模块列出全部条目，把每个会话的队列挂起到 controller 接入，并在活动回合终止事件
   之后释放一条。删除会话会级联删除其条目。
 
+**会话 Todo 清单——存储架构 v21**
+
+```sql
+CREATE TABLE session_todo (
+  session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+  position INTEGER NOT NULL CHECK (position >= 0 AND position < 50),
+  content TEXT NOT NULL,
+  status TEXT NOT NULL CHECK (status IN ('pending', 'in_progress', 'completed', 'cancelled')),
+  priority TEXT NOT NULL DEFAULT 'medium' CHECK (priority IN ('high', 'medium', 'low')),
+  updated_at INTEGER NOT NULL,
+  PRIMARY KEY (session_id, position)
+);
+```
+
+`sessions.todo_revision` 和 `sessions.todo_updated_at` 即使清单为空也保留顺序元数据。
+主机事务会更新这些字段、删除旧行并插入归一化后的替换清单；每次成功写入都会推进
+revision，包括清空。唯一的部分 `in_progress` 索引在数据库边界保证只有一个活动项。
+分叉会话从 revision 0 和空清单开始；删除会话会级联删除清单行。
+
+行内容在存储前会裁剪空白，限制为 500 个 Unicode 标量值且不得包含 NUL。
+TodoWrite 是唯一写入方；渲染器和 sidecar 只能通过 host RPC 访问该状态。
+
 ### 4.6c 会话协作 ledger —— 宿主拥有的投递状态（架构 v16）
 
 ```sql
@@ -687,8 +720,10 @@ type Block =
       status: "ok" | "error" | "denied"; result?: unknown;
       completedAt?: string; durationMs?: number;
       toolUsage?: ToolTokenUsage }
-  | { type: "attachment"; kind: "image" | "file"; name: string;
-      ref: string /* attachments/<sha256> or absolute path */ }
+  | { type: "attachment"; kind: "image" | "file" | "session"; name: string;
+      ref: string /* attachments/<sha256>、绝对路径或会话 id */;
+      mimeType?: string; size?: number;
+      text?: string /* 被引用对话的有界摘录 */ }
   | { type: "hostedSearch"; status: "searching" | "completed" | "failed";
       rounds: Array<{ id: string;
         status: "searching" | "completed" | "failed";
@@ -702,6 +737,11 @@ type Block =
 
 - 工具结果存储**截断后**（16 个工具结果限制）；满
   原始输出不是存储问题。
+- `kind: "session"` 块是会话引用：它存储被引用的会话 id、显示标题，以及引用给模型的
+  有界摘录，因此后续轮次读到的是同一份引用，而不必重新读取被引用的对话。摘录边界、
+  同项目规则与 `<session_reference>` 提示块属于引用契约
+  （`04-ux/08-component-spec.md` §20B）；宿主只存它拿到的东西，不会为了拼出一条引用
+  去读被引用的会话。
 - 辅助思维仅存储在文件内的 `thinking` 块中。的
   派生的 `text` 列包含最终答案文本，因此转录搜索和
   答案预览不会暴露或混合推理。
@@ -869,7 +909,7 @@ CREATE TABLE scheduled_tasks (
   id          TEXT PRIMARY KEY,
   title       TEXT NOT NULL,
   prompt      TEXT NOT NULL,
-  cadence     TEXT NOT NULL DEFAULT 'manual',  -- manual | hourly | daily | weekly
+  cadence     TEXT NOT NULL DEFAULT 'manual',  -- manual | hourly | interval | daily | weekly
   enabled     INTEGER NOT NULL DEFAULT 1,
   project_id  INTEGER REFERENCES projects(id) ON DELETE SET NULL,
   config_json TEXT NOT NULL DEFAULT '{}',      -- mode, cron expr, model override, notify policy
@@ -891,11 +931,14 @@ CREATE INDEX idx_task_runs ON task_runs(task_id, started_at DESC);
 ```
 
 生成会话的运行通过 `session_id` 免费获取其转录本。
-`config_json` 保存 `schedule: {hour, minute, weekday}`、毫秒时间戳 `nextRunAt`、
-`workspacePath`，以及可选的任务级 `permissionMode` 与成对的 `providerId`／`modelId`。
+该转录本通过针对 `task_runs` 的 `EXISTS` 判断被识别为自动化产出，每个会话摘要与搜索命中都以 `scheduledRun` 返回这一归属。归属在读取时派生、不写入会话行：因此在该会话仍属于某次运行时，会话列表与会话搜索会隐藏它；删除任务后它会回到普通列表，而不会变得无法访问（issue #1291）。
+`scheduled.listRuns` 提供两种形状：单任务自己的历史（`taskId`，最多 200 条）与每任务最新一次运行（`latestPerTask`，每个任务一行，不能与 `taskId` 同时使用）。任务列读取后者：`task_runs` 的全局窗口可能被某个繁忙任务填满（保留策略是按任务各留最近 100 条），那样空闲任务会被误报为「尚未运行」，所以喂给任务列的读取按任务而不是共享窗口。
+保留策略按任务各留最近 100 条运行（`TASK_RUNS_KEEP`，每次打开数据库时执行）。归属由这些行派生，因此一条被清理的运行会带走两件事：它从任务历史里消失，其会话也不再带 `scheduledRun`，于是那段转写回到会话列表与全局搜索。运行速度快于保留窗口的任务——`interval` 从 5 分钟起、每小时周期约四天后——会碰到这条边界；用持久化 origin 取代派生标记的改法与 issue #1291 的后续一起跟踪。任务页每次最多读取 200 条运行，这是 `scheduled.listRuns` 对单任务历史的上限。
+
+`config_json` 保存 `schedule: {hour, minute, weekday}`、`intervalMinutes`（5–1440，只有 `interval` 周期读取，因此保留该字段的排程会保留它的值）、毫秒时间戳 `nextRunAt`、`workspacePath`、会话模式 `sessionMode`（`perRun` 或 `reuse`，缺失按 `perRun`），以及可选的任务级 `permissionMode` 与成对的 `providerId`／`modelId`。
 这些新增字段无需物理表迁移。缺少模型字段时仍在运行时读取应用默认值；缺少权限字段时，
-自动运行继续使用 Ask，立即运行继续继承全局权限。每天、每周按宿主本地时区计算。每小时采用 `nextRunAt = now + 3_600_000`，
-忽略日历时间字段。可选 `weekdays` 保存 1–7 个不重复的 0–6 整数，覆盖每周的旧 `weekday`；
+自动运行继续使用 Ask，立即运行继续继承全局权限。每天、每周按宿主本地时区计算；每小时与间隔按准入时刻起算的经过时间计算：每小时采用 `nextRunAt = now + 3_600_000`，间隔采用 `nextRunAt = now + intervalMinutes × 60_000`，两者都忽略日历时间字段。
+`interval` 任务的排程若缺少 `intervalMinutes`，写入会被拒绝，而不是保存成永不触发的任务。可选 `weekdays` 保存 1–7 个不重复的 0–6 整数，覆盖每周的旧 `weekday`；
 缺失时保留单日语义，空数组、重复或越界值在写入前拒绝。无需表结构迁移。
 无 `schedule` 的旧任务不会自动运行；无需修改表或迁移数据库。见 ADR 0305。
 
@@ -1114,7 +1157,7 @@ outbox 排空。渲染器侧的停止绝不重写已有已开始回复的转录
 - JSON 列在热路径上盲读（按原样发送到渲染器）；
   任何过滤或求和的内容都是按规则提升的列。
 
-## 7. 版本控制、v7 重置和 v8 到 v16 迁移
+## 7. 版本控制、v7 重置和 v8 到 v23 迁移
 
 - `PRAGMA user_version` 保留模式权限；未来的结构性变化
   再次添加有序的 Rust 迁移 fns，每个都在一个事务中，并带有一个
@@ -1125,7 +1168,7 @@ outbox 排空。渲染器侧的停止绝不重写已有已开始回复的转录
   旧文件中的会话、提供程序和设置不会保留；
   存档仍保留以供手动恢复。所有 v7 之前的迁移代码
   （v1 `settings.sqlite` 导入，v2→v6 链）被删除。
-- 全新安装直接运行完整的 v16 DDL。
+- 全新安装直接运行完整的 v23 DDL。
 - **架构 v15 是增量的。** 它增加 `turn_queue` 表及其两个索引（D386 / ADR 0213），使 Host
   拥有的回合队列在重启后存活；不改动任何已有行，迁移前保留 `pi.sqlite.v14.bak`。
 - **架构 v16 是增量的。** 它增加会话协作 link 和投递表、生命周期索引，以及可为空的
@@ -1134,6 +1177,8 @@ outbox 排空。渲染器侧的停止绝不重写已有已开始回复的转录
 - **架构 v17 是增量的。** 它增加可为空的 `providers.owner_plugin_id` 归属列及其部分索引
   （ADR 0259），从而把插件在 `contributes.providers` 中声明的 provider 行与用户创建的行区分开
   —— 所有 v17 之前的行保持 NULL 归属。该步骤之前保留 `pi.sqlite.v16.bak` 副本。
+- **架构 v23 是增量的。** 它增加 `sessions.title_source`，并将现有占位标题归类为
+  `default`；其余现有标题保持原样并归类为 `manual`。迁移前保留 v22 备份。
   v15→v16 会话协作步骤现在写入 `16`（它自己的版本）而不是最新的架构常量，
   因此 v15 文件可以在一次启动中走完两个步骤。
 - **架构 v7 首先到达 v8，然后使用受保护的路径。** v7→v8
@@ -1181,13 +1226,10 @@ outbox 排空。渲染器侧的停止绝不重写已有已开始回复的转录
 1–1,000,000 的整数范围。因此现有数据库会在读取时延迟获得默认值，不需要破坏性
 迁移或第二个设置存储。
 
-同一个应用设置 JSON 还可选存储提示词增强的覆盖值
-`promptEnhancementCustomTemplate`（决定已存模板是否生效的开关）、
-`promptEnhancementUserTemplate`、`promptEnhancementProviderId`、
-`promptEnhancementModelId` 与 `promptEnhancementThinkingLevel`（ADR 0121）。用户模板缺失或为空表示使用内置默认值，
-因此清空字段不会写入空字符串而是不写该键。非空的用户模板必须包含草稿变量，且
-不得超过 `PROMPT_ENHANCEMENT_TEMPLATE_MAX_LENGTH`；host-core 会拒绝违反任一规则的
-写入，并丢弃已不再读取的 `promptEnhancementSystemPrompt`。无需提升 schema 版本。
+应用设置 JSON 可能仍包含旧版本写入的提示词增强键。为支持回退和降级，宿主保留这些值，
+但不会再把它们作为有效偏好读取或写入。用户安装并授权独立的
+`pi.prompt-enhancement` 插件时，Electron 会将有效旧值一次性复制到插件私有设置中
+（见 `04-ux/12-prompt-enhancement.md`）。迁移标记也位于插件私有数据目录；宿主设置 schema 不变。
 - Plan 和 Goal 工件永远不会根据转录内容重建。开
   启动,
   一笔交易标志着每笔 `pending` 批准和每笔 `queued` 或
@@ -1342,3 +1384,15 @@ schedule 就推断为日历配置；旧版 Hourly 行保留字段，但转换时
 已知意图在周期切换和数据库重开后仍然保留。该新增 JSON 字段不需要表或 schema
 版本迁移；旧版本会忽略它，也无法执行新的转换保护。
 
+
+## Physical operation usage ledger
+
+Optional operation ID, origin, physical account/model and cost status augment
+existing message/turn usage. `session.recordUsage` merges identities into the
+existing turn `usage_json`; no schema migration or historical rewrite is needed.
+Identified records are idempotent across event replay, outbox retries, tool results
+and parent/subagent rollups. Legacy token-only rows remain readable and additive.
+An unknown price is distinct from a known zero price; partial known costs remain
+on the individual operations. Late usage targets its captured turn and does not
+revive it or debit the currently active turn. Immediate nested parent and owning
+Task remain separate optional transcript/event fields.

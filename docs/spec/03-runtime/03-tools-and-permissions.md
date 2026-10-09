@@ -1,6 +1,6 @@
 # 03. Tools and Permissions
 
-> Decisions applied: D003, D004, D005, D006, D013, D015, D093, D114, D115, D181, D186,
+> Decisions applied: D003, D004, D006, D013, D015, D093, D114, D115, D181, D186, D636,
 > D189, D190, D195 (ADR 0057), D315, D384 (ADR 0211), ADR 0087
 
 ## 0. Frozen policy summary
@@ -8,12 +8,12 @@
 | Topic | Decision |
 |---|---|
 | Default mode | Agent |
-| Agent tools | Read / Glob / Grep / Write / Edit / Bash + registered plugin tools |
+| Agent tools | Read / Glob / Grep / Write / Edit / Bash + registered plugin tools + optional Jev classifier |
 | Plan tools | Read / Glob / Grep / BrowserPreview / Bash / SubmitPlan + plugin tools that declare plan-safe actions |
 | Goal tools | Read / Glob / Grep / BrowserPreview / Bash / SubmitGoal + plugin tools that declare plan-safe actions |
 | Plan and Goal hard deny | Write / Edit / plugin tools without `planSafeActions` / unknown tools / the other kind's submit tool |
 | Plugin `planSafeActions` | Non-empty array of `action` strings; runtime hides plugin tools without one in Plan/Goal, host admits listed tools, plugin-runtime rejects any action outside the list (ADR 0211) |
-| Permission timeout | 120s → deny |
+| Local permission approval | No automatic deadline; explicit decision or cancellation required |
 | allow-session scope | toolName |
 | Bash style | non-interactive; selected host catalog shell with streamed output |
 | Edit contract | line-anchored ops + whole-file `tag`; no `old_string`/`new_string` (ADR 0087) |
@@ -40,23 +40,26 @@ Let the agent get things done, but stay under control by default.
 | `Edit` | high | Modify files through line-anchored ops against a verified `tag` ([18](18-line-anchored-edit-contract.md)) |
 | `Bash` | high | Execute commands |
 | `asktool` | low | Ask one or more user questions and return the submitted answers as tool output |
+| `TodoWrite` | low | Replace the current Agent session checklist; host validates and persists the full ordered snapshot |
 
 > Names may be fine-tuned during implementation, but semantics stay consistent.
 
 ### 2.1 Deferred ancillary tools (D185, ADR 0048)
 
-Following pi's coding-agent default, the first Agent request activates only
-`Read`, `Bash`, `Edit`, and `Write`; `Glob` and `Grep` are loaded on demand.
-Plan and Goal keep their read/inspection core. `Skill` is deliberately not
-deferred: a `/skill-id` invocation instructs the model to call it, and a tool
-absent from the schema cannot be called at all, so it ships with the first
-request whenever the skill catalog is non-empty (D404, ADR 0230). The runtime
-also registers capabilities without sending their full schemas up front:
+The first Agent request includes `Read`, `Bash`, `Edit`, `Write`, `Glob`, and
+`Grep`. Keeping workspace listing and content search in the initial schema
+avoids a discovery round trip for routine project exploration (the amendment
+to ADR 0048 records this change). Plan and Goal keep their read/inspection core.
+`Skill` is deliberately not deferred: a `/skill:<skill-id>` invocation instructs the
+model to call it, and a tool absent from the schema cannot be called at all, so
+it ships with the first request whenever the skill catalog is non-empty (D404,
+ADR 0230). The runtime still registers optional capabilities without sending
+their full schemas up front:
 
-- `Glob` and `Grep` in Agent mode
 - `BrowserPreview`
 - `PluginCheck`, `PluginScaffold`, and `PluginPack`
 - plugin-declared agent tools
+- `JevClassify` when the user enables Jev and saves a TypeSafe API key
 
 These tools appear in a bounded `# On-demand tools` catalog with compact
 descriptions. The model calls the local `ToolSearch` tool with an exact name or
@@ -73,9 +76,34 @@ workspace/scratch containment, timeout, and audit rules do not change when a
 tool is loaded. `ToolSearch` itself never executes a workspace operation and
 never bypasses host-core policy.
 
+`JevClassify` is offered only in Agent mode, only when explicitly enabled in
+Settings → Models, and only while its TypeSafe key is available. It is a
+structured classifier call, not a chat model or workspace operation. The Agent
+must supply its JSON state and typed questions; those values go directly to
+TypeSafe when the tool is called. The tool validates JSON shape and bounds the
+payload to 24 KiB, uses the pi-ai `jev-latest` classifier with a 45-second
+timeout, and returns only structured answers and reported usage. Plan and Goal
+never receive the tool. The settings disclosure warns users not to pass secrets
+or personal information.
+
+An explicit composer MCP selection carries exact server IDs to the runtime.
+The current host-supplied catalog associates each MCP tool with its server ID;
+selection activates all mode-allowed tools for that server before the request,
+without a ToolSearch call or its result-count limit. An optional `mcpToolNames`
+selection narrows activation to those exact catalog names, each owned by a
+selected server. Unknown, differently owned or mode-denied requested tools fail;
+there is no fallback to whole-server activation. Steering activates only
+when the queued user message is consumed, before the next provider dispatch.
+Unknown servers and selections with no mode-allowed tools fail explicitly.
+Activation preserves other tools, follows existing session restoration, and
+never bypasses execution permissions. Missing selection fields retain normal
+on-demand discovery. Main rejects a selected MCP command without task text or
+an attachment before opening or persisting a turn. See
+`docs/adr/composer-mcp-invocations.md`.
+
 ## 3. Common Tool Constraints
 
-Every non-interactive execution tool must have:
+Every non-interactive workspace execution tool must have:
 
 1. JSON schema / typebox parameter definition
 2. timeout
@@ -86,7 +114,14 @@ Every non-interactive execution tool must have:
 
 `asktool` is the interactive exception: it has a typed request event, waits for
 the renderer response without an expiry, and returns a bounded structured tool
-result. Stopping the turn resolves outstanding questions as skipped.
+result. Options may be plain strings or `{ label, description? }` objects; the
+selected label remains the answer value. Stopping the turn resolves outstanding
+questions as skipped.
+
+`JevClassify` is an external provider operation rather than a workspace
+execution tool. It validates its structured request, observes cancellation,
+uses a bounded provider timeout, and returns typed classifier results; it has
+no filesystem path or host-core workspace permission surface.
 
 ## 4. Path Rules
 
@@ -108,11 +143,10 @@ On POSIX, a literal backslash in a filename remains a backslash so the result
 can be passed back to `Read` or `Edit`; Windows path separators are normalized
 to `/`.
 
-Agent mode keeps `Glob`/`Grep` deferred under D185. Each new user prompt clears
-their live activation and restores only eligible successful markers still in
-context; when no such marker exists, directory discovery activates `Glob`
-through `ToolSearch` for that prompt instead of guessing a file name or calling
-`Read` on a directory.
+Agent mode keeps `Glob`/`Grep` available from the first request. Other deferred
+tools still follow the per-prompt activation and successful-context restoration
+rules above; directory discovery can call `Glob` directly without a
+`ToolSearch` round trip.
 
 The runtime accepts one alias per canonical argument name and folds it away
 before the host sees the call (D273):
@@ -156,7 +190,7 @@ low-risk auto-allow decision:
 - `ask` and `accept-edits` emit the ordinary permission card;
 - `allow-once` executes only the current call, while `allow-session` follows
   the existing per-tool session grant scope;
-- denial, timeout, or cancellation never executes the operation;
+- denial or cancellation never executes the operation;
 - relative `..` escapes and symlink escapes use the same rule as absolute
   paths;
 - successful external `Read`/`Write`/`Edit` results carry `root: "external"`
@@ -192,9 +226,11 @@ as binary content.
 - **Addressing.** In a project session, the model addresses scratch by absolute
   path only; the path is advertised in the system prompt, relative tool paths
   resolve against the project workspace, and `Bash` exports
-  `PI_SCRATCH_DIR`. In a temporary session, that same scratch directory is the
-  session workspace root, so relative Read/Glob/Grep/Write/Edit/Bash paths work
-  there without inheriting a project.
+  `PI_SCRATCH_DIR`. POSIX shells, including Git Bash on Windows, receive the
+  forward-slash path advertised in the prompt; PowerShell and cmd keep the
+  native path spelling. In a temporary session, that same scratch directory is
+  the session workspace root, so relative Read/Glob/Grep/Write/Edit/Bash paths
+  work there without inheriting a project.
 - **Containment.** `resolve_tool_path` tries the workspace root first, then
   the scratch root, applying the identical two-layer defense (lexical `..`
   normalization + canonicalized-ancestor symlink check) to each. A symlink
@@ -311,7 +347,11 @@ keeps only the ordering and loop-guard rules. The agent mutation workflow is:
    result with an error-specific recovery hint, so the agent stops after reporting
    the exact mismatch. Do not hand-edit old unified-diff hunk headers or continue a
    repair loop.
-4. Keep mutations to one path sequential, even when read/search calls are
+4. Recovery counters are scoped to the parent turn or the individual delegate
+   run. One delegate's failed mutation cannot terminate another delegate or the
+   parent. A delegate that exhausts its budget returns a failed, resumable Task
+   result while preserving any report text it already produced.
+5. Keep mutations to one path sequential, even when read/search calls are
    issued in parallel.
 
 An `EDIT_LINES_UNSEEN` rejection whose reveal was complete is exempt from step
@@ -332,6 +372,8 @@ Host execution baseline:
 - Default cwd = the originating session's `workspaceRoot`
 - Confirmation required by default
 - Set a mandatory 60s timeout; accept a 1s–21,600s override (D329)
+- A timeout returns `TOOL_TIMEOUT` with the effective `timeoutMs` budget and
+  guidance to raise that budget or split the command
 - Stream stdout and stderr separately, then return bounded final output
 - Truncate large output without mixing the two streams
 - No interactive TTY (MVP)
@@ -396,6 +438,15 @@ Initial denylist (extensible):
 | low | Read/Glob/Grep inside the session roots | Auto-allow |
 | medium | low-risk network/metadata | Confirm or allow by policy |
 | high | Write/Edit/Bash | Confirm by default |
+
+Tools from user-configured MCP servers (`mcp_<serverId>_<tool>`) are classified
+`medium`, the same as a plugin tool without a valid declared risk. A risk level
+self-declared by an MCP server is not trusted, unlike the risk in a plugin
+manifest the user accepted. Under `ask` and `accept-edits` an MCP tool call
+shows an approval card with reason "MCP server tool requires approval"; an
+`allow-session` grant suppresses further prompts for that tool name in that
+session (grants are in-memory only). `auto` auto-allows it, and the Plan/Goal
+contract-mode hard deny still applies (D640, ADR `mcp-tool-approval-risk`).
 
 ### Decision Types
 
@@ -462,8 +513,10 @@ tool call
  → deny? return tool error result
 ```
 
-Permission confirmation timeout:
-- After 120s, auto-deny (D005: fail closed, do not hang forever)
+Permission confirmation:
+- The local approval remains pending until Allow once, Allow for session, Deny,
+  cancellation, or host/process shutdown. Tool-specific execution timeouts
+  still apply after approval.
 
 ## 8. Tool Result Visibility to the Model
 

@@ -44,9 +44,10 @@ describe("detectTrigger — slash mode", () => {
     });
   });
 
-  it("never triggers mid-draft or on later lines", () => {
-    expect(detectTrigger("hi /cmd", 7)).toBeNull();
-    expect(detectTrigger("hi\n/cmd", 7)).toBeNull();
+  it("targets later slash tokens independently", () => {
+    expect(detectTrigger("hi /cmd", 7)).toMatchObject({ tokenStart: 3, query: "cmd" });
+    expect(detectTrigger("hi\n/cmd", 7)).toMatchObject({ tokenStart: 3, query: "cmd" });
+    expect(detectTrigger("https://example.com", 8)).toBeNull();
   });
 });
 
@@ -226,6 +227,19 @@ describe("compact file references", () => {
     );
   });
 
+  it("resolves a plugin mark to the text it sends, never to a path", () => {
+    const references = [
+      { path: "", token: "\uE001", plugin: { send: "Issue #42: crash on start" } },
+      { path: "src/a.ts", token: "\uE002" },
+      { path: "", token: "\uE003", plugin: { send: "#7 #8" } },
+    ];
+    expect(
+      serializeInlineComposerFileReferences("see \uE001\uE002 and \uE003", references),
+    ).toBe("see Issue #42: crash on start @src/a.ts and #7 #8");
+    // A mark is inline only: once its chip is gone it sends nothing.
+    expect(serializeComposerFileReferences("gone", references.slice(0, 1))).toBe("gone");
+  });
+
   it("does not serialize an inline reference after its token is removed", () => {
     expect(
       serializeComposerFileReferences("the token was removed", [
@@ -271,5 +285,19 @@ describe("compact file references", () => {
     expect(normalizeLargePasteThreshold(0)).toBe(600);
     expect(normalizeLargePasteThreshold(1_000_001)).toBe(600);
     expect(normalizeLargePasteThreshold(601)).toBe(601);
+  });
+
+  it("sends a session reference as its link, never as an @path", () => {
+    const id = "6f1d2c3b-4a59-4e7f-8a90-b1c2d3e4f506";
+    const reference = { path: id, kind: "session", token: "\uE001" };
+    expect(serializeInlineComposerFileReferences(`look \uE001 now`, [reference])).toBe(
+      `look pi-desktop://session/${id} now`,
+    );
+    expect(serializeComposerFileReferences(`look \uE001 now`, [reference])).toBe(
+      `look pi-desktop://session/${id} now`,
+    );
+    // Token or not, a session reference never becomes an appended @path.
+    expect(serializeComposerFileReferences("", [reference])).toBe("");
+    expect(serializeComposerFileReferences("", [{ path: id, kind: "session" }])).toBe("");
   });
 });

@@ -50,6 +50,50 @@
   max-width: 240px;
 }
 
+/* A chip inside a message belongs to that message: it borrows the message's own
+   face, size and leading and only keeps the tile surface. The composer's fixed
+   11.5px/20px box is a draft-only metric, and as a message chip it clipped the
+   message's own line box. Sized by the inherited leading and aligned to the
+   line, the tile covers exactly one line of message text, so the label sits on
+   that line's baseline and the chip reads as a run of it. */
+.message-row .composer-chip {
+  height: auto;
+  padding: 0 6px;
+  font: inherit;
+  line-height: inherit;
+  vertical-align: top;
+}
+
+/* A conversation reference is the message chip whose label can be as long as a
+   conversation title. An atomic chip that does not fit is pushed whole onto the
+   next line and leaves the rest of its line blank, so this one is an inline run
+   instead: it breaks with the text, its first line still reaches the right edge
+   of the line it started on, and the tile continues over the break. */
+.message-row .composer-chip[data-action="open-session-reference"] {
+  display: inline;
+  /* An inline box is as tall as the font (about 1.18em here), so half of the
+     leading has to come back as padding for the tile to cover the line box. */
+  padding: 0.186em 6px;
+  vertical-align: baseline;
+  white-space: normal;
+  -webkit-box-decoration-break: clone;
+  box-decoration-break: clone;
+}
+
+/* `gap` only spaces flex items: an inline run needs the icon's own gap. */
+.message-row .composer-chip[data-action="open-session-reference"] .composer-chip-icon {
+  margin-right: 4px;
+}
+
+/* Break the label where the line needs it instead of ellipsising it: on a full
+   line the label is the only part long enough to reach the right edge. */
+.message-row .composer-chip[data-action="open-session-reference"] .composer-chip-name {
+  overflow: visible;
+  overflow-wrap: anywhere;
+  text-overflow: clip;
+  white-space: normal;
+}
+
 .message-row.assistant .message-col,
 .message-row.system .message-col,
 .message-row.tool .message-col {
@@ -69,21 +113,33 @@
 
 .asktool-card {
   width: min(100%, var(--chat-prose-max-width, 720px));
-  margin: 10px 0;
-  padding: 14px 16px;
+  margin: 8px 0;
+  padding: 10px 12px;
   border-radius: var(--radius-md);
   background: var(--ds-tile);
 }
 
 .asktool-card-header,
-.asktool-card-actions {
+.asktool-card-header-actions {
   display: flex;
   align-items: center;
 }
-
 .asktool-card-header {
   justify-content: space-between;
-  gap: 12px;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.asktool-card-header-actions {
+  flex: none;
+  gap: 6px;
+  margin-left: auto;
+}
+.asktool-card-header-main {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
 }
 
 .asktool-card-title {
@@ -92,11 +148,12 @@
   font-weight: var(--font-weight-medium);
   letter-spacing: var(--tracking-wide);
   text-transform: uppercase;
+  white-space: nowrap;
 }
-
 .asktool-card-progress {
   color: var(--ds-text-faint);
   font-size: var(--text-2xs);
+  white-space: nowrap;
 }
 
 .asktool-question-number {
@@ -122,22 +179,21 @@
 
 .asktool-indicators {
   display: flex;
-  gap: 6px;
-  margin: 12px 0 14px;
+  align-items: center;
+  gap: 4px;
+  margin: 0;
 }
-
 .asktool-indicator {
-  width: 8px;
-  height: 8px;
+  width: 6px;
+  height: 6px;
   padding: 0;
   border-radius: var(--radius-full);
   background: var(--ds-tile-deep);
   cursor: pointer;
 }
-
 .asktool-indicator.current {
   outline: 2px solid color-mix(in oklab, var(--ds-accent) 30%, transparent);
-  outline-offset: 2px;
+  outline-offset: 1px;
 }
 
 .asktool-indicator.answered {
@@ -148,24 +204,29 @@
   background: var(--ds-text-muted);
 }
 
-.asktool-question-number {
-  margin-bottom: 8px;
+.asktool-question {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  align-items: baseline;
+  column-gap: 8px;
+  margin: 8px 0 0;
+  color: var(--ds-text-primary);
+  font-size: var(--text-sm);
+  font-weight: var(--font-weight-medium);
+  line-height: var(--leading-snug);
 }
 
-.asktool-question {
-  margin: 0;
-  color: var(--ds-text-primary);
-  font-size: var(--text-md);
-  font-weight: var(--font-weight-medium);
-  line-height: var(--leading-normal);
+.asktool-question-body {
+  display: block;
+  min-width: 0;
 }
 
 .asktool-options {
   display: grid;
-  gap: 8px;
-  max-height: min(320px, 36vh);
-  max-height: min(320px, 36dvh);
-  margin-top: 12px;
+  gap: 6px;
+  max-height: min(208px, 24vh);
+  max-height: min(208px, 24dvh);
+  margin-top: 8px;
   padding: 2px 4px 2px 0;
   overflow-x: hidden;
   overflow-y: auto;
@@ -179,18 +240,119 @@
 .asktool-option {
   display: flex;
   width: 100%;
-  align-items: center;
+  align-items: flex-start;
   gap: 8px;
-  min-height: 30px;
-  padding: 4px 8px;
+  min-height: 28px;
+  padding: 5px 8px;
   border-radius: var(--radius-sm);
   background: var(--ds-tile-deep);
   color: var(--ds-text-secondary);
   cursor: pointer;
   font: inherit;
-  font-size: var(--text-md);
+  font-size: var(--text-sm);
+  line-height: var(--leading-snug);
   text-align: start;
   transition: background-color var(--motion-duration-fast) var(--motion-ease-out);
+}
+
+.asktool-option-copy {
+  display: grid;
+  min-width: 0;
+  gap: 2px;
+}
+
+.asktool-rich-paragraph,
+.asktool-rich-heading,
+.asktool-rich-list,
+.asktool-rich-list-item,
+.asktool-rich-quote,
+.asktool-rich-pre,
+.asktool-rich-table,
+.asktool-rich-table-row,
+.asktool-rich-table-cell {
+  display: block;
+  margin: 0;
+}
+
+.asktool-rich-heading {
+  font-weight: var(--font-weight-semibold);
+}
+
+.asktool-rich-list {
+  padding-inline-start: 4px;
+}
+
+.asktool-rich-list-ordered {
+  counter-reset: asktool-option-item;
+}
+
+.asktool-rich-list-item + .asktool-rich-list-item {
+  margin-top: 2px;
+}
+
+.asktool-rich-list-ordered > .asktool-rich-list-item {
+  counter-increment: asktool-option-item;
+}
+
+.asktool-rich-list-ordered > .asktool-rich-list-item > .asktool-rich-list-marker::before {
+  content: counter(asktool-option-item) ". ";
+}
+
+.asktool-rich-list-unordered > .asktool-rich-list-item > .asktool-rich-list-marker {
+  margin-inline-end: 5px;
+  color: var(--ds-text-muted);
+}
+
+.asktool-rich-quote {
+  padding-inline-start: 6px;
+  color: var(--ds-text-muted);
+}
+
+.asktool-rich-pre {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.asktool-rich-task-marker,
+.asktool-rich-image-alt {
+  color: var(--ds-text-muted);
+}
+
+.asktool-rich-image-alt {
+  font-style: italic;
+}
+
+.asktool-rich-rule {
+  display: block;
+  height: 1px;
+  margin: 4px 0;
+  background: var(--ds-text-faint);
+}
+
+.asktool-rich-table-row {
+  display: flex;
+  gap: 6px;
+}
+
+.asktool-rich-table-cell {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.asktool-rich-code {
+  border-radius: var(--radius-2xs);
+  background: var(--ds-tile-deep);
+  padding: 1px 3px;
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  overflow-wrap: anywhere;
+}
+
+.asktool-option-description {
+  color: var(--ds-text-muted);
+  font-size: var(--text-xs);
+  line-height: var(--leading-snug);
+  overflow-wrap: anywhere;
 }
 
 .asktool-option:hover,
@@ -210,6 +372,7 @@
   color: var(--ds-accent);
   font-size: var(--text-xs);
   line-height: var(--leading-none);
+  margin-top: 2px;
 }
 
 .asktool-option[role="radio"] .asktool-option-mark {
@@ -223,14 +386,14 @@
 .asktool-custom-input {
   box-sizing: border-box;
   width: 100%;
-  margin-top: 10px;
+  margin-top: 8px;
   padding: 6px 8px;
   border: 0;
   border-radius: var(--radius-sm);
   background: var(--ds-tile-deep);
   color: var(--ds-text-primary);
   font: inherit;
-  font-size: var(--text-md);
+  font-size: var(--text-sm);
 }
 
 .asktool-custom-input:focus-visible {
@@ -238,23 +401,15 @@
   box-shadow: 0 0 0 2px color-mix(in oklab, var(--ds-accent) 30%, transparent);
 }
 
-.asktool-card-actions {
-  justify-content: flex-end;
-  gap: 8px;
-  margin-top: 12px;
+.asktool-card-header-actions .btn {
+  padding: 2px 10px;
+  font-size: var(--text-xs);
 }
-
-.asktool-card-actions .btn {
-  padding: 4px 10px;
-  font-size: var(--text-sm);
-}
-
 @media (max-width: 560px) {
   .asktool-card-header {
     align-items: flex-start;
   }
-
-  .asktool-card-actions .btn {
+  .asktool-card-header-actions .btn {
     flex: 1 1 auto;
   }
 }
@@ -750,12 +905,6 @@
   font-size: var(--text-xs-plus);
   line-height: var(--leading-compact-plus);
 }
-
-.review-change-rollback-note.is-warning {
-  flex: 1;
-  color: var(--ds-warning);
-}
-
 .review-change-diff .diff-line-sign {
   width: 24px;
   padding-block: 3px;
@@ -1583,11 +1732,13 @@
 }
 
 .message-attachments {
-  display: flex;
+  display: inline-flex;
   max-width: 100%;
   flex-wrap: wrap;
   gap: 5px;
-  margin-bottom: 7px;
+  /* The chips continue the body line instead of heading it. */
+  margin-left: 4px;
+  vertical-align: middle;
 }
 
 .message-row.user .message-attachments {
@@ -1615,29 +1766,12 @@
   white-space: nowrap;
 }
 
-.message-attachment-image {
+/* A user-message image is a chip like any other attachment; its preview card
+   appears on hover or focus and is rendered outside the message row. */
+.message-attachment-image-chip {
   display: inline-flex;
   min-width: 0;
   align-items: center;
-  justify-content: center;
-  border-radius: var(--radius-md);
-  padding: 3px;
-  background: var(--ds-tile);
-  cursor: pointer;
-  overflow: hidden;
-}
-
-.message-attachment-image:hover {
-  background: var(--ds-raised);
-  box-shadow: 0 0 0 2px color-mix(in oklab, var(--ds-accent) 18%, transparent);
-}
-
-.message-attachment-image img {
-  display: block;
-  max-width: 220px;
-  max-height: 220px;
-  object-fit: contain;
-  border-radius: var(--radius-sm);
 }
 
 .message-row.assistant .message-bubble,
@@ -2805,6 +2939,20 @@
   word-break: break-word;
 }
 
+.large-text-preview-controls {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 6px;
+  margin-bottom: 4px;
+}
+
+.large-text-preview-status {
+  color: var(--ds-text-muted);
+  font-size: var(--text-xs);
+  font-variant-numeric: tabular-nums;
+}
+
 .tool-row-content.is-error {
   background: color-mix(in oklab, var(--ds-error) 7%, transparent);
   color: color-mix(in oklab, var(--ds-error) 72%, var(--ds-text-primary));
@@ -3175,14 +3323,22 @@
   font-size: var(--text-sm);
 }
 
-/* ── Smooth streaming cursor ── */
+/* ── Smooth streaming cursor and layout stabilization ── */
 
 @keyframes smooth-stream-blink {
   0%, 100% { opacity: 1; }
   50% { opacity: 0; }
 }
 
-.assistant-turn-fragment.smooth-cursor .prose-chat > :last-child::after {
+.assistant-turn-fragment.streaming .prose-chat {
+  text-wrap: wrap;
+}
+
+.assistant-turn-fragment.smooth-cursor .prose-chat > :last-child:not(ul):not(ol):not(blockquote):not(pre):not(table):not(.table-wrap)::after,
+.assistant-turn-fragment.smooth-cursor .prose-chat > :is(ul, ol):last-child li:last-child:not(:has(ul, ol)):not(:has(p))::after,
+.assistant-turn-fragment.smooth-cursor .prose-chat > :is(ul, ol):last-child li:last-child > p:last-child::after,
+.assistant-turn-fragment.smooth-cursor .prose-chat > blockquote:last-child > p:last-child::after,
+.assistant-turn-fragment.smooth-cursor .prose-chat > pre:last-child > code::after {
   content: "";
   display: inline-block;
   width: 2px;
@@ -3194,7 +3350,11 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .assistant-turn-fragment.smooth-cursor .prose-chat > :last-child::after {
+  .assistant-turn-fragment.smooth-cursor .prose-chat > :last-child:not(ul):not(ol):not(blockquote):not(pre):not(table):not(.table-wrap)::after,
+  .assistant-turn-fragment.smooth-cursor .prose-chat > :is(ul, ol):last-child li:last-child:not(:has(ul, ol)):not(:has(p))::after,
+  .assistant-turn-fragment.smooth-cursor .prose-chat > :is(ul, ol):last-child li:last-child > p:last-child::after,
+  .assistant-turn-fragment.smooth-cursor .prose-chat > blockquote:last-child > p:last-child::after,
+  .assistant-turn-fragment.smooth-cursor .prose-chat > pre:last-child > code::after {
     animation: none;
     opacity: 0.7;
   }

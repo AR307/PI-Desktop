@@ -359,10 +359,35 @@
 }
 
 /* The heading's help mark sits beside the heading rather than inside it: a
-   nested button would join the heading's accessible name. */
+   nested button would join the heading's accessible name.
+   The 10px gap below the heading belongs to this flex row: a margin inside it
+   would extend the icon's centering box and lift the question mark off the
+   heading text. */
 .settings-card-heading-help {
   display: flex;
   align-items: center;
+  margin-bottom: 10px;
+}
+
+.settings-card-heading-help .settings-card-heading {
+  margin-bottom: 0;
+}
+
+/* A card heading that carries a card-level action keeps heading, help mark and
+   action on one line, centered on each other. */
+.settings-card-heading-row.settings-card-heading-with-action {
+  align-items: center;
+}
+
+.settings-card-heading-row.settings-card-heading-with-action .settings-card-heading-help {
+  min-width: 0;
+  margin-bottom: 0;
+}
+
+.settings-card-heading-row.settings-card-heading-with-action
+  .settings-card-heading-help
+  .settings-card-heading {
+  margin-bottom: 0;
 }
 
 .settings-card-heading-row {
@@ -423,7 +448,6 @@
 .settings-panel:has(> .settings-row),
 .settings-panel.shortcut-map,
 .settings-panel.agent-capability-panel,
-.settings-panel.provider-list-panel:has(> .provider-row-list),
 .settings-panel.model-provider-panel:has(> .model-provider-list) {
   gap: 6px;
   background: transparent;
@@ -490,20 +514,149 @@
   gap: 8px;
 }
 
-.settings-config-sync > .settings-card-block:first-child .settings-config-sync-actions {
+.settings-config-sync > .settings-card-block:first-child .settings-config-sync-actions,
+.settings-config-sync > .settings-card-block:first-of-type .settings-config-sync-actions {
   padding: 0 16px 14px;
 }
 
-.settings-config-sync-message {
+/* A failed sync is a state, not a stray paragraph: the notice wears the error
+   ink on its frame and glyph, keeps the copy legible on both themes, and hides
+   the raw host text behind a disclosure. */
+.settings-config-sync-alert {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
   margin: 0 16px 14px;
+  padding: 12px 14px;
+  border: 1px solid color-mix(in srgb, var(--ds-error) 30%, transparent);
+  border-radius: var(--radius-md-plus);
+  background: color-mix(in srgb, var(--ds-error) 8%, transparent);
   color: var(--ds-text-secondary);
-  font-size: var(--text-sm);
+  font-size: var(--text-sm-plus);
+  line-height: var(--leading-body);
   overflow-wrap: anywhere;
 }
 
-.settings-config-sync-message.error,
-.settings-config-sync-error {
-  color: var(--ds-danger);
+.settings-config-sync-alert-icon {
+  flex: none;
+  margin-top: 1px;
+  color: var(--ds-error);
+}
+
+.settings-config-sync-alert-copy {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.settings-config-sync-alert-title {
+  margin: 0;
+  color: var(--ds-text-primary);
+  font-size: var(--text-md);
+  font-weight: var(--font-weight-medium);
+  line-height: var(--leading-compact);
+}
+
+.settings-config-sync-alert-text {
+  margin: 0;
+}
+
+.settings-config-sync-alert-details {
+  margin-top: 2px;
+}
+
+.settings-config-sync-alert-details > summary {
+  color: var(--ds-text-secondary);
+  font-size: var(--text-sm);
+  line-height: var(--leading-compact);
+  cursor: pointer;
+  user-select: none;
+}
+
+.settings-config-sync-alert-details > summary:hover,
+.settings-config-sync-alert-details > summary:focus-visible {
+  color: var(--ds-text-primary);
+}
+
+.settings-config-sync-alert-details > pre {
+  max-height: 120px;
+  margin: 6px 0 0;
+  padding: 8px 10px;
+  border-radius: var(--radius-sm);
+  background: var(--ds-tile-deep);
+  color: var(--ds-text-secondary);
+  font-size: var(--text-xs-plus);
+  line-height: var(--leading-body);
+  overflow: auto;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.settings-storage-path,
+.settings-storage-message,
+.settings-storage-confirmation dd {
+  overflow-wrap: anywhere;
+}
+
+.settings-storage-message {
+  margin: 12px 16px;
+  color: var(--ds-text-secondary);
+  font-size: var(--text-sm);
+  line-height: var(--leading-body);
+}
+
+.settings-storage-message.error {
+  color: var(--ds-error);
+}
+
+.settings-storage-confirmation {
+  margin: 12px 16px 16px;
+  padding: 16px;
+  border: 1px solid var(--ds-border-default);
+  border-radius: var(--radius-md);
+  color: var(--ds-text-secondary);
+  font-size: var(--text-sm);
+  line-height: var(--leading-body);
+}
+
+.settings-storage-confirmation h4 {
+  margin: 0 0 12px;
+  color: var(--ds-text-primary);
+  font-size: var(--text-md);
+  font-weight: var(--font-weight-medium);
+}
+
+.settings-storage-confirmation p {
+  margin: 8px 0;
+}
+
+.settings-storage-confirmation dl {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 8px 16px;
+  margin: 0 0 12px;
+}
+
+.settings-storage-confirmation dd {
+  margin: 0;
+  color: var(--ds-text-primary);
+}
+
+.settings-storage-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 16px;
+}
+
+.settings-config-sync-refresh {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0 16px;
+  color: var(--ds-text-muted);
+  font-size: var(--text-sm);
 }
 
 /*
@@ -759,13 +912,6 @@
   line-height: var(--leading-compact);
 }
 
-.settings-remote-host-empty-detail {
-  flex: 1 1 100%;
-  color: var(--ds-text-secondary);
-  font-family: var(--font-mono);
-  font-size: var(--text-xs-plus);
-}
-
 .settings-remote-host-pulse {
   width: 8px;
   height: 8px;
@@ -919,7 +1065,18 @@
 }
 
 /*
-  A toggle paired with an icon action (prompt enhancement). The control column
+  The Jev row's control column: two actions and the switch. The row metric
+  above only matches a bare toggle, so the group keeps its own height.
+*/
+.jev-settings-controls {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: var(--ds-field-height);
+}
+
+/*
+  A toggle paired with an icon action. The control column
   has no gap of its own, so the two would otherwise touch.
 */
 .settings-row-control:has(> .settings-toggle + .settings-icon-button) {
@@ -1447,19 +1604,28 @@
 .settings-font-trigger {
   display: inline-flex;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
   width: max-content;
   max-width: 100%;
   min-width: 0;
-  /* One closed-trigger height for every picker: the metric a text input in the
-     same Settings row resolves to, so the two never disagree (see the token). */
-  height: var(--ds-field-height);
-  padding: 0 10px 0 12px;
+  padding: 0 10px;
   border-radius: var(--radius-full);
   background: var(--ds-raised);
   box-shadow: var(--ds-raised-shadow);
   color: var(--ds-text-primary);
   font-size: var(--text-sm-plus);
+}
+
+.settings-language-trigger,
+.settings-theme-trigger,
+.settings-font-trigger {
+  /* Appearance values are brief; the compact trigger frees vertical space
+     while SettingsMenuSelect continues to align with adjacent field inputs. */
+  height: var(--ds-settings-picker-height);
+}
+
+.settings-menu-select-trigger {
+  height: var(--ds-field-height);
 }
 
 .settings-menu-select-anchor.is-full .settings-menu-select-trigger {
@@ -1704,7 +1870,7 @@
  * One workbench per page: a description line, a single toolbar (level filter
  * with counts, one search field, project picker, primary actions), then one
  * elevated panel whose rows are divided by level group headers. Rows follow
- * the provider-row rhythm, lists flow at natural height, and loading/empty
+ * the service-row rhythm, lists flow at natural height, and loading/empty
  * states reuse the same row anatomy.
  */
 
@@ -1991,7 +2157,7 @@
   gap: 6px;
 }
 
-/* Rows follow the provider-row rhythm: quiet icon, name + badges, meta. */
+/* Rows follow the service-row rhythm: quiet icon, name + badges, meta. */
 .agent-capability-row {
   display: flex;
   align-items: center;
@@ -2268,12 +2434,14 @@
 }
 
 /*
-  The menu floats over a `#212121` panel, and the shared elevated gray is only
-  `#282828` — too close to read as detached. Light mode keeps the plain white
-  surface, where the ring and drop shadow already separate it.
+  The menu floats over the settings panel (--ds-bg-secondary, #212121 in the
+  built-in dark) and the shared elevated gray is only #282828 — too close to
+  read as detached. Light mode keeps the plain white surface, where the ring
+  and drop shadow already separate it. Both colours ride tokens so a
+  contributed theme can move the plate with the rest of the settings chrome.
 */
 :root[data-theme="dark"] .agent-capability-menu {
-  background: color-mix(in oklab, var(--gray-0) 8%, var(--gray-800));
+  background: color-mix(in oklab, var(--ds-text-primary) 8%, var(--ds-bg-secondary));
   box-shadow:
     0 0 0 0.5px var(--ds-border-strong),
     0 12px 32px rgb(0 0 0 / 44%);
@@ -2857,7 +3025,7 @@
 }
 
 .mcpm-search .field-input:focus-visible {
-  border-color: color-mix(in oklab, var(--gray-0) 32%, transparent);
+  border-color: color-mix(in oklab, var(--ds-text-primary) 32%, transparent);
   box-shadow: 0 0 0 3px var(--ds-tile-deep);
 }
 
@@ -2922,7 +3090,7 @@
 
 .mcpm-card:hover {
   transform: translateY(-2px);
-  border-color: color-mix(in oklab, var(--gray-0) 20%, transparent);
+  border-color: color-mix(in oklab, var(--ds-text-primary) 20%, transparent);
   background: var(--ds-tile-hover);
   box-shadow: 0 10px 28px color-mix(in oklab, #000 24%, transparent);
 }
@@ -3362,7 +3530,7 @@
 }
 
 .sklm-search .field-input:focus-visible {
-  border-color: color-mix(in oklab, var(--gray-0) 32%, transparent);
+  border-color: color-mix(in oklab, var(--ds-text-primary) 32%, transparent);
   box-shadow: 0 0 0 3px var(--ds-tile-deep);
 }
 
@@ -3427,7 +3595,7 @@
 
 .sklm-card:hover {
   transform: translateY(-2px);
-  border-color: color-mix(in oklab, var(--gray-0) 20%, transparent);
+  border-color: color-mix(in oklab, var(--ds-text-primary) 20%, transparent);
   background: var(--ds-tile-hover);
   box-shadow: 0 10px 28px color-mix(in oklab, #000 24%, transparent);
 }
@@ -3787,16 +3955,4 @@
 
 .sklm-page-jump::placeholder {
   color: var(--ds-text-muted);
-}
-
-/* Discovered local package paths remain readable at narrow settings widths. */
-.pi-skill-discovery .settings-row-detail {
-  overflow-wrap: anywhere;
-}
-.pi-skill-discovery .settings-row {
-  margin-top: 8px;
-  flex-wrap: wrap;
-}
-.pi-skill-discovery .settings-row-copy {
-  flex-basis: 240px;
 }

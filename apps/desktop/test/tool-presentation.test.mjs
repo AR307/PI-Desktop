@@ -16,6 +16,7 @@ const {
   toolResultChips,
   toolResultPayload,
 } = await import("../src/lib/tool-presentation.ts");
+const { getToolAction } = await import("../src/lib/tool-display.ts");
 
 /** A host tool result as pi-ai delivers it: structured details plus text echo. */
 function envelope(details) {
@@ -65,6 +66,22 @@ test("Read renders file content as code with a path-derived language", () => {
   assert.equal(content.lang, "tsx");
   assert.equal(content.highlight, true);
   assert.equal(content.text, "export const App = () => null;\n");
+});
+
+test("Read keeps oversized or exceptionally long-line content as plain text", () => {
+  for (const content of ["x".repeat(100_001), "x".repeat(2_001)]) {
+    const blocks = buildToolPresentation(
+      {
+        toolName: "Read",
+        toolArgs: { path: "src/App.tsx" },
+        toolResult: envelope({ path: "src/App.tsx", content, truncated: false }),
+      },
+      { hideSummaryArg: true },
+    );
+    assert.equal(blocks[0].kind, "code");
+    assert.equal(blocks[0].text, content);
+    assert.equal(blocks[0].highlight, false);
+  }
 });
 
 test("Write shows the written content and a size chip", () => {
@@ -716,4 +733,20 @@ test("a malformed roster degrades instead of rendering blank rows", () => {
     }),
     [],
   );
+});
+
+test("TodoWrite has a checklist action and keeps its arguments visible", () => {
+  assert.equal(getToolAction("TodoWrite"), "todo");
+  const message = {
+    toolName: "TodoWrite",
+    toolArgs: { todos: [{ content: "Inspect", status: "pending", priority: "high" }] },
+    toolResult: envelope({
+      text: "Checklist updated: 0/1 completed",
+      revision: 1,
+      summary: { completed: 0, total: 1, inProgress: 0, cancelled: 0 },
+      warnings: [],
+    }),
+  };
+  assert.deepEqual(roles(buildToolPresentation(message)), ["input", "notice"]);
+  assert.match(byRole(buildToolPresentation(message), "input").text, /Inspect/);
 });

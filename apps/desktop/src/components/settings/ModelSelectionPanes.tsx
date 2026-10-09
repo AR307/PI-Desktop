@@ -8,7 +8,7 @@
  * guarantee lives here once instead of in a convention two files had to
  * remember.
  */
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type Ref } from "react";
 import { useTranslation } from "react-i18next";
 import {
   THINKING_LEVELS,
@@ -26,6 +26,7 @@ import {
   type ModelInfo,
   type SessionThinkingLevel,
   type ThinkingLevel,
+  type ThinkingProtocol,
 } from "@pi-desktop/shared";
 import {
   CONTEXT_WINDOW_PRESETS,
@@ -43,7 +44,6 @@ import {
   customModelSeedBinding,
   type CustomModelLookupContext,
 } from "./model-custom-lookup";
-import { describeModelsFetchError } from "./model-fetch-error";
 import type { ProviderModelsState } from "./useProviderModels";
 import { useModelReorder } from "./useModelReorder";
 
@@ -69,6 +69,24 @@ export type ModelSelection = {
   bindingsToPersist: ModelBinding[];
   setModels: (update: (current: ModelBinding[]) => ModelBinding[]) => void;
 };
+
+type ModelTokenLimit = "contextWindow" | "maxTokens";
+
+function publishedModelLimit(
+  info: ModelInfo | undefined,
+  field: ModelTokenLimit,
+): number | undefined {
+  if (!info) return undefined;
+  const published = field === "contextWindow" ? info.limit?.context : info.limit?.output;
+  if (published !== undefined) return published;
+  // models.dev rows keep the raw record in `limit`; other discovered rows may
+  // carry only the runtime's generic safety budget, which is not a published
+  // model limit and should not look like one in Settings.
+  if (info.catalogSource === "models.dev" || info.source === "discovered") {
+    return undefined;
+  }
+  return field === "contextWindow" ? info.contextWindow : info.maxTokens;
+}
 
 /**
  * Row merging and published-level metadata for one binding list.
@@ -209,6 +227,10 @@ export type ModelSelectionPanesProps = {
    * limits; absent fields only widen the catalog search.
    */
   lookupContext?: CustomModelLookupContext;
+  /** Attached to the hand-typed id field, so a caller can focus it. */
+  customModelInputRef?: Ref<HTMLInputElement>;
+  /** The chosen list is exactly what the recommendation picked. */
+  autoPicked?: boolean;
 };
 
 /**
@@ -226,6 +248,8 @@ export function ModelSelectionPanes({
   imageModelIds,
   lookupContext,
   onImageModelChange,
+  customModelInputRef,
+  autoPicked = false,
 }: ModelSelectionPanesProps) {
   const { t } = useTranslation();
   const { rows, models, publishedLevelsById, setModels } = selection;
@@ -233,22 +257,25 @@ export function ModelSelectionPanes({
   const [chosenQuery, setChosenQuery] = useState("");
   const [customModelId, setCustomModelId] = useState("");
   const [customModelError, setCustomModelError] = useState("");
-  // Keep fetched selections scannable. Expanding the first row by default can
-  // fill the pane with its controls and push every other checked model below
-  // the fold, which makes a successful multi-select look empty.
+  // Keep selections scannable; advanced settings stay folded until requested.
   const [expandedModelId, setExpandedModelId] = useState<string | null>(null);
 
   // The returned list is short and already local, so filtering is client-side:
   // no host search and no debounced IPC round trip.
   const visibleRows = useMemo(() => {
+    // The service pane follows a live answer. Configured-only rows remain in
+    // the chosen pane, including hand-typed IDs absent from discovery.
+    const availableRows = discovery.source === "remote"
+      ? rows.filter((row) => row.info && row.info.source !== "user")
+      : rows;
     const needle = modelQuery.trim().toLowerCase();
-    if (!needle) return rows;
-    return rows.filter(
+    if (!needle) return availableRows;
+    return availableRows.filter(
       (row) =>
         row.id.toLowerCase().includes(needle) ||
         row.displayName.toLowerCase().includes(needle),
     );
-  }, [modelQuery, rows]);
+  }, [modelQuery, rows, discovery.source]);
 
   const selected = useMemo(
     () => new Set(models.map((binding) => binding.id.toLowerCase())),
@@ -356,8 +383,14 @@ export function ModelSelectionPanes({
     } catch {
       return;
     }
-    // A catalog hit for a different wire id is not metadata for this row.
-    if (info && info.modelId.toLowerCase() !== seed.id.toLowerCase()) return;
+    /*
+      The host answered for the id this row was added with, so the record is this
+      row's — including when the same model is published under another spelling
+      of it (a route prefix, a date, a marker the deployment appends). That is the
+      resolution the runtime reads for the row too, so checking the spelling again
+      here would only drop an answer the rest of the app uses. The stored wire id
+      stays exactly what the user typed.
+    */
     setModels((current) => applyCustomModelLookup(current, seed, info));
   };
 
@@ -392,14 +425,17 @@ export function ModelSelectionPanes({
     if (!discovered?.info) void enrichCustomModel(binding);
   };
 
-  const fetchFailed = discovery.status === "error";
-  const emptyFetchError = fetchFailed && rows.length === 0;
+  // A failed probe leaves an empty pane: the pane says the list is missing and
+  // the toast says why, so the list no longer hosts a classified error box.
+  const emptyFetchError = discovery.status === "error" && rows.length === 0;
 
   const modelListBody =
     discovery.status === "idle" ? (
       <div className="provider-models-placeholder">{t("settings.modelsEmptyHint")}</div>
     ) : emptyFetchError ? (
-      <ModelsFetchErrorMessage error={discovery.error} variant="placeholder" />
+      <div className="provider-models-placeholder is-error">
+        {t("settings.modelsFetchFailed")}
+      </div>
     ) : rows.length === 0 ? (
       <div className="provider-models-placeholder">
         {discovery.status === "loading"
@@ -452,7 +488,8 @@ export function ModelSelectionPanes({
                 ) : null}
               </span>
               <span className="provider-models-row-limits">
-                {formatTokenCount(row.contextWindow)} · {formatTokenCount(row.maxTokens)}
+                {formatTokenCount(publishedModelLimit(row.info, "contextWindow"))} ·{" "}
+                {formatTokenCount(publishedModelLimit(row.info, "maxTokens"))}
               </span>
             </label>
           </li>
@@ -531,10 +568,6 @@ export function ModelSelectionPanes({
           </div>
         </div>
 
-        {fetchFailed && !emptyFetchError ? (
-          <ModelsFetchErrorMessage error={discovery.error} variant="banner" />
-        ) : null}
-
         {modelListBody}
       </div>
 
@@ -558,6 +591,9 @@ export function ModelSelectionPanes({
             />
           </div>
         </div>
+        {autoPicked && models.length > 0 ? (
+          <div className="provider-models-summary-hint">{t("settings.modelsAutoPicked")}</div>
+        ) : null}
         {models.length === 0 ? (
           <div className="provider-chosen-empty">{t("settings.noModelsChosen")}</div>
         ) : visibleChosen.length === 0 ? (
@@ -576,12 +612,21 @@ export function ModelSelectionPanes({
               const publishedImages = info ? modelMatchesFilter(info, "vision") : false;
               // The row's published window, so the hint below the field can say
               // the number still follows it.
-              const publishedContextWindow = info
-                ? (info.contextWindow ?? info.limit?.context)
-                : undefined;
+              const publishedContextWindow = publishedModelLimit(info, "contextWindow");
+              const publishedMaxTokens = publishedModelLimit(info, "maxTokens");
               const followsCatalog =
                 binding.contextWindowSource !== "user" &&
                 publishedContextWindow !== undefined;
+              const displayedContextWindow =
+                binding.contextWindowSource === "catalog" &&
+                publishedContextWindow === undefined
+                  ? undefined
+                  : binding.contextWindow;
+              const displayedMaxTokens =
+                binding.maxTokensSource === "catalog" &&
+                publishedMaxTokens === undefined
+                  ? undefined
+                  : binding.maxTokens;
               const publishedDocuments = info ? modelMatchesFilter(info, "pdf") : false;
               const expanded = expandedModelId === binding.id;
               const imageModelSelected = imageModelIds?.some((modelId) =>
@@ -617,8 +662,8 @@ export function ModelSelectionPanes({
                       <span className="provider-chosen-row-alias">{binding.alias.trim()}</span>
                     ) : null}
                     <span className="provider-chosen-row-limits">
-                      {formatTokenCount(binding.contextWindow)} ·{" "}
-                      {formatTokenCount(binding.maxTokens)}
+                      {formatTokenCount(displayedContextWindow)} ·{" "}
+                      {formatTokenCount(displayedMaxTokens)}
                     </span>
                     <button
                       type="button"
@@ -763,6 +808,7 @@ export function ModelSelectionPanes({
                                 onClick={() =>
                                   updateBinding(binding.id, {
                                     maxTokens: preset.tokens,
+                                    maxTokensSource: "user",
                                   })
                                 }
                               >
@@ -779,6 +825,7 @@ export function ModelSelectionPanes({
                           onChange={(event) =>
                             updateBinding(binding.id, {
                               maxTokens: Number(event.target.value) || 0,
+                              maxTokensSource: "user",
                             })
                           }
                         />
@@ -794,34 +841,63 @@ export function ModelSelectionPanes({
                             <HelpIcon label={t("settings.thinkingManualOverrideHint")} />
                           ) : null}
                         </span>
-                        {bindingDefaultThinkingMenuLevels(enabledLevels).length > 1 ? (
-                          <div className="provider-chosen-thinking-default">
+                        <div className="provider-chosen-thinking-controls">
+                          <div className="provider-chosen-thinking-protocol">
                             <span className="provider-chosen-thinking-label">
-                              {t("settings.defaultThinkingLevel")}
+                              {t("settings.thinkingProtocol")}
                             </span>
                             <SettingsMenuSelect
                               className="provider-chosen-thinking-select"
-                              label={t("settings.defaultThinkingLevel")}
+                              label={t("settings.thinkingProtocol")}
                               value={
-                                resolveBindingDefaultThinkingLevel(
-                                  binding.defaultThinkingLevel,
-                                  enabledLevels,
-                                ) ?? ""
+                                binding.thinkingProtocol ?? info?.thinkingProtocol ?? "legacy"
                               }
                               onChange={(id) =>
                                 updateBinding(binding.id, {
-                                  defaultThinkingLevel: id as SessionThinkingLevel,
+                                  thinkingProtocol: id as ThinkingProtocol,
                                 })
                               }
-                              options={bindingDefaultThinkingMenuLevels(enabledLevels).map(
-                                (level) => ({
-                                  id: level,
-                                  label: level,
-                                }),
-                              )}
+                              options={[
+                                {
+                                  id: "legacy",
+                                  label: t("settings.thinkingProtocolLegacy"),
+                                },
+                                {
+                                  id: "adaptive",
+                                  label: t("settings.thinkingProtocolAdaptive"),
+                                },
+                              ]}
                             />
                           </div>
-                        ) : null}
+                          {bindingDefaultThinkingMenuLevels(enabledLevels).length > 1 ? (
+                            <div className="provider-chosen-thinking-default">
+                              <span className="provider-chosen-thinking-label">
+                                {t("settings.defaultThinkingLevel")}
+                              </span>
+                              <SettingsMenuSelect
+                                className="provider-chosen-thinking-select"
+                                label={t("settings.defaultThinkingLevel")}
+                                value={
+                                  resolveBindingDefaultThinkingLevel(
+                                    binding.defaultThinkingLevel,
+                                    enabledLevels,
+                                  ) ?? ""
+                                }
+                                onChange={(id) =>
+                                  updateBinding(binding.id, {
+                                    defaultThinkingLevel: id as SessionThinkingLevel,
+                                  })
+                                }
+                                options={bindingDefaultThinkingMenuLevels(enabledLevels).map(
+                                  (level) => ({
+                                    id: level,
+                                    label: level,
+                                  }),
+                                )}
+                              />
+                            </div>
+                          ) : null}
+                        </div>
                       </div>
                       <div
                         className="provider-chosen-thinking-chips"
@@ -972,6 +1048,7 @@ export function ModelSelectionPanes({
           >
             <div className="provider-custom-model-row">
               <Input
+                ref={customModelInputRef}
                 value={customModelId}
                 placeholder={t("settings.customModelPlaceholder")}
                 className="font-mono text-sm"
@@ -997,75 +1074,21 @@ export function ModelSelectionPanes({
   );
 }
 
-function ModelsFetchErrorMessage({
-  error,
-  variant,
-}: {
-  error?: string;
-  variant: "banner" | "placeholder";
-}) {
-  const { t } = useTranslation();
-  const view = describeModelsFetchError(error);
-  let summary = t("settings.modelsFetchFailed");
-  switch (view.kind) {
-    case "unauthorized":
-      summary = t("errors.PROVIDER_UNAUTHORIZED");
-      break;
-    case "notFound":
-      summary = t("settings.modelsFetchNotFound");
-      break;
-    case "rateLimited":
-      summary = t("errors.PROVIDER_RATE_LIMITED");
-      break;
-    case "timeout":
-      summary = t("errors.TIMEOUT");
-      break;
-    case "network":
-      summary = t("errors.NETWORK_ERROR");
-      break;
-    case "invalidResponse":
-      summary = t("settings.modelsFetchInvalidResponse");
-      break;
-    case "http":
-      summary = t("settings.modelsFetchFailedStatus", {
-        status: view.summaryParams?.status ?? 0,
-      });
-      break;
-  }
-  const className =
-    variant === "placeholder"
-      ? "provider-models-placeholder is-error"
-      : "provider-models-note is-error";
-  return (
-    <div className={className} role="alert">
-      <span className="provider-models-error-summary">{summary}</span>
-      {view.detail ? (
-        <span className="provider-models-error-detail">{view.detail}</span>
-      ) : null}
-      {variant === "placeholder" ? (
-        <span className="provider-models-error-hint">{t("settings.modelsFetchHint")}</span>
-      ) : null}
-    </div>
-  );
-}
-
 type CapabilityToggleProps = {
   label: string;
   /** What models.dev publishes for this model. */
   published: boolean;
   /** Stored override: `true`/`false` explicit, `null`/undefined follows. */
   value: boolean | null | undefined;
-  onChange: (next: boolean | null) => void;
+  onChange: (next: boolean) => void;
 };
 
 /**
  * One attachment capability as a plain checkbox showing the effective answer.
  *
- * The three stored states stay, but they need no third control: ticking the box
- * back to what models.dev publishes stores "follow the catalog" rather than an
- * equal-valued override, so agreeing with the catalog is the reset. That keeps a
- * later catalog correction flowing through without asking the user to
- * understand the distinction.
+ * An untouched checkbox follows the catalog. Once the user changes it, the
+ * selected boolean is explicit and stays pinned even if it currently agrees
+ * with models.dev; catalog refreshes must not undo a deliberate choice.
  */
 function CapabilityToggle({ label, published, value, onChange }: CapabilityToggleProps) {
   const effective = typeof value === "boolean" ? value : published;
@@ -1074,9 +1097,7 @@ function CapabilityToggle({ label, published, value, onChange }: CapabilityToggl
       <input
         type="checkbox"
         checked={effective}
-        onChange={(event) =>
-          onChange(event.target.checked === published ? null : event.target.checked)
-        }
+        onChange={(event) => onChange(event.target.checked)}
       />
       <span>{label}</span>
     </label>

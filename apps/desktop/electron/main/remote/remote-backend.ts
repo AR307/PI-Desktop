@@ -66,6 +66,7 @@ const HANDLED_CHANNELS: ReadonlySet<string> = new Set([
   IPC.invoke.agentPrompt,
   IPC.invoke.agentQueuePush,
   IPC.invoke.agentQueueList,
+  IPC.invoke.agentQueueRemove,
   IPC.invoke.agentStop,
   IPC.invoke.agentAbort,
   IPC.invoke.agentCompact,
@@ -75,6 +76,7 @@ const HANDLED_CHANNELS: ReadonlySet<string> = new Set([
   IPC.invoke.sessionConfigure,
   IPC.invoke.sessionFork,
   IPC.invoke.sessionRename,
+  IPC.invoke.sessionDeriveTitle,
   IPC.invoke.sessionDelete,
   IPC.invoke.toolResolvePermission,
   IPC.invoke.askToolResolve,
@@ -170,6 +172,15 @@ export function createRemoteBackend(options: RemoteBackendOptions): RemoteBacken
           position: turn.queuePosition ?? 0,
           createdAt: new Date().toISOString(),
         } satisfies QueuedTurnSummary;
+      }
+      case IPC.invoke.agentQueueRemove: {
+        const request = args[0] as { turnId?: unknown };
+        const turnId = typeof request.turnId === "string" ? request.turnId.trim() : "";
+        if (!turnId || turnId.length > 256) {
+          throw Object.assign(new Error("queued turn id is invalid"), { errorCode: ErrorCodes.INVALID_ARGUMENT });
+        }
+        await client.request("turn/cancel", { turnId, context: context() });
+        return { ok: true };
       }
       case IPC.invoke.agentQueueList: {
         const remoteSessionId = remoteIdFor(args);
@@ -277,6 +288,14 @@ export function createRemoteBackend(options: RemoteBackendOptions): RemoteBacken
         const title = args[1] as string;
         await client.request("session/rename", { sessionId: hostIdFor(args), title });
         return { ok: true };
+      }
+      case IPC.invoke.sessionDeriveTitle: {
+        const title = args[1] as string;
+        const result = await client.request<{ updated?: boolean }>("session/deriveTitle", {
+          sessionId: hostIdFor(args),
+          title,
+        });
+        return { updated: result.updated === true };
       }
       case IPC.invoke.sessionDelete: {
         await client.request("session/delete", { sessionId: hostIdFor(args) });

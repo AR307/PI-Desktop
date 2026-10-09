@@ -39,11 +39,12 @@ giving them the loop — scaffold, run, inspect, package.
    instructions.** Later text carries more weight, so a user's own instruction
    files keep the last word and an installed plugin can refine the built-in
    guidance but never the reverse.
-3. **Runtime reuse keys on the catalog digest, not on bodies.** Enabling a
-   plugin, revoking `agent.prompt.inject` or renaming a skill changes the text
-   the model reads, so it retires the idle runtime rather than reusing a stale
-   prompt. An edit to a body needs no retirement: the `Skill` tool reads the file
-   at call time.
+3. **Catalog changes update an idle runtime's skills section.** The chronological
+   system-transcript decision supersedes the original digest-based retirement:
+   enabling a plugin, revoking `agent.prompt.inject`, or renaming a skill appends
+   a section update before the next request. The digest excludes bodies; the
+   `Skill` tool reads the file and rechecks permissions at call time. Removing
+   the last catalog entry also removes the executable `Skill` declaration.
 4. **Plugin authoring ships as a first-party devkit, not as a plugin.**
    `@pi-desktop/plugin-devkit` owns scaffold, check and pack; three surfaces
    share that one implementation — the `pi-plugin` CLI, the `PluginScaffold` /

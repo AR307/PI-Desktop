@@ -46,12 +46,14 @@ const COMMAND_GROUP_ORDER = {
   builtin: 1,
   plugin: 2,
   extension: 3,
-  skill: 4,
+  mcp: 4,
+  skill: 5,
 } as const;
 
 function filterCommands(
   commands: ComposerCommand[],
   query: string,
+  skillsOnly = false,
 ): AutocompleteItem[] {
   const matched: Array<{
     command: ComposerCommand;
@@ -59,6 +61,7 @@ function filterCommands(
     sortText: string;
   }> = [];
   for (const command of commands) {
+    if (skillsOnly && command.kind !== "skill") continue;
     const byName = fuzzyMatchCommand(query, command.name);
     if (byName) {
       matched.push({ command, match: byName, sortText: command.name });
@@ -251,7 +254,7 @@ export function useComposerAutocomplete({
   const items = useMemo<AutocompleteItem[]>(() => {
     if (!trigger || dismissed) return [];
     if (trigger.mode === "slash") {
-      return commands ? filterCommands(commands, trigger.query) : [];
+      return commands ? filterCommands(commands, trigger.query, trigger.tokenStart > 0) : [];
     }
     return files ? filterFiles(files.entries, trigger.query) : [];
   }, [trigger, dismissed, commands, files]);

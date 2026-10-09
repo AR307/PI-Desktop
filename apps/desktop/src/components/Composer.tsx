@@ -1,3 +1,4 @@
+import { inheritedSessionModelBinding } from "../lib/session-model";
 import {
   useEffect,
   useLayoutEffect,
@@ -12,10 +13,10 @@ import type {
 } from "@pi-desktop/shared";
 import {
   initialThinkingLevelForBinding,
+  initialThinkingLevelForUnmatchedModel,
   imageGenerationBindings,
   isImageGenerationModel,
   normalizeLargePasteThreshold,
-  stripInlineComposerFileReferenceTokens,
 } from "@pi-desktop/shared";
 import { useAppStore } from "../stores/app-store";
 import { latestTurnContextInspector } from "../lib/latest-turn-context";
@@ -24,15 +25,12 @@ import { headAsk, queuedAskCount } from "../lib/pending-asks";
 import type { QueuedPrompt } from "../lib/queued-prompts";
 import { composerModelDisplayName, sameComposerModelId } from "../lib/composer-models";
 import {
-  providerThinkingLevels,
   resolveComposerThinkingProvider,
 } from "../lib/session-thinking";
-import {
-  useComposerAutocomplete,
-} from "../hooks/use-composer-autocomplete";
 import { ComposerAutocomplete } from "./ComposerAutocomplete";
 import { AskToolCard } from "./AskToolCard";
 import { PlanApprovalBar } from "./PlanApprovalBar";
+import { TodoDock } from "./TodoDock";
 import {
   COMPOSER_MAX_VISIBLE_ROWS,
   COMPOSER_MIN_HEIGHT_PX,
@@ -42,25 +40,20 @@ import {
   isThinkingLevel,
   thinkingLevelForProvider,
   thinkingProviderForModel,
-  THINKING_LEVELS,
   type ComposerPrefill,
 } from "../features/chat/composer/model";
-import {
-  createFileReference,
-  editorSelectionRange,
-  isImageFilePath,
-  nextChipToken,
-} from "../features/chat/composer/editor";
+import { editorSelectionRange } from "../features/chat/composer/editor";
 import { useComposerAttachments } from "../features/chat/composer/hooks/useComposerAttachments";
+import { useComposerCompletions } from "../features/chat/composer/hooks/useComposerCompletions";
 import { useComposerDraft } from "../features/chat/composer/hooks/useComposerDraft";
+import { useComposerInputHistory } from "../features/chat/composer/hooks/useComposerInputHistory";
+import { usePluginComposerBridge } from "../features/chat/composer/hooks/usePluginComposerBridge";
 import { useComposerSubmit } from "../features/chat/composer/hooks/useComposerSubmit";
-import { ComposerImageAttachments } from "../features/chat/composer/ComposerImageAttachments";
+import { useComposerTransforms } from "../features/chat/composer/hooks/useComposerTransforms";
 import { ComposerInput } from "../features/chat/composer/ComposerInput";
 import { useComposerModelMenu } from "../features/chat/composer/hooks/useComposerModelMenu";
-import { ComposerToolbar } from "../features/chat/composer/ComposerToolbar";
 import { useVoiceInput } from "../features/voice/useVoiceInput";
-import { VoiceOverlay } from "../features/voice/VoiceOverlay";
-import "../styles/voice.css";
+import { ComposerToolbar } from "../features/chat/composer/ComposerToolbar";
 import { ComposerStatus } from "../features/chat/composer/ComposerStatus";
 
 const EMPTY_QUEUED_PROMPTS: QueuedPrompt[] = [];
@@ -92,6 +85,14 @@ export function Composer({
     s.activeSessionId ? s.planningStates[s.activeSessionId] : undefined,
   );
   const settings = useAppStore((s) => s.settings);
+  const plugins = useAppStore((s) => s.plugins);
+  const composerTransforms = useMemo(
+    () =>
+      plugins
+        .filter((plugin) => plugin.enabled && plugin.status === "ready")
+        .flatMap((plugin) => plugin.composerTransforms ?? []),
+    [plugins],
+  );
   const imageGenerationCandidates = useMemo(
     () => imageGenerationBindings(settings?.imageGenerationModels, settings?.imageGeneration),
     [settings?.imageGenerationModels, settings?.imageGeneration],
@@ -143,13 +144,13 @@ export function Composer({
   );
 
   const [permissionOpen, setPermissionOpen] = useState(false);
-  const enhancementInvalidateRef = useRef<() => void>(() => {});
+  const composerTransformInvalidateRef = useRef<() => void>(() => {});
   const composerShellRef = useRef<HTMLDivElement>(null);
   const dockRef = useRef<HTMLDivElement>(null);
   const publishedDockHeightRef = useRef(-1);
 
-  const invalidatePromptEnhancement = () => {
-    enhancementInvalidateRef.current();
+  const invalidateComposerTransforms = () => {
+    composerTransformInvalidateRef.current();
   };
 
   const draft = useComposerDraft({
@@ -161,7 +162,7 @@ export function Composer({
     clearComposerPrefill,
     prefill,
     t,
-    invalidatePromptEnhancement,
+    invalidateComposerTransforms,
     inputBlocked: planCheckpoint?.status === "pending" || nativeInputBlocked,
   });
   const {
@@ -192,6 +193,11 @@ export function Composer({
     insertNewlineInEditor,
     handleInput,
   } = draft;
+  const inputHistory = useComposerInputHistory({
+    draftKey,
+    referenceSessionId,
+    draft,
+  });
 
   const approvalPending = planCheckpoint?.status === "pending";
   const largePasteThreshold = normalizeLargePasteThreshold(
@@ -231,10 +237,6 @@ export function Composer({
   const inputBlocked = approvalPending || pasting || nativeInputBlocked;
   const controlsBlocked = approvalPending || nativeSession;
   const sendBlocked = approvalPending || pasting || nativeInputBlocked;
-  const enhancementDraft = stripInlineComposerFileReferenceTokens(
-    value,
-    activeFileReferences,
-  );
   // Edit returns one queued row to the composer. The row is removed and its
   // captured draft becomes the input, so the input must be empty first: the
   // live read is the only current source (the draft cache is not per keystroke).
@@ -329,17 +331,15 @@ export function Composer({
       : sessionPermissionMode;
   const composerPermissionMode: Exclude<PermissionMode, "inherit"> =
     mode === "goal" ? "auto" : effectivePermissionMode;
-  const provider = providers.find(
-    (candidate) =>
-      candidate.id ===
-      (activeSession?.providerId ??
-        (!activeSession ? draftConfiguration?.providerId : undefined) ??
-        settings?.defaultProviderId),
-  );
-  const modelId =
-    activeSession?.modelId ??
-    (!activeSession ? draftConfiguration?.modelId : undefined) ??
-    (settings?.defaultModelId?.trim() || provider?.models?.[0]?.id || provider?.defaultModelId);
+  const recentModels = useAppStore((s) => s.recentModels);
+  const selectedModel = inheritedSessionModelBinding({
+    draft: activeSession ?? draftConfiguration,
+    settings,
+    providers,
+    recentModels,
+  });
+  const provider = providers.find(candidate => candidate.id === selectedModel.providerId);
+  const modelId = selectedModel.modelId;
   const selectedModelCatalog = provider ? providerModels[provider.id] : undefined;
   const catalogThinkingProvider = thinkingProviderForModel(
     provider,
@@ -355,12 +355,20 @@ export function Composer({
   const selectedBinding = provider?.models.find((candidate) =>
     sameComposerModelId(candidate.id, modelId ?? ""),
   );
+  const selectedModelInfo = selectedModelCatalog?.find((candidate) =>
+    sameComposerModelId(candidate.modelId, modelId ?? ""),
+  );
   // A draft without a session starts at the selected model's stored default
   // thinking level, clamped onto that binding's enabled ladder.
-  const draftThinkingLevel = initialThinkingLevelForBinding(
-    selectedBinding,
-    thinkingProvider?.supportedThinkingLevels,
-  );
+  const draftThinkingLevel = selectedModelInfo?.catalogSource === "models.dev"
+    ? initialThinkingLevelForBinding(
+        selectedBinding,
+        thinkingProvider?.supportedThinkingLevels,
+      )
+    : initialThinkingLevelForUnmatchedModel(
+        selectedBinding,
+        thinkingProvider?.supportedThinkingLevels,
+      );
   const sessionThinkingLevel =
     activeSession?.thinkingLevel ??
     (!activeSession ? draftConfiguration?.thinkingLevel : undefined) ??
@@ -368,17 +376,13 @@ export function Composer({
   const configuredThinkingLevel = isThinkingLevel(sessionThinkingLevel)
     ? sessionThinkingLevel
     : "off";
-  const availableThinkingLevels = providerThinkingLevels(thinkingProvider);
   const thinkingLevel = thinkingLevelForProvider(
     thinkingProvider,
     configuredThinkingLevel,
   );
   const thinkingLabel = thinkingLevel;
-  const selectedModelInfo = selectedModelCatalog?.find((candidate) =>
-    sameComposerModelId(candidate.modelId, modelId ?? ""),
-  );
   const modelLabel = modelId
-    ? composerModelDisplayName(provider, modelId, selectedModelInfo?.displayName)
+    ? composerModelDisplayName(provider, modelId)
     : t("chat.model");
   const modelMenu = useComposerModelMenu({
     configureActiveSession,
@@ -405,14 +409,26 @@ export function Composer({
     setPermissionOpen(false);
   }, [controlsBlocked]);
 
-  const submitController = useComposerSubmit({
+  const composerTransformController = useComposerTransforms({
+    transforms: composerTransforms,
     value,
     draftKey,
     activeSessionId,
     providerId: provider?.id,
     modelId,
-    thinkingLevel,
+    sendBlocked,
+    activeFileReferences,
+    draft: { ref, setValue, setCursor },
+    showToast,
+  });
+  composerTransformInvalidateRef.current = composerTransformController.invalidate;
+
+  const submitController = useComposerSubmit({
+    value,
+    draftKey,
+    activeSessionId,
     modelReady,
+    invalidateComposerTransforms,
     sendBlocked,
     pasting,
     activeFileReferences,
@@ -420,32 +436,29 @@ export function Composer({
     sendPrompt,
     steerPrompt,
     showToast,
+    recordHistory: inputHistory.record,
     draft: {
       ref,
       draftSnapshot,
       draftRevision,
       clearDraftForKey,
       restoreDraftForKey,
-      setValue,
-      setCursor,
     },
   });
-  enhancementInvalidateRef.current = submitController.invalidatePromptEnhancement;
-  const {
-    enhancingPrompt,
-    enhancementUndoText,
-    enhancementError,
-    clearEnhancementError,
-    enhancePrompt,
-    undoPromptEnhancement,
-    submit,
-  } = submitController;
+  const { submit } = submitController;
 
-  const voiceEnabled = !!settings?.voice?.enabled;
-  const voice = useVoiceInput({
-    enabled: voiceEnabled,
+  // Both submit entry points (the composer's Enter and the toolbar's Send)
+  // leave history browsing before the draft is cleared.
+  const submitFromComposer = (steering?: boolean) => {
+    inputHistory.exitBrowsing();
+    return submit(steering);
+  };
+
+  // Keep the legacy listener for already-started or IPC-owned Dictation, but
+  // the Composer no longer exposes a Dictation control or overlay.
+  useVoiceInput({
+    enabled: import.meta.env.DEV && !!settings?.voice?.enabled,
     onTranscriptionComplete: (text) => {
-      // Insert transcribed text into Composer
       const current = readLiveDraft();
       if (!current.trim()) {
         applyEditorDraft(text, fileReferencesRef.current, text.length);
@@ -455,46 +468,20 @@ export function Composer({
       }
     },
   });
-
-  const composerAc = useComposerAutocomplete({
+  const completions = useComposerCompletions({
     value,
     cursor,
     composing,
     enabled: !inputBlocked,
+    referenceSessionId,
+    fileReferencesRef,
+    applyEditorDraft,
+    handleInput,
+    invalidateComposerTransforms,
   });
 
-  const acceptCompletion = (index: number) => {
-    const result = composerAc.accept(index);
-    if (!result) return;
-    invalidatePromptEnhancement();
-    // File accept strips the @ token (empty insert) and used to store a
-    // token-less chip above the textarea. Inline chips only paint when a
-    // sentinel is in the draft, so Enter looked like the reference vanished.
-    const acceptedFileReference = result.fileReference;
-    if (!acceptedFileReference) {
-      applyEditorDraft(result.value, fileReferencesRef.current, result.cursor);
-      return;
-    }
-    const token = nextChipToken();
-    const nextText =
-      result.value.slice(0, result.cursor) + token + result.value.slice(result.cursor);
-    applyEditorDraft(
-      nextText,
-      [
-        ...fileReferencesRef.current,
-        createFileReference(
-          acceptedFileReference.path,
-          acceptedFileReference.name,
-          referenceSessionId,
-          {
-            kind: isImageFilePath(acceptedFileReference.path) ? "image" : "file",
-            token,
-          },
-        ),
-      ],
-      result.cursor + token.length,
-    );
-  };
+  // Plugin draft and attachment actions reach this composer while it takes input.
+  usePluginComposerBridge({ ...draft, inputBlocked });
 
   // Keep the transcript's bottom reserve in sync with the composer's real
   // height (it grows with multi-line input) so the last message sits just
@@ -527,6 +514,7 @@ export function Composer({
       data-composer-dock={variant}
     >
       <div className="composer-stack">
+        {activeSessionId ? <TodoDock sessionId={activeSessionId} /> : null}
         {planCheckpoint?.status === "pending" ? (
           <PlanApprovalBar proposal={planCheckpoint} />
         ) : null}
@@ -546,14 +534,11 @@ export function Composer({
           editQueuedPrompt={handleEditQueuedPrompt}
           sendQueuedNow={sendQueuedNow}
           approvalPending={approvalPending}
-          enhancementError={enhancementError}
-          clearEnhancementError={clearEnhancementError}
           droppedDirectories={droppedDirectories}
           openDroppedFolderAsProject={openDroppedFolderAsProject}
           insertDroppedDirectoryPaths={insertDroppedDirectoryPaths}
           dismissDroppedDirectories={dismissDroppedDirectories}
         />
-        <ComposerImageAttachments controller={draft.imagePreview} onRemove={draft.removeImage} disabled={inputBlocked} />
         <div
           ref={composerShellRef}
           className={`composer-shell${inputBlocked ? " is-gated" : ""}${
@@ -567,8 +552,8 @@ export function Composer({
           {inputFocused ? (
             <ComposerAutocomplete
               anchorRef={composerShellRef}
-              ac={composerAc}
-              onAccept={acceptCompletion}
+              ac={completions.ac}
+              onAccept={completions.acceptCompletion}
             />
           ) : null}
           <ComposerInput
@@ -581,24 +566,29 @@ export function Composer({
             pasting={pasting}
             enterToSend={enterToSend}
             runActive={runActive}
-            composerAc={composerAc}
+            composerAc={completions.ac}
             onPaste={pasteClipboardFiles}
-            onAcceptCompletion={acceptCompletion}
-            onSubmit={(steering) => void submit(steering)}
+            onAcceptCompletion={completions.acceptCompletion}
+            onSubmit={(steering) => void submitFromComposer(steering)}
             onInsertNewline={insertNewlineInEditor}
-            onInput={handleInput}
+            onInput={(source, caret) => {
+              inputHistory.exitBrowsing();
+              completions.handleInput(source, caret);
+            }}
+            onHistoryNavigate={inputHistory.navigate}
             onCompositionStart={() => setComposing(true)}
             onCompositionEnd={(event) => {
               setComposing(false);
               draft.updateCursor(editorSelectionRange(event.currentTarget).start);
             }}
+            // A dropped compositionend must not freeze the menu forever (#929).
+            onSettledInput={() => draft.setComposing(false)}
             onFocus={() => setInputFocused(true)}
             onBlur={() => {
               setInputFocused(false);
               persistDraft();
             }}
           />
-          <VoiceOverlay t={t} state={voice.state} onCancel={voice.cancel} />
           <ComposerToolbar
             t={t}
             mode={mode}
@@ -618,23 +608,20 @@ export function Composer({
             modelLabel={modelLabel}
             thinkingLabel={thinkingLabel}
             contextUsage={composerContextUsage ?? null}
-            enhancementDraft={enhancementDraft}
             value={value}
             modelReady={modelReady}
             sendBlocked={sendBlocked}
-            enhancingPrompt={enhancingPrompt}
-            enhancementUndoText={enhancementUndoText}
-            enhancePrompt={enhancePrompt}
-            undoPromptEnhancement={undoPromptEnhancement}
-            clearEnhancementError={clearEnhancementError}
+            composerTransforms={composerTransforms}
+            activeTransformKey={composerTransformController.activeTransformKey}
+            undoTransform={composerTransformController.undo?.transform ?? null}
+            runComposerTransform={composerTransformController.run}
+            undoComposerTransform={composerTransformController.undoLast}
             runActive={runActive}
             hasDraftContent={hasDraftContent}
             abort={abort}
-            submit={submit}
-            voicePhase={voice.state.phase}
-            voiceEnabled={voiceEnabled}
-            onVoiceToggle={voice.toggle}
-            onVoiceCancel={voice.cancel}
+            submit={submitFromComposer}
+            workSessionId={activeSessionId ?? undefined}
+            workSessionLabel={activeSessionSummary?.title}
           />
         </div>
       </div>

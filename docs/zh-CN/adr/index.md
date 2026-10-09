@@ -42,7 +42,7 @@ ADR 记录那些不应被静默改变的架构选择。中文入口与英文索�
 | [ADR 0183：P0 国际化应用程序壳语言](/adr/0183-p0-international-shell-locales) | 提供德语、西班牙语和法语完整外壳目录及发版日志 |
 | [ADR 0184：输入框工具栏中的上下文用量检查器](/adr/0184-composer-context-usage-inspector) | 把剩余容量检查器移到模型选择器左侧，答案下方只保留模型徽章 |
 | [ADR 0185：韩语应用程序壳](/adr/0185-korean-shell-locale) | 提供完整韩语外壳、系统语言解析和韩语发版日志目录 |
-| [ADR 0186：用宿主一次性补全总结首轮会话标题](/adr/0186-session-auto-title-summary) | 首轮提示先显示回退标题，结束后由主进程按会话模型生成摘要 |
+| [ADR 0186：用宿主一次性补全总结首轮会话标题](/adr/0186-session-auto-title-summary) | 已由 ADR 0323 取代：标题生成由可配置的独立插件拥有 |
 | [ADR 0187：按焦点区分任务和交互式本机通知](/adr/0187-focus-aware-native-task-notifications) | 任务横幅仅在窗口失焦时出现；交互询问可通知聚焦的其他会话。字段名为 `kind` |
 | [ADR 0188：模型配置导入保留不同凭据](/adr/0188-preserve-distinct-import-credentials) | 同一端点的不同 API 密钥作为独立提供商导入，相同凭据仍保持幂等跳过 |
 | [ADR 0189：父级终态错误中止残留委托](/adr/0189-parent-fatal-error-aborts-leftover-delegates) | 父级空闲仍不中止委托；429 等终态错误会中止残留子智能体，让“继续”不再 AGENT_BUSY |
@@ -50,6 +50,8 @@ ADR 记录那些不应被静默改变的架构选择。中文入口与英文索�
 | [ADR 0191：明确标注两个 macOS 发布架构](/adr/0191-label-both-macos-release-architectures) | macOS DMG/ZIP 统一使用 `-arm64` / `-x64` 后缀，更新源 URL 与校验和保持一致 |
 | [ADR 0192：为已配置模型设置别名并允许复制模型 id](/adr/0192-model-alias) | 别名只用于展示；配置页模型 id 可选择复制，请求仍使用真实 id |
 | [ADR 0193：上下文检查器按最后一次请求计算占用](/adr/0193-last-request-context-occupancy) | 占用、本轮合计和缓存读写取最新一条助手消息，不再把工具循环里的每次请求加总 |
+| [ADR 0323：会话标题由独立插件拥有](/adr/0323-plugin-owned-session-titles) | 核心保留确定性首条提示兜底标题；独立插件可配置提示词、模型与思考级别，并通过主机 CAS 升级该标题 |
+| [ADR 0324：提示词增强由可选插件拥有](/adr/0324-plugin-owned-composer-prompt-enhancement) | 输入框只提供受权限约束的通用文本转换扩展点；提示词增强需用户单独安装，旧设置在首次加载时迁移 |
 | [ADR 0194：可选的子智能体思考覆盖](/adr/0194-subagent-thinking-parameter-omission) | 子智能体可继承、显式关闭或不发送思考参数 |
 | [ADR 0195：视口固定的工作面板开关](/adr/0195-viewport-fixed-work-panel-toggle) | 非设置页右上角提供与 Cmd/Ctrl+J 等价的指针开关 |
 | [ADR 0196：在进行中重试行显示 provider 原因](/adr/0196-retry-cause-in-active-turn-status) | 悬停或聚焦重试状态行时显示错误摘要、错误码和安全的 provider 消息 |
@@ -57,8 +59,8 @@ ADR 记录那些不应被静默改变的架构选择。中文入口与英文索�
 | [ADR 0198：为每个安静间隔命名活动行](/adr/0198-quiet-interval-activity-phases) | 补齐 starting / preparing / compacting / recovering，并在等待 Subagent 时展示各自的粗粒度动作 |
 | [ADR 0200：宿主拥有的插件会话导入与归属 API](/adr/0200-plugin-owned-session-api) | 插件历史会话由主机生成 id，并按插件、来源和外部 id 归属 |
 | [ADR 0201：显式插件项目 id 与宿主拥有的会话刷新](/adr/0201-plugin-project-ids-and-session-refresh) | 插件可显式绑定主机项目，成功写入由主机通知渲染器刷新 |
-| [ADR 0204：未签名 macOS 首次启动助手](/adr/0204-unsigned-macos-first-launch-helper) | 只清理 PI-Desktop 的 quarantine 属性，并用 Finder 一键启动可信的未签名应用（由 ADR 0232 修订） |
-| [ADR 0232：macOS DMG 只保留打开说明](/adr/0232-macos-dmg-text-only-opening-guidance) | 由 ADR 0296 修订：DMG 现为双图标安装；ZIP 仍保留首次启动助手 |
+| [ADR 0204：未签名 macOS 首次启动助手](/adr/0204-unsigned-macos-first-launch-helper) | 该辅助文件已由 D634 / ADR 0309 从 macOS 分发包中移除 |
+| [ADR 0232：macOS DMG 只保留打开说明](/adr/0232-macos-dmg-text-only-opening-guidance) | macOS 分发规则已由 D634 / ADR 0309 取代 |
 | [ADR 0252：插件的宿主回合结束事件](/adr/0252-plugin-host-turn-end-event) | 宿主在每次已开始的回合结束时向插件宣告一次 `session:turnEnded`，携带回合身份与终止原因 |
 
 ## 完整索引
@@ -188,7 +190,7 @@ ADR 记录那些不应被静默改变的架构选择。中文入口与英文索�
 | 0118 | [队列中的提示由渲染器拥有，并在回合边界停止运行](/adr/0118-renderer-owned-queued-prompts) | 已接受 |
 | 0119 | [事件驱动的子智能体超时](/adr/0119-event-driven-subagent-timeouts) | 已接受待实现 |
 | 0120 | [有界的会话历史窗口](/adr/0120-bounded-session-history-windows) | 已接受 |
-| 0121 | [输入框提示增强保持一次性且由主进程拥有](/adr/0121-one-shot-composer-prompt-enhancement) | 已接受 |
+| 0121 | [输入框提示增强保持一次性且由主进程拥有](/adr/0121-one-shot-composer-prompt-enhancement) | 已由 ADR 0324 取代 |
 | 0122 | [工作面板可见时预留原生宽度](/adr/0122-reserve-native-width-while-work-panel-visible) | 已被 ADR 0151 取代 |
 | 0123 | [Windows/Linux 窗口控制使用原生任务栏最小化](/adr/0123-native-taskbar-minimize-controls) | 已接受 |
 | 0124 | [将临时会话绑定到独立的临时工作区](/adr/0124-temporary-session-scratch-workspace) | 已接受 |
@@ -252,7 +254,7 @@ ADR 记录那些不应被静默改变的架构选择。中文入口与英文索�
 | 0183 | [P0 国际化应用程序壳语言](/adr/0183-p0-international-shell-locales) | 已接受（修订 ADR 0160 / ADR 0182） |
 | 0184 | [输入框工具栏中的上下文用量检查器](/adr/0184-composer-context-usage-inspector) | 已接受（修订 ADR 0047 / ADR 0103） |
 | 0185 | [韩语应用程序壳](/adr/0185-korean-shell-locale) | 已接受（修订 ADR 0160 / ADR 0183） |
-| 0186 | [用宿主一次性补全总结首轮会话标题](/adr/0186-session-auto-title-summary) | 已接受 |
+| 0186 | [用宿主一次性补全总结首轮会话标题](/adr/0186-session-auto-title-summary) | 已被 ADR 0323 取代 |
 | 0187 | [按焦点区分任务和交互式本机通知](/adr/0187-focus-aware-native-task-notifications) | 已接受（修订 ADR 0107 / D117） |
 | 0188 | [模型配置导入保留不同凭据](/adr/0188-preserve-distinct-import-credentials) | 已接受（修订 ADR 0179 / D342） |
 | 0189 | [父级终态错误中止残留委托](/adr/0189-parent-fatal-error-aborts-leftover-delegates) | 已接受（修订 ADR 0166 / D328） |
@@ -260,6 +262,8 @@ ADR 记录那些不应被静默改变的架构选择。中文入口与英文索�
 | 0191 | [明确标注两个 macOS 发布架构](/adr/0191-label-both-macos-release-architectures) | 已接受（修订 ADR 0145 / D353） |
 | 0192 | [为已配置模型设置别名并允许复制模型 id](/adr/0192-model-alias) | 已接受（修订 D266） |
 | 0193 | [上下文检查器按最后一次请求计算占用](/adr/0193-last-request-context-occupancy) | 已接受（修订 ADR 0047 / ADR 0103 / ADR 0184） |
+| 0323 | [会话标题由独立插件拥有](/adr/0323-plugin-owned-session-titles) | 已接受（修订 ADR 0186；D654 保留首条提示兜底） |
+| 0324 | [提示词增强由可选插件拥有](/adr/0324-plugin-owned-composer-prompt-enhancement) | 已接受（修订 ADR 0121） |
 | 0194 | [可选的子智能体思考覆盖](/adr/0194-subagent-thinking-parameter-omission) | 已接受待实现 |
 | 0195 | [视口固定的工作面板开关](/adr/0195-viewport-fixed-work-panel-toggle) | 已接受（修订 ADR 0068 / ADR 0085） |
 | 0196 | [在进行中重试行显示 provider 原因](/adr/0196-retry-cause-in-active-turn-status) | 已接受（修订 ADR 0175） |
@@ -301,9 +305,14 @@ ADR 记录那些不应被静默改变的架构选择。中文入口与英文索�
 | 0292 | [远端主机的 SSH 引导](/adr/0292-ssh-remote-host-bootstrap) | 已接受实施（D453；ADR 0205 R2b，扩展 ADR 0286） |
 | 0294 | [项目存档改为列表 + 检查器](/adr/0294-project-archive-list-inspector) | 已接受（D455；修订 D267 / D168） |
 | 0295 | [会话思考参数不发送](/adr/0295-session-thinking-parameter-omission) | 已接受（D456；修订 ADR 0194 / ADR 0144 / ADR 0221） |
-| 0296 | [已签名 macOS DMG 改为双图标安装](/adr/0296-macos-signed-dmg-two-icon-install) | 已接受（D457；修订 ADR 0232 / ADR 0204） |
+| 0296 | [已签名 macOS DMG 改为双图标安装](/adr/0296-macos-signed-dmg-two-icon-install) | 已接受；ZIP 指引已由 D634 / ADR 0309 取代 |
 | 0297 | [提供商托管联网搜索作为适配器能力](/adr/0297-provider-hosted-web-search-adapter-capability) | 已接受 |
 | 0298 | [应用不再随包发布任何字体](/adr/0298-remove-bundled-fonts) | 已接受（D598；修订 ADR 0083 / D232） |
+| 0308 | [移除拉取请求页面与列表工具](/adr/0308-remove-pull-requests-destination) | 已接受 |
+| 0309 | [移除 macOS 首次启动辅助文件](/adr/0309-remove-macos-first-launch-artifacts) | 已接受（D634；修订 D457 / ADR 0296） |
+| 0310 | [保持本地权限批准一直待解决](/adr/0310-local-permission-approvals-without-deadline) | 已接受实施 |
+| 0311 | [在 Host 受理时重新核验 Live Work 工作空间身份](/adr/0311-live-work-workspace-admission-guard) | 已实现候选 |
+| 0312 | [会话级 Todo 清单](/adr/0312-session-scoped-todo-checklist) | 已接受实施 |
 | registry-header-variable-spelling | [Remote header variables accept the registry's `{name}` spelling](/adr/registry-header-variable-spelling) | Proposed |
 
 ## 什么时候看 ADR

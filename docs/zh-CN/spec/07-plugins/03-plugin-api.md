@@ -107,6 +107,48 @@ pi.commands.register(def: {
 pi.commands.unregister(id: string): Promise<void>
 ```
 
+### 输入框文本转换（`composer.transform`）
+
+插件可通过 `manifest.contributes.composerTransforms` 声明由用户主动触发的文本操作。
+非空贡献需要 `composer.transform` 权限。宿主只会列出已加载且当前获得该权限的插件操作；
+操作标题和可选的撤销标题来自 manifest。
+
+```ts
+type PluginComposerTransformInput = {
+  id: string;
+  text: string;
+  modelKey?: string; // 当前 Composer 提供商/模型 key；不含凭据
+};
+
+type PluginModule = {
+  onComposerTransform?: (
+    input: PluginComposerTransformInput,
+  ) => Promise<string> | string;
+};
+```
+
+回调只收到草稿文本和可选模型 key，不会收到会话 id、转录内容或单独的附件/文件引用元数据。
+宿主在调用前移除行内文件引用 token，成功后再恢复。回调返回字符串；输入与输出各限制为
+100,000 个字符，调用超时为 110 秒。宿主会重新检查插件是否仍已加载、操作是否仍在声明中、
+权限是否仍获授，并审计成功与失败。若用户在等待时编辑、发送或切换会话，Composer 会丢弃
+过期结果；成功后提供一步撤销。若插件还要请求模型，必须另外声明对应 API 所需权限，例如
+`agent.complete` 与 `models.list`。
+
+```json
+{
+  "permissions": ["composer.transform"],
+  "contributes": {
+    "composerTransforms": [
+      {
+        "id": "enhance",
+        "title": { "en": "Enhance prompt", "zh-CN": "增强提示词" },
+        "undoTitle": { "en": "Undo", "zh-CN": "撤销" }
+      }
+    ]
+  }
+}
+```
+
 ### 语音（`speech.adapter.register`）
 ```ts
 pi.speech.registerAdapter(adapter: {
@@ -283,6 +325,66 @@ type PluginModelInfo = {
 只返回已启用且已认证的 provider 行（API key、OAuth 或 `authKind: "none"`）。不含密钥。
 `models.list` 也是面板桥通道，选择器页面可以自行填充。宿主传输不可用时返回空列表，不记警告（D080）。
 
+### provider OAuth（需要 `provider.oauth`）
+
+OAuth provider 声明需要同时拥有 `provider.register` 和 `provider.oauth`、设置
+`baseUrl`，并由插件主模块导出 `onProviderOAuth`。宿主只会为 manifest 中声明的
+provider 调用该回调：
+
+```ts
+type PluginProviderOAuthRequest = {
+  operation: "login" | "refresh"
+  providerId: string       // 插件本地 provider 声明 id
+  loginId?: string         // 仅登录时提供；传给 prompt/notify
+  credential?: PluginProviderOAuthCredential // 仅刷新时提供；属于该 provider 的凭据
+}
+
+type PluginProviderOAuthCredential = {
+  accessToken: string
+  refreshToken?: string
+  expiresAt?: number       // Unix epoch 毫秒
+  accountLabel?: string
+  headers?: Record<string, string>
+}
+
+type PluginProviderOAuthContext = { signal: AbortSignal }
+
+onProviderOAuth(request, { signal }): Promise<PluginProviderOAuthCredential>
+```
+
+登录时，用户授权后回调返回凭据。刷新时，宿主把当前凭据传给同一回调，回调返回更新后
+的凭据。宿主把凭据加密存于 provider 行对应的 OAuth secret 引用下，并串行执行刷新。
+回调只能访问自己的 provider 声明凭据。宿主按请求向 Agent Runtime 传递解析后的访问令牌；
+刷新令牌不会发给渲染进程或 Agent Runtime。每个 provider 声明只保存一个账号；退出登录会
+清除凭据，但保留 manifest 所有的 provider 行。
+
+插件可以使用宿主提供的登录界面，不必自行打开窗口：
+
+```ts
+if (!request.loginId) throw new Error("loginId is required for sign-in")
+const loginId = request.loginId
+
+await pi.providers.oauth.notify(loginId, {
+  kind: "deviceCode",
+  userCode,
+  verificationUri,
+  intervalSeconds,
+  expiresInSeconds,
+})
+
+const code = await pi.providers.oauth.prompt(loginId, {
+  type: "secret",
+  message: "Enter the verification code",
+})
+```
+
+`prompt` 支持 `text`、`secret`、`select` 和 `manual_code`。`notify` 支持非敏感的
+`info`、`authUrl`、`deviceCode` 和 `progress` 事件；宿主会打开经过校验的 HTTP(S) 授权
+链接，并报告浏览器是否成功打开。用户取消、插件卸载或宿主调用超时都会中止回调上下文
+的 signal。使用宿主网络 API 请求 OAuth token 时，仍需 `net.fetch` 和
+`manifest.net.domains`。该权限不提供通用宿主密钥 API。插件入口代码并非操作系统沙箱，
+仍可使用原生 Node API，因此只应向可信代码授予该权限。
+
 ### session（需要 `session.read`）
 ```ts
 pi.session.getLlmContext(): Promise<PluginLlmContext>
@@ -292,6 +394,37 @@ pi.session.getLlmContext(): Promise<PluginLlmContext>
 在工具执行之外调用会以 `INVALID_ARGUMENT` 失败。子代理行会被省略。插件自己
 正在飞行的工具调用会从尾部剥掉。compaction 摘要替换检查点之前的历史。
 合计内容上限 200k 字符。
+
+### 会话自动标题（需要 `session.autoTitle`）
+
+此能力与 `session.read` 分开：它不会开放任意转录窗口或消息查询，仅用于在回合完成后生成标题。
+
+```ts
+type PluginAutoTitleContext = {
+  sessionId: string
+  expectedTitle: string
+  userPrompt: string // 第一条用户消息，最多 1,000 个字符
+  assistantReply?: string // 第一条助手回复，最多 500 个字符
+  modelKey?: string // 来自会话配置的 providerId/modelId
+}
+
+pi.session.getAutoTitleContext(input: {
+  sessionId: string
+}): Promise<PluginAutoTitleContext | null>
+
+pi.session.setAutoTitle(input: {
+  sessionId: string
+  expectedTitle: string
+  title: string
+}): Promise<{ updated: boolean }>
+```
+
+只有活动会话且标题来源仍为 `default` 时才返回上下文。该来源既覆盖新会话的占位标题，也覆盖
+核心自己写入的确定性首条提示兜底标题，因此插件应预期 `expectedTitle` 是当前已派生的文本，
+而不是本地化占位标题。宿主不会返回附件、工具调用、后续回合
+或其他转录内容。标题长度为 1–80 个 Unicode 码点，并通过精确的 `expectedTitle` 比较并设置；
+手动重命名或另一项更新发生后返回 `{ updated: false }`。两个方法都需要高风险权限
+`session.autoTitle`，因为持有 `agent.complete` 的插件可能将首轮文本发送给模型。
 
 ### 插件拥有的会话（P0/P1；需要对应权限）
 
@@ -476,8 +609,8 @@ pi.agent.complete(input: {
 }>
 ```
 
-宿主解析凭据，并通过与 Composer 提示增强相同的路径发起 `tools: []` 的一次性补全。
-插件拿不到密钥。`includeSessionContext: true` 还需要 `session.read` 以及进行中的
+宿主解析凭据，并发起 `tools: []` 的一次性补全；插件拿不到密钥。独立提示词增强插件会在
+`onComposerTransform` 回调中使用此 API。`includeSessionContext: true` 还需要 `session.read` 以及进行中的
 工具会话。system ≤ 32 KiB；消息合计 ≤ 200k 字符；每个插件每滚动 60 秒 8 次
 （`RATE_LIMITED`）；预算 90 秒（`TIMEOUT`）。
 
@@ -520,16 +653,24 @@ pi.browser.console(input?: { limit?: number }): Promise<{ messages: unknown[] }>
 pi.browser.cdp(input: { method: string; params?: unknown }): Promise<unknown>
 ```
 
-访客页是宿主拥有的 `WebContentsView`（`persist:work-browser`）。
+当前访客页是宿主拥有的 `WebContentsView`（`persist:work-browser`），各资源标签保留自己的页面。
+后台会话导航保留给该会话上次选中的标签；尚无标签时由首个标签消费，不导航或返回其他会话的页面。
 `setBounds` 相对调用插件视图的内容区，并被夹紧，因此访客页不能盖住聊天/输入框。
 `cdp` 默认拒绝；cookie、storage、target 和网络拦截方法以 `PERMISSION_DENIED` 失败。
 代理调用的会话身份来自进行中的 `plugins.execute` `sessionId`，而不是插件参数（D333 / ADR 0170）。
+页面操作（`navigate`、`action`、`openExternal`、`getState`、snapshot、screenshot 和 CDP 调用）
+仅在 Browser 视图可见时可用。视图隐藏时调用会以 `UNAVAILABLE` 失败；应通过 `BrowserPreview`
+请求宿主显示 Browser 视图后再继续。
 
 `getHistory` 返回由主机明确记录的条目，按最新优先排列，文本和图片按捕获时间混排。
 通过 `writeText` 写入的内容，以及 Composer 用户主动粘贴事件提供的内容会被记录；主机
 不会在后台轮询或重新读取系统剪贴板。连续相同内容会合并并刷新时间戳。历史只保留在
 内存中，最多保留 30 天、500 条和 256 MiB；单条文本最多 100 KiB UTF-8 字节，图片
 最多 50 MiB。图片统一返回 PNG 字节及像素尺寸。没有粘贴过的复制内容不会被记录。
+
+`navigate` 在当前主框架导航提交（含重定向）时返回，不等待慢图片或子框架。
+`browser:state` 立即报告加载状态，导航失败时可带 `loadError`。
+可选的 `sessionId`、`tabId` 标识宿主管理的工作面板目标；插件不能通过导航参数指定这些身份。
 
 ### 服务（需要 `background.service`）
 ```ts
@@ -881,6 +1022,7 @@ window.pluginBridge.on(event, handler)
 - models.list（返回行数）
 - session.getLlmContext（会话 id、消息数、truncated 标志 —— 不含转录文本）
 - agent.complete（模型 key、体积、usage —— 不含提示或补全文本）
+- provider.oauth（插件 id、声明的 provider id、操作、结果/错误码——绝不记录凭据内容）
 
 日志字段：
 - 插件ID
@@ -910,6 +1052,7 @@ window.pluginBridge.on(event, handler)
 - `speech.registerAdapter` / `unregisterAdapter`（`speech.adapter.register`）
 
 - `models.list`、`session.getLlmContext`
+- `onProviderOAuth` 和 `pi.providers.oauth.prompt` / `notify`（`provider.oauth`）
 - `clipboard.*`、`shell.openExternal`、`net.fetch`
 - `browser.*`（访客页 CDP；`browser.cdp`）
 - `services.register` / `unregister`、`bus.publish` / `subscribe`、`events.on` / `off`

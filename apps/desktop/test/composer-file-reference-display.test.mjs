@@ -52,12 +52,14 @@ test("accepted files become compact references while directories keep completion
   );
   assert.match(composer, /applyEditorDraft\(\s*nextText,/);
   // Workspace switches still drop relative `@` chips, not every token-backed
-  // chip — paste/scratch paths are absolute and must survive.
+  // chip — paste/scratch paths are absolute, plugin marks carry no path, and a
+  // session reference names a conversation, so all three must survive.
   assert.match(composer, /function isPersistedScratchReference\(path: string\)/);
   assert.match(
     composer,
-    /kept = current\.filter\(\(fileReference\) =>\s*isPersistedScratchReference\(fileReference\.path\)/,
+    /Boolean\(fileReference\.plugin\) \|\|[\s\S]*?fileReference\.kind === "session" \|\|[\s\S]*?isPersistedScratchReference\(fileReference\.path\)/,
   );
+  assert.match(composer, /kept = current\.filter\(survives\)/);
   assert.doesNotMatch(
     composer,
     /current\.filter\(\(fileReference\) => Boolean\(fileReference\.token\)\)/,
@@ -72,12 +74,17 @@ test("composer renders atomic inline chips and serializes paths on send", () => 
   assert.match(composer, /chip\.dataset\.token = token/);
   assert.match(composer, /composer-chip-name/);
   assert.match(composer, /nameSpan\.textContent = reference\.name/);
-  assert.match(composer, /chip\.title = reference\.path/);
+  // A file chip's title is its path; a plugin mark's is its plugin.
+  assert.match(composer, /isPluginMark\(reference\) \? \(reference\.plugin\?\.pluginId \?\? ""\) : reference\.path/);
+  assert.match(composer, /chip\.title = origin/);
   assert.match(
     composer,
-    /serializeComposerFileReferences\(text, activeFileReferences\)/,
+    /serializeComposerFileReferences\(rawText, activeFileReferences\)/,
   );
-  assert.match(composer, /sendPrompt\(inlineContent, submittedDraft\)/);
+  assert.match(
+    composer,
+    /sendPrompt\(\s*inlineContent,\s*submittedDraft,\s*activeSessionId \?\? undefined,\s*captureAcceptedSession,\s*\)/,
+  );
   assert.match(composer, /serializeInlineComposerFileReferences\(/);
   assert.match(composer, /current\.filter\(/);
   assert.match(
@@ -111,7 +118,7 @@ test("text file chips expand into editable draft text", () => {
 });
 
 test("unanswered stop restores compact references instead of serialized paths", () => {
-  assert.match(composer, /setValue\(composerPrefill\.text\)/);
+  assert.match(composer, /setValue\(prefilled\.text\)/);
   assert.match(composer, /composerPrefill\.fileReferences\.map/);
   assert.match(composer, /composerPrefill\.sessionId !== activeSessionId/);
   assert.match(

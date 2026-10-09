@@ -37,29 +37,10 @@ function load(relative, imports) {
   return module.exports;
 }
 
-const fixture = {
-  anthropic: {
-    name: "Anthropic",
-    api: "https://api.anthropic.com",
-    models: {
-      "claude-opus-4.6": {
-        id: "claude-opus-4.6",
-        name: "Claude Opus 4.6",
-        reasoning: true,
-        reasoning_options: [{ type: "effort", values: ["low", "medium", "high"] }],
-        modalities: { input: ["text", "image"], output: ["text"] },
-        limit: { context: 1_000_000, output: 128_000 },
-      },
-    },
-  },
-};
-
-async function fixtureCatalog(t) {
-  const dir = await mkdtemp(join(tmpdir(), "pi-lookup-model-"));
-  t.after(() => rm(dir, { recursive: true, force: true }));
-  const catalogPath = join(dir, "api.json");
-  await writeFile(catalogPath, JSON.stringify(fixture), "utf8");
-  const catalog = new modelsDev.ModelsDevCatalog({ catalogPath });
+async function fixtureCatalog() {
+  const catalog = new modelsDev.ModelsDevCatalog({
+    catalogPath: new URL("../resources/models.dev/api.json", import.meta.url).pathname,
+  });
   assert.equal(await catalog.ensureLoaded(), true);
   return catalog;
 }
@@ -86,11 +67,20 @@ function harness(realCatalog) {
     "@pi-desktop/shared": {
       IPC,
       ErrorCodes,
-      resolveBindingContextWindow: () => ({}),
+      inferEndpointProfile: () => undefined,
+      normalizeApiStyle: (value) => value ?? "chat_completions",
+      resolveBindingLimits: () => ({}),
     },
     "../oauth": { OAUTH_AUTH_KIND: "oauth" },
     "../model-discovery": {
-      discoverProviderModels: async () => {
+      probeProviderEndpoint: async () => {
+        throw new Error("the lookup must not probe the network");
+      },
+    },
+    "../provider-endpoint-probe": {
+      // The lookup handler is a snapshot read: any sweep it started would take
+      // the network path this test exists to rule out.
+      probeDiscoveryCandidates: async () => {
         throw new Error("the lookup must not probe the network");
       },
     },
@@ -121,15 +111,15 @@ function harness(realCatalog) {
   return { call: (input) => handler(input), catalogCalls, hostCalls };
 }
 
-test("a published id returns the snapshot record for the typed id", async (t) => {
+test("a published id returns the models.dev record for the typed id", async (t) => {
   const h = harness(await fixtureCatalog(t));
   const result = await h.call({
-    modelId: "Claude-Opus-4.6",
+    modelId: "Claude-Opus-4-6",
     providerId: "provider-1",
     vendorKey: "anthropic",
   });
   assert.ok(result.info, "a published id must return its record");
-  assert.equal(result.info.modelId, "claude-opus-4.6");
+  assert.equal(result.info.modelId, "claude-opus-4-6");
   assert.equal(result.info.providerId, "provider-1");
   assert.equal(result.info.contextWindow, 1_000_000);
   assert.equal(result.info.maxTokens, 128_000);
@@ -140,9 +130,10 @@ test("a published id returns the snapshot record for the typed id", async (t) =>
   assert.deepEqual(h.catalogCalls[0], "ensureLoaded");
   assert.equal(h.catalogCalls[1][0], "findModel");
   assert.deepEqual(h.catalogCalls[1][1], {
+    providerId: "provider-1",
     vendorKey: "anthropic",
     baseUrl: undefined,
-    modelId: "Claude-Opus-4.6",
+    modelId: "Claude-Opus-4-6",
   });
   assert.deepEqual(h.hostCalls, []);
 });

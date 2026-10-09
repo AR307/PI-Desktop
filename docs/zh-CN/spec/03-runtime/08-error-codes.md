@@ -97,8 +97,10 @@ stdio 与 Tokio 的动态阻塞池隔离，因此后一种情况
 | `AGENT_NOT_FOUND` | 不 | 会话丢失 |
 | `TURN_NOT_FOUND` | 不 | 使 id 无效 |
 | `TURN_ABORTED` | 不 | 回合被 user/system 中止 |
+| `AGENT_SIDECAR_CRASHED` | 不 | Node agent sidecar 进程在回合中途死亡；所属回合以中止收尾并使用此代码，而不是无关的 Plan 审批代码（issue #1077） |
+| `AGENT_SIDECAR_OOM` | 不 | sidecar 在 JavaScript 堆触及配置上限后死亡，依据其 stderr 尾部的 V8 致命错误横幅判定；在输入缩小之前，同一回合会以同样方式失败（issue #1077） |
 | `MODEL_NOT_CONFIGURED` | 不 | 未选择可用模型，或提供商因未知而拒绝所选模型 |
-| `PROVIDER_ERROR` | 是的 | 上游提供商故障；可重试的故障（5xx 网关）最多获得四次同回合重试，格式错误的 400/422 请求是终止的 |
+| `PROVIDER_ERROR` | 是的 | 上游提供商故障；可重试的故障（5xx 网关）最多获得四次同回合重试，而格式错误的 400/422 请求，以及适配器自身拒绝的请求选项（Google 适配器遇到自定义 `fetch`，issue #1072）都是终止的 |
 | `PROVIDER_UNAUTHORIZED` | 不 | bad/missing 提供商凭证 |
 | `PROVIDER_RATE_LIMITED` | 是的 | 供应商费率有限 |
 | `CONTEXT_TOO_LARGE` | 不 | 恢复后 prompt/context 仍超出安全模型预算、发生第二个提供程序溢出或禁用自动恢复 |
@@ -112,6 +114,8 @@ stdio 与 Tokio 的动态阻塞池隔离，因此后一种情况
 | `SUBAGENT_IDLE_TIMEOUT` | 不 | 已撤回（D328）：空闲看门狗不再武装；代码仅为已存储结果保留 |
 | `SUBAGENT_DURATION_TIMEOUT` | 不 | 已撤回（D328）：时长看门狗不再武装；代码仅为已存储结果保留 |
 | `SUBAGENT_CONTEXT_OVERFLOW` | 不 | 委派自身的模型上下文超出其安全预算，自动的回合边界压缩与仅保留任务简报和最近消息的降级重试都没能把它带回限制以内；该失败给出可执行的恢复方式，而不是提供商的溢出文本 |
+| `SUBAGENT_OUTPUT_TRUNCATED` | 不 | 委派报告在模型输出 token 上限处结束；保留部分报告用于诊断，但该运行报告为失败，不会被呈现为已完成的委派 |
+| `SUBAGENT_PARENT_FAILED` | 不 | 父级失败中断了运行中的委托；可通过 Task 手动恢复，仍受现有历史与读取预算限制 |
 
 ### 3. 3 工作空间/工具/权限
 
@@ -126,13 +130,14 @@ stdio 与 Tokio 的动态阻塞池隔离，因此后一种情况
 | `TOOL_DENIED` | 不 | 权限被拒绝/模式被禁止 |
 | `TOOL_TIMEOUT` | 是的 | 工具执行超时 |
 | `TOOL_FAILED` | 也许 | 工具已执行但失败 |
+| `FILE_NOT_FOUND` | 不 | Read/Write/Edit 目标路径不存在（与 `TOOL_DENIED` 可区分） |
 | `TOOL_ABORTED` | 不 | 工具在完成前被用户停止或回合中止取消 |
 | `MUTATION_RETRY_BUDGET_EXHAUSTED` | 是 | 重复保护在同路径 `Edit` 或 shell patch 反复失败后终止了本轮；携带 `details.kind`（`edit` 或 `patch-command`）与最后一个工具错误代码 |
 | `PROCESS_RESOURCE_EXHAUSTED` | 是的 | shell 进程无法启动，因为操作系统暂时耗尽了进程资源 |
 | `SHELL_NOT_FOUND` | 不 | 目录回退后没有有效的平台 shell 可用；消息承载指引 |
 | `COMMAND_SHELL_CHANGED` | 不 | 固定的 shell ID 或方言在执行前已更改 |
 | `COMMAND_SHELL_INVALID` | 不 | 设置提供了未知、不可用或错误的平台 shell ID |
-| `PERMISSION_TIMEOUT` | 不 | 权限提示超时（映射为拒绝） |
+| `PERMISSION_TIMEOUT` | 不 | 旧版权限提示超时的兼容错误码；当前本地提示会一直保持待处理 |
 | `PERMISSION_REQUIRED` | 不 | 等待用户决定 |
 | `WRITE_DISABLED_IN_PLAN` | 不 | Write 的契约模式硬拒绝 |
 | `EDIT_DISABLED_IN_PLAN` | 不 | 编辑的契约模式硬拒绝 |
@@ -192,6 +197,7 @@ stdio 与 Tokio 的动态阻塞池隔离，因此后一种情况
 | 代码 | 可重试 | 含义 |
 |---|---|---|
 | `EDIT_TAG_REQUIRED` | 否 | `tag` 缺失或不是 4 位十六进制 |
+| `EDIT_LEGACY_MATCH_FAILED` | `Read` 之后可以 | 旧版兼容参数 `old_string` 未找到或出现多次 |
 | `EDIT_TAG_MISMATCH` | `Read` 之后可以 | tag 无法哈希出实时文件且漂移恢复拒绝；携带实时 tag 与锚点处的当前内容 |
 | `EDIT_TAG_UNKNOWN` | `Read` 之后可以 | tag 格式正确，但本会话没有为该路径记录过对应内容 |
 | `EDIT_LINES_UNSEEN` | 是 | 锚点引用了会话从未显示过的行；携带被揭示的内容 |
@@ -303,6 +309,39 @@ ADR 0285）。渲染进程除了一个标识徽章外看不到本地/远程之�
 | `PAIRING_TOKEN_EXPIRED` | 否 | 一次性配对令牌在配对完成前已过期 |
 | `CAPABILITY_UNAVAILABLE` | 否 | 请求的操作对应主机声明为不可用的能力（如附件、工具中继） |
 
+### 3.9 实时语音
+
+实时语音错误通过应用所有的 IPC 和 Provider adapter 事件返回，不表示 Agent turn 失败。可重试错误表示瞬时条件清除后，用户可以重试同一通话；不会自动切换 Provider 或计费路径。
+
+| 代码 | 可重试 | 含义 |
+|---|---|---|
+| `LIVE_DISABLED` | 否 | 设置中关闭了实时语音 |
+| `LIVE_NOT_CONFIGURED` | 否 | 未选择有效的实时语音绑定 |
+| `LIVE_PROVIDER_NOT_FOUND` | 否 | 所选 Provider 不存在、已停用或解析凭证期间发生变化 |
+| `LIVE_AUTH_KIND_UNSUPPORTED` | 否 | 所选 Provider 凭证类型与 adapter 不兼容 |
+| `LIVE_AUTH_REQUIRED` | 否 | 缺少所需 OAuth/API key，或凭证被拒绝 |
+| `LIVE_ACCOUNT_ID_MISSING` | 否 | Codex OAuth 账号身份缺失或不一致 |
+| `LIVE_ACCESS_DENIED` | 否 | Provider 拒绝访问或账号无权限 |
+| `LIVE_RATE_LIMITED` | 是 | Provider 返回了速率限制响应 |
+| `LIVE_PROTOCOL_UNSUPPORTED` | 否 | endpoint、模型或所选协议 profile 不受支持 |
+| `LIVE_PROTOCOL_ERROR` | 否 | Provider 或 IPC 消息格式错误，或违反所选协议 |
+| `LIVE_ALREADY_ACTIVE` | 否 | 另一通实时语音通话或麦克风释放隔离占用唯一通话槽位 |
+| `LIVE_REQUEST_CONFLICT` | 否 | 相同幂等 request ID 被不同通话参数重复使用 |
+| `LIVE_SETTINGS_IN_USE` | 否 | 准备期间设置发生变化，或活动绑定不可编辑 |
+| `LIVE_MEDIA_RELEASE_UNCONFIRMED` | 否 | 未收到 Renderer 的媒体释放确认；Main 隔离麦克风租约 |
+| `LIVE_STALE_CALL` | 否 | 通话、请求或采集 epoch 已不是当前值 |
+| `LIVE_INVALID_OWNER` | 否 | IPC 或媒体端口 owner 与受信主 frame 不匹配 |
+| `LIVE_MICROPHONE_BUSY` | 否 | Dictation、另一通 Live 通话或尚未确认的释放占用共享采集租约 |
+| `LIVE_MICROPHONE_DENIED` | 否 | 用户或操作系统拒绝麦克风权限 |
+| `LIVE_MICROPHONE_UNAVAILABLE` | 否 | 没有可用的麦克风设备 |
+| `LIVE_MEDIA_UNSUPPORTED` | 否 | 浏览器媒体或 AudioWorklet 支持不可用 |
+| `LIVE_PLAYBACK_BLOCKED` | 不确定 | 浏览器播放需要用户手势才能开始或恢复 |
+| `LIVE_TIMEOUT` | 是 | 有时限的启动、握手、heartbeat、控制或清理阶段超时 |
+| `LIVE_NETWORK_ERROR` | 是 | Provider 传输发生暂时性连接故障 |
+| `LIVE_NETWORK_POLICY_UNSUPPORTED` | 否 | 桌面代理路由无法由 Live 传输安全表示 |
+| `LIVE_AUDIO_BACKPRESSURE` | 否 | PCM 或播放 credit 的有界容量已耗尽 |
+| `LIVE_EXECUTION_NOT_CONNECTED` | 否 | Provider 请求了当前不支持的函数/delegation 执行路径 |
+
 ## 4. 映射规则
 
 ### 主机 RPC 数字 → AppError.code
@@ -354,7 +393,9 @@ Exhaustion reports `retryAttempt: 10` from the relevant budget counter.
 里的 errno 已经消失，裸 `fetch failed` 只能被记为 `networkCategory: unknown`；
 而 fetch 包装层仍持有原始 Error，并从它给出同一组经过校验的字段。捕获到的
 cause 同时确定了阶段：没有任何响应到达时故障记为 `phase: request`，这正是它
-与「响应中途断流」的区别。`networkRoute`（`direct`、`environment-proxy`、
+与「响应中途断流」的区别。发往 pi-ai Google 适配器的请求不带 fetch 包装、也不会到达 `onResponse`（issue #1072），因此这两个字段都不会上报：它只保留提供商自己的消息，`Retry-After` 退回有界阶梯，下面的重建对它不生效。
+
+`networkRoute`（`direct`、`environment-proxy`、
 `http-proxy`、`socks5-proxy`）指出请求实际走的链路，代理这一跳失败无需再从
 errno 猜测。
 
@@ -366,7 +407,7 @@ errno 猜测。
 链路会被原样复现，绝不会悄悄降级为直连。
 
 ### 权限超时
-UI/host 超时在内部发出 `PERMISSION_TIMEOUT`，工具结果向代理显示为拒绝 (`TOOL_DENIED`)。
+`PERMISSION_TIMEOUT` 是旧版兼容错误码，当前本地桌面权限请求不会再发出；未解决的本地权限会保持待处理，明确拒绝或取消时向代理显示为 `TOOL_DENIED`。
 
 ### Shell 和 Plan/Goal 检查点失败
 

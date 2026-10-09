@@ -38,6 +38,13 @@ const sessionIpcSource = await readMainModule("ipc/session-ipc.ts");
 const sessionLaunchSource = await readMainModule("runtime/session-launch.ts");
 const storeSource = await readStoreSource();
 const sessionCoordinationSource = await readStoreModule("runtime/session-coordination.ts");
+const modelMenuSource = await readFile(
+  new URL(
+    "../src/features/chat/composer/hooks/useComposerModelMenu.ts",
+    import.meta.url,
+  ),
+  "utf8",
+);
 // Agent/Plan mode and model selection are owned by the Composer; the
 // conversation top bar only hosts the task title and window actions.
 const topbarSource = await readFile(
@@ -68,12 +75,13 @@ test("composer exposes the runtime thinking level order and provider filtering",
   assert.match(composerSource, /supportsReasoning/);
   assert.match(composerSource, /thinkingLevelForProvider/);
   assert.match(composerSource, /thinkingLevel:\s*level/);
-  assert.match(composerSource, /composer-thinking-list/);
+  // The level is a drag on the slider: no reasoning list submenu to render.
+  assert.doesNotMatch(composerSource, /composer-thinking-list/);
   assert.doesNotMatch(stylesSource, /\.composer-thinking-levels/);
   assert.doesNotMatch(stylesSource, /\.composer-thinking-level\b/);
   assert.match(
     stylesSource,
-    /\.composer-model-thinking-menu\s*\{[\s\S]*?width:\s*min\(280px,\s*calc\(100vw - 24px\)\);/,
+    /\.composer-model-thinking-menu\s*\{[\s\S]*?width:\s*min\(280px,\s*calc\(100vw - 24px\)\);/
   );
   assert.match(composerSource, /availableThinkingLevels/);
   assert.match(composerSource, /thinkingMenuLevels/);
@@ -81,7 +89,8 @@ test("composer exposes the runtime thinking level order and provider filtering",
 
 test("thinking levels use their canonical English values without i18n", () => {
   assert.match(composerSource, /const thinkingLabel = thinkingLevel;/);
-  assert.match(composerSource, /<span className="flex-1">\s*\{level\}/);
+  // The slider's ticks print the canonical level values themselves.
+  assert.match(composerSource, /onClick=\{\(\) => select\(stop\)\}>\{candidate\}<\/button>/);
   assert.doesNotMatch(composerSource, /THINKING_LEVEL_(LABELS|I18N_KEYS)/);
   assert.doesNotMatch(composerSource, /chat\.effort(?:Off|Minimal|Low|Mid|High|Xhigh|Max)/);
   assert.doesNotMatch(transcriptSource, /thinkingLevel\./);
@@ -108,7 +117,8 @@ test("Composer owns the mode and model controls", () => {
   // default thinking level instead of pinning the draft to its current value.
   assert.match(scheduledModelPickerSource, /activeSessionId: null/);
   assert.doesNotMatch(scheduledModelPickerSource, /useId\(/);
-  assert.match(
+  assert.match(scheduledModelPickerSource, /composerModelDisplayName\(provider, value\.modelId \?\? ""\)/);
+  assert.doesNotMatch(
     scheduledModelPickerSource,
     /composerModelDisplayName\(provider, value\.modelId \?\? "", selected\.displayName\)/,
   );
@@ -118,8 +128,8 @@ test("Composer owns the mode and model controls", () => {
   assert.doesNotMatch(stylesSource, /\.conversation-topbar \.ct-mode/);
   assert.match(composerModelPickerSource, /composer-model-thinking-chip/);
   assert.match(composerModelPickerSource, /composer-model-thinking-menu/);
-  assert.match(composerModelPickerSource, /composer-menu-entry/);
-  assert.match(composerModelPickerSource, /composer-menu-back/);
+  assert.match(composerModelPickerSource, /<ComposerModelList/);
+  assert.doesNotMatch(composerModelPickerSource, /composer-menu-back/);
 });
 
 test("conversation topbar keeps the title and actions free of a running indicator", () => {
@@ -181,10 +191,22 @@ test("draft Composer thinking follows the exact model selected in its menu", () 
   );
   assert.match(
     composerSource,
-    /const nextThinkingLevel = activeSession[\s\S]*?thinkingLevelForProvider\(nextModelProvider, thinkingLevel\)[\s\S]*?initialThinkingLevelForBinding\(/,
+    /const selectedSameModel =\s*activeSessionId &&\s*candidate\.id === provider\?\.id &&\s*sameComposerModelId\(modelId \?\? "", nextModelId\);/,
+  );
+  assert.match(
+    composerSource,
+    /const nextThinkingLevel = selectedSameModel\s*\?\s*thinkingLevelForProvider\(nextModelProvider, thinkingLevel\)[\s\S]*?initialThinkingLevelForBinding\([\s\S]*?initialThinkingLevelForUnmatchedModel\(/,
   );
   assert.match(composerSource, /const selectedBinding = provider\?\.models\.find/);
-  assert.match(composerSource, /const draftThinkingLevel = initialThinkingLevelForBinding\(/);
+  assert.match(
+    composerSource,
+    /const draftThinkingLevel = selectedModelInfo\?\.catalogSource === "models\.dev"\s*\?\s*initialThinkingLevelForBinding\(/,
+  );
+  assert.match(composerSource, /initialThinkingLevelForUnmatchedModel\(/);
+  assert.match(modelMenuSource, /initialThinkingLevelForUnmatchedModel\(/);
+  assert.match(sessionCoordinationSource, /initialThinkingLevelForUnmatchedModel\(/);
+  assert.match(modelMenuSource, /nextModel\?\.catalogSource === "models\.dev"/);
+  assert.match(sessionCoordinationSource, /catalogModel\?\.catalogSource === "models\.dev"/);
   assert.doesNotMatch(composerSource, /highestSupportedThinkingLevel/);
 });
 
@@ -210,10 +232,9 @@ test("main resolves reasoning from each session's exact selected model", () => {
   assert.match(providerCatalogSource, /const enrichSession/);
   assert.match(providerCatalogSource, /const resolveSessionCapabilityTarget/);
   assert.match(providerCatalogSource, /defaults\?\.defaultProviderId/);
-  assert.match(providerCatalogSource, /modelsDevModelFor\(provider, modelId\)/);
   assert.match(sessionIpcSource, /result\.sessions\.map\(\(session\) =>/);
   assert.match(sessionIpcSource, /enrichSession\(session, providers, defaults\)/);
-  assert.match(providerCatalogSource, /modelConfigFromModelsDev\(\s*modelsDevModel,\s*provider\.baseUrl\s*\)/);
+  assert.match(providerCatalogSource, /catalogModelConfigFor\(modelsDevCatalog/);
   // models.dev records stamp reasoning capability per exact model id.
   assert.match(providerCatalogSource, /capabilitiesFromModelConfig\(modelConfig\)/);
   assert.match(providerCatalogSource, /supportsReasoning/);
@@ -231,7 +252,7 @@ test("transcript keeps assistant thinking in a separate disclosure", () => {
   assert.match(transcriptSource, /thinking-prose[\s\S]*?Markdown source=\{text\}/);
   assert.match(transcriptSource, /CopyButton text=\{content\}/);
   assert.match(transcriptSource, /messageThinking as thinkingText/);
-  assert.match(transcriptSource, /onlyThinking = items\.every/);
+  assert.match(transcriptSource, /onlyThinking = useMemo\(\(\) => items\.every/);
   assert.match(stylesSource, /\.thinking-prose/);
 });
 
@@ -255,7 +276,7 @@ test("expanded assistant activity rails collapse their disclosures", () => {
   assert.match(stylesSource, /\.disclosure-collapse-rail:focus-visible\s*\{/);
 });
 
-test("detailed mode opens the last tool while compact keeps payloads collapsed", () => {
+test("tool and search rows stay collapsed while thinking keeps its leaf default", () => {
   assert.match(transcriptDisclosureSource, /export function useAutomaticDisclosure\(/);
   assert.match(transcriptDisclosureSource, /revealRequest\?: number/);
   assert.match(transcriptDisclosureSource, /const currentOpen = useRef\(open\)/);
@@ -263,14 +284,13 @@ test("detailed mode opens the last tool while compact keeps payloads collapsed",
   assert.match(transcriptSource, /useAutomaticDisclosure\(\s*hasSubagentTopology \? live : visibleItems\.length <= 1/);
   assert.match(
     transcriptSource,
-    /<ThinkingRow[\s\S]*?autoOpen=\{live && itemIndex === items.length - 1\}/,
+    /<ThinkingRow[\s\S]*?autoOpen=\{live && item === lastItem\}/,
   );
-  assert.match(
-    transcriptSource,
-    /const autoOpenLatest =\s*!compact && isLast && itemIndex === items.length - 1/,
-  );
-  assert.match(transcriptSource, /<ToolRow[\s\S]*?autoOpen=\{autoOpenLatest\}/);
-  assert.match(transcriptToolRowSource, /const disclosure = useAutomaticDisclosure\(\s*autoOpen && !failed && status !== "denied",\s*revealRequest/);
+  // The leaf default stays with thinking only; a tool, hosted-search or plan
+  // row waits for an explicit user action in either mode.
+  assert.doesNotMatch(transcriptSource, /autoOpenLatest/);
+  assert.doesNotMatch(transcriptSource, /<ToolRow[^>]*\sautoOpen/);
+  assert.match(transcriptToolRowSource, /const disclosure = useAutomaticDisclosure\(\s*false,\s*revealRequest,\s*disclosureKey\("tool", message\.id\),\s*\);/);
   assert.match(transcriptSource, /onClick=\{toggleDisclosure\}/);
   assert.match(transcriptSource, /onCollapse=\{collapseDisclosure\}/);
   assert.match(transcriptSource, /onUserInteraction=\{claimDisclosure\}/);
@@ -310,7 +330,8 @@ test("provider settings persist model-local limits and thinking configuration", 
 });
 
 test("main forwards the complete models.dev model record to the sidecar", () => {
-  assert.match(sessionLaunchSource, /modelConfigFromModelsDev/);
+  // catalogModelConfigFor returns modelConfigFromModelsDev for a resolved record.
+  assert.match(sessionLaunchSource, /catalogModelConfigFor/);
   assert.doesNotMatch(sessionLaunchSource, /resolvePiModelConfig/);
   assert.match(sessionLaunchSource, /\.\.\.\(modelConfig \? \{ modelConfig \} : \{\}\)/);
   assert.doesNotMatch(sessionLaunchSource, /modelCompat/);

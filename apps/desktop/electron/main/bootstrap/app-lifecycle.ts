@@ -18,11 +18,12 @@ import {
 } from "@pi-desktop/shared";
 import { catalogs, resolveLocale } from "@pi-desktop/i18n";
 import { installApplicationMenu } from "../application-menu";
+import { isWindowFullScreen, setWindowFullScreen } from "../window-fullscreen";
 import { createTraySessions } from "../tray-sessions";
 import { createTaskbarUnreadBadge } from "../taskbar-unread-badge";
 import { createWindow, type WindowLifecycleState } from "./window";
 import { windowToggleAction } from "./window-visibility";
-import type { BrowserPane } from "../browser-view";
+import type { BrowserHost } from "../browser-host";
 import type { Logger } from "../logger";
 import type { PluginRuntime } from "../plugin-runtime";
 import type { PluginViewHost } from "../plugin-view-host";
@@ -66,7 +67,7 @@ export type ApplicationLifecycleDependencies = {
   showPluginLauncher: () => Promise<void>;
   askCloseBehavior: (window: BrowserWindow) => Promise<CloseBehavior | null>;
   applyCloseBehavior: (behavior: CloseBehavior) => void;
-  browserPane: BrowserPane;
+  browserHost: BrowserHost;
   pluginViews: PluginViewHost;
   plugins: PluginRuntime;
   logger: Pick<Logger, "app">;
@@ -99,7 +100,7 @@ export function createApplicationLifecycle({
   showPluginLauncher,
   askCloseBehavior,
   applyCloseBehavior,
-  browserPane,
+  browserHost,
   pluginViews,
   plugins,
   logger,
@@ -340,16 +341,13 @@ export function createApplicationLifecycle({
       observedWorkPanelBaseBounds,
       classifyDisplayTransition,
       resetMenuRendererReady,
-      markMenuRendererReady,
-      sendToRenderer,
       safeOpenExternal,
       showPluginLauncher,
       askCloseBehavior,
       applyCloseBehavior,
       createTray,
-      browserPane,
+      browserHost,
       pluginViews,
-      plugins,
       logger,
     });
   }
@@ -405,7 +403,7 @@ export function createApplicationLifecycle({
       const window = state.mainWindow;
       return {
         maximized: Boolean(window && !window.isDestroyed() && window.isMaximized()),
-        fullScreen: Boolean(window && !window.isDestroyed() && window.isFullScreen()),
+        fullScreen: Boolean(window && !window.isDestroyed() && isWindowFullScreen(window)),
       };
     }
     if (!target || target.isDestroyed()) {
@@ -445,7 +443,11 @@ export function createApplicationLifecycle({
         contents.setZoomFactor(1);
         break;
       case "toggleFullScreen":
-        target.setFullScreen(!target.isFullScreen());
+        setWindowFullScreen(
+          target,
+          !isWindowFullScreen(target),
+          process.platform === "win32" && target === state.mainWindow,
+        );
         break;
       case "minimize":
         target.minimize();
@@ -461,7 +463,7 @@ export function createApplicationLifecycle({
 
     return {
       maximized: !target.isDestroyed() && target.isMaximized(),
-      fullScreen: !target.isDestroyed() && target.isFullScreen(),
+      fullScreen: !target.isDestroyed() && isWindowFullScreen(target),
     };
   }
 

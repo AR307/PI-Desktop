@@ -60,6 +60,12 @@ fn manifest_with_providers(ids: &[&str]) -> PluginManifest {
     serde_json::from_value(value).unwrap()
 }
 
+fn manifest_with_dynamic_provider() -> PluginManifest {
+    let mut value = serde_json::to_value(manifest()).unwrap();
+    value["contributes"]["providers"][0]["models"] = json!([]);
+    serde_json::from_value(value).unwrap()
+}
+
 fn write_plugin(root: &std::path::Path, manifest: Value) {
     fs::create_dir_all(root).unwrap();
     fs::write(root.join("main.js"), "export function onLoad() {}").unwrap();
@@ -91,9 +97,11 @@ fn declaration_manifest(providers: Value, permissions: Value) -> Value {
 #[test]
 fn a_new_database_carries_the_owner_column_at_the_current_schema_version() {
     let (_dir, db, _secrets) = test_context();
-    // v17 added the owner column, v18 the turn-queue priority column, v19 session omit; a fresh
-    // database is stamped with the newest, so the column set is the current one.
-    assert_eq!(SCHEMA_VERSION, 19);
+    // v17 added the owner column, v18 the turn-queue priority column,
+    // v19 session omit, v21 the session Todo checklist, and v22 the
+    // session-list index. A fresh database is stamped with the newest version,
+    // so the column set is the current one.
+    assert_eq!(SCHEMA_VERSION, 23);
     let version: i64 = db
         .conn()
         .query_row("PRAGMA user_version", [], |row| row.get(0))
@@ -137,6 +145,61 @@ fn declared_providers_reads_the_manifest() {
 }
 
 #[test]
+fn provider_declarations_have_no_eight_row_cap() {
+    let ids: Vec<String> = (0..18).map(|index| format!("site-{index}")).collect();
+    let borrowed: Vec<&str> = ids.iter().map(String::as_str).collect();
+    let declared = declared_providers(&manifest_with_providers(&borrowed));
+    assert_eq!(declared.len(), 18);
+
+    let temp = tempfile::tempdir().unwrap();
+    let root = temp.path().join("plugin");
+    write_plugin(
+        &root,
+        serde_json::to_value(manifest_with_providers(&borrowed)).unwrap(),
+    );
+    assert!(PluginManager::read_manifest(&root).is_ok());
+}
+
+#[test]
+fn empty_api_key_model_list_uses_the_cached_endpoint_discovery() {
+    let (_dir, db, secrets) = test_context();
+    let declared = declared_providers(&manifest_with_dynamic_provider());
+    assert!(declared[0].models.is_empty());
+    let temp = tempfile::tempdir().unwrap();
+    let root = temp.path().join("plugin");
+    write_plugin(
+        &root,
+        serde_json::to_value(manifest_with_dynamic_provider()).unwrap(),
+    );
+    assert!(PluginManager::read_manifest(&root).is_ok());
+    sync_plugin_providers(&db, &secrets, "demo.provider", &declared, true).unwrap();
+    providers::set_provider_secret(
+        &db,
+        &secrets,
+        "plugin:demo.provider:demo",
+        Some("fixture-key"),
+    )
+    .unwrap();
+    providers::cache_discovered_models(
+        &db,
+        "plugin:demo.provider:demo",
+        &[providers::DiscoveredModelInput {
+            model_id: "demo-chat".to_string(),
+            display_name: "Demo Chat".to_string(),
+            capabilities: vec!["text".to_string()],
+            context_window: Some(128_000),
+        }],
+    )
+    .unwrap();
+
+    let listed = providers::list_providers(&db, &secrets, true).unwrap();
+    assert_eq!(listed[0].models.len(), 1);
+    assert_eq!(listed[0].models[0].id, "demo-chat");
+    assert_eq!(listed[0].models[0].alias.as_deref(), Some("Demo Chat"));
+    assert_eq!(listed[0].default_model_id.as_deref(), Some("demo-chat"));
+}
+
+#[test]
 fn sync_writes_rows_owned_by_the_plugin() {
     let (_dir, db, secrets) = test_context();
     let declared = declared_providers(&manifest());
@@ -176,6 +239,118 @@ fn sync_is_declarative_and_drops_a_removed_declaration() {
             .is_none()
     );
     assert!(!secrets.has(&key_ref));
+}
+
+/// A declaration that stops naming a model forgets the row cached for it, the
+/// same way a user save does: the cache must not keep describing a model this
+/// provider no longer declares.
+#[test]
+fn dropping_a_declared_model_forgets_its_cached_row() {
+    let (_dir, db, secrets) = test_context();
+    let declared = declared_providers(&manifest());
+    sync_plugin_providers(&db, &secrets, "demo.provider", &declared, true).unwrap();
+    let row_id = "plugin:demo.provider:demo";
+    providers::cache_discovered_models(
+        &db,
+        row_id,
+        &[
+            providers::DiscoveredModelInput {
+                model_id: "demo-large".into(),
+                display_name: "Demo Large".into(),
+                capabilities: vec!["text".into()],
+                context_window: Some(200_000),
+            },
+            providers::DiscoveredModelInput {
+                model_id: "demo-small".into(),
+                display_name: "Demo Small".into(),
+                capabilities: vec!["text".into()],
+                context_window: Some(32_000),
+            },
+            providers::DiscoveredModelInput {
+                model_id: "demo-extra".into(),
+                display_name: "Demo Extra".into(),
+                capabilities: vec!["text".into()],
+                context_window: None,
+            },
+        ],
+    )
+    .unwrap();
+    assert_eq!(providers::list_models(&db, Some(row_id)).unwrap().len(), 3);
+
+    let mut value = serde_json::to_value(manifest()).unwrap();
+    value["contributes"]["providers"][0]["models"] = json!([{
+        "id": "demo-large",
+        "name": "Demo Large",
+        "contextWindow": 200000,
+        "maxTokens": 8192
+    }]);
+    let shrunk: PluginManifest = serde_json::from_value(value).unwrap();
+    sync_plugin_providers(
+        &db,
+        &secrets,
+        "demo.provider",
+        &declared_providers(&shrunk),
+        true,
+    )
+    .unwrap();
+
+    let mut cached: Vec<String> = providers::list_models(&db, Some(row_id))
+        .unwrap()
+        .into_iter()
+        .map(|model| model.model_id)
+        .collect();
+    cached.sort();
+    assert_eq!(cached, vec!["demo-extra", "demo-large"]);
+}
+
+/// A declaration that moves its endpoint abandons the discovery answer the
+/// previous one produced: those rows describe a service this provider no longer
+/// points at.
+#[test]
+fn moving_a_declared_endpoint_forgets_the_discovered_answer() {
+    let (_dir, db, secrets) = test_context();
+    let declared = declared_providers(&manifest());
+    sync_plugin_providers(&db, &secrets, "demo.provider", &declared, true).unwrap();
+    let row_id = "plugin:demo.provider:demo";
+    providers::cache_discovered_models(
+        &db,
+        row_id,
+        &[
+            providers::DiscoveredModelInput {
+                model_id: "demo-large".into(),
+                display_name: "Demo Large".into(),
+                capabilities: vec!["text".into()],
+                context_window: Some(200_000),
+            },
+            providers::DiscoveredModelInput {
+                model_id: "demo-remote-only".into(),
+                display_name: "Demo Remote Only".into(),
+                capabilities: vec!["text".into()],
+                context_window: Some(8_000),
+            },
+        ],
+    )
+    .unwrap();
+    assert_eq!(providers::list_models(&db, Some(row_id)).unwrap().len(), 2);
+
+    let mut value = serde_json::to_value(manifest()).unwrap();
+    value["contributes"]["providers"][0]["baseUrl"] = json!("https://mirror.example.com/v1");
+    let moved: PluginManifest = serde_json::from_value(value).unwrap();
+    sync_plugin_providers(
+        &db,
+        &secrets,
+        "demo.provider",
+        &declared_providers(&moved),
+        true,
+    )
+    .unwrap();
+
+    let cached: Vec<String> = providers::list_models(&db, Some(row_id))
+        .unwrap()
+        .into_iter()
+        .map(|model| model.model_id)
+        .collect();
+    assert_eq!(cached, vec!["demo-large"]);
 }
 
 #[test]
@@ -399,7 +574,42 @@ fn the_declaration_shape_is_validated() {
     );
     assert!(read_manifest_err(&root).contains("http(s) URL"));
 
-    // A model list is required and bounded.
+    // Localized labels are bounded by characters, including full-width text.
+    let long_localized_provider = json!([{
+        "id": "demo",
+        "name": "Demo",
+        "category": { "en": "C".repeat(128), "zh-CN": "公".repeat(128) },
+        "description": { "en": "A".repeat(280), "zh-CN": "公益".repeat(140) },
+        "baseUrl": "https://api.example.com/v1",
+        "models": [{ "id": "m" }]
+    }]);
+    write_plugin(
+        &root,
+        declaration_manifest(long_localized_provider, permissions.clone()),
+    );
+    assert!(PluginManager::read_manifest(&root).is_ok());
+
+    write_plugin(
+        &root,
+        declaration_manifest(
+            json!([{ "id": "demo", "name": "Demo", "category": { "en": "Community" },
+                     "baseUrl": "https://api.example.com/v1", "models": [{ "id": "m" }] }]),
+            permissions.clone(),
+        ),
+    );
+    assert!(read_manifest_err(&root).contains("category must be a string or localized strings"));
+
+    write_plugin(
+        &root,
+        declaration_manifest(
+            json!([{ "id": "demo", "name": "Demo", "description": "公".repeat(281),
+                     "baseUrl": "https://api.example.com/v1", "models": [{ "id": "m" }] }]),
+            permissions.clone(),
+        ),
+    );
+    assert!(read_manifest_err(&root).contains("description must be a string or localized strings"));
+
+    // Dynamic discovery needs an endpoint when an API-key model list is empty.
     write_plugin(
         &root,
         declaration_manifest(
@@ -407,7 +617,8 @@ fn the_declaration_shape_is_validated() {
             permissions.clone(),
         ),
     );
-    assert!(read_manifest_err(&root).contains("1 to 64 models"));
+    assert!(read_manifest_err(&root)
+        .contains("may omit models only for an API-key provider with a baseUrl"));
 
     write_plugin(
         &root,
@@ -419,26 +630,76 @@ fn the_declaration_shape_is_validated() {
     );
     assert!(read_manifest_err(&root).contains("declares model m twice"));
 
-    // OAuth needs the Host-owned login flow, which does not exist yet.
+    // OAuth declarations require an explicit OAuth capability grant.
     write_plugin(
         &root,
         declaration_manifest(
             json!([{ "id": "demo", "name": "Demo", "authKind": "oauth",
-                     "models": [{ "id": "m" }] }]),
-            permissions,
+                     "baseUrl": "https://api.example.com/v1", "models": [{ "id": "m" }] }]),
+            permissions.clone(),
         ),
     );
-    assert!(read_manifest_err(&root).contains("unsupported authKind oauth"));
+    assert!(read_manifest_err(&root).contains("require the provider.oauth permission"));
 
     write_plugin(
         &root,
         declaration_manifest(
             json!([{ "id": "demo", "name": "Demo", "authKind": "oauth",
-                     "oauth": { "label": "Demo" }, "models": [{ "id": "m" }] }]),
-            json!(["provider.register"]),
+                     "baseUrl": "https://api.example.com/v1",
+                     "oauth": { "loginLabel": "Continue in browser", "isSubscription": true },
+                     "models": [{ "id": "m" }] }]),
+            json!(["provider.register", "provider.oauth"]),
         ),
     );
-    assert!(read_manifest_err(&root).contains("not supported in this release"));
+    assert!(PluginManager::read_manifest(&root).is_ok());
+
+    let oauth_permissions = json!(["provider.register", "provider.oauth"]);
+    let invalid_oauth_providers = [
+        (
+            json!([{ "id": "demo", "name": "Demo", "authKind": "oauth",
+                     "models": [{ "id": "m" }] }]),
+            "requires baseUrl for OAuth",
+        ),
+        (
+            json!([{ "id": "demo", "name": "Demo", "authKind": "api_key",
+                     "baseUrl": "https://api.example.com/v1",
+                     "oauth": { "loginLabel": "Continue" },
+                     "models": [{ "id": "m" }] }]),
+            "requires authKind oauth",
+        ),
+        (
+            json!([{ "id": "demo", "name": "Demo", "authKind": "oauth",
+                     "baseUrl": "https://api.example.com/v1", "oauth": "invalid",
+                     "models": [{ "id": "m" }] }]),
+            "oauth must be an object",
+        ),
+        (
+            json!([{ "id": "demo", "name": "Demo", "authKind": "oauth",
+                     "baseUrl": "https://api.example.com/v1",
+                     "oauth": { "unexpected": true }, "models": [{ "id": "m" }] }]),
+            "oauth has unsupported field unexpected",
+        ),
+        (
+            json!([{ "id": "demo", "name": "Demo", "authKind": "oauth",
+                     "baseUrl": "https://api.example.com/v1", "oauth": { "loginLabel": " " },
+                     "models": [{ "id": "m" }] }]),
+            "oauth.loginLabel must be a non-empty string",
+        ),
+        (
+            json!([{ "id": "demo", "name": "Demo", "authKind": "oauth",
+                     "baseUrl": "https://api.example.com/v1",
+                     "oauth": { "isSubscription": "yes" }, "models": [{ "id": "m" }] }]),
+            "oauth.isSubscription must be a boolean",
+        ),
+    ];
+    for (providers, expected_error) in invalid_oauth_providers {
+        write_plugin(
+            &root,
+            declaration_manifest(providers, oauth_permissions.clone()),
+        );
+        let error = read_manifest_err(&root);
+        assert!(error.contains(expected_error), "{error}");
+    }
 }
 
 /// A row id already in use by something other than this plugin cannot arise

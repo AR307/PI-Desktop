@@ -122,6 +122,167 @@ fn v18_database_migrates_session_thinking_omit() {
     assert!(sql.contains("'omit'"), "{sql}");
 }
 
+#[test]
+fn v22_database_migrates_session_title_sources_without_losing_titles() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("pi.sqlite");
+    let (default_id, localized_id, manual_id) = {
+        let db = Database::open(&path).unwrap();
+        let default_session =
+            crate::sessions::create_session(&db, None, None, None, None, None).unwrap();
+        // A v22 install wrote the active locale's placeholder into the title.
+        let localized_session =
+            crate::sessions::create_session(&db, Some("새 작업".into()), None, None, None, None)
+                .unwrap();
+        let manual_session = crate::sessions::create_session(
+            &db,
+            Some("A title chosen by the user".into()),
+            None,
+            None,
+            None,
+            None,
+        )
+        .unwrap();
+        db.conn()
+            .execute_batch("ALTER TABLE sessions DROP COLUMN title_source;")
+            .unwrap();
+        db.conn().pragma_update(None, "user_version", 22).unwrap();
+        (default_session.id, localized_session.id, manual_session.id)
+    };
+
+    let db = Database::open(&path).unwrap();
+    assert_eq!(schema_version(db.conn()), SCHEMA_VERSION);
+    assert!(migration_backup_path(&path, 22).exists());
+    let sources: (String, String, String) = db
+        .conn()
+        .query_row(
+            "SELECT
+                (SELECT title_source FROM sessions WHERE id = ?1),
+                (SELECT title_source FROM sessions WHERE id = ?2),
+                (SELECT title_source FROM sessions WHERE id = ?3)",
+            params![default_id, localized_id, manual_id],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+        )
+        .unwrap();
+    assert_eq!(
+        sources,
+        ("default".into(), "default".into(), "manual".into())
+    );
+    assert_eq!(
+        crate::sessions::get_session(&db, &manual_id)
+            .unwrap()
+            .unwrap()
+            .summary
+            .title,
+        "A title chosen by the user"
+    );
+}
+
+/// v21 owns the session checklist. A real v20 database has neither the
+/// `sessions` stamps nor the `session_todo` table, so the upgrade must add
+/// both, keep the v20 rows, leave a readable pre-migration backup, and stay
+/// idempotent when a fixture downgrades the same file in place.
+#[test]
+fn v20_database_migrates_the_session_checklist_with_a_backup() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("pi.sqlite");
+    let session_id = {
+        let db = Database::open(&path).unwrap();
+        let session = crate::sessions::create_session(
+            &db,
+            Some("v20 session".into()),
+            Some("agent".into()),
+            None,
+            None,
+            None,
+        )
+        .unwrap();
+        db.conn()
+            .execute(
+                "INSERT INTO artifacts (session_id, path, op, updated_at)
+                     VALUES (?1, 'kept.txt', 'write', 1)",
+                params![session.id],
+            )
+            .unwrap();
+        session.id
+    };
+
+    let downgrade_to_v20 = |path: &Path| {
+        let conn = Connection::open(path).unwrap();
+        conn.execute_batch(
+            "PRAGMA foreign_keys = OFF;
+             DROP TABLE IF EXISTS session_todo;
+             ALTER TABLE sessions DROP COLUMN todo_revision;
+             ALTER TABLE sessions DROP COLUMN todo_updated_at;
+             DROP INDEX IF EXISTS idx_sessions_updated_id;
+             CREATE INDEX idx_sessions_updated ON sessions(updated_at DESC);
+             PRAGMA user_version = 20;",
+        )
+        .unwrap();
+        drop(conn);
+    };
+    downgrade_to_v20(&path);
+
+    let db = Database::open(&path).unwrap();
+    assert_eq!(schema_version(db.conn()), SCHEMA_VERSION);
+    assert!(table_exists(db.conn(), "session_todo"));
+    assert!(migration_backup_path(&path, 20).exists());
+    assert_readable_migration_backup(&path, 20);
+    let todo_columns: i64 = db
+        .conn()
+        .query_row(
+            "SELECT COUNT(*) FROM pragma_table_info('sessions')
+                 WHERE name IN ('todo_revision', 'todo_updated_at')",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(todo_columns, 2, "both v21 session stamps are present");
+    let (title, revision, updated_at): (String, i64, Option<i64>) = db
+        .conn()
+        .query_row(
+            "SELECT title, todo_revision, todo_updated_at FROM sessions WHERE id = ?1",
+            params![session_id],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+        )
+        .unwrap();
+    assert_eq!(title, "v20 session");
+    assert_eq!(revision, 0, "a migrated session starts at revision zero");
+    assert!(updated_at.is_none());
+    let kept: String = db
+        .conn()
+        .query_row(
+            "SELECT path FROM artifacts WHERE session_id = ?1",
+            params![session_id],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(kept, "kept.txt");
+
+    // A second run over the same file, both with and without the v21 objects
+    // already in place, must not fail or duplicate anything.
+    drop(db);
+    downgrade_to_v20(&path);
+    let db = Database::open(&path).unwrap();
+    assert_eq!(schema_version(db.conn()), SCHEMA_VERSION);
+    assert!(table_exists(db.conn(), "session_todo"));
+    drop(db);
+    {
+        let conn = Connection::open(&path).unwrap();
+        conn.pragma_update(None, "user_version", 20).unwrap();
+    }
+    let db = Database::open(&path).unwrap();
+    assert_eq!(schema_version(db.conn()), SCHEMA_VERSION);
+    assert!(table_exists(db.conn(), "session_todo"));
+    assert_eq!(
+        db.conn()
+            .query_row("SELECT COUNT(*) FROM session_todo", [], |row| row
+                .get::<_, i64>(0))
+            .unwrap(),
+        0
+    );
+}
+
 fn schema_version(conn: &Connection) -> i64 {
     conn.query_row("PRAGMA user_version", [], |row| row.get(0))
         .unwrap()
@@ -195,6 +356,7 @@ fn fresh_open_creates_latest_schema() {
         "audit_log",
         "plan_approvals",
         "session_import_origins",
+        "session_todo",
     ] {
         assert!(table_exists(db.conn(), table), "missing {table}");
     }
@@ -1211,7 +1373,7 @@ fn project_group_roundtrips_roots_and_shared_context() {
 }
 
 #[test]
-fn project_group_update_adjusts_roots_without_orphaning_chats() {
+fn project_group_update_detaches_roots_with_chats_without_orphaning_them() {
     let dir = tempfile::tempdir().unwrap();
     let primary = dir.path().join("primary");
     let first = dir.path().join("first");
@@ -1274,15 +1436,102 @@ fn project_group_update_adjusts_roots_without_orphaning_chats() {
         Some(canonical_second.as_str())
     );
 
-    assert!(db
+    let detached = db
         .update_project_group(
             &updated.id,
             "Adjusted again",
             &[primary.to_string_lossy().into()],
         )
-        .unwrap_err()
-        .to_string()
-        .contains("still has chats"));
+        .expect("a root with chats can be detached from the group");
+    assert_eq!(detached.roots.len(), 1);
+    assert_eq!(detached.roots[0].path, group.primary_path);
+    assert_eq!(detached.detached_paths.len(), 1);
+
+    let groups = db.list_project_groups().unwrap();
+    assert_eq!(groups.len(), 2);
+    let standalone = groups
+        .iter()
+        .find(|candidate| candidate.roots[0].path == canonical_second)
+        .expect("the detached project's chats remain reachable");
+    assert!(standalone.legacy);
+    assert_eq!(
+        db.project_session_ids(&canonical_second).unwrap(),
+        [session.id]
+    );
+}
+
+#[test]
+fn remove_project_from_group_detaches_even_with_chats_and_may_move_primary() {
+    let dir = tempfile::tempdir().unwrap();
+    let primary = dir.path().join("primary");
+    let first = dir.path().join("first");
+    let second = dir.path().join("second");
+    std::fs::create_dir_all(&primary).unwrap();
+    std::fs::create_dir_all(&first).unwrap();
+    std::fs::create_dir_all(&second).unwrap();
+    let db = Database::open(&dir.path().join("pi.sqlite")).unwrap();
+    let group = db
+        .create_project_group(
+            "Deadlock",
+            &[
+                primary.to_string_lossy().into(),
+                first.to_string_lossy().into(),
+                second.to_string_lossy().into(),
+            ],
+        )
+        .unwrap();
+    // The project has chats: `update_project_group` refuses to detach it, so
+    // `projects.remove` must not depend on that path (#1358).
+    let session = crate::sessions::create_session(
+        &db,
+        Some("Blocked chat".into()),
+        Some("agent".into()),
+        None,
+        None,
+        Some(primary.to_string_lossy().into_owned()),
+    )
+    .unwrap();
+    let project_session_ids = db.project_session_ids(&group.primary_path).unwrap();
+    assert_eq!(
+        project_session_ids.as_slice(),
+        std::slice::from_ref(&session.id)
+    );
+
+    // Removing the primary moves the role to the first remaining root and
+    // keeps the other root in the group.
+    let after_primary = db
+        .remove_project_from_group(&group.id, &group.primary_path)
+        .unwrap()
+        .expect("group survives removing its primary");
+    let canonical_first = crate::db::canonical_project_path(&first.to_string_lossy()).unwrap();
+    let canonical_second = crate::db::canonical_project_path(&second.to_string_lossy()).unwrap();
+    assert_eq!(after_primary.primary_path, canonical_first);
+    assert_eq!(after_primary.roots.len(), 2);
+    assert_eq!(after_primary.roots[0].path, canonical_first);
+
+    // Removing a non-primary root keeps the primary in place.
+    let after_second = db
+        .remove_project_from_group(&group.id, &canonical_second)
+        .unwrap()
+        .unwrap();
+    assert_eq!(after_second.primary_path, canonical_first);
+    assert_eq!(after_second.roots.len(), 1);
+
+    // Removing the last root deletes the group record.
+    let gone = db
+        .remove_project_from_group(&group.id, &canonical_first)
+        .unwrap();
+    assert!(gone.is_none());
+    assert!(!db
+        .list_project_groups()
+        .unwrap()
+        .iter()
+        .any(|candidate| candidate.id == group.id));
+    // The chats of removed roots stay reachable for the caller's bulk delete.
+    assert_eq!(
+        db.project_session_ids(&group.primary_path).unwrap(),
+        [session.id]
+    );
 }
 
 #[test]
@@ -1467,4 +1716,48 @@ fn a_v16_file_gains_the_provider_owner_column() {
         )
         .unwrap();
     assert!(owner.is_none());
+}
+
+#[test]
+fn migrates_v21_to_v22_replaces_session_index() {
+    let dir = tempfile::tempdir().unwrap();
+    let db_path = dir.path().join("pi.sqlite");
+    {
+        // Open a fresh database which creates the latest schema
+        let db = Database::open(&db_path).unwrap();
+        db.conn()
+            .execute_batch(
+                "
+            DROP INDEX IF EXISTS idx_sessions_updated_id;
+            CREATE INDEX idx_sessions_updated ON sessions(updated_at DESC);
+            PRAGMA user_version = 21;
+            ",
+            )
+            .unwrap();
+    }
+
+    let db = Database::open(&db_path).unwrap();
+
+    let version: i64 = db
+        .conn()
+        .query_row("PRAGMA user_version", [], |r| r.get(0))
+        .unwrap();
+    assert_eq!(version, crate::db::SCHEMA_VERSION);
+
+    let old_index_exists: bool = db.conn().query_row(
+        "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='index' AND name='idx_sessions_updated')",
+        [],
+        |r| r.get(0)
+    ).unwrap();
+    assert!(!old_index_exists, "idx_sessions_updated should be dropped");
+
+    let new_index_exists: bool = db.conn().query_row(
+        "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='index' AND name='idx_sessions_updated_id')",
+        [],
+        |r| r.get(0)
+    ).unwrap();
+    assert!(
+        new_index_exists,
+        "idx_sessions_updated_id should be created"
+    );
 }

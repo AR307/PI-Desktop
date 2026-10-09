@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, renameSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { register } from "node:module";
@@ -8,7 +8,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 
 const here = dirname(fileURLToPath(import.meta.url));
 register(pathToFileURL(join(here, "helpers/ts-import-hooks.mjs")));
-const { parseChatRef, resolveChatFileRef } = await import(
+const { isChatRefOutsideRoots, parseChatRef, resolveChatFileRef } = await import(
   "../electron/main/chat-ref-resolve.ts"
 );
 
@@ -80,14 +80,96 @@ test("a bare leaf name resolves through the workspace index", async () => {
   assert.equal(match?.relativePath, "src/dir/openimage.js");
 });
 
-test("the reported case: a POSIX absolute path from a tool call is completed by tail", async () => {
-  // The agent printed `/root/dir/openimage.js`; on this machine the real file
-  // only ever existed as `src/dir/openimage.js` inside the project.
+test("an absolute path outside the project cannot select a same-name file by tail", async () => {
   const workspace = tempTree("ws", ["src/dir/openimage.js"]);
   const match = await resolve("/root/dir/openimage.js", { workspace });
-  assert.equal(match?.root, "workspace");
-  assert.equal(match?.matchedBy, "path-suffix");
-  assert.equal(match?.relativePath, "src/dir/openimage.js");
+  assert.equal(match, null);
+  const unc = "\\\\server\\my share\\openimage.js";
+  assert.equal(parseChatRef(unc)?.absolute, true);
+  assert.equal(await isChatRefOutsideRoots(unc, roots({ workspace })), true);
+  assert.equal(await resolve(unc, { workspace }), null);
+});
+
+test("an exact absolute path with spaces resolves only inside an allowed root", async () => {
+  const workspace = tempTree("spaced ws", ["my project/page.md", "other/page.md"]);
+  const absolute = join(workspace, "my project", "page.md");
+  const match = await resolve(absolute, { workspace });
+  assert.equal(match?.matchedBy, "exact-absolute");
+  assert.equal(match?.absolutePath, absolute);
+  assert.equal(await resolve(join(dirname(workspace), "page.md"), { workspace }), null);
+  assert.equal(await isChatRefOutsideRoots(absolute, roots({ workspace })), false);
+  assert.equal(await isChatRefOutsideRoots(join(dirname(workspace), "page.md"), roots({ workspace })), true);
+});
+
+test("an absolute realpath alias resolves under the same registered root", async () => {
+  const workspace = tempTree("alias-target", ["my project/page.md"]);
+  const aliasParent = mkdtempSync(join(tmpdir(), "pi-chat-ref-alias-"));
+  const alias = join(aliasParent, "linked-project");
+  symlinkSync(workspace, alias, process.platform === "win32" ? "junction" : "dir");
+  const target = join(workspace, "my project", "page.md");
+  const project = [folder(alias)];
+  assert.equal(await isChatRefOutsideRoots(target, { project }), false);
+  const match = await resolveChatFileRef(target, { project });
+  assert.equal(match?.matchedBy, "exact-absolute");
+  assert.equal(match?.relativePath, "my project/page.md");
+  assert.equal(match?.absolutePath, target);
+  const missing = join(workspace, "my project", "missing.md");
+  assert.equal(await isChatRefOutsideRoots(missing, { project }), false);
+  assert.equal(await resolveChatFileRef(missing, { project }), null);
+  assert.equal((await resolveChatFileRef("my project/page.md", { project }))?.relativePath, "my project/page.md");
+});
+
+test("an in-root symlink cannot resolve a file outside the registered root", async () => {
+  const workspace = tempTree("symlink-root", ["safe.md"]);
+  const outside = tempTree("symlink-outside", ["page.md"]);
+  symlinkSync(outside, join(workspace, "linked"), process.platform === "win32" ? "junction" : "dir");
+  const ref = join(workspace, "linked", "page.md");
+  assert.equal(await isChatRefOutsideRoots(ref, roots({ workspace })), true);
+  assert.equal(await resolve(ref, { workspace }), null);
+  assert.equal(await isChatRefOutsideRoots(join(workspace, "linked", "missing.md"), roots({ workspace })), true);
+});
+
+test("an exact relative symlink escape does not fall back to a same-name file", async () => {
+  const workspace = tempTree("relative-escape", ["other/linked/page.md"]);
+  const outside = tempTree("relative-outside", ["page.md"]);
+  symlinkSync(outside, join(workspace, "linked"), process.platform === "win32" ? "junction" : "dir");
+  assert.equal(await resolve("linked/page.md", { workspace }), null);
+
+  const scratch = tempTree("scratch-escape", []);
+  symlinkSync(outside, join(scratch, "linked"), process.platform === "win32" ? "junction" : "dir");
+  assert.equal(await resolve("linked/page.md", { scratch }), null);
+});
+
+test("an exact relative link within its root remains resolvable", async () => {
+  const workspace = tempTree("relative-inside", ["docs/page.md"]);
+  symlinkSync(join(workspace, "docs"), join(workspace, "linked"), process.platform === "win32" ? "junction" : "dir");
+  const match = await resolve("linked/page.md", { workspace });
+  assert.equal(match?.matchedBy, "exact-relative");
+  assert.equal(match?.relativePath, "linked/page.md");
+});
+
+test("a stale fuzzy index skips escaped and missing candidates in priority order", async () => {
+  const workspace = tempTree("stale-index", ["a/page.md", "b/page.md", "c/page.md"]);
+  assert.equal((await resolve("page.md", { workspace }))?.relativePath, "a/page.md");
+  renameSync(join(workspace, "a"), join(workspace, "old-a"));
+  renameSync(join(workspace, "b"), join(workspace, "old-b"));
+  const outside = tempTree("stale-outside", ["page.md"]);
+  symlinkSync(outside, join(workspace, "a"), process.platform === "win32" ? "junction" : "dir");
+  assert.equal((await resolve("page.md", { workspace }))?.relativePath, "c/page.md");
+});
+
+test("a dangling relative link, including a middle directory, does not fall back", async () => {
+  const workspace = tempTree("dangling-link", ["other/linked/page.md"]);
+  symlinkSync(join(workspace, "missing"), join(workspace, "linked"), process.platform === "win32" ? "junction" : "dir");
+  assert.equal(await resolve("linked/page.md", { workspace }), null);
+
+  const terminal = tempTree("dangling-terminal", ["other/linked"]);
+  symlinkSync(join(terminal, "missing"), join(terminal, "linked"), process.platform === "win32" ? "junction" : "dir");
+  assert.equal(await resolve("linked", { workspace: terminal }), null);
+
+  const scratch = tempTree("dangling-scratch", ["other/linked/page.md"]);
+  symlinkSync(join(scratch, "missing"), join(scratch, "linked"), process.platform === "win32" ? "junction" : "dir");
+  assert.equal(await resolve("linked/page.md", { scratch }), null);
 });
 
 test("a longer matching tail beats a bare leaf name", async () => {
@@ -181,6 +263,39 @@ test("a content-addressed attachment blob resolves against the attachment store"
   );
 });
 
+test("an attachment link cannot escape its store", async () => {
+  const digest = "c".repeat(64);
+  const attachments = tempTree("attachment-link", []);
+  const outside = tempTree("attachment-outside", ["page.md"]);
+  if (process.platform === "win32") {
+    symlinkSync(outside, join(attachments, "linked"), "junction");
+    assert.equal(await resolve("linked/page.md", { attachments }), null);
+  } else {
+    symlinkSync(join(outside, "page.md"), join(attachments, digest), "file");
+    assert.equal(await resolve(`attachments/${digest}`, { attachments }), null);
+  }
+});
+
+test("an attachment blob reference rejects invalid hash formats or non-hex characters", async () => {
+  const attachments = tempTree("attachments", ["not-a-valid-sha256"]);
+  assert.equal(
+    await resolve("attachments/not-a-valid-sha256", { attachments }),
+    null,
+  );
+  assert.equal(
+    await resolve("Attachments/not-a-valid-sha256", { attachments }),
+    null,
+  );
+  assert.equal(
+    await resolve(`attachments/${"z".repeat(64)}`, { attachments }),
+    null,
+  );
+  assert.equal(
+    await resolve("attachments/..%2F..%2Fsecrets", { attachments }),
+    null,
+  );
+});
+
 test("line and column references are stripped before matching", async () => {
   const workspace = tempTree("ws", ["src/a.ts"]);
   const match = await resolve("src/a.ts:12:4", { workspace });
@@ -258,4 +373,45 @@ test("a project folder never loses to the scratch store", async () => {
   });
   assert.equal(match?.root, "workspace");
   assert.equal(match?.projectRoot?.path, sibling);
+});
+
+/**
+ * A generated image belongs to the session that made it, but the chat that
+ * shows it belongs to whatever session the user is reading. The read guards
+ * (`fsRead`, `fsOpen`, the image reader) already accept the whole scratch
+ * store, so completion must not report a restriction for a file the app can
+ * open — while a shorthand still never crosses into another session's files.
+ */
+test("an absolute path in the wider store opens though another session wrote it", async () => {
+  const store = tempTree("scratch-store", []);
+  const other = join(store, "session-b");
+  mkdirSync(other, { recursive: true });
+  const image = join(other, "generated-1.png");
+  writeFileSync(image, "png\n");
+  const scratch = join(store, "session-a");
+  mkdirSync(scratch, { recursive: true });
+  const containment = [{ kind: "scratch", path: store }];
+
+  assert.equal(await isChatRefOutsideRoots(image, roots({ scratch, containment })), false);
+  const match = await resolve(image, { scratch, containment });
+  assert.equal(match?.root, "scratch");
+  assert.equal(match?.matchedBy, "exact-absolute");
+  assert.equal(match?.absolutePath, image);
+});
+
+test("a shorthand still searches the session's own store and not the wider one", async () => {
+  const store = tempTree("scratch-store-shorthand", ["session-b/generated-1.png"]);
+  const scratch = join(store, "session-a");
+  mkdirSync(scratch, { recursive: true });
+  const containment = [{ kind: "scratch", path: store }];
+  assert.equal(await resolve("generated-1.png", { scratch, containment }), null);
+});
+
+test("an absolute path outside every root is still reported as restricted", async () => {
+  const store = tempTree("scratch-store-outside", []);
+  const outside = tempTree("outside-store", ["generated-1.png"]);
+  const image = join(outside, "generated-1.png");
+  const options = roots({ scratch: null, containment: [{ kind: "scratch", path: store }] });
+  assert.equal(await isChatRefOutsideRoots(image, options), true);
+  assert.equal(await resolveChatFileRef(image, options), null);
 });

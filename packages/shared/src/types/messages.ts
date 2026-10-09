@@ -1,61 +1,83 @@
+import type { PlanHistoryEntry } from "./plans.js";
 /** Shared public types grouped by the owning application domain. */
 import type { SessionMessageOrigin } from "../session-collaboration.js";
 import type { AppError } from "../errors.js";
 
 export type UiMessageRole = "user" | "assistant" | "system" | "tool";
 
-export type MessageUsage = {
+/** Minimal provenance for an accepted Live Voice work input. */
+export type VoiceOrigin = {
+  callId: string;
+  operationId: string;
+};
+
+export type MessageUsageCost = {
+  input: number;
+  output: number;
+  cacheRead: number;
+  cacheWrite: number;
+  total: number;
+};
+
+export type UsageProvenance = {
+  /** Identifies one physical request, not a tool, artifact, or logical retry group. */
+  operationId?: string;
+  usageOrigin?: "pi" | "legacy";
+  costStatus?: "reported" | "estimated" | "unknown";
+  /** Physical billing binding, not a virtual model alias. */
+  providerId?: string;
+  modelId?: string;
+};
+
+export type MessageUsage = UsageProvenance & {
   inputTokens: number;
   outputTokens: number;
   cacheReadTokens?: number;
   cacheWriteTokens?: number;
   reasoningTokens?: number;
   totalTokens: number;
+  cost?: MessageUsageCost;
+  aggregation?: "operation" | "aggregate";
+  /** Atomic records included in this rollup; never recursively nested. */
+  operations?: UsageOperation[];
 };
 
-/** Sum two provider usage records. Used for turn rollups, never to rewrite a message. */
-export function addUsage(
-  total: MessageUsage | undefined,
-  next: MessageUsage | undefined,
-): MessageUsage | undefined {
-  if (!next) return total;
-  if (!total) return next;
-  return {
-    inputTokens: total.inputTokens + next.inputTokens,
-    outputTokens: total.outputTokens + next.outputTokens,
-    ...(total.cacheReadTokens !== undefined || next.cacheReadTokens !== undefined
-      ? {
-          cacheReadTokens:
-            (total.cacheReadTokens ?? 0) + (next.cacheReadTokens ?? 0),
-        }
-      : {}),
-    ...(total.cacheWriteTokens !== undefined ||
-    next.cacheWriteTokens !== undefined
-      ? {
-          cacheWriteTokens:
-            (total.cacheWriteTokens ?? 0) + (next.cacheWriteTokens ?? 0),
-        }
-      : {}),
-    ...(total.reasoningTokens !== undefined || next.reasoningTokens !== undefined
-      ? {
-          reasoningTokens:
-            (total.reasoningTokens ?? 0) + (next.reasoningTokens ?? 0),
-        }
-      : {}),
-    totalTokens: total.totalTokens + next.totalTokens,
-  };
-}
+export type UsageOperation = Omit<MessageUsage, "operations" | "aggregation"> & {
+  operationId: string;
+};
+
+export { addUsage, withUsageIdentity } from "../message-usage.js";
 
 export type MessageAttachment = {
-  kind: "image" | "file";
+  kind: "image" | "file" | "session";
   name: string;
-  /** Workspace-relative path or session-scratch absolute path. */
+  /** Workspace-relative path, session-scratch absolute path, or a session id. */
   ref: string;
   mimeType?: string;
   size?: number;
+  /**
+   * Bounded excerpt of a referenced conversation, written by Electron main when
+   * the prompt carries a `pi-desktop://session/<id>` link. The model reads it
+   * with the user's message; other attachment kinds never carry it.
+   */
+  text?: string;
+  /**
+   * The `@path` text this attachment occupies inside the message content, when
+   * the user placed it between words. The transcript renders the attachment at
+   * that position instead of appending it after the text; absent means the
+   * attachment follows the body (a formatted, expanded, or legacy message).
+   */
+  inlinePath?: string;
   /** Sidecar-only hydrated image data; never persisted or sent by the host. */
   data?: string;
 };
+
+/** Whether an attachment is a renderer-resolvable file or image reference. */
+export function isRenderableAttachment(
+  attachment: MessageAttachment,
+): attachment is MessageAttachment & { kind: "image" | "file" } {
+  return attachment.kind !== "session";
+}
 
 /** Estimated context footprint for one tool call and its returned result. */
 export type ToolTokenUsage = {
@@ -69,8 +91,19 @@ export type UiMessage = {
   id: string;
   role: UiMessageRole;
   content: string;
+  /** Internal model instructions/tool declarations; never a visible chat row. */
+  modelSystem?: {
+    version: 1;
+    /** The following user input can have been persisted before runtime admission. */
+    beforeMessageId?: string;
+    afterMessageId?: string;
+    /** Opaque JSON preserves section and schema key order across Host storage. */
+    messageJson: string;
+  };
   /** Authenticated agent-to-agent provenance; never inferred from message text. */
   sessionMessage?: SessionMessageOrigin;
+  /** Present only on the durable user row created by a Live Voice operation. */
+  voiceOrigin?: VoiceOrigin;
   /** Files or images associated with a user turn, kept separate from text. */
   attachments?: MessageAttachment[];
   /** Accepted input to an existing turn; Stop must preserve it after reload. */
@@ -97,16 +130,19 @@ export type UiMessage = {
   /** 1-based active variant index for this user root turn. */
   activeRevision?: number;
   /**
-   * Typed slash invocation ("/name args") when this user message was
-   * produced by a prompt-template command; `content` holds the expanded
-   * text the model sees (D123). Transcript renders this as a chip.
+   * Original text for an expanded slash template or explicit Skill invocation;
+   * `content` holds the expanded text the model sees (D123, ADR 0219).
    */
   command?: string;
+  /** Validated Skill tokens in `command`, using UTF-16 offsets. */
+  skillMentions?: Array<{ start: number; end: number; id: string }>;
   toolName?: string;
   toolCallId?: string;
   toolStatus?: "running" | "success" | "error" | "denied";
   toolArgs?: unknown;
   toolResult?: unknown;
+  /** Renderer projection; never written back into canonical model evidence. */
+  planHistory?: PlanHistoryEntry;
   /** Estimated tokens occupied by this tool call and its result. */
   toolUsage?: ToolTokenUsage;
   toolCompletedAt?: string;
@@ -119,6 +155,8 @@ export type UiMessage = {
    * report enters its context.
    */
   parentToolCallId?: string;
+  /** Immediate tool-call parent, independent of the owning Task/subagent. */
+  nestedParentToolCallId?: string;
   /** Definition name of the subagent that produced this row. */
   agentName?: string;
   /**

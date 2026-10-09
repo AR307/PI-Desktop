@@ -23,6 +23,7 @@
 | MCP 服务器 | 从本地或远程 MCP 服务器发现的工具 | `contributes.mcpServers`，MCP 权限 |
 | 服务 | 驻地工作由主人监督 | `contributes.services`、`background.service` 权限 |
 | 消息总线 | 插件之间按约定类型化事件 | `contributes.bus`，总线权限 |
+| 渲染器插槽 | 在应用自身窗口内绘制界面：输入区控件、消息操作栏、回复下方区块、工具卡、代码块渲染器、角落浮层 | `renderer`、`renderer.extension` 权限、`packages/plugin-sdk/src/renderer.ts` |
 
 插件入口代码在专用的 Node 进程中运行。面板在沙盒中运行，
 上下文隔离的 Electron 窗口，没有 Node 集成。来自任一方的呼叫
@@ -505,17 +506,45 @@ root 本身。`net.fetch` 接受 HTTP(S)，并且只能到达 `manifest.net.doma
         "id": "midnight",
         "label": "Midnight",
         "path": "themes/midnight.css",
-        "base": "dark"
+        "base": "dark",
+        "assets": ["themes/background.svg"]
       }
-    ]
+    ],
+    "windowAppearance": {
+      "backgroundColor": { "dark": "#141a24", "light": "#f5f7fa" }
+    }
   },
-  "permissions": ["ui.theme"]
+  "permissions": ["ui.theme", "ui.window.appearance"]
 }
 ```
 
-覆盖该 CSS 中的 PI-Desktop 设计标记。楼主对贡献的内容进行了清理
-CSS，拒绝导入和非数据 URL，每个文件的上限为 256 KiB，并允许
-每个插件有八个主题。用户在“设置”中选择主题。
+`base` 选择覆盖样式所基于的内置 `light` 或 `dark` 调色板；省略时默认
+为 `dark`。用户在“设置”中选择插件贡献的主题。
+
+覆盖设计令牌时，应使用与基础调色板相同的选择器：
+
+```css
+:root[data-theme="dark"] { --ds-bg-primary: #141a24; }
+:root[data-theme="light"] { --ds-bg-primary: #f5f7fa; }
+```
+
+主题样式表追加在宿主样式之后，但只有选择器特异度相同时，后写的声明才胜出。
+宿主调色板使用 `:root[data-theme="dark"]` 和 `:root[data-theme="light"]`；
+单独的 `:root` 特异度较低，不能保证覆盖这些声明。浅色基础主题应显式使用
+`:root[data-theme="light"]`。
+
+宿主清理 CSS，拒绝 `@import`，`url()` 目标仅允许 `data:` URI 或已声明的主题资源；每份
+样式表上限 256 KiB，每个插件最多八个主题。可选 `assets` 接受 `png`、`jpg`、
+`jpeg`、`webp`、`avif`、`svg`、`woff2` 文件，总大小上限 4 MiB。路径可以是插件包内
+相对路径（不得逃出插件根目录或引用 `node_modules`），也可以是绝对路径。
+匹配的 CSS URL 会改写为已注册、只读的 `plugin-asset://` URL；卸载插件时撤销
+注册，渲染器不会收到原始文件系统路径。
+
+可选的 `contributes.windowAppearance.backgroundColor` 为 `light`/`dark` 提供
+`#rrggbb` 或 `#rrggbbaa` 颜色，除 `ui.theme` 外还需要 `ui.window.appearance`。
+它仅在该插件的主题被选中时生效，切换到其他主题后恢复宿主背景；macOS 保留
+系统 vibrancy。完整主题与窗口外观字段参见
+[清单契约](spec/07-plugins/02-plugin-manifest-schema.md)。
 
 ### 6.8 MCP 服务器
 
@@ -666,6 +695,65 @@ export default function (pi) {
   Electron 头重建（`npx @electron/rebuild -v <electron 版本>`）即可修复。安装失败会清理
   部分依赖并显示警告 toast，不会阻塞导入；只有扩展实际加载失败时插件行才显示 load error。
 
+### 6.11 渲染器插槽
+
+上面每一种界面都是插件自己拥有的窗口或页面。**渲染模块**则绘制在 PI-Desktop 自己的窗口里：
+输入区工具栏上的控件、消息操作栏上的条目、助手回复下方的区块、自有 Agent 工具的卡片、
+代码块的渲染器，或者你自己管理的角落浮层。
+
+```json
+{
+  "permissions": ["renderer.extension"],
+  "renderer": "renderer/index.mjs",
+  "rendererActions": ["plugin.call", "composer.insertText"],
+  "rendererCallMethods": ["openWorkspace"]
+}
+```
+
+入口导出 `onLoad(pi)`，宿主在自己的窗口中求值它，并且每次加载都会给一份新的 `pi`。
+组件的 props 只携带数据，因此组件通过模块自己保存的那份 `pi` 访问宿主：
+
+```js
+import React from "react";
+
+let host = null;
+
+function InsertButton() {
+  return React.createElement(
+    "button",
+    { onClick: () => host.dispatch("composer.insertText", { text: "hello" }) },
+    "Insert",
+  );
+}
+
+export function onLoad(pi) {
+  host = pi;
+  pi.slots.register({ slot: "composerControl", component: InsertButton, positions: ["right"] });
+}
+```
+
+- `composerControl` —— 输入区工具栏上的控件；`positions: ["left"]` 或 `["right"]` 选择一侧，省略即两侧
+- `composerTrigger` —— 输入区某个触发符背后的条目列表：`{ slot: "composerTrigger", trigger: "#", items }`，列表由宿主绘制
+- `userAction` / `assistantAction` —— 消息操作栏上的条目
+- `entryExtra` —— 助手回复下方的区块
+- `toolCard` —— 自有 Agent 工具调用的卡片；用 `toolName` 指定工具
+- `blockRenderer` —— 形如 `<你的插件id>:<lang>` 的代码块渲染器；`language` 指定标签
+
+自绘弹窗不是插槽：`pi.ui.openLayer()` 交给你一个可以渲染的层，组件在其中绘制。样式通过
+`pi.ui.injectStyle` 注入；`react` / `react-dom` 会通过窗口的 import map 解析到应用自带的副本，
+不需要打包自己的 React。
+
+`rendererActions` 限定组件可派发的动作——`plugin.call`、`composer.insertText`、
+`composer.readDraft`、`composer.replaceDraft`、`attachments.add`、`attachments.list`、
+`attachments.remove`，最多 16 个——`rendererCallMethods` 限定 `onRendererCall` 为
+`plugin.call` 应答的方法名，最多 32 个。白名单之外的派发返回 `PLUGIN_ACTION_UNDECLARED`，
+词表之外的词返回 `PLUGIN_ACTION_UNKNOWN`。模块与应用同文档、共用同一份 React，因此
+`renderer.extension` 是高风险权限：只授予你信任的代码。
+
+`examples/plugins/ui-slots-lab` 在每个插槽上都挂了一个样例。
+`packages/plugin-sdk/src/renderer.ts` 里有类型和各插槽的 props，manifest 侧见
+[规格 07-plugins/02 §3.2](spec/07-plugins/02-plugin-manifest-schema.md)。
+
 ## 7.权限设计
 
 权限均在 `manifest.json` 中声明并由用户授予。
@@ -675,7 +763,7 @@ export default function (pi) {
 |---|---|
 | 低 | `ui.panel`、`ui.theme`、`notify` |
 | 中等 | `clipboard.read`、`clipboard.write`、`fs.read`、`shell.openExternal`、`background.service`、`bus.publish`、`bus.subscribe`、`audio.playback.background`、`keyboard.globalShortcut` |
-| 高 | `fs.write`、`fs.delete`、`agent.tool.register`、`agent.prompt.inject`、`net.fetch`、`mcp.server.local`、`mcp.server.remote`、`audio.capture.background`、`net.websocket` |
+| 高 | `fs.write`、`fs.delete`、`agent.tool.register`、`agent.prompt.inject`、`renderer.extension`、`net.fetch`、`mcp.server.local`、`mcp.server.remote`、`audio.capture.background`、`net.websocket` |
 
 `keyboard.globalShortcut` 与 `net.websocket` 已实现。`pi.audio.*` 已经存在并且
 可以调用，其方法仍由权限把关，但当前宿主还没有设备后端：获得授权的调用会以
@@ -814,10 +902,11 @@ commit 并给出警告。插件相对仓库根目录的路径也会被记录，�
 8. 运行 `pi-plugin pack` 并以干净的应用程序状态安装生成的包。
 9. 在发布工件旁边记录打印的 SHA-256。
 
-对于官方市场，请将包和目录元数据提交至
-[`vastsa/pi-desktop-plugins`](https://github.com/vastsa/pi-desktop-plugins) 和
-遵循该存储库的 `CONTRIBUTING.md`。市场目录是
-单独的存储库；在这里添加插件不会发布它。
+官方市场的发布走插件中心 [plugins.aiuo.net](https://plugins.aiuo.net)：创建插件、绑定插件所在的仓库、
+给版本打标签并提交——可以在控制台操作，也可以用发布 skill 走 MCP。平台负责打包、审查源码、记录
+SHA-256 并发布该版本，再把目录与安装包同步到
+[AIUO-Net/pi-desktop-plugins](https://github.com/AIUO-Net/pi-desktop-plugins) 作为 GitHub 备用通道。
+分发仓库不托管插件源码，向它提交「新增插件源码」的 PR 会被关闭。
 
 签名不是当前的信任原语。包 SHA-256 和显式
 许可审查是实施的基线；遵循

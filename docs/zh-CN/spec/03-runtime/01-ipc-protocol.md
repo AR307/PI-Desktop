@@ -21,7 +21,7 @@
 | `app` | 应用程序信息、健康检查 |
 | `agent` | 对话、中止、状态和交互式 Asktool 解决方案 |
 | `plan` | Plan 提案列出、决议和变更事件 |
-| `session` | 会话 CRUD/历史记录 |
+| `session` | 会话 CRUD/历史记录/标题元数据 |
 | `session collaboration` | 侧边栏投影使用的有界只读协作状态；变更仍通过已审查的插件网关完成 |
 | `settings` | 配置 read/write |
 | `secrets` | 秘密 write/delete/exists（绝不将明文返回到 UI 日志） |
@@ -38,6 +38,7 @@
 | `menu` | 列入许可名单的应用程序菜单命令和本机 editing/window 操作 |
 | `notification` | 持久收件箱 list/read/clear 和 new/activated 事件 |
 | `stats` | 已完成回合的 token 历史（host RPC；仪表板由插件拥有） |
+| `voice/live` | 应用管理的实时语音通话、无凭证状态/设置 DTO 与每通电话专用媒体端口 |
 
 ## 3. 通道约定
 
@@ -185,6 +186,8 @@ Root 用户轮次可能包括 `revisionRootId`、`revisionCount` 和
  输入框
 附件可供性保持隐藏，直到 main、sidecar、pi 模型
 功能和持久性都会消耗有效负载。
+草稿内联命名过位置的图片会带上 `inlinePath`，运行时按它把图片块放回原位置，
+而不是统一追加在提示文本之后。
 
 ### 5.1a 向当前回合补充指令
 
@@ -810,8 +813,17 @@ type ToolTokenUsage = {
 
 type SessionDetail = SessionSummary & {
  messages: UiMessage[];
+  /** Authoritative metadata for SubmitPlan/SubmitGoal calls in this page. */
+  planHistory?: Array<{ proposal: PlanProposal; superseded: boolean }>;
 };
 ```
+
+历史读取仅为当前会话返回页中的 SubmitPlan/SubmitGoal 调用附加 `planHistory`。
+SQLite 提供真实审批状态、完整 Markdown 快照、文件路径及同类型的新版本替代标记，
+原始 JSONL 工具结果保持不变。显示截断不影响这些有提交大小限制的计划快照。
+该字段兼容旧主机和原生会话；分叉会话不复制审批记录，也不从工具结果或文件名推断状态。
+渲染器可将其投影到 `UiMessage.planHistory`，但不得将显示元数据写回模型证据。
+
 
 Electron 主进程用该会话精确 provider/API URL 与 model 的本地 models.dev
 记录，丰富 session list/get/create/fork/configure 结果中的有效推理能力。
@@ -856,8 +868,16 @@ ID、或会话无法解析出默认目标时，得到 `supportsReasoning: false`
 - `session/get`
 - `session/delete`
 - `session/rename`
+- `session/deriveTitle({ id, title }) -> { updated: boolean }` 应用确定性的首条提示兜底标题。
+  只有当存储标题仍是可识别的占位标题且标题来源为 `default` 时，host-core 才接受它；该写入
+  只改元数据，`updated_at`、转录内容与消息数都不变。派生标题会保留该来源，因此已安装的
+  标题插件仍可替换它；`session/rename` 仍是用户拥有的路径。
 - `session/importScan`
 - `session/importRun(candidates) -> { imported, skipped, failed }`
+
+`session/rename({ id, title })` 会裁剪标题并接受 1–80 个 Unicode 码点；空标题或
+超长标题返回 `INVALID_PARAMS`。成功重命名只更新会话元数据、不改活动时间，并将标题来源
+标为 `manual`，因此标题插件不能覆盖它。
 
 导入候选者携带 `projectPath: string | null` 与
 `messageCount: number | null`。扫描对每个源文件全量读取的上限为导入器的
@@ -1376,7 +1396,9 @@ Chrome 和代理 CDP 位于随应用打包的 `pi.browser` 插件中，通过 `p
 渲染器 IPC 仅保留给 Plan 安全的预览门面和 URL 回退：
 
 - `browser/openExternal({url?})` — 白名单内的 http(s)/mailto，或省略时使用当前访客页 URL
-- 事件：`browser/event/state {url, title, isLoading, canGoBack, canGoForward}`
+- 渲染器打开/关闭插件视图时可携带 `sessionId`、`tabId`。打开前检查插件贡献和作用域；
+  关闭仅释放对应标签的页面，不关闭其他标签共享的工具栏。只提供会话 id 时释放该会话的页面。
+- 事件：`browser/event/state {url, title, isLoading, canGoBack, canGoForward, loadError?, sessionId?, tabId?}`
   （同时以 `browser:state` 推送给插件视图）
 - 代理预览事件：`browser/event/preview {sessionId, path?, url?}`。
   Electron Main 会校验工作区 `path` 位于该会话项目内，在该对话的插件视图可见时
@@ -1391,7 +1413,7 @@ Chrome 和代理 CDP 位于随应用打包的 `pi.browser` 插件中，通过 `p
 - `fs/read({path, mimeType?})` → 文本 (≤512KB) / 图像数据 URL (≤5MB) / 二进制 / 太大。相对路径在工作区根内解析；`attachments/<sha256>` 以及已位于工作区、`<data_dir>/scratch/` 或 `<data_dir>/attachments/` 下的绝对路径在 realpath 校验后也可读（D334 / ADR 0172）；同一项目组中其他文件夹里的绝对路径同样可读（ADR 0249 §5、ADR 0263）。已知图片扩展名优先于 `mimeType`；无扩展名 blob 只接受图片 MIME 白名单。穿越、`~` 和其他逃逸被拒绝（`INVALID_ARGUMENT`）。
 - `fs/readImageDataUrl({ref, mimeType?})` → `FsImageDataUrlResult`（`image` 带 `dataUrl`，或 `missing` / `notImage` / `tooLarge`）。包含范围与 `fs/read` 相同。从不返回非图片字节。仅渲染器使用，不是插件宿主 API。
 - `fs/reveal({path})` → 在 Finder 中显示。包含范围与 `fs/read` 相同。
-- `fs/open({path})` → 用系统默认应用打开。词法包含范围与 `fs/read` 相同（读取额外做 realpath）。
+- `fs/open({path, mimeType?})` → 用系统默认应用打开已有的普通文件。与 `fs/read` 一样校验真实路径包含范围，拒绝通过符号链接逃逸。对于声明为 `video/mp4` 的无后缀 `attachments/<sha256>` blob，宿主在私有应用数据目录建立 `.mp4` 符号链接后再交给系统，不复制视频字节。
 - `fs/resolveRef({ref, sessionId?})` → `FsChatRefResolveResult`（`{ match: FsChatRefMatch | null }`，match 指出应答的 `root`（`workspace` / `scratch` / `attachments`）、相对该应答根的 `relativePath`、绝对路径 `absolutePath` 与 `matchedBy`（`exact-relative` / `exact-absolute` / `path-suffix` / `basename`），以及在 `workspace` 命中时给出的 `projectRoot`（`{ path, name, primary }`，指出是哪个文件夹应答的））；`sessionId` 决定查哪个会话的临时目录。它补全智能体在聊天里打印的文件引用，因为渲染器看不到会话自己的临时目录：已经在某个已知根内指向真实文件的绝对引用直接胜出，`attachments/<sha256>` blob 直接对附件库解析；否则按优先级顺序搜索各根——整个打开的项目、再会话自己的临时目录（`<data_dir>/scratch/<sessionId>/`，ADR 0124）、最后附件库——第一个给出结果的根胜出。项目指的是打开的工作区背后的文件夹组（ADR 0249）：主文件夹先应答，其余文件夹随后按项目组自身顺序搜索（ADR 0263），因此简写落在同级文件夹里和落在主文件夹里一样自然，命中结果也指出是哪个文件夹应答的。同一个根内精确路径优先于简写；简写之间最长匹配尾优先，其次路径更浅者。文件面板的忽略集合同样生效。什么都没匹配到时返回 `match: null`；解析本身不打开任何东西（ADR 0262）。
 - `fs/list` 仍只限工作区；外面的遍历被拒绝（`INVALID_ARGUMENT`）。
 
@@ -1795,7 +1817,14 @@ Electron 等待主机关闭之前会停止服务，并将清单标记为非活�
 `read`、`write` 或 `dangerous`；通用危险操作，以及命名的删除会话、配置会话和决议
 计划工具，都要求 `confirm: true`。该标志是 Agent 确认，不是桌面用户弹窗。所有调用
 仍会经过现有 IPC 处理器的校验、主机权限、工作区边界和错误模型。文本负载和
-`structuredContent` 都有大小上限。
+`structuredContent` 都有大小上限：512 KiB（`MAX_RESULT_CHARS`）。超出上限的答复不会被
+原样返回，而是替换为 `{truncated: true, reason: "MCP_RESULT_LIMIT", preview: "<JSON 前
+512 KiB>"}`，因此外部调用方永远不会收到被静默缩短的负载。如果超限答复来自
+`session/get`（`pi_session_get`）且含有 `compaction` 记录，Main 会先将该记录投影为精简身份
+（`createdAt` 与 `details.generation`），再复查大小，然后才返回截断信封。这样，当长会话中
+无界增长的 `ContextCompactionRecord`（`summary` / `retainedTail` / `details.modifiedFiles`）
+本身导致超限时，转写仍可完整返回。未超限的答复保留完整 compaction 详情；桌面自己的会话详情
+保持不变。
 
 六个 `session/collaboration/*` 操作仅限第一方插件：它们要求经过认证的插件工具调用上下文，
 因此会出现在 `pi.desktop.listOperations` 中并可通过 `pi.desktop.invoke` 调用，但被排除在
@@ -1841,7 +1870,7 @@ unchanged. See [provider configuration](12-provider-config-schema.md).
 
 ## 15. 云配置同步
 
-设置 → 云同步页面使用以下 Renderer-to-Main 通道；所有通道都会转发到 Host 所有的 `configSync.*` RPC 方法：
+设置 → 云同步页面使用以下 Renderer-to-Main 通道；所有通道都会转发到 Host 所有的 `configSync.*` RPC 方法。该页面当前仅在开发构建可见；通道与其 Host 契约不变：
 
 | IPC 通道 | Host 方法 | 契约 |
 |---|---|---|
@@ -1861,3 +1890,33 @@ unchanged. See [provider configuration](12-provider-config-schema.md).
 输入密码只会被传给需要它的操作。原始秘密、vault key、解密资源或远端 archive 不会返回到 Renderer。`configSync.changed` 事件携带相同的脱敏状态，并由 Host 发起的变更（包括 Host scheduler）触发。Main 只是传输/生命周期协调器，不负责调度、合并、加密或应用配置。
 
 手动同步会在运行期间报告 `configSync.progress`：当前阶段（`capture`、`download`、`merge`、`upload`、`apply` 或 `cleanup`）、该阶段已完成与总量，以及已知时的字节数。因此上传大量资源对象时，界面不会无内容可显示。后台轮询不报告进度，因为只有手动路径有调用方在等待。
+
+## 16. 实时语音 API
+
+实时语音是应用管理的通话通路，其所有权绑定在主窗口上，详见[live-voice.md](live-voice.md)。DTO 定义在 `packages/shared/src/types/live-voice.ts`；preload 只暴露下表列出的白名单通道。Main 从调用 IPC 的受信 frame 推导 owner，并只向该 frame 发送通话事件。payload 不能提供 owner 身份或凭证。停靠挂件窗口只绘制通话控件、不拥有通话，因此它的三条通道单独校验，且永不进入 owner 推导。
+
+| IPC 通道 | 方向 | 契约 |
+|---|---|---|
+| `pi-desktop/voice/live/status` | Renderer → Main | 脱敏功能状态、绑定就绪情况和设置版本 |
+| `pi-desktop/voice/live/prepare` | Renderer → Main | 按 request ID 幂等准备通话；同步保留共享麦克风租约 |
+| `pi-desktop/voice/live/connect` | Renderer → Main | 连接已准备的通话；Codex 可附带有界 SDP offer |
+| `pi-desktop/voice/live/setMuted` | Renderer → Main | 通过单调递增的 capture epoch 设置静音 |
+| `pi-desktop/voice/live/reportMedia` | Renderer → Main | 报告采集、连接和释放生命周期；只有确认释放后才能复用租约 |
+| `pi-desktop/voice/live/reportPlayback` | Renderer → Main | 有界的 PCM 已播放游标列表，供中断/截断使用 |
+| `pi-desktop/voice/live/reportDelegation` | Renderer → Main | 报告 Provider 请求的 delegation；v1 会拒绝执行，也不会转发给 Agent/MCP |
+| `pi-desktop/voice/live/reportControlApplied` | Renderer → Main | 确认受支持的 Provider 控制，或报告拒绝了不支持的操作 |
+| `pi-desktop/voice/live/end` | Renderer → Main | 幂等结束活动通话，或取消等待中的请求 |
+| `pi-desktop/voice/live/heartbeat` | Renderer → Main | Renderer 正常响应时维持 owner 通话 |
+| `pi-desktop/voice/live/event/changed` | Main → Renderer | 脱敏通话阶段、错误、提示和活动状态 |
+| `pi-desktop/voice/live/event/port` | Main → Renderer | 转交一个通话专用 `MessagePort`，附带 call ID 和一次性 nonce |
+| `pi-desktop/voice/live/event/control` | Main → Renderer | Provider 控制请求，仅包含 v1 明确允许的控制类型 |
+| `pi-desktop/voice/live/event/transcript` | Main → Renderer | 当前通话的临时、有界字幕事件 |
+| `pi-desktop/voice/live/widget/visibility` | 挂件 → Main | 挂件自身的展示决定与所需内容盒尺寸；Main 据此显示或隐藏该窗口 |
+| `pi-desktop/voice/live/widget/action` | 挂件 → Main | 在挂件中按下的通话操作；Main 校验发送方后转发给 owner frame 执行 |
+| `pi-desktop/voice/live/widget/ownerState` | 主窗口 → Main | 只有 owner frame 才知道的信息：它自身的错误码（例如被拒绝的静音）以及绑定工作会话是否在等待决策；两者都不在通话视图中 |
+| `pi-desktop/voice/live/event/widgetState` | Main → 挂件 | 权威通话视图加上 owner 自身的错误码与等待决策标记，推送给停靠挂件窗口 |
+| `pi-desktop/voice/live/event/widgetAction` | Main → 主窗口 | 需要 owner frame 执行的挂件操作 |
+
+只有 owner 验证成功后才会创建 `MessagePort`，之后由 preload 中继到 renderer 窗口。owner 在首个 `hello` 中回送每通电话独有的 nonce；Main 仅在 call ID 和 nonce 均匹配时接受该端口一次。二进制帧包含有界 PCM 音频、采集 epoch、释放确认、播放游标和协议就绪信号。它不是通用 IPC 隧道：不会传输 Provider 凭证、任意命令、工作区路径、Agent 消息或持久化字幕。通话结束或 owner 丢失时会关闭端口。
+
+停靠挂件窗口不是通话 owner，也不可能成为 owner：它在所有经过 owner 校验的通道上都会像任何其他 renderer 一样被以 `PERMISSION_DENIED` 拒绝。Main 只在该窗口作为发送方时响应它的两条通道；owner 自身的错误码经由主窗口传入，因为执行操作的是该 frame。挂件操作本身不会改变通话状态：它被转发给 owner frame，结果状态再通过 owner 收到的同一份权威视图回到挂件。

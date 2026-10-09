@@ -1,5 +1,6 @@
-import { useCallback, useMemo } from "react";
+import { useCallback } from "react";
 import { useTranslation } from "react-i18next";
+import { isActiveInProject } from "@pi-desktop/shared";
 import { useAppStore } from "../stores/app-store";
 import { api } from "../lib/api";
 import { isHtmlFilePath, toWorkspaceRel, type ChatPreviewTarget } from "../lib/chat-links";
@@ -26,8 +27,19 @@ import {
 export function useOpenPreviewTarget() {
   const openFileRef = useOpenChatFileRef();
   return useCallback(
-    (target: ChatPreviewTarget) =>
-      target.kind === "file" ? openFileRef(target.path) : openHttpUrl(target.url),
+    (target: ChatPreviewTarget) => {
+      if (target.kind === "file") {
+        return openFileRef(target.path, undefined, undefined, {
+          line: target.line,
+          column: target.column,
+        });
+      }
+      if (target.kind === "session") {
+        void useAppStore.getState().selectSession(target.sessionId).catch(() => undefined);
+        return;
+      }
+      openHttpUrl(target.url);
+    },
     [openFileRef],
   );
 }
@@ -38,7 +50,7 @@ function isDotRelative(path: string): boolean {
 }
 
 /**
- * Open a file reference the conversation mentioned.
+ * Where a chat file reference actually landed.
  *
  * The reference is completed in the main process first, because the token is
  * routinely a shorthand: an agent that works on `/root/dir/openimage.js` names
@@ -51,77 +63,297 @@ function isDotRelative(path: string): boolean {
  * named by its absolute path, and the file view switches its own folder to the
  * one that contains it. Scratch and attachment files are absolute too.
  *
- * A workspace `.html` page in the primary folder stays with the side browser
- * (ADR 0163): it is a page to run, not a file to read. A reference that matches
- * nothing says so instead of opening an empty panel.
+ * A reference that matches nothing is reported here, once, so every action
+ * built on a reference stays honest about a shorthand that resolved to
+ * nothing instead of acting on a differently named file.
  */
-export function useOpenChatFileRef() {
+export type ResolvedChatFileRef = {
+  /** The address the host accepts for this reference. */
+  path: string;
+  /** The absolute path; the one spelling that resolves from anywhere. */
+  absolutePath: string;
+  /** Project-relative spelling; null when the file sits outside the project. */
+  relativePath: string | null;
+  /** True for a match inside a folder the open project registers (ADR 0249). */
+  inProject: boolean;
+  /** True when that folder is the project's primary one. */
+  primary: boolean;
+};
+
+/**
+ * Load the bundled file view on demand when a user explicitly opens a project
+ * file. Its enabled state can be off or its runtime can have failed even though
+ * the app still ships the plugin; project scope and the recorded ui.view grant
+ * remain authoritative.
+ */
+const fileManagerViewLoads = new Map<string, Promise<boolean>>();
+
+async function ensureFileManagerView(workspacePath: string | null): Promise<boolean> {
+  const key = workspacePath ?? "";
+  const pending = fileManagerViewLoads.get(key);
+  if (pending) return pending;
+
+  const load = (async () => {
+    try {
+      const views = await api.listPluginViews();
+      useAppStore.setState({ pluginViews: views });
+      if (hasPluginView(views, FILE_MANAGER_PLUGIN_TAB)) return true;
+
+      const { plugins } = await api.listPlugins();
+      const fileManager = plugins.find(
+        (plugin) => plugin.id === FILE_MANAGER_PLUGIN_TAB.pluginId,
+      );
+      if (
+        !fileManager?.bundled ||
+        !fileManager.permissions.includes("ui.view") ||
+        useAppStore.getState().workspace?.path !== workspacePath ||
+        !isActiveInProject(
+          { ...fileManager, enabled: true },
+          workspacePath,
+        )
+      ) {
+        return false;
+      }
+
+      if (!fileManager.enabled) {
+        await api.enablePlugin(fileManager.id);
+      } else {
+        // The host can finish booting before the bundled plugin runtime has
+        // restored its view. Reloading here joins that gap and retries a failed
+        // startup without changing the user's scope or permission grants.
+        const result = await api.reloadPlugin(fileManager.id);
+        if (result.review) return false;
+      }
+
+      const refreshedViews = await api.listPluginViews();
+      useAppStore.setState({ pluginViews: refreshedViews });
+      return hasPluginView(refreshedViews, FILE_MANAGER_PLUGIN_TAB);
+    } catch {
+      return false;
+    }
+  })();
+  fileManagerViewLoads.set(key, load);
+  try {
+    return await load;
+  } finally {
+    if (fileManagerViewLoads.get(key) === load) fileManagerViewLoads.delete(key);
+  }
+}
+
+function useResolveChatFileRef() {
   const { t } = useTranslation();
   const workspacePath = useAppStore((s) => s.workspace?.path ?? null);
   const sessionId = useAppStore((s) => s.activeSessionId);
-  const pluginViews = useAppStore((s) => s.pluginViews);
-  const openFile = useAppStore((s) => s.openFileInWorkPanel);
-  const openUrl = useAppStore((s) => s.openUrlInWorkPanel);
-  const openTab = useAppStore((s) => s.openWorkPanelTab);
   const showToast = useAppStore((s) => s.showToast);
 
-  const fileViewAvailable = useMemo(
-    () => hasPluginView(pluginViews, FILE_MANAGER_PLUGIN_TAB),
-    [pluginViews],
-  );
-
   return useCallback(
-    (path: string, baseDir?: string, mimeType?: string) => {
+    async (
+      path: string,
+      baseDir?: string,
+    ): Promise<ResolvedChatFileRef | null> => {
       const raw = String(path ?? "").trim();
-      if (!raw) return;
+      if (!raw) return null;
       // `./x` and `../x` are the one shape the caller resolves better than the
       // main process can: the base is the markdown file on screen, which only
       // the caller knows. Everything else is completed against the roots.
       const anchored = isDotRelative(raw)
         ? toWorkspaceRel(raw, workspacePath, baseDir)
         : null;
+      let result;
+      try {
+        result = await api.fsResolveRef(anchored ?? raw, sessionId);
+      } catch {
+        showToast(t("chat.fileRefLookupFailed"), { variant: "error" });
+        return null;
+      }
+      const match = result.match;
+      if (!match) {
+        const key = result.reason === "outside-allowed-roots"
+          ? "chat.fileRefRestricted"
+          : "chat.fileRefMissing";
+        showToast(t(key, { name: raw }), { variant: "error" });
+        return null;
+      }
+      if (match.root !== "workspace") {
+        return {
+          path: match.absolutePath,
+          absolutePath: match.absolutePath,
+          relativePath: null,
+          inProject: false,
+          primary: false,
+        };
+      }
+      // A project group can hold several folders, and a relative path always
+      // means the primary one, so a file from a sibling folder travels by its
+      // absolute path and the file view switches to that folder (ADR 0263).
+      const primary = match.projectRoot ? match.projectRoot.primary : true;
+      return {
+        path: primary ? match.relativePath : match.absolutePath,
+        absolutePath: match.absolutePath,
+        relativePath: match.relativePath,
+        inProject: true,
+        primary,
+      };
+    },
+    [sessionId, showToast, t, workspacePath],
+  );
+}
+
+/**
+ * Open a file reference the conversation mentioned.
+ *
+ * A workspace `.html` page in the primary folder stays with the side browser
+ * (ADR 0163): it is a page to run, not a file to read. A direct click on a
+ * plain project file starts or retries the bundled file view; a positioned
+ * `path:line` reference uses the host file tab, which can scroll to the line.
+ * The plugin view accepts opaque path locations and has no line-navigation
+ * contract, so positioned references keep their path unchanged and use the
+ * host viewer's existing scroll support. Scratch and attachment files also use
+ * the host file tab.
+ */
+export function useOpenChatFileRef() {
+  const { t } = useTranslation();
+  const resolveRef = useResolveChatFileRef();
+  const workspacePath = useAppStore((s) => s.workspace?.path ?? null);
+  const sessionId = useAppStore((s) => s.activeSessionId);
+  const openFile = useAppStore((s) => s.openFileInWorkPanel);
+  const openUrl = useAppStore((s) => s.openUrlInWorkPanel);
+  const openTab = useAppStore((s) => s.openWorkPanelTab);
+  const showToast = useAppStore((s) => s.showToast);
+
+  return useCallback(
+    (
+      path: string,
+      baseDir?: string,
+      mimeType?: string,
+      position?: { line?: number; column?: number },
+    ) => {
+      const line = position?.line;
+      const column = position?.column;
       void (async () => {
-        let match = null;
-        try {
-          match = (await api.fsResolveRef(anchored ?? raw, sessionId)).match;
-        } catch {
-          match = null;
-        }
-        if (!match) {
-          showToast(t("chat.fileRefMissing", { name: raw }), {
-            variant: "error",
-          });
+        const resolved = await resolveRef(path, baseDir);
+        if (!resolved) return;
+        const current = useAppStore.getState();
+        if (
+          current.workspace?.path !== workspacePath ||
+          current.activeSessionId !== sessionId
+        ) {
           return;
         }
-        if (match.root === "workspace") {
-          // A project group can hold several folders, and a relative path always
-          // means the primary one, so a file from a sibling folder travels by its
-          // absolute path and the file view switches to that folder (ADR 0263).
-          const inPrimary = match.projectRoot ? match.projectRoot.primary : true;
-          const target = inPrimary ? match.relativePath : match.absolutePath;
-          if (inPrimary && isHtmlFilePath(match.relativePath)) {
-            openUrl(match.relativePath);
-            return;
-          }
-          if (fileViewAvailable) {
-            openTab(fileManagerPluginTab(target));
-            return;
-          }
-          openFile(target, mimeType);
+        const hasPosition = line !== undefined || column !== undefined;
+        if (
+          !hasPosition &&
+          resolved.inProject &&
+          resolved.primary &&
+          resolved.relativePath &&
+          isHtmlFilePath(resolved.relativePath)
+        ) {
+          openUrl(resolved.relativePath);
           return;
         }
-        openFile(match.absolutePath, mimeType);
+        if (resolved.inProject && !hasPosition) {
+          if (await ensureFileManagerView(workspacePath)) {
+            const latest = useAppStore.getState();
+            if (
+              latest.workspace?.path !== workspacePath ||
+              latest.activeSessionId !== sessionId
+            ) {
+              return;
+            }
+            openTab(fileManagerPluginTab(resolved.path));
+            return;
+          }
+          const latest = useAppStore.getState();
+          if (
+            latest.workspace?.path !== workspacePath ||
+            latest.activeSessionId !== sessionId
+          ) {
+            return;
+          }
+          showToast(t("chat.fileManagerUnavailable"), { variant: "error" });
+        }
+        openFile(resolved.path, mimeType, { line, column });
       })();
     },
     [
-      fileViewAvailable,
       openFile,
       openTab,
       openUrl,
+      resolveRef,
       sessionId,
       showToast,
       t,
       workspacePath,
     ],
+  );
+}
+
+/**
+ * Show a file reference in the system file manager.
+ *
+ * It travels through the same completion and the same address rule a click
+ * uses (`useOpenChatFileRef`), so a right-click never reveals a differently
+ * named file that happens to sit in the same folder: a reference that matched
+ * nothing says so instead.
+ */
+export function useRevealChatFileRef() {
+  const { t } = useTranslation();
+  const resolveRef = useResolveChatFileRef();
+  const showToast = useAppStore((s) => s.showToast);
+
+  return useCallback(
+    (path: string, baseDir?: string) => {
+      void (async () => {
+        const resolved = await resolveRef(path, baseDir);
+        if (!resolved) return;
+        try {
+          await api.fsReveal(resolved.path);
+        } catch {
+          showToast(t("chat.fileRevealFailed"), { variant: "error" });
+        }
+      })();
+    },
+    [resolveRef, showToast, t],
+  );
+}
+
+/**
+ * Copy a reference as an address a user can paste somewhere else.
+ *
+ * "Full" is the absolute path, the one spelling that resolves from any working
+ * directory. "Relative" is the project-relative spelling, and only a file
+ * inside the open project has one: a scratch or attachment file says so
+ * instead of handing back an absolute path under a name that promises
+ * something else.
+ */
+export function useCopyChatFileRef() {
+  const { t } = useTranslation();
+  const resolveRef = useResolveChatFileRef();
+  const showToast = useAppStore((s) => s.showToast);
+
+  return useCallback(
+    (
+      path: string,
+      baseDir: string | undefined,
+      kind: "absolute" | "relative",
+    ) => {
+      void (async () => {
+        const resolved = await resolveRef(path, baseDir);
+        if (!resolved) return;
+        const value =
+          kind === "absolute" ? resolved.absolutePath : resolved.relativePath;
+        if (!value) {
+          showToast(t("chat.relativePathUnavailable"), { variant: "error" });
+          return;
+        }
+        try {
+          await navigator.clipboard.writeText(value);
+          showToast(t("chat.copied"), { variant: "success" });
+        } catch {
+          showToast(t("chat.copyFailed"), { variant: "error" });
+        }
+      })();
+    },
+    [resolveRef, showToast, t],
   );
 }

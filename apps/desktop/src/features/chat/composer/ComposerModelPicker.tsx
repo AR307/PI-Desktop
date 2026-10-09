@@ -4,11 +4,7 @@ import { ComposerModelList } from "./ComposerModelList";
 import { AnchoredMenu } from "../../../components/settings/AnchoredMenu";
 import {
   IconBot,
-  IconCheck,
   IconChevronDown,
-  IconChevronLeft,
-  IconChevronRight,
-  IconSparkles,
 } from "../../../components/icons";
 import { TooltipButton } from "../../../components/ui";
 import type { useComposerModelMenu } from "./hooks/useComposerModelMenu";
@@ -45,23 +41,20 @@ export function ComposerModelPicker({
   const {
     open,
     setOpen,
-    view,
+    otherModelsExpanded,
+    setOtherModelsExpanded,
+    hasOtherModels,
     query,
     setQuery,
     modelHighlight,
     setModelHighlight,
-    thinkingHighlight,
-    setThinkingHighlight,
-    rootMenuRef,
     modelSearchRef,
     modelListRef,
-    thinkingListRef,
     modelGroups,
+    recentEntries,
     thinkingMenuLevels,
-    showView,
     selectModel,
     commitThinkingLevel,
-    selectThinkingLevel,
     onMenuKeyDown,
   } = controller;
 
@@ -75,7 +68,7 @@ export function ComposerModelPicker({
       role="menu"
       align="end"
       side="top"
-      initialFocus="none"
+      initialFocus="input"
       onMenuKeyDown={onMenuKeyDown}
       trigger={(ref) => (
         <TooltipButton
@@ -90,10 +83,9 @@ export function ComposerModelPicker({
           onClick={() => {
             onCloseOtherMenus();
             if (!open) {
-              showView("root");
+              setOtherModelsExpanded(false);
               setQuery("");
               setModelHighlight(-1);
-              setThinkingHighlight(-1);
             }
             setOpen((current) => !current);
           }}
@@ -112,94 +104,28 @@ export function ComposerModelPicker({
         </TooltipButton>
       )}
     >
-      {view === "root" ? (
-        <div className="composer-menu-root" ref={rootMenuRef}>
-          {rootActions}
-          <button
-            type="button"
-            className="composer-menu-entry"
-            role="menuitem"
-            aria-haspopup="menu"
-            onClick={() => showView("model")}
-          >
-            <IconBot size={14} aria-hidden="true" />
-            <span className="composer-menu-entry-label">{t("chat.model")}</span>
-            <span className="composer-menu-entry-value" title={modelLabel}>{modelLabel}</span>
-            <IconChevronRight size={14} aria-hidden="true" />
-          </button>
-          <button
-            type="button"
-            className="composer-menu-entry"
-            role="menuitem"
-            aria-haspopup="menu"
-            onClick={() => showView("thinking")}
-          >
-            <IconSparkles size={14} aria-hidden="true" />
-            <span className="composer-menu-entry-label">{t("chat.reasoningLevel")}</span>
-            <span className="composer-menu-entry-value">{thinkingLabel}</span>
-            <IconChevronRight size={14} aria-hidden="true" />
-          </button>
-          {/* The slider sits directly under the Reasoning level entry
-              (issue #417): one drag adjusts the level without entering the
-              submenu, while the entry itself opens the classic radio list. */}
-          {thinkingMenuLevels.length > 1 ? (
-            <ThinkingLevelSlider
-              key={`${selectedProviderId}:${selectedModelId}:${thinkingMenuLevels.join("|")}`}
-              levels={thinkingMenuLevels}
-              level={thinkingLevel}
-              label={t("chat.reasoningLevel")}
-              commit={commitThinkingLevel}
-            />
-          ) : null}
-        </div>
-      ) : (
-        <>
-          <button
-            type="button"
-            className="composer-menu-back"
-            role="menuitem"
-            onClick={() => showView("root")}
-          >
-            <IconChevronLeft size={14} aria-hidden="true" />
-            <span>{view === "model" ? t("chat.model") : t("chat.reasoningLevel")}</span>
-          </button>
-          <div className="composer-menu-separator" />
-          {view === "model" ? (
-            <>
-              <ComposerModelList
-                t={t} query={query} setQuery={setQuery}
-                modelSearchRef={modelSearchRef} modelListRef={modelListRef}
-                modelGroups={modelGroups} modelHighlight={modelHighlight}
-                setModelHighlight={setModelHighlight} selectModel={selectModel}
-                selectedProviderId={selectedProviderId} selectedModelId={selectedModelId}
-              />
-            </>
-          ) : (
-            <>
-              <div className="composer-thinking-heading">
-                {t("chat.reasoningSupportedBy", { model: modelLabel })}
-              </div>
-              <div className="composer-thinking-list" ref={thinkingListRef}>
-                {thinkingMenuLevels.map((level, index) => (
-                  <button
-                    key={level}
-                    type="button"
-                    data-thinking-index={index}
-                    className={`composer-plus-item ${thinkingLevel === level ? "active" : ""} ${thinkingHighlight === index ? "kb-active" : ""}`}
-                    role="menuitemradio"
-                    aria-checked={thinkingLevel === level}
-                    onMouseMove={() => setThinkingHighlight(index)}
-                    onClick={() => void selectThinkingLevel(level)}
-                  >
-                    <span className="flex-1">{level}</span>
-                    {thinkingLevel === level ? <IconCheck size={14} className="composer-model-check" aria-hidden="true" /> : null}
-                  </button>
-                ))}
-              </div>
-            </>
-          )}
-        </>
-      )}
+      <div className="composer-menu-root" onMouseMove={() => setModelHighlight(-1)} onMouseLeave={() => setModelHighlight(-1)}>
+        {rootActions}
+        <ComposerModelList
+          t={t} query={query} setQuery={setQuery}
+          modelSearchRef={modelSearchRef} modelListRef={modelListRef}
+          modelGroups={modelGroups} modelHighlight={modelHighlight}
+          recentEntries={recentEntries} hasOtherModels={hasOtherModels}
+          otherModelsExpanded={otherModelsExpanded}
+          setOtherModelsExpanded={setOtherModelsExpanded}
+          setModelHighlight={setModelHighlight} selectModel={selectModel}
+          selectedProviderId={selectedProviderId} selectedModelId={selectedModelId}
+        />
+        {thinkingMenuLevels.length > 1 ? (
+          <ThinkingLevelSlider
+            key={`${selectedProviderId}:${selectedModelId}:${thinkingMenuLevels.join("|")}`}
+            levels={thinkingMenuLevels}
+            level={thinkingLevel}
+            label={t("chat.reasoningLevel")}
+            commit={commitThinkingLevel}
+          />
+        ) : null}
+      </div>
     </AnchoredMenu>
   );
 }

@@ -7,8 +7,6 @@ use crate::providers::{
 };
 use crate::secrets::SecretStore;
 
-/// Upper bound on `contributes.providers` entries. Matches the SDK constant.
-pub(crate) const MAX_PLUGIN_PROVIDERS: usize = 8;
 /// Upper bound on one declaration's model list.
 pub(crate) const MAX_PLUGIN_PROVIDER_MODELS: usize = 64;
 
@@ -29,11 +27,8 @@ const PLUGIN_API_STYLES: [&str; 7] = [
     "pi_messages",
 ];
 
-/// Auth kinds a manifest may declare today. `oauth` is deliberately absent: a
-/// plugin OAuth broker needs a Host-owned login flow that does not exist yet,
-/// so a declaration that asks for one is refused instead of materializing a
-/// row nobody can sign in to.
-const PLUGIN_AUTH_KINDS: [&str; 2] = ["api_key", "none"];
+/// Auth kinds a manifest may declare.
+const PLUGIN_AUTH_KINDS: [&str; 3] = ["api_key", "none", "oauth"];
 
 pub(crate) fn is_known_api_style(value: &str) -> bool {
     PLUGIN_API_STYLES.contains(&value)
@@ -126,7 +121,6 @@ pub(crate) fn declared_providers(manifest: &PluginManifest) -> Vec<DeclaredPlugi
     };
     entries
         .iter()
-        .take(MAX_PLUGIN_PROVIDERS)
         .filter_map(|entry| {
             let obj = entry.as_object()?;
             let id = obj.get("id")?.as_str()?.trim().to_string();
@@ -169,6 +163,7 @@ pub(crate) fn declared_providers(manifest: &PluginManifest) -> Vec<DeclaredPlugi
                                     .filter(|value| !value.is_empty())
                                     .map(str::to_string),
                                 context_window_source: None,
+                                max_tokens_source: None,
                                 context_window: model
                                     .get("contextWindow")
                                     .and_then(Value::as_u64)
@@ -181,6 +176,10 @@ pub(crate) fn declared_providers(manifest: &PluginManifest) -> Vec<DeclaredPlugi
                                     .unwrap_or(0),
                                 thinking_levels: declared_thinking_levels(model),
                                 default_thinking_level: declared_default_thinking_level(model),
+                                thinking_protocol: model
+                                    .get("thinkingProtocol")
+                                    .and_then(Value::as_str)
+                                    .map(str::to_string),
                                 supports_images: model
                                     .get("supportsImages")
                                     .and_then(Value::as_bool),
@@ -261,18 +260,48 @@ pub(crate) fn sync_plugin_providers(
             ),
             None => {}
         }
-        let (existing_config, existing_secret_ref): (Option<String>, Option<String>) = db
+        let (existing_config, existing_secret_ref, existing_base_url, existing_api_style): (
+            Option<String>,
+            Option<String>,
+            Option<String>,
+            Option<String>,
+        ) = db
             .conn()
             .query_row(
-                "SELECT config_json, secret_ref FROM providers WHERE id = ?1",
+                "SELECT config_json, secret_ref, base_url, api_style FROM providers WHERE id = ?1",
                 params![row_id],
-                |row| Ok((row.get(0)?, row.get(1)?)),
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
             )
             .optional()?
-            .unwrap_or((None, None));
+            .unwrap_or((None, None, None, None));
         let models = providers::normalize_model_bindings(&provider.models);
-        // The merge replaces only the model bindings: headers and the OAuth
-        // account label a login flow wrote are not this function's to drop.
+        // A declaration that moves the endpoint abandons the answer the previous
+        // one produced: the cached rows carry no endpoint of their own, so the
+        // discovery cache is dropped and the next probe records the new answer.
+        let endpoint_changed = existing_config.is_some()
+            && (existing_base_url.as_deref().unwrap_or("").trim()
+                != provider.base_url.as_deref().unwrap_or("").trim()
+                || existing_api_style.as_deref().unwrap_or("") != provider.api_style);
+        // A declaration that no longer names a model forgets that model's
+        // cached row, exactly as a user save does: the row would otherwise keep
+        // describing a model this provider stopped declaring. The row above is
+        // already known to be absent or owned by this plugin.
+        let removed_models = providers::config_model_bindings(
+            existing_config.as_deref().unwrap_or("{}"),
+            None,
+            &row_id,
+        )
+        .into_iter()
+        .filter(|binding| {
+            !models
+                .iter()
+                .any(|model| model.id.eq_ignore_ascii_case(&binding.id))
+        })
+        .map(|binding| binding.id)
+        .collect::<Vec<_>>();
+        providers::forget_cached_models(db, &row_id, &removed_models)?;
+        // The merge replaces only model bindings; headers and OAuth metadata
+        // are not this declaration's to drop.
         let config = providers::config_with_model_bindings(
             existing_config.as_deref().unwrap_or("{}"),
             &models,
@@ -292,6 +321,13 @@ pub(crate) fn sync_plugin_providers(
             }
             None
         };
+        if provider.auth_kind != "oauth" {
+            let oauth_ref = crate::secrets::secret_ref_for_provider_oauth(&row_id);
+            secrets.delete(&oauth_ref)?;
+            db.conn()
+                .prepare_cached("DELETE FROM secrets_meta WHERE secret_ref = ?1")?
+                .execute(params![oauth_ref])?;
+        }
         // The public projection derives the default from the first binding, so
         // the declared order is the plugin's choice of default.
         let default_model_id = models.first().map(|model| model.id.clone());
@@ -333,6 +369,11 @@ pub(crate) fn sync_plugin_providers(
                 secret_ref,
                 now
             ])?;
+        if endpoint_changed {
+            let declared_model_ids: Vec<String> =
+                models.iter().map(|model| model.id.clone()).collect();
+            providers::forget_missing_discovered_models(db, &row_id, &declared_model_ids)?;
+        }
         written += 1;
     }
     let declared_rows: Vec<String> = declared

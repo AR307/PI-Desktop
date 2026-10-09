@@ -2,6 +2,20 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  capabilitiesFromModelConfig,
+  clampThinkingLevel,
+  genericModelConfig,
+  modelConfigWithBinding,
+} from "@pi-desktop/agent-runtime";
+import {
+  buildProviderModel,
+  createProviderModels,
+} from "../../../packages/agent-runtime/dist/provider-binding.js";
+import { InMemoryModelsStore } from "@earendil-works/pi-ai";
+import { registerBunOAuthFlows } from "@earendil-works/pi-ai/bun-oauth";
+import { builtinModels } from "@earendil-works/pi-ai/providers/all";
+
+import {
   VendorOAuth,
   apiStyleForWireApi,
   isXaiConversationModel,
@@ -68,7 +82,7 @@ function fakeHost() {
  * test exercises the credential path rather than mocking it away.
  */
 function fakeModels(credentials, { login, models: configuredModels, provider: providerOverride } = {}) {
-  const provider = providerOverride ?? {
+  let provider = providerOverride ?? {
     id: "anthropic",
     name: "Anthropic",
     baseUrl: "https://api.anthropic.com",
@@ -113,13 +127,18 @@ function fakeModels(credentials, { login, models: configuredModels, provider: pr
       maxTokens: 8_192,
     },
   ];
+  provider = { ...provider, getModels: () => models };
   return {
+    setProvider: next => { provider = next; },
     getProviders: () => [provider],
     getProvider: (id) => (id === provider.id ? provider : undefined),
-    refresh: async () => ({ aborted: false, errors: new Map() }),
-    getAvailable: async () => models,
+    refresh: async (options = {}) => {
+      await provider.refreshModels?.({ allowNetwork: options.allowNetwork !== false, signal: options.signal ?? new AbortController().signal, force: options.force, publish: async ({ update }) => { update?.(); return true; } });
+      return { aborted: false, errors: new Map() };
+    },
+    getAvailable: async () => provider.getModels(),
     getModel: (providerId, modelId) => providerId === provider.id
-      ? models.find((model) => model.id === modelId)
+      ? provider.getModels().find((model) => model.id === modelId)
       : undefined,
     login:
       login ??
@@ -159,7 +178,7 @@ function harness(options = {}) {
   let counter = 0;
   const stores = [];
   const oauth = new VendorOAuth({
-    call: host.call,
+    call: (method, params) => options.call ? options.call(method, params, host.call) : host.call(method, params),
     emit: (event) => events.push(event),
     openExternal: async (url) => {
       opened.push(url);
@@ -167,9 +186,13 @@ function harness(options = {}) {
     },
     createModels: (store) => {
       stores.push(store);
-      return fakeModels(store, options);
+      return options.createModels ? options.createModels(store) : fakeModels(store, options);
     },
     modelConfigFor: options.modelConfigFor,
+    getPluginOAuthBridge: options.getPluginOAuthBridge,
+    onAccountModels: options.onAccountModels,
+    onAccountRemoved: options.onAccountRemoved,
+    log: options.log,
     newId: () => `id-${++counter}`,
     fetch:
       options.fetch ??
@@ -194,6 +217,15 @@ async function waitFor(events, kind, maxAttempts = 200) {
     await new Promise((resolve) => setTimeout(resolve, 5));
   }
   throw new Error(`no ${kind} event; saw ${events.map((e) => e.kind).join(", ")}`);
+}
+
+async function waitForPromptType(events, type, maxAttempts = 200) {
+  for (let attempt = 0; attempt < maxAttempts; attempt++) {
+    const found = events.find((event) => event.kind === "prompt" && event.request.type === type);
+    if (found) return found;
+    await new Promise((resolve) => setTimeout(resolve, 5));
+  }
+  throw new Error(`no ${type} prompt; saw ${events.filter((e) => e.kind === "prompt").map((e) => e.request.type).join(", ")}`);
 }
 
 test("wire apis map to the provider row's api style and protocol", () => {
@@ -277,6 +309,272 @@ test("a completed login stores the credential and configures the row", async () 
   ]);
 });
 
+test("plugin OAuth uses host login slots, encrypted credentials, refresh, and sign-out", async () => {
+  const provider = {
+    pluginId: "test.clinepress",
+    runtimeId: "runtime-1",
+    contributionId: "clinepress",
+    providerId: "plugin:test.clinepress:clinepress",
+    name: "ClinePress",
+    loginLabel: "Sign in with ClinePress",
+    isSubscription: false,
+  };
+  const invoked = [];
+  let oauth;
+  const bridge = {
+    listOAuthProviders: () => [provider],
+    invokeProviderOAuth: async (pluginId, contributionId, request, signal, expectedRuntimeId) => {
+      invoked.push({ pluginId, contributionId, request, signal, expectedRuntimeId });
+      assert.equal(pluginId, provider.pluginId);
+      assert.equal(contributionId, provider.contributionId);
+      assert.equal(expectedRuntimeId, provider.runtimeId);
+      if (request.operation === "login") {
+        await oauth.notifyPluginOAuth(pluginId, request.loginId, {
+          kind: "deviceCode",
+          userCode: "ABCD-EFGH",
+          verificationUri: "https://auth.example.com/device",
+        });
+        const code = await oauth.promptPluginOAuth(pluginId, request.loginId, {
+          type: "secret",
+          message: "Enter the device code",
+        });
+        return {
+          accessToken: `access-${code}`,
+          refreshToken: "refresh-plugin-token",
+          expiresAt: Date.now() + 60_000,
+          accountLabel: "user@example.com",
+        };
+      }
+      assert.equal(request.operation, "refresh");
+      assert.equal(request.credential.refreshToken, "refresh-plugin-token");
+      assert.equal(signal.aborted, false);
+      return {
+        accessToken: "refreshed-plugin-access",
+        expiresAt: Date.now() + 3_600_000,
+      };
+    },
+  };
+  const removed = [];
+  const h = harness({
+    getPluginOAuthBridge: () => bridge,
+    onAccountRemoved: (providerId) => removed.push(providerId),
+  });
+  oauth = h.oauth;
+  h.host.providers.set(provider.providerId, {
+    id: provider.providerId,
+    name: provider.name,
+    vendorKey: "custom",
+    ownerPluginId: provider.pluginId,
+    authKind: "oauth",
+    baseUrl: "https://api.example.com/v1",
+    apiStyle: "chat_completions",
+    models: [{ id: "cline-model", contextWindow: 128_000, maxTokens: 8_192, thinkingLevels: [] }],
+    enabled: true,
+  });
+
+  const unconnected = await oauth.listVendors();
+  const vendor = unconnected.find((entry) => entry.vendorId === provider.providerId);
+  assert.equal(vendor.name, "ClinePress");
+  assert.equal(vendor.accounts[0].connected, false);
+
+  const { loginId } = await oauth.start(provider.providerId);
+  const device = await waitFor(h.events, "deviceCode");
+  assert.equal(device.userCode, "ABCD-EFGH");
+  const prompt = await waitFor(h.events, "prompt");
+  assert.equal(prompt.request.message, "Enter the device code");
+  assert.equal(oauth.respond({ loginId, promptId: prompt.request.promptId, value: "123456" }), true);
+  const done = await waitFor(h.events, "done");
+  assert.equal(done.accountLabel, "user@example.com");
+
+  const secretRef = secretRefForProviderOauth(provider.providerId);
+  const stored = JSON.parse(h.host.secrets.get(secretRef));
+  assert.equal(stored.accessToken, "access-123456");
+  assert.equal(stored.refreshToken, "refresh-plugin-token");
+  assert.equal(stored.accountLabel, "user@example.com");
+  assert.equal(await oauth.resolveAuth(provider.providerId).then((auth) => auth.apiKey), "access-123456");
+  assert.deepEqual(await oauth.listModels(provider.providerId), [{
+    modelId: "cline-model",
+    apiStyle: "chat_completions",
+    baseUrl: "https://api.example.com/v1",
+  }]);
+  const binding = await oauth.bindingFor(provider.providerId, "cline-model");
+  assert.equal(binding.baseUrl, "https://api.example.com/v1");
+  assert.equal(binding.modelConfig.name, "cline-model");
+
+  stored.expiresAt = Date.now() - 1;
+  h.host.secrets.set(secretRef, JSON.stringify(stored));
+  assert.deepEqual(await oauth.resolveAuth(provider.providerId), {
+    apiKey: "refreshed-plugin-access",
+  });
+  assert.equal(invoked.filter((entry) => entry.request.operation === "refresh").length, 1);
+  assert.equal(
+    JSON.parse(h.host.secrets.get(secretRef)).refreshToken,
+    "refresh-plugin-token",
+    "an omitted refresh token keeps the current refresh token",
+  );
+
+  const connected = (await oauth.listVendors()).find((entry) => entry.vendorId === provider.providerId);
+  assert.equal(connected.accounts[0].connected, true);
+  assert.equal(connected.accounts[0].accountLabel, "user@example.com");
+  await oauth.deleteAccount(provider.providerId);
+  assert.equal(h.host.secrets.has(secretRef), false);
+  assert.equal(h.host.providers.has(provider.providerId), true, "sign-out keeps the manifest-owned provider row");
+  assert.deepEqual(removed, [provider.providerId]);
+});
+
+test("cancelling plugin OAuth aborts its callback and rejects an active host prompt", async () => {
+  const provider = {
+    pluginId: "test.cancel-oauth",
+    runtimeId: "runtime-1",
+    contributionId: "cancel",
+    providerId: "plugin:test.cancel-oauth:cancel",
+    name: "Cancel OAuth",
+    isSubscription: false,
+  };
+  let oauth;
+  let callbackSignal;
+  const bridge = {
+    listOAuthProviders: () => [provider],
+    invokeProviderOAuth: async (pluginId, contributionId, request, signal) => {
+      callbackSignal = signal;
+      return oauth.promptPluginOAuth(pluginId, request.loginId, {
+        type: "manual_code",
+        message: "Paste the callback code",
+      });
+    },
+  };
+  const h = harness({ getPluginOAuthBridge: () => bridge });
+  oauth = h.oauth;
+  h.host.providers.set(provider.providerId, {
+    id: provider.providerId,
+    name: provider.name,
+    ownerPluginId: provider.pluginId,
+    authKind: "oauth",
+    baseUrl: "https://api.example.com/v1",
+    enabled: true,
+  });
+
+  const { loginId } = await oauth.start(provider.providerId);
+  await waitFor(h.events, "prompt");
+  assert.equal(oauth.cancel(loginId), true);
+  await waitFor(h.events, "cancelled");
+  assert.equal(callbackSignal.aborted, true);
+  assert.equal(h.host.secrets.has(secretRefForProviderOauth(provider.providerId)), false);
+});
+
+test("signing out aborts an in-flight plugin token refresh before clearing its secret", async () => {
+  const provider = {
+    pluginId: "test.refresh-cancel",
+    runtimeId: "runtime-1",
+    contributionId: "refresh-cancel",
+    providerId: "plugin:test.refresh-cancel:refresh-cancel",
+    name: "Refresh cancellation",
+    isSubscription: false,
+  };
+  let refreshSignal;
+  let markRefreshStarted;
+  const refreshStarted = new Promise((resolve) => {
+    markRefreshStarted = resolve;
+  });
+  const bridge = {
+    listOAuthProviders: () => [provider],
+    invokeProviderOAuth: async (_pluginId, _contributionId, request, signal) => {
+      assert.equal(request.operation, "refresh");
+      refreshSignal = signal;
+      markRefreshStarted();
+      return new Promise((_resolve, reject) => {
+        signal.addEventListener("abort", () => reject(signal.reason), { once: true });
+      });
+    },
+  };
+  const h = harness({ getPluginOAuthBridge: () => bridge });
+  h.host.providers.set(provider.providerId, {
+    id: provider.providerId,
+    name: provider.name,
+    ownerPluginId: provider.pluginId,
+    authKind: "oauth",
+    baseUrl: "https://api.example.com/v1",
+    enabled: true,
+  });
+  const secretRef = secretRefForProviderOauth(provider.providerId);
+  h.host.secrets.set(secretRef, JSON.stringify({
+    accessToken: "expired-access",
+    refreshToken: "refresh-token",
+    expiresAt: Date.now() - 1,
+  }));
+
+  const auth = h.oauth.resolveAuth(provider.providerId);
+  await refreshStarted;
+  await h.oauth.deleteAccount(provider.providerId);
+  await assert.rejects(auth, /provider sign-out requested/);
+  assert.equal(refreshSignal.aborted, true);
+  assert.equal(h.host.secrets.has(secretRef), false);
+  assert.equal(h.host.providers.has(provider.providerId), true);
+});
+
+test("the pi-ai 1.0 Anthropic copy-code flow uses the select and manual-code bridge", async () => {
+  const requests = [];
+  const previousFetch = globalThis.fetch;
+  globalThis.fetch = async (input, init = {}) => {
+    const url = String(input);
+    requests.push({ url, init });
+    assert.equal(url, "https://platform.claude.com/v1/oauth/token");
+    return new Response(JSON.stringify({
+      access_token: "fixture-access-token",
+      refresh_token: "fixture-refresh-token",
+      expires_in: 3600,
+    }), { status: 200, headers: { "content-type": "application/json" } });
+  };
+
+  let registered = false;
+  const { host, events, opened, oauth } = harness({
+    createModels: (credentials) => {
+      if (!registered) {
+        registerBunOAuthFlows();
+        registered = true;
+      }
+      return builtinModels({
+        credentials,
+        authContext: { env: async () => undefined, fileExists: async () => false },
+        modelsStore: new InMemoryModelsStore(),
+      });
+    },
+  });
+
+  try {
+    const { loginId } = await oauth.start("anthropic");
+    const selection = await waitForPromptType(events, "select");
+    assert.deepEqual(selection.request.options.map(({ id }) => id), ["browser", "copy_code"]);
+    assert.equal(oauth.respond({ loginId, promptId: selection.request.promptId, value: "copy_code" }), true);
+
+    const authUrl = await waitFor(events, "authUrl");
+    assert.deepEqual(opened, [authUrl.url]);
+    const redirect = new URL(authUrl.url).searchParams.get("redirect_uri");
+    assert.equal(redirect, "https://platform.claude.com/oauth/code/callback");
+
+    const manualCode = await waitForPromptType(events, "manual_code");
+    const state = new URL(authUrl.url).searchParams.get("state");
+    assert.ok(state);
+    assert.equal(oauth.respond({
+      loginId,
+      promptId: manualCode.request.promptId,
+      value: `fixture-auth-code#${state}`,
+    }), true);
+
+    const done = await waitFor(events, "done");
+    const row = host.providers.get(done.providerId);
+    const stored = JSON.parse(host.secrets.get(secretRefForProviderOauth(row.id)));
+    assert.equal(stored.refresh, "fixture-refresh-token");
+    assert.equal(stored.access, "fixture-access-token");
+    assert.equal(host.secrets.has(`secret:provider:${row.id}:api_key`), false);
+    assert.deepEqual(await oauth.resolveAuth(row.id), { apiKey: "fixture-access-token" });
+    assert.equal(requests.length, 1);
+    assert.equal(JSON.parse(requests[0].init.body).grant_type, "authorization_code");
+  } finally {
+    globalThis.fetch = previousFetch;
+  }
+});
+
 test("OAuth model configuration comes from the supplied models.dev snapshot", async () => {
   const modelConfigFor = async ({ option }) => ({
     source: "models.dev",
@@ -326,7 +624,7 @@ test("cancelling takes the half-created row back out", async () => {
 
   await waitFor(events, "cancelled");
   assert.equal(host.providers.size, 0);
-  assert.equal(host.secrets.size, 0);
+  assert.deepEqual([...host.secrets.keys()], ["secret:installation:oauth-device-id"]);
   // The pending prompt is closed out so the dialog cannot hang on it.
   assert.ok(events.some((event) => event.kind === "promptCancelled"));
 });
@@ -514,7 +812,7 @@ test("Meta OAuth removes the provider row when API-key minting reports an expire
     const error = await waitFor(events, "error", 1200);
     assert.match(error.message, /Meta session expired/);
     assert.equal(host.providers.size, 0);
-    assert.equal(host.secrets.size, 0);
+    assert.deepEqual([...host.secrets.keys()], ["secret:installation:oauth-device-id"]);
   } finally {
     globalThis.fetch = previousFetch;
   }
@@ -537,6 +835,7 @@ test("the real pi-ai catalog offers every vendor account we ship", async () => {
       "github-copilot",
       "kimi-coding",
       "meta",
+      "openai",
       "openai-codex",
       "openrouter",
       "radius",
@@ -565,7 +864,7 @@ test("the ChatGPT OAuth catalog includes GPT-6 Astra", async () => {
   assert.equal(model.api, "openai-codex-responses");
 });
 
-test("the pi-ai 0.87.1 OAuth catalogs include the stable model wires", async () => {
+test("the pi-ai OAuth catalog supplies wire identities, not model limits", async () => {
   const { OPENAI_CODEX_MODELS } = await import(
     "@earendil-works/pi-ai/providers/openai-codex.models"
   );
@@ -573,10 +872,7 @@ test("the pi-ai 0.87.1 OAuth catalogs include the stable model wires", async () 
     const model = OPENAI_CODEX_MODELS[modelId];
     assert.ok(model, `openai-codex catalog must include ${modelId}`);
     assert.equal(model.api, "openai-codex-responses");
-    assert.equal(model.reasoning, true);
-    assert.equal(model.contextWindow, 272_000);
-    assert.equal(model.maxTokens, 128_000);
-    assert.ok(model.input.includes("image"));
+    assert.equal(model.provider, "openai-codex");
   }
 
   const { GITHUB_COPILOT_MODELS } = await import(
@@ -587,23 +883,16 @@ test("the pi-ai 0.87.1 OAuth catalogs include the stable model wires", async () 
     const model = GITHUB_COPILOT_MODELS[modelId];
     assert.ok(model, `github-copilot catalog must include ${modelId}`);
     assert.equal(model.api, "openai-responses");
-    assert.ok(model.input.includes("image"));
+    assert.equal(model.provider, "github-copilot");
   }
 
   const { ANTHROPIC_MODELS } = await import(
     "@earendil-works/pi-ai/providers/anthropic.models"
   );
   assert.equal(ANTHROPIC_MODELS["claude-opus-5"]?.api, "anthropic-messages");
-  assert.equal(ANTHROPIC_MODELS["claude-opus-5"]?.contextWindow, 1_000_000);
 
   const { XAI_MODELS } = await import("@earendil-works/pi-ai/providers/xai.models");
   assert.equal(XAI_MODELS["grok-4.6"]?.api, "openai-responses");
-  const thinkingLevels = Object.entries(XAI_MODELS["grok-4.6"]?.thinkingLevelMap ?? {})
-    .filter(([, value]) => typeof value === "string")
-    .map(([level]) => level);
-  for (const level of ["low", "medium", "high", "xhigh"]) {
-    assert.ok(thinkingLevels.includes(level), `xAI catalog must include ${level} thinking`);
-  }
 });
 
 test("credential writes for one account run one at a time", async () => {
@@ -635,7 +924,7 @@ test("credential writes for one account run one at a time", async () => {
   // pi-ai's locked refresh depends on to avoid double-refreshing a token.
   assert.equal(overlapped, false);
   assert.deepEqual(seen, ["access-for-abc", "rotated-1"]);
-  assert.equal(host.secrets.size, 1);
+  assert.deepEqual([...host.secrets.keys()].sort(), ["secret:installation:oauth-device-id", secretRefForProviderOauth("row-1")].sort());
 });
 
 test("conversation-model filter drops xAI image and video ids", () => {
@@ -711,8 +1000,8 @@ test("an xAI account offers the chat models its /models endpoint returns", async
     const row = host.providers.get(done.providerId);
     assert.deepEqual(row.models.map((model) => model.id), ["grok-4.6", "grok-4.7"]);
     const offered = row.models.find((model) => model.id === "grok-4.7");
-    assert.equal(offered.contextWindow, 500_000);
-    assert.deepEqual(offered.thinkingLevels, ["low", "medium", "high", "xhigh"]);
+    assert.equal(offered.contextWindow, 128_000);
+    assert.deepEqual(offered.thinkingLevels, ["off"]);
     assert.equal(await oauth.bindingFor(done.providerId, "grok-2"), undefined);
     const binding = await oauth.bindingFor(done.providerId, "grok-4.7");
     assert.equal(binding.apiStyle, "responses");
@@ -724,7 +1013,7 @@ test("an xAI account offers the chat models its /models endpoint returns", async
   }
 });
 
-test("a new Grok inherits grok-4.6 even when an older Grok is first in the pin", async () => {
+test("live account metadata never inherits a sibling model record", async () => {
   const fetchModels = async () => new Response(JSON.stringify({
     data: [{ id: "grok-4.7" }],
   }), { status: 200, headers: { "content-type": "application/json" } });
@@ -765,7 +1054,352 @@ test("a new Grok inherits grok-4.6 even when an older Grok is first in the pin",
   oauth.respond({ loginId, promptId: prompt.request.promptId, value: "abc" });
   const done = await waitFor(events, "done");
   const binding = await oauth.bindingFor(done.providerId, "grok-4.7");
-  assert.equal(binding.modelConfig.contextWindow, 500_000);
-  assert.equal(binding.modelConfig.maxTokens, 500_000);
-  assert.deepEqual(binding.supportedThinkingLevels, ["low", "medium", "high", "xhigh"]);
+  assert.equal(binding.modelConfig.source, "generic");
+  assert.equal(binding.modelConfig.contextWindow, 128_000);
+  assert.equal(binding.modelConfig.maxTokens, 8_192);
+  assert.deepEqual(binding.supportedThinkingLevels, ["off"]);
+});
+
+async function liveCopilotBinding(sibling, options = {}) {
+  const modelId = options.modelId ?? "claude-sonnet-99";
+  const { events, oauth } = harness({
+    provider: {
+      id: "github-copilot",
+      name: "GitHub Copilot",
+      baseUrl: "https://api.individual.githubcopilot.com",
+      auth: { oauth: { name: "GitHub Copilot", loginLabel: "Sign in" } },
+    },
+    models: [sibling],
+    modelConfigFor: options.modelConfigFor,
+    onAccountModels: options.onAccountModels,
+    onAccountRemoved: options.onAccountRemoved,
+    fetch: async () => new Response(JSON.stringify({
+      data: [{ id: modelId, model_picker_enabled: true, policy: { state: "enabled" } }],
+    }), { status: 200, headers: { "content-type": "application/json" } }),
+  });
+  const { loginId } = await oauth.start("github-copilot");
+  const prompt = await waitFor(events, "prompt");
+  oauth.respond({ loginId, promptId: prompt.request.promptId, value: "test-code" });
+  const done = await waitFor(events, "done");
+  const binding = await oauth.bindingFor(done.providerId, modelId);
+  assert.ok(binding, "the account's newly offered model must be runnable");
+  return binding;
+}
+
+const adaptiveSonnet = {
+  id: "claude-sonnet-5",
+  name: "Claude Sonnet 5",
+  api: "anthropic-messages",
+  provider: "github-copilot",
+  baseUrl: "https://api.individual.githubcopilot.com",
+  reasoning: true,
+  input: ["text", "image"],
+  contextWindow: 1_000_000,
+  maxTokens: 128_000,
+  cost: { input: 2, output: 10, cacheRead: 0.2, cacheWrite: 2.5 },
+  compat: { forceAdaptiveThinking: true },
+  thinkingLevelMap: {
+    off: null,
+    minimal: null,
+    low: "low",
+    medium: "medium",
+    high: "high",
+    xhigh: "xhigh",
+    max: "max",
+  },
+};
+
+test("a live-only Claude model does not inherit Pi metadata from its sibling", async () => {
+  const binding = await liveCopilotBinding(adaptiveSonnet);
+  assert.equal(binding.apiStyle, "anthropic_messages");
+  assert.equal(binding.modelConfig.name, "claude-sonnet-99");
+  assert.equal(binding.modelConfig.source, "generic");
+  assert.equal(binding.modelConfig.compat, undefined);
+  assert.equal(binding.modelConfig.thinkingLevelMap, undefined);
+  assert.equal(binding.modelConfig.contextWindow, 128_000);
+  assert.equal(binding.modelConfig.maxTokens, 8_192);
+});
+
+test("live-only reasoning models do not inherit a sibling effort map", async () => {
+  const binding = await liveCopilotBinding({
+    ...adaptiveSonnet,
+    thinkingLevelMap: { xhigh: "xhigh", max: "max" },
+  });
+  assert.deepEqual(binding.supportedThinkingLevels, ["off"]);
+  assert.equal(clampThinkingLevel(binding, "high"), "off");
+});
+
+test("live-only models do not inherit reasoning restrictions from siblings", async () => {
+  const restricted = await liveCopilotBinding({
+    ...adaptiveSonnet,
+    thinkingLevelMap: { off: null, minimal: null, low: null, medium: null, high: null, xhigh: "xhigh", max: null },
+  });
+  assert.deepEqual(restricted.supportedThinkingLevels, ["off"]);
+  const nonReasoning = await liveCopilotBinding({ ...adaptiveSonnet, reasoning: false });
+  assert.equal(nonReasoning.supportsReasoning, false);
+  assert.deepEqual(nonReasoning.supportedThinkingLevels, ["off"]);
+});
+
+test("a live-only model without a same-tier sibling keeps generic capabilities", async () => {
+  const binding = await liveCopilotBinding(adaptiveSonnet, { modelId: "claude-haiku-99" });
+  assert.equal(binding.supportsReasoning, false);
+  assert.deepEqual(binding.supportedThinkingLevels, ["off"]);
+  assert.equal(binding.modelConfig.compat, undefined);
+  assert.equal(binding.modelConfig.thinkingLevelMap, undefined);
+});
+
+test("models.dev metadata takes precedence over Pi sibling metadata", async () => {
+  const published = {
+    ...genericModelConfig("claude-sonnet-99"),
+    source: "models.dev",
+    reasoning: true,
+    supportedThinkingLevels: ["low", "high"],
+    thinkingLevelMap: { low: "low", high: "high" },
+    thinkingProtocol: "legacy",
+  };
+  const binding = await liveCopilotBinding(adaptiveSonnet, { modelConfigFor: async () => published });
+  assert.deepEqual(binding.modelConfig, published);
+  assert.deepEqual(binding.supportedThinkingLevels, ["low", "high"]);
+});
+
+test("an explicit effort map on generic metadata governs the fallback's supported levels", async () => {
+  const config = {
+    ...genericModelConfig("claude-sonnet-99"),
+    thinkingLevelMap: { off: null, minimal: null, low: null, medium: null, high: "high", xhigh: null, max: null },
+    compat: { forceAdaptiveThinking: false },
+  };
+  const binding = await liveCopilotBinding(adaptiveSonnet, { modelConfigFor: async () => config });
+  assert.equal(binding.modelConfig.compat.forceAdaptiveThinking, false);
+  assert.deepEqual(binding.modelConfig.thinkingLevelMap, config.thinkingLevelMap);
+  assert.deepEqual(binding.supportedThinkingLevels, ["high"]);
+});
+
+test("a live-only Claude request keeps its wire ID without Pi sibling metadata", async () => {
+  const binding = await liveCopilotBinding({
+    ...adaptiveSonnet,
+    thinkingLevelMap: { off: null, minimal: null, xhigh: "xhigh", max: "max" },
+  });
+  const modelConfig = modelConfigWithBinding(binding.modelConfig);
+  const provider = {
+    ...binding,
+    modelConfig,
+    ...capabilitiesFromModelConfig(modelConfig),
+    id: "test-account-row",
+    name: "GitHub Copilot",
+    vendorKey: "github-copilot",
+    modelId: "claude-sonnet-99",
+    authKind: "oauth",
+    apiKey: "",
+    resolveAuth: async () => ({ apiKey: "test-copilot-access-token" }),
+  };
+  const model = buildProviderModel(provider);
+  const models = createProviderModels(provider, model);
+  let request;
+  const result = await models.streamSimple(model, {
+    messages: [{ role: "user", content: "fixture", timestamp: 1 }],
+  }, {
+    reasoning: "off",
+    maxRetries: 0,
+    fetch: async (input, init) => {
+      request = new Request(input, init);
+      return Response.json({ type: "error", error: { type: "invalid_request_error", message: "fixture response" } }, { status: 400 });
+    },
+  }).result();
+  assert.equal(result.stopReason, "error");
+  assert.ok(request, "the real adapter must reach the HTTP boundary");
+  const body = await request.json();
+  assert.equal(body.model, "claude-sonnet-99");
+  assert.equal(body.thinking.type, "enabled");
+  assert.equal(body.thinking.budget_tokens, 1_024);
+  assert.equal(body.output_config, undefined);
+  assert.equal(request.headers.get("Authorization"), "Bearer test-copilot-access-token");
+  assert.equal(request.headers.get("x-api-key"), null);
+});
+
+test("legacy thinking siblings do not define an unknown model's thinking metadata", async () => {
+  const binding = await liveCopilotBinding({
+    ...adaptiveSonnet,
+    id: "claude-sonnet-4.5",
+    compat: undefined,
+    thinkingLevelMap: undefined,
+  });
+  assert.equal(binding.modelConfig.source, "generic");
+  assert.equal(binding.modelConfig.contextWindow, 128_000);
+  assert.equal(binding.modelConfig.maxTokens, 8_192);
+  assert.notEqual(binding.modelConfig.compat?.forceAdaptiveThinking, true);
+  assert.equal(binding.modelConfig.thinkingLevelMap, undefined);
+  assert.deepEqual(binding.supportedThinkingLevels, ["off"]);
+});
+
+test("live-only models do not inherit thinking restrictions from a sibling", async () => {
+  const disabled = { off: null, minimal: null, low: null, medium: null, high: null, xhigh: null, max: null };
+  for (const sibling of [
+    { ...adaptiveSonnet, thinkingLevelMap: { ...disabled, high: "high" } },
+    { ...adaptiveSonnet, reasoning: false, thinkingLevelMap: undefined },
+    { ...adaptiveSonnet, thinkingLevelMap: disabled },
+  ]) {
+    const binding = await liveCopilotBinding(sibling);
+    const effective = modelConfigWithBinding(binding.modelConfig);
+    assert.equal(binding.modelConfig.thinkingLevelMap, undefined);
+    assert.equal(effective.contextWindow, 128_000);
+    assert.equal(effective.maxTokens, 8_192);
+  }
+});
+
+function codexProvider() {
+  return {
+    id: "openai-codex",
+    name: "ChatGPT",
+    baseUrl: "https://chatgpt.com/backend-api",
+    auth: { oauth: { name: "ChatGPT Plus/Pro", isSubscription: true, loginLabel: "Sign in" } },
+  };
+}
+
+function codexModel(id) {
+  return {
+    id,
+    name: id,
+    api: "openai-codex-responses",
+    provider: "openai-codex",
+    baseUrl: "https://chatgpt.com/backend-api",
+    input: ["text"],
+    reasoning: true,
+    thinkingLevelMap: { off: null, low: "low", medium: "medium", high: "high" },
+    cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+    contextWindow: 272_000,
+    maxTokens: 128_000,
+  };
+}
+
+/** A pasted code that makes `access-for-<code>` a ChatGPT-shaped JWT. */
+function codexLoginCode() {
+  const payload = Buffer.from(JSON.stringify({
+    "https://api.openai.com/auth": { chatgpt_account_id: "acct_123" },
+  })).toString("base64url");
+  return `h.${payload}.sig`;
+}
+
+test("a ChatGPT account lists the models /codex/models returns for its client version", async () => {
+  const seen = [];
+  // The live endpoint rejects a request without client_version.
+  const fetchModels = async (input) => {
+    const url = new URL(String(input));
+    seen.push(url);
+    if (!url.searchParams.get("client_version")) {
+      return new Response(JSON.stringify({
+        detail: [{ loc: ["query", "client_version"], msg: "Field required" }],
+      }), { status: 400 });
+    }
+    return new Response(JSON.stringify({
+      models: [{ slug: "gpt-6-luna", visibility: "list" }, { slug: "gpt-6.1-sol", visibility: "list" }],
+    }), { status: 200, headers: { "content-type": "application/json" } });
+  };
+  const { host, events, oauth } = harness({
+    fetch: fetchModels,
+    provider: codexProvider(),
+    models: [codexModel("gpt-6-luna")],
+  });
+  const { loginId } = await oauth.start("openai-codex");
+  const prompt = await waitFor(events, "prompt");
+  oauth.respond({ loginId, promptId: prompt.request.promptId, value: codexLoginCode() });
+  const done = await waitFor(events, "done");
+  const row = host.providers.get(done.providerId);
+  assert.deepEqual(row.models.map((model) => model.id), ["gpt-6-luna", "gpt-6.1-sol"]);
+  assert.equal(seen[0].pathname, "/backend-api/codex/models");
+  const binding = await oauth.bindingFor(done.providerId, "gpt-6.1-sol");
+  assert.equal(binding.baseUrl, "https://chatgpt.com/backend-api");
+});
+
+test("a failed ChatGPT model list logs the status and a token-free response excerpt", async () => {
+  const logs = [];
+  const code = codexLoginCode();
+  const fetchModels = async () => new Response(JSON.stringify({
+    detail: [{ loc: ["query", "client_version"], msg: "Field required" }],
+    echoed: `access-for-${code}`,
+  }), { status: 400 });
+  const { host, events, oauth } = harness({
+    fetch: fetchModels,
+    log: (level, message, data) => logs.push({ level, message, data }),
+    provider: codexProvider(),
+    models: [codexModel("gpt-6-luna")],
+  });
+  const { loginId } = await oauth.start("openai-codex");
+  const prompt = await waitFor(events, "prompt");
+  oauth.respond({ loginId, promptId: prompt.request.promptId, value: code });
+  const done = await waitFor(events, "done");
+  // pi-ai's pinned list is still the fallback.
+  assert.deepEqual(host.providers.get(done.providerId).models.map((model) => model.id), ["gpt-6-luna"]);
+  const failed = logs.find((entry) => entry.message === "vendor account model list failed");
+  assert.ok(failed, `no model list failure log; saw ${logs.map((entry) => entry.message).join(", ")}`);
+  assert.equal(failed.level, "warn");
+  assert.equal(failed.data.vendorId, "openai-codex");
+  assert.equal(failed.data.status, 400);
+  assert.match(failed.data.responseExcerpt, /client_version/);
+  const logged = JSON.stringify(logs);
+  assert.equal(logged.includes(code), false);
+  assert.equal(logged.includes(code.split(".")[1]), false);
+});
+
+test("failed Host deletion keeps the account catalog and credentials usable", async () => {
+  const host = fakeHost();
+  const row = { id: "saved", vendorKey: "anthropic", authKind: "oauth" };
+  host.providers.set(row.id, row);
+  host.secrets.set(secretRefForProviderOauth(row.id), JSON.stringify({
+    type: "oauth", access: "fixture-access", refresh: "fixture-refresh", expires: 4102444800000,
+  }));
+  const removed = [];
+  const oauth = new VendorOAuth({
+    call: async (method, params) => {
+      if (method === "providers.delete") throw new Error("fixture Host deletion failed");
+      return host.call(method, params);
+    },
+    emit: () => {}, openExternal: async () => {},
+    createModels: store => fakeModels(store),
+    onAccountRemoved: id => removed.push(id),
+  });
+  assert.deepEqual(await oauth.resolveAuth(row.id), { apiKey: "fixture-access" });
+  await assert.rejects(oauth.deleteAccount(row.id), /Host deletion failed/);
+  assert.deepEqual(removed, []);
+  assert.deepEqual(await oauth.resolveAuth(row.id), { apiKey: "fixture-access" });
+});
+
+test("an unsigned OAuth account cannot borrow an ambient API key", async (t) => {
+  const previous = process.env.ANTHROPIC_API_KEY;
+  process.env.ANTHROPIC_API_KEY = "fixture-ambient-not-this-account";
+  t.after(() => { if (previous === undefined) delete process.env.ANTHROPIC_API_KEY; else process.env.ANTHROPIC_API_KEY = previous; });
+  const host = fakeHost();
+  host.providers.set("unsigned", { id: "unsigned", vendorKey: "anthropic", authKind: "oauth", enabled: true });
+  const oauth = new VendorOAuth({ call: host.call, emit: () => undefined, openExternal: async () => undefined,
+    fetch: async () => { throw new Error("No network expected"); } });
+  await assert.rejects(oauth.resolveAuth("unsigned"), /not signed in/);
+});
+
+test("forced account refresh bypasses the live model TTL", async () => {
+  let models = ["gpt-6-luna"];
+  let attached;
+  const h = harness({ onAccountModels: (_id, collection) => { attached = collection; }, provider: codexProvider(), models: [codexModel("gpt-6-luna"), codexModel("gpt-6.1-sol")],
+    fetch: async () => Response.json({ models: models.map(slug => ({ slug, visibility: "list" })) }) });
+  const { loginId } = await h.oauth.start("openai-codex");
+  const prompt = await waitFor(h.events, "prompt");
+  h.oauth.respond({ loginId, promptId: prompt.request.promptId, value: codexLoginCode() });
+  const done = await waitFor(h.events, "done");
+  models = ["gpt-6.1-sol"];
+  await attached.refresh({ allowNetwork: true, force: true });
+  assert.deepEqual((await h.oauth.listModels(done.providerId)).map(model => model.modelId), ["gpt-6.1-sol"]);
+});
+
+test("failed cleanup after a rejected login preserves the surviving account instance", async () => {
+  const attached = []; const removed = [];
+  const h = harness({ login: async () => { throw new Error("fixture login rejected"); },
+    call: (method, params, call) => { if (method === "providers.delete") throw new Error("fixture delete rejected"); return call(method, params); },
+    onAccountModels: (id, models) => attached.push({ id, models }),
+    onAccountRemoved: id => removed.push(id),
+  });
+  await h.oauth.start("anthropic");
+  await waitFor(h.events, "error");
+  assert.equal(h.host.providers.size, 1);
+  assert.deepEqual(removed, []);
+  const rowId = [...h.host.providers.keys()][0];
+  await h.oauth.listModels(rowId);
+  assert.equal(attached.filter(account => account.id === rowId).length, 1);
 });

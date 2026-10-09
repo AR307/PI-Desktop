@@ -1,7 +1,9 @@
+import { accountModelStream, type UsageObserver } from "./request-usage.js";
 import {
   buildProviderModel,
   copilotRequestHeaders,
   createProviderModels,
+  providerRequestFetch,
   providerRequestKey,
   type RuntimeProviderConfig,
 } from "./provider-binding.js";
@@ -34,6 +36,7 @@ export function subagentModelBinding(opts: {
   thinkingLevel: SubagentThinkingLevel;
   sessionId: string;
   maxTokens?: number;
+  onUsage?: UsageObserver;
 }, retry: SubagentProviderRetryState) {
   // A definition may cap the delegate's own output (issue #171). The
   // catalog's published limit keeps applying otherwise, so this is an
@@ -71,15 +74,18 @@ export function subagentModelBinding(opts: {
             maxTokens: clampOutputToContext(m, context, options?.maxTokens),
             maxRetries: 0,
             sessionId: opts.sessionId,
-            fetch: captureProviderResponse(options?.fetch, (response, _bytes, failure) => {
-              retry.failure = failure;
-              retry.status = response?.status;
-              retry.headers = carriesRetryDelayHeaders(
-                response?.status,
-              )
-                ? response?.headers
-                : undefined;
-            }),
+            fetch: providerRequestFetch(
+              m.api,
+              captureProviderResponse(options?.fetch, (response, _bytes, failure) => {
+                retry.failure = failure;
+                retry.status = response?.status;
+                retry.headers = carriesRetryDelayHeaders(
+                  response?.status,
+                )
+                  ? response?.headers
+                  : undefined;
+              }),
+            ),
           },
           {
             ...openCodeEndpointFromProvider(opts.provider, m),
@@ -90,15 +96,20 @@ export function subagentModelBinding(opts: {
           copilotRequestHeaders(opts.provider, context),
           opts.provider.headers,
         ),
+        m.api,
       );
       return createProviderRetryStream(
         m,
         context,
         requestOptions,
-        (retryOptions) =>
+        (retryOptions) => accountModelStream(m, () =>
           omitThinking
             ? models.stream(omitThinkingModel, context, retryOptions)
-            : models.streamSimple(m, context, retryOptions),
+            : models.streamSimple(m, context, retryOptions), {
+              providerId: opts.provider.id,
+              nativeCost: opts.provider.modelConfig?.nativeCost,
+              onUsage: opts.onUsage,
+            }),
         {
           claim: (error, phase) => retry.claim(error, phase),
           headers: () => retry.headers,

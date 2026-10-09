@@ -1,4 +1,5 @@
 /** Resolve the provider/model a session should keep after first selection. */
+import type { RecentModel } from "./recent-models";
 
 export type SessionModelRef = {
   providerId?: string;
@@ -9,31 +10,72 @@ export type SessionModelProvider = {
   id: string;
   defaultModelId?: string;
   models?: Array<{ id: string }>;
+  enabled?: boolean;
+  hasSecret?: boolean;
+  authKind?: string;
 };
 
 export type SessionModelSettings = {
   defaultProviderId?: string;
   defaultModelId?: string;
+  imageGeneration?: SessionModelRef | null;
+  imageGenerationModels?: SessionModelRef[] | null;
 };
 
+/** Only configured, runnable chat bindings can be inherited by a new chat. */
+export function availableRecentModels(
+  recentModels: readonly RecentModel[],
+  providers: readonly SessionModelProvider[],
+  settings?: SessionModelSettings | null,
+): RecentModel[] {
+  const images = [
+    ...(settings?.imageGenerationModels ?? []),
+    ...(settings?.imageGeneration ? [settings.imageGeneration] : []),
+  ];
+  return recentModels.filter(entry => {
+    const provider = providers.find(item => item.id === entry.providerId);
+    const ids = provider?.models?.length ? provider.models.map(model => model.id) : [provider?.defaultModelId];
+    return provider && provider.enabled !== false &&
+      (provider.authKind === undefined || provider.authKind === "none" || provider.hasSecret) &&
+      ids.some(id => id?.toLowerCase() === entry.modelId.toLowerCase()) &&
+      !images.some(image => image.providerId === entry.providerId && image.modelId?.toLowerCase() === entry.modelId.toLowerCase());
+  });
+}
+
 /**
- * App default (or an explicit draft override) at the moment a session is
- * created. Later Settings default-model changes must not rewrite this pair.
+ * Snapshot the most recent available binding when a chat is created.
+ * Explicit drafts and existing session bindings keep their own selection.
  */
 export function inheritedSessionModelBinding({
   draft,
   settings,
   providers,
+  recentModels = [],
 }: {
   draft?: SessionModelRef | null;
   settings?: SessionModelSettings | null;
   providers: readonly SessionModelProvider[];
+  recentModels?: readonly RecentModel[];
 }): SessionModelRef {
-  const providerId = draft?.providerId ?? settings?.defaultProviderId;
+  if (draft?.providerId && draft.modelId) {
+    return { providerId: draft.providerId, modelId: draft.modelId };
+  }
+  const fallbackCandidates = providers.flatMap(provider =>
+    (provider.models?.length ? provider.models.map(model => model.id) : [provider.defaultModelId])
+      .filter((modelId): modelId is string => !!modelId)
+      .map(modelId => ({ providerId: provider.id, modelId })),
+  );
+  const legacy = settings?.defaultProviderId && settings.defaultModelId
+    ? [{ providerId: settings.defaultProviderId, modelId: settings.defaultModelId }]
+    : [];
+  const inherited = [...recentModels, ...legacy, ...fallbackCandidates].find(entry =>
+    availableRecentModels([entry], providers, settings).length > 0,
+  );
+  const providerId = draft?.providerId ?? inherited?.providerId;
   const provider = providers.find((item) => item.id === providerId);
   const modelId =
     draft?.modelId ??
-    settings?.defaultModelId ??
+    (providerId === inherited?.providerId ? inherited?.modelId : undefined) ??
     provider?.defaultModelId ??
     provider?.models?.[0]?.id;
   return {
@@ -67,18 +109,21 @@ export function sessionNeedsModelPin(
 
 /**
  * Durable snapshot for an unpinned session: last used turn, else the current
- * app default. Callers persist this so the session stops following Settings.
+ * recent available model. Callers persist this so later selections cannot
+ * rewrite an existing chat's binding.
  */
 export function pinnedSessionModelBinding({
   session,
   messages,
   settings,
   providers,
+  recentModels,
 }: {
   session: SessionModelRef;
   messages?: readonly SessionModelRef[];
   settings?: SessionModelSettings | null;
   providers: readonly SessionModelProvider[];
+  recentModels?: readonly RecentModel[];
 }): SessionModelRef {
   const used = lastUsedSessionModel(messages ?? []);
   return inheritedSessionModelBinding({
@@ -88,5 +133,6 @@ export function pinnedSessionModelBinding({
     },
     settings,
     providers,
+    recentModels,
   });
 }

@@ -23,6 +23,7 @@ Host-core 持有 vault key、WebDAV 传输、修订状态、合并基线、待�
 
 当前适配器集合覆盖应用偏好、用户所有的 providers、MCP 定义、用户 skills、全局 subagents、由应用管理的全局/项目指令与项目、插件安装意图、定时自动化任务以及可选的项目记忆。凭据默认需要明确选择。只有选中凭据类别时才会包含 provider API key 和 MCP 环境变量/headers；OAuth access/refresh token 与 cookies 永远不会导出。
 指令适配器只读取固定的全局 `~/.pi/agent/AGENTS.md` 和每个已注册项目根目录的 `AGENTS.md`；不会扫描嵌套仓库或任意文件。导入的指令文件只有在明确选择其作用域、完成必要映射并获得审批后才会写入。
+指令文件没有单独的字节上限；其内容只受 Host 在上传与远程校验时统一的便携实体负载上限约束。
 目录形态的 skills 会将有界的同级资源作为已认证对象携带。Host 会校验 package path、symlink、冲突、文件数量和总大小后才写入已审批的资源：每个 package 最多 256 个资源、单个资源 2 MiB、整个 package 16 MiB；技能文档本身仍保持 128 KiB 上限，因为它可能进入 prompt。脚本按字节存储，导入时绝不执行。
 
 项目和 workspace 绑定使用不透明的逻辑标识符表示。Host-core 为每个已注册的独立项目分配持久逻辑身份；项目组根目录的身份由组身份和有序根位置派生。设备映射把接收的逻辑 ID 覆盖到本地文件夹，因此不同绝对路径不会产生重复实体。
@@ -68,7 +69,11 @@ Host 绝不会仅因为 UI flag 被设置就激活暂存的可执行内容。新
 
 ## 5. 设置工作流
 
+该目的地当前仅在开发构建可见：打包构建会省略「设置 → 云同步」的导轨行、页面与设置搜索命中，而本文描述的 Host 行为不变。
+
 设置 → 云同步提供 WebDAV endpoint 凭据、vault 密码、设备标签、服务器兼容模式、类别选择、能力测试、立即同步、解锁、暂停、文件夹映射、批准/拒绝、revision history/restore、vault 密码重新包裹以及断开连接控制。严格 CAS 是默认模式。选择追加式兼容模式会显示持续风险提示，并在保存配置前要求确认；其测试成功提示目录列表支持，而不是条件写支持。Renderer 将 `notConfigured`、`locked`、`upToDate`、`localChangesPending`、`syncing`、`offline`、`unsupportedServer`、`conflict`、`awaitingActivation`、`paused` 和 `error` 显示为不同状态。断开连接会保留本地数据，不会删除远端数据。
+
+重新打开页面时，先用短时的 Renderer 缓存绘制最近一次脱敏的 Host 状态和历史记录，随后在后台刷新 Host。连接草稿（endpoint、用户名、远程目录、设备标签、兼容模式和类别选择）保存在 Renderer 本地存储中，因此离开页面或重载后未完成的表单仍会保留；Host 确认已保存的配置后，草稿会重新标记为已保存。WebDAV 应用密码留在 Host secret store 中，且只对同一 endpoint 和账户复用；Renderer 永远不会存储任一密码，只有新设备或已锁定设备需要打开 vault 时才需要输入 vault 密码。
 
 手动同步会在运行期间报告它正在做什么。`configSync.progress` 携带当前阶段（`capture`、`download`、`merge`、`upload`、`apply` 或 `cleanup`）、该阶段已完成的单位数，以及已知时的字节数：`done`/`total` 在传输时计资源对象（追加式模式下计正在读取的设备 tip）、其他阶段计实体；`total` 为 0 表示该阶段无法预知总量；`bytesTotal` 为 0 表示字节数未知，这是下载阶段的常态。报告会节流，阶段变化绝不丢弃，状态事件与调用的返回值仍是终态信号。后台轮询不报告进度：只有手动路径有调用方在等待。
 

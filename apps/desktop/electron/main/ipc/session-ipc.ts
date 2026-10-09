@@ -9,7 +9,6 @@ import {
   draftMatchesExisting,
   providerCreateInputFromDraft,
   isModelConfigImportSource,
-  type ActivationScope,
   type ModelConfigImportDraft,
   type Mode,
   type SessionThinkingLevel,
@@ -37,11 +36,6 @@ type RuntimeSession = {
   modelId?: string;
   thinkingLevel?: SessionThinkingLevel;
   [key: string]: unknown;
-};
-
-type ImportableModelConfig = ModelConfigImportDraft & {
-  id?: string;
-  secretValue?: string;
 };
 
 let scannedImportSessions = new Map<string, ExternalSessionSummary>();
@@ -139,6 +133,15 @@ export function registerSessionIpc({
   handle(IPC.invoke.sessionSearchContext, async (input) => {
     if (!host) throw new Error("host unavailable");
     return host.call("search.context", input);
+  });
+  handle(IPC.invoke.todosGet, async (input: { sessionId?: unknown } = {}) => {
+    if (!host) throw new Error("host unavailable");
+    if (typeof input.sessionId !== "string" || !input.sessionId.trim()) {
+      throw Object.assign(new Error("sessionId is required"), {
+        errorCode: ErrorCodes.INVALID_ARGUMENT,
+      });
+    }
+    return host.call("todos.get", { sessionId: input.sessionId });
   });
   handle(IPC.invoke.sessionList, async () => {
     if (!host) throw new Error("host unavailable");
@@ -352,6 +355,15 @@ export function registerSessionIpc({
     }
     if (!host) throw new Error("host unavailable");
     return host.call("session.rename", { id, title });
+  });
+  handle(IPC.invoke.sessionDeriveTitle, async (id: string, title: string) => {
+    if (id.startsWith("native-pi:")) {
+      throw Object.assign(new Error("Native Pi session title derivation is not supported"), {
+        errorCode: ErrorCodes.INVALID_ARGUMENT,
+      });
+    }
+    if (!host) throw new Error("host unavailable");
+    return host.call("session.deriveTitle", { id, title });
   });
   handle(
     IPC.invoke.sessionMoveProject,

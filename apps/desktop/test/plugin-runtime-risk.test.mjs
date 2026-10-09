@@ -10,10 +10,10 @@ import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { en } from "../../../packages/i18n/src/locales/en/index.ts";
-import { zhCN } from "../../../packages/i18n/src/locales/zh-CN/index.ts";
-import { tr } from "../../../packages/i18n/src/locales/tr/index.ts";
-import { ko } from "../../../packages/i18n/src/locales/ko/index.ts";
+import { en } from "../../../packages/i18n/dist/locales/en/index.js";
+import { zhCN } from "../../../packages/i18n/dist/locales/zh-CN/index.js";
+import { tr } from "../../../packages/i18n/dist/locales/tr/index.js";
+import { ko } from "../../../packages/i18n/dist/locales/ko/index.js";
 
 const catalogs = { en, "zh-CN": zhCN, tr, ko };
 
@@ -44,6 +44,7 @@ test("plugin runtime exposes gated high-risk host APIs", () => {
     "agent.complete",
     "desktop.control",
     "session.read",
+    "session.autoTitle",
     "models.list",
     "shell.openExternal",
     "clipboard.read",
@@ -110,6 +111,8 @@ test("the plugins page shows the file scope behind a file permission", () => {
     assert.equal(typeof catalog.plugins.permissionHelp["fs.delete"], "string");
     assert.equal(typeof catalog.plugins.permissions["agent.complete"], "string");
     assert.equal(typeof catalog.plugins.permissionHelp["session.read"], "string");
+    assert.equal(typeof catalog.plugins.permissions["session.autoTitle"], "string");
+    assert.equal(typeof catalog.plugins.permissionHelp["session.autoTitle"], "string");
     assert.equal(typeof catalog.plugins.permissions["models.list"], "string");
     assert.equal(typeof catalog.plugins.permissions["ui.microphone"], "string");
     assert.equal(typeof catalog.plugins.permissionHelp["ui.microphone"], "string");
@@ -166,7 +169,7 @@ test("shared protocol declares marketplace and package install IPC", () => {
 
 test("plugins page can refresh the official marketplace repository", () => {
   assert.match(pageSrc, /marketRefresh|refreshMarket|refreshRemote/);
-  assert.match(pageSrc, /pi-desktop-plugins|marketSource/);
+  assert.doesNotMatch(pageSrc, /MarketplaceSourceSettings|marketSource/);
 });
 
 

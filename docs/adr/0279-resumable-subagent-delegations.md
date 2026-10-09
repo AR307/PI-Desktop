@@ -115,8 +115,11 @@ the same conversation to a different model with no trace.
 
 A `failed` run's reads and findings still have value; its failed assistant row
 is dropped by the converter like any other error row. `stopped` and `aborted`
-encode the user's or the parent's decision to abandon that line of work, and
-resuming it would contradict the stop. `interrupted` (the app closed while the
+encode an explicit Stop or runtime disposal, and resuming it would contradict
+the cancellation. A terminal parent error still cancels active execution, but
+its interrupted delegates settle as `failed` with `SUBAGENT_PARENT_FAILED`
+instead: this system interruption preserves manual resume eligibility (#680).
+`interrupted` (the app closed while the
 run still worked) means the same thing for this purpose: the delegate never
 settled, so there is nothing trustworthy to continue. (`timed_out` is a vestigial
 status — ADR 0119's timeouts were withdrawn by D328 — and is treated as `failed`

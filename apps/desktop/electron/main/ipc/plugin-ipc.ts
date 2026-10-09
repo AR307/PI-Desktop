@@ -12,6 +12,7 @@ import {
   type PluginRuntime,
 } from "../plugin-runtime";
 import { PluginViewHost } from "../plugin-view-host";
+import { rendererCallError } from "../plugin-renderer-extension";
 import type { IpcRegistrar } from "./types";
 
 export type PluginIpcDependencies = {
@@ -125,17 +126,62 @@ export function registerPluginIpc({
         const withExtension = extensionIds.length
           ? { ...plugin, agentExtension: agentExtensions.statusForPlugin(extensionIds) }
           : plugin;
-        if (!plugin?.settings?.length || !plugins.getLoaded(plugin.id)) return withExtension;
+        // The renderer host loads from the live load, never from the registry
+        // row: a plugin that is not running has nothing to load.
+        const renderer = plugin?.id ? plugins.rendererDescriptor(plugin.id) : undefined;
+        const withRenderer = renderer ? { ...withExtension, renderer } : withExtension;
+        const withComposerTransforms = plugin?.id
+          ? { ...withRenderer, composerTransforms: plugins.getComposerTransforms(plugin.id) }
+          : withRenderer;
+        if (!plugin?.settings?.length || !plugins.getLoaded(plugin.id)) return withComposerTransforms;
         try {
           const settings = await plugins.getPluginSettings(plugin.id);
-          return { ...withExtension, settings };
+          return { ...withComposerTransforms, settings };
         } catch {
-          return withExtension;
+          return withComposerTransforms;
         }
       }),
     );
     return { ...result, plugins: pluginsWithSettings };
   });
+
+  // Renderer extensions run in the main window only (`PluginRendererHost`),
+  // so no other window may relay into a plugin's headless entry.
+  registrar.handleWithEvent(
+    IPC.invoke.pluginRendererCall,
+    async (event, pluginId: unknown, method: unknown, args: unknown) => {
+      registrar.assertMainWindowSender(event);
+      if (typeof pluginId !== "string" || !pluginId || typeof method !== "string" || !method) {
+        throw rendererCallError("INVALID_ARGUMENT", "pluginId and method are required");
+      }
+      return plugins.callRenderer(pluginId, method, args);
+    },
+  );
+
+  registrar.handleWithEvent(
+    IPC.invoke.pluginComposerTransform,
+    async (event, payload: unknown) => {
+      registrar.assertMainWindowSender(event);
+      if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
+        throw rendererCallError("INVALID_ARGUMENT", "composer transform input is invalid");
+      }
+      const input = payload as Record<string, unknown>;
+      if (
+        typeof input.pluginId !== "string" ||
+        typeof input.id !== "string" ||
+        typeof input.text !== "string" ||
+        (input.modelKey !== undefined && typeof input.modelKey !== "string")
+      ) {
+        throw rendererCallError("INVALID_ARGUMENT", "composer transform input is invalid");
+      }
+      return plugins.runComposerTransform({
+        pluginId: input.pluginId,
+        id: input.id,
+        text: input.text,
+        ...(typeof input.modelKey === "string" ? { modelKey: input.modelKey } : {}),
+      });
+    },
+  );
 
   handle(IPC.invoke.pluginSettingsGet, async (id: string) => {
     const settings = await plugins.getPluginSettings(String(id ?? ""));

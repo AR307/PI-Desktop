@@ -4,8 +4,9 @@ import type {
   MessageUsage,
   UiMessage,
 } from "@pi-desktop/shared";
-import { hostedSearchRounds } from "@pi-desktop/shared";
+import { addUsage, hostedSearchRounds } from "@pi-desktop/shared";
 import { isDelegationStartTool } from "./tool-display";
+import { messageContentFacts } from "./transcript-summary";
 
 export type AssistantActivityItem =
   | { kind: "thinking"; message: UiMessage }
@@ -68,9 +69,10 @@ export function messageThinking(message: UiMessage): string {
 }
 
 function isVisibleMessage(message: UiMessage): boolean {
+  if (message.role === "system" && message.modelSystem) return false;
   return !(
     message.role === "assistant" &&
-    !(message.content || "").trim() &&
+    !messageContentFacts(message).hasContent &&
     !messageThinking(message) &&
     !message.hostedSearch &&
     !message.error
@@ -107,7 +109,7 @@ function collectSubagentRuns(
     // showing: the text is the only place its narration and report exist.
     const thinking = messageThinking(message);
     if (thinking) run.items.push({ kind: "thinking", message });
-    if ((message.content || "").trim() || message.error) {
+    if (messageContentFacts(message).hasContent || message.error) {
       run.items.push({ kind: "answer", message });
     }
   }
@@ -269,9 +271,10 @@ export function buildTranscriptEntries(
     for (const round of hostedSearchRounds(message.hostedSearch)) {
       pushActivity({ kind: "hostedSearch", message, round });
     }
-    if ((message.content || "").trim() || !thinking || message.error) {
+    const hasContent = messageContentFacts(message).hasContent;
+    if (hasContent || !thinking || message.error) {
       current.parts.push({ kind: "message", message });
-      if (!current.anchorId && (message.content || "").trim()) {
+      if (!current.anchorId && hasContent) {
         current.anchorId = message.id;
       }
     }
@@ -548,22 +551,5 @@ export function assistantTurnUsage(
   );
   if (usages.length === 0) return undefined;
 
-  const sum = (field: keyof MessageUsage) =>
-    usages.reduce((total, usage) => total + (usage[field] ?? 0), 0);
-  const optionalSum = (
-    field: "cacheReadTokens" | "cacheWriteTokens" | "reasoningTokens",
-  ) =>
-    usages.some((usage) => usage[field] !== undefined) ? sum(field) : undefined;
-  const cacheReadTokens = optionalSum("cacheReadTokens");
-  const cacheWriteTokens = optionalSum("cacheWriteTokens");
-  const reasoningTokens = optionalSum("reasoningTokens");
-
-  return {
-    inputTokens: sum("inputTokens"),
-    outputTokens: sum("outputTokens"),
-    totalTokens: sum("totalTokens"),
-    ...(cacheReadTokens !== undefined ? { cacheReadTokens } : {}),
-    ...(cacheWriteTokens !== undefined ? { cacheWriteTokens } : {}),
-    ...(reasoningTokens !== undefined ? { reasoningTokens } : {}),
-  };
+  return usages.reduce<MessageUsage | undefined>((total, usage) => addUsage(total, usage), undefined);
 }

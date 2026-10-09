@@ -12,7 +12,6 @@ const rendererApi = read("../src/capture/renderer-api.ts");
 const captureRig = read("../src/capture/capture-rig.ts");
 const main = read("../src/main.tsx");
 const windowControls = read("../src/components/WindowControls.tsx");
-const pulls = read("../src/pages/PullRequestsPage.tsx");
 const messages = read("../src/styles/messages.css");
 
 test("screenshot fixtures stay out of the production App bundle", () => {
@@ -49,7 +48,7 @@ test("screenshot fixtures stay out of the production App bundle", () => {
 test("the crash fallback never interprets the error as markup", () => {
   assert.doesNotMatch(main, /innerHTML/);
   assert.match(main, /detail\.textContent = String\(error\);/);
-  assert.match(main, /heading\.textContent = crashCatalog\.app\.uiCrashed;/);
+  assert.match(main, /heading\.textContent = i18n\.t\("app\.uiCrashed"/);
 });
 
 test("window controls draw through the icon wrappers", () => {
@@ -57,19 +56,52 @@ test("window controls draw through the icon wrappers", () => {
   assert.match(windowControls, /import \{ IconClose, IconCopy, IconMinus, IconSquare \} from "\.\/icons";/);
 });
 
-test("pull request links open through the shared external-open path", () => {
-  assert.doesNotMatch(pulls, /window\.open\(/);
-  assert.match(pulls, /api\.browserOpenExternal\(pr\.url\)/);
+
+test("message image chips carry no tile or stroke of their own (D297)", () => {
+  const start = messages.indexOf(".message-attachment-image-chip {");
+  assert.notEqual(start, -1, "message image chip rule is missing");
+  const block = messages.slice(start, messages.indexOf("}", start));
+  // The shared composer chip and the preview card own the surface; the wrapper
+  // stays a bare inline layout box.
+  assert.doesNotMatch(block, /background:|border|box-shadow/);
+  assert.match(block, /display: inline-flex;/);
 });
 
-test("attachment thumbnails are tone tiles, not stroked boxes (D297)", () => {
-  const block = messages.slice(
-    messages.indexOf(".message-attachment-image {"),
-    messages.indexOf(".message-attachment-image img {"),
-  );
-  assert.doesNotMatch(block, /border(?:-color)?:/);
-  assert.match(block, /background: var\(--ds-tile\);/);
-  assert.match(block, /:hover \{[\s\S]*?background: var\(--ds-raised\);/);
+test("a chip inside a message reads at that message's own type scale", () => {
+  const start = messages.indexOf(".message-row .composer-chip {");
+  assert.notEqual(start, -1, "message chip type rule is missing");
+  const block = messages.slice(start, messages.indexOf("}", start));
+  // The composer's fixed 11.5px/20px chip is a draft-only box. In a message the
+  // tile is sized by the inherited leading and sits on the line, so the label
+  // reads on the message's own baseline instead of poking out of a 20px tile.
+  assert.match(block, /font: inherit;/);
+  assert.match(block, /height: auto;/);
+  assert.match(block, /line-height: inherit;/);
+  assert.match(block, /vertical-align: top;/);
+  assert.doesNotMatch(block, /--text-xs-plus/);
+  assert.doesNotMatch(block, /height: 20px/);
+});
+
+test("a conversation chip breaks with the line instead of emptying it", () => {
+  const selector = '.message-row .composer-chip[data-action="open-session-reference"]';
+  const start = messages.indexOf(`${selector} {`);
+  assert.notEqual(start, -1, "the conversation chip has no inline-run rule");
+  const block = messages.slice(start, messages.indexOf("}", start));
+  // Chromium never fragments a `<button>`: as one, a chip that does not fit is
+  // pushed whole onto the next line and the line it left keeps its blank. An
+  // inline run breaks with the text, so its first line still reaches the edge.
+  assert.match(block, /display: inline;/);
+  assert.match(block, /white-space: normal;/);
+  assert.match(block, /box-decoration-break: clone;/);
+  const nameStart = messages.indexOf(`${selector} .composer-chip-name {`);
+  assert.notEqual(nameStart, -1, "the label is never told it may break");
+  const nameBlock = messages.slice(nameStart, messages.indexOf("}", nameStart));
+  assert.match(nameBlock, /overflow-wrap: anywhere;/);
+  assert.match(nameBlock, /white-space: normal;/);
+  assert.doesNotMatch(nameBlock, /text-overflow: ellipsis;/);
+  const iconStart = messages.indexOf(`${selector} .composer-chip-icon {`);
+  assert.notEqual(iconStart, -1, "an inline run has no flex gap, so the icon needs its own");
+  assert.match(messages.slice(iconStart, messages.indexOf("}", iconStart)), /margin-right:/);
 });
 
 test("dead components are gone", () => {

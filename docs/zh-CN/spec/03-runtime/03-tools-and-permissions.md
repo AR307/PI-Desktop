@@ -3,7 +3,7 @@
 > **翻译说明：** 本页是与 [英文源规格](/spec/03-runtime/03-tools-and-permissions) 一一对应的机器辅助翻译。代码、协议字段和标识符保持原文；如翻译与英文源事实有歧义，以英文版本为准。
 
 
-> 应用的决定：D003、D004、D005、D006、D013、D015、D093、D114、D115、D181、D186、
+> 应用的决定：D003、D004、D006、D013、D015、D093、D114、D115、D181、D186、D636、
 > D189、D190、D195（ADR 0057）、D315、D384（ADR 0211）、ADR 0087
 
 ## 0. 冻结政策总结
@@ -16,7 +16,7 @@
 | Goal 工具 | 读取 / Glob / Grep / BrowserPreview / Bash / SubmitGoal + 声明 plan-safe 动作的插件工具 |
 | Plan 和 Goal 硬拒绝 | 写入 / 编辑 / 没有 `planSafeActions` 的插件工具 / 未知工具 / 另一类的提交工具 |
 | 插件 `planSafeActions` | 非空的 `action` 字符串数组；运行时在 Plan/Goal 中隐藏没有该列表的插件工具，host 放行已列出的工具，plugin-runtime 拒绝列表外的任何动作（ADR 0211） |
-| 权限超时 | 120秒→拒绝 |
+| 本地权限确认 | 无自动截止时间；必须明确决定或取消 |
 | 允许会话范围 | 工具名称 |
 | 重击风格 | 非交互式；具有流输出的选定主机目录外壳 |
 | Edit 契约 | 行锚定操作 + 整文件 `tag`；不再有 `old_string`/`new_string`（ADR 0087） |
@@ -43,6 +43,7 @@
 | `Edit` | 高 | 通过针对已校验 `tag` 的行锚定操作修改文件（[18](18-line-anchored-edit-contract.md)） |
 | `Bash` | 高 | 执行命令 |
 | `asktool` | 低 | 询问一个或多个用户问题并将提交的答案作为工具输出返回 |
+| `TodoWrite` | 低 | 替换当前 Agent 会话清单；由主机校验并持久化完整有序快照 |
 
 > 名称可以在实现过程中进行微调，但语义保持一致。
 
@@ -50,7 +51,7 @@
 
 按照 pi 的编码代理默认值，第一个 Agent 请求仅激活
 `Read`、`Bash`、`Edit` 和 `Write`； `Glob` 和 `Grep` 按需加载。
-Plan 和 Goal 保留其 read/inspection 核心。`Skill` 有意不作延迟：`/skill-id`
+Plan 和 Goal 保留其 read/inspection 核心。`Skill` 有意不作延迟：`/skill:<skill-id>`
 调用会指示模型调用它，而模式中不存在的工具根本无法被调用，因此只要技能目录非空，
 它就会随第一个请求一起发送（D404、ADR 0230）。运行时还注册功能
 无需预先发送其完整模式：
@@ -148,7 +149,7 @@ schema 中放宽到 100000000，好让毫秒值先通过校验：超过 21,600 �
 - `ask`和`accept-edits`发出普通权限卡；
 - `allow-once` 仅执行当前调用，而 `allow-session` 紧随其后
   现有的每个工具会话授予范围；
-- 拒绝、超时或取消永远不会执行该操作；
+- 拒绝或取消永远不会执行该操作；
 - 相对 `..` 转义和符号链接转义使用与绝对相同的规则
   路径；
 - 成功的外部 `..`/`Read`/`Write` 结果携带 `root: "external"`
@@ -177,7 +178,8 @@ Electron 主要低于 `<data_dir>/scratch/<sessionId>/pasted/` 之前的
 
 - **寻址。** 该模型仅通过绝对路径寻址；路径
   在系统提示中公布。相对刀具路径始终解析
-  反对工作区。 `Bash` 还导出 `PI_SCRATCH_DIR`。
+  反对工作区。 `Bash` 还导出 `PI_SCRATCH_DIR`。POSIX shell（包括 Windows 上的
+  Git Bash）收到提示中展示的正斜杠路径；PowerShell 和 cmd 保留原生路径格式。
 - **遏制。** `resolve_tool_path` 首先尝试工作空间根目录，然后
   暂存根，应用相同的两层防御（词汇 `..`
   规范化+规范化祖先符号链接检查）到每个。符号链接
@@ -308,6 +310,7 @@ type ReviewChange = {
 - 默认 cwd = 原始会话的 `workspaceRoot`
 - 默认需要确认
 - 设置强制 60 秒超时；接受 1 秒至 21,600 秒覆盖（D329）
+- 超时返回 `TOOL_TIMEOUT`，错误消息包含实际 `timeoutMs` 预算，并建议延长预算或拆分命令
 - 分别流式传输 stdout 和 stderr，然后返回有界的最终输出
 - 截断大输出而不混合两个流
 - 没有交互式 TTY (MVP)
@@ -365,6 +368,13 @@ tool/protocol 名称，请求中单独携带固定的 shell ID。
 | 低 | 会话根目录内的 Read/Glob/Grep | 自动允许 |
 | 中等 | 低风险 network/metadata | 政策确认或允许 |
 | 高 | Write/Edit/Bash | 默认确认 |
+
+用户配置的 MCP 服务器提供的工具（`mcp_<serverId>_<tool>`）归类为 `medium`，
+与未声明有效风险的插件工具相同。MCP 服务器自行声明的风险级别不被信任，
+这与用户已接受的插件 manifest 中的风险不同。在 `ask` 和 `accept-edits` 下，
+MCP 工具调用会显示审批卡片，原因为 "MCP server tool requires approval"；
+`allow-session` 授权会在该会话内对该工具名不再提示（授权仅保存在内存中）。
+`auto` 自动允许，Plan/Goal 合约模式的硬拒绝仍然生效（D640，ADR `mcp-tool-approval-risk`）。
 
 ### 决策类型
 
@@ -431,8 +441,8 @@ tool call
  → deny? return tool error result
 ```
 
-权限确认超时：
-- 120秒后，自动拒绝（D005：失败关闭，不永远挂起）
+权限确认：
+- 本地确认会一直保持待处理，直到允许一次、允许会话、拒绝、取消或主机/进程关闭。批准后仍执行工具自身的超时限制。
 
 ## 8. 工具结果对模型的可见性
 

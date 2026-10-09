@@ -10,17 +10,18 @@ surface of PI-Desktop. This document specifies one plugin contribution,
 `contributes.agentExtensions`: TypeScript or JavaScript modules that run
 inside the Agent sidecar, receive an `ExtensionAPI` object, and register
 tools, commands, and event handlers directly on the agent loop. The
-`ExtensionAPI` contract is the one defined by `@earendil-works/pi-coding-agent`,
-which PI-Desktop adopts alongside the `pi-ai` and `pi-agent-core` kernel
-(ADR 0002), so an extension written for the pi CLI is the module a plugin
-contributes. D388 folded the earlier standalone "trusted extensions"
-registry into this contribution; the engine below is unchanged.
+`ExtensionAPI` shape is modeled on `@earendil-works/pi-coding-agent`, which
+PI-Desktop adopts alongside the `pi-ai` and `pi-agent-core` kernel (ADR 0002).
+The Desktop adapter implements an explicit subset, so compatibility with the
+pi CLI is limited to the members listed here. D388 folded the earlier
+standalone "trusted extensions" registry into this contribution; the engine
+below is unchanged.
 
 This contract describes extensions attached to Desktop Agent sessions. The
 Desktop adapter implements the explicit subset in §5–6; new upstream events do
 not become actionable here automatically. Native Pi continuation runs the
-coding-agent SDK's own extension lifecycle and can use its 0.87.1 boundary
-hooks, subject to the separate native-session lease and trust rules in
+coding-agent SDK's own extension lifecycle and native runtime package version,
+subject to the separate native-session lease and trust rules in
 [ADR 0254](../../adr/0254-native-pi-session-continuation.md).
 
 Provider declarations are a separate manifest surface rather than part of this
@@ -143,9 +144,13 @@ reuse it after validation; a stale saved path returns to the recovery prompt.
 If persistence fails, a native warning explains that the choice could not be
 saved but the current import can still use the validated executable.
 
-The selected executable's directory is added only to the install child's `PATH`
-so npm can find `node`; no shell startup probing or global environment mutation
-is permitted. Version checks and installation retain a minimal environment with
+When no npm executable is configured on macOS/Linux, validation and installation
+append existing well-known user binary directories (including Homebrew and
+`~/.local/bin`) after the inherited `PATH`. This lets GUI imports find an existing
+Node.js/npm installation without executing shell startup files. A configured
+executable keeps its selected directory first and does not use these fallbacks.
+Only the install child's environment changes; the application `PATH` is unchanged.
+No shell startup probing or global environment mutation is permitted. Version checks and installation retain a minimal environment with
 no inherited credentials. The registry-only proxy, isolated npm configuration,
 bounded two-step install, disabled git resolution, and disabled lifecycle scripts
 remain unchanged. Configured Windows `.cmd`/`.bat` launchers use the adjacent
@@ -208,30 +213,6 @@ dependency specs, disables git resolution, and isolates npm's config/cache from
 the user's credentials and proxy settings. Importing a package does not promise
 that every third-party extension dependency can execute.
 
-### Installed npm skill candidates (issue #236)
-
-Settings → Skills lists read-only candidates from
-`~/.pi/agent/npm/node_modules`, including scoped packages. Candidates display
-package name, source path, declared skill paths, and a warning when executable
-extensions are included. Discovery grants no permissions and does not execute
-package code. Refresh retries discovery; invalid packages show diagnostics
-without suppressing healthy candidates, including when a scoped directory is
-unreadable. Hoisted npm dependencies do not cap discovery; metadata reads are
-asynchronous and must read a regular file no larger than 256 KiB. Symbolic package
-links are not followed. The existing contribution parser enforces path bounds.
-
-Import and enable asks for native confirmation (Cancel is the default), then
-uses the same importer, dependency policy, registration, and runtime as manual
-import. The renderer sends only a candidate id. Main rediscovers before and
-after confirmation, rejecting stale metadata, changed declarations, arbitrary
-paths and concurrent imports. Registered imported packages are marked Already
-imported, including when disabled; manage them in Plugins. Unregistered leftover
-directories do not block retry. If host registration succeeds but runtime loading
-fails, the error remains visible and the panel refreshes the registered state;
-recovery uses Plugins reload or app restart. No second persisted enablement registry exists.
-No schema or host RPC version changes. General CLI configuration discovery and
-source-update synchronization remain outside scope. See ADR pi-npm-skill-discovery.
-
 ## 4. Loading and runtime
 
 ### 4.1 Where extensions run
@@ -241,11 +222,10 @@ never in Electron main, the renderer, or a plugin host process.
 
 ### 4.2 Loader
 
-- The sidecar pins `@earendil-works/pi-coding-agent` at exactly the version
-  pinned for `pi-ai` and `pi-agent-core`. The three versions must match; CI
-  fails when they drift. Native Pi sessions run its extension loader
-  in process, so the pin is a bundled runtime dependency and not a
-  types-only contract.
+- The sidecar pins `@earendil-works/pi-agent-core`, `pi-ai`, and
+  `pi-coding-agent` together at the same exact release. Native Pi sessions run
+  the coding-agent session manager in process, so these are runtime dependencies,
+  not a types-only contract.
 - The loader mirrors the `pi-coding-agent` discovery rules and uses
   `jiti/static` with `virtualModules`, so the babel transform is bundled
   and no path resolution happens at runtime. The bundling step is verified
@@ -264,6 +244,13 @@ never in Electron main, the renderer, or a plugin host process.
   resolves to a stub module that exports every symbol as an inert
   value so a top-level import never fails. Using a stubbed symbol raises a
   diagnostic at call time.
+- The trusted-extension coding-agent shim exposes only its documented supported
+  helpers. Importing or accessing another root export reports an
+  `unsupported_api` diagnostic; the export remains unavailable, and the loader
+  does not load the full coding-agent runtime as a fallback.
+  `TRUSTED_EXTENSION_KERNEL_VERSION` remains the legacy marker exposed as
+  `VERSION` by this shim. It describes the compatibility subset modeled on the
+  0.87.1 API and deliberately does not mirror the installed 1.0.0 package.
 
 ### 4.3 Runner per session
 
@@ -299,6 +286,11 @@ unsupported ones.
 | Deferred to v2 | `sendMessage`, `appendEntry`, `setLabel`, `sessionManager` read API, `switchSession`, `registerShortcut`, `registerMarkdownTransformer`, `ui.setEditorText`, `ui.getEditorText`, `ui.addAutocompleteProvider`, `registerFlag` value editing |
 | Unsupported | `ui.setWidget`, `ui.setFooter`, `ui.setHeader`, `ui.setTitle`, `ui.custom`, `ui.overlay`, `ui.onTerminalInput`, `ui.setWorkingVisible`, `ui.setWorkingIndicator`, `ui.setHiddenThinkingLabel`, `ui.pasteToEditor`, `ui.editor`, `registerMessageRenderer`, `registerEntryRenderer`, `navigateTree`, `shutdown` |
 
+`getActiveTools` describes the model-facing declarations, not execution grants.
+Plan/Goal can retain denied Write/Edit and configured Task-family declarations;
+the runtime mode gate runs before extension tool-call hooks or handlers. Plugins
+must not infer permission from the presence of a name in this list.
+
 `registerAgent({ id, name?, models, stream? | complete? })` registers a
 session-scoped plugin-owned LLM integration. Each model declares bounded public
 metadata (`id`, display name, API label, modalities, reasoning and limits). The
@@ -333,7 +325,7 @@ are honored where the event type defines a result.
 | `session_info_changed` | Session rename through `setSessionName` | No |
 | `project_trust` | v1 note: not emitted; enablement per project is the trust decision | No |
 | `resources_discover` | v1 note: not emitted; skills and prompt discovery stay in Electron main | n/a |
-| `before_agent_start` | Before the first provider request of a turn | Yes, system prompt replacement only |
+| `before_agent_start` | Before the first provider request of a turn | Yes, returned system prompt replacements chain in handler order |
 | `context` | `prepareNextTurn` | Yes, replacement message list |
 | `before_provider_request`, `before_provider_headers`, `after_provider_response` | Provider call wrapper | Request return value; headers mutate the payload in place |
 | `agent_start`, `agent_end`, `agent_settled` | Agent loop boundaries | No |
@@ -347,6 +339,22 @@ are honored where the event type defines a result.
 | `session_before_fork` | v1 note: not emitted; fork runs in Electron main | n/a |
 | `input` | v1 note: not emitted; Host queue admission is not wired yet | n/a |
 | `user_bash`, `session_before_switch`, `session_before_tree`, `session_tree`, `ui_prompt_start`, `ui_prompt_end` | Not emitted in v1 | n/a |
+
+For `before_agent_start`, each handler receives its own payload copy containing
+the last successfully returned string `systemPrompt`. The desktop supplies
+extensions sorted by extension ID; handlers within an extension run in
+registration order. Returning `event.systemPrompt + suffix` preserves earlier
+additions. Returning a different string, including an empty string, deliberately
+replaces the current prompt. Missing or non-string prompt fields, exceptions,
+timeouts, and unreturned input mutations retain the last accepted prompt.
+Cancelled dispatches return no result; late completions cannot change it.
+
+Each turn starts this chain from its freshly composed base prompt, so additions
+do not accumulate across turns. The same ordered handlers, base, and returned
+strings produce identical prompt bytes; this does not guarantee provider cache
+hits or stabilize content produced by plugins themselves. No append field or
+new plugin API is introduced, and other events retain their existing folding
+rules. See [ADR 0214](../../adr/0214-trusted-extensions.md).
 
 Desktop event capabilities are maintained in
 `packages/agent-runtime/src/extensions/event-capabilities.ts`: result,
@@ -411,7 +419,10 @@ the UI broker's own prompt timeout does not extend that budget.
 4. Every execution writes an audit line with extension id, tool name, and
    duration. Parameters are not logged.
 5. `exec` runs in the sidecar with the session's working directory and the
-   session's proxy and environment settings.
+   session's proxy and environment settings. That directory, also `ctx.cwd`,
+   is the project root; a temporary session uses its own scratch directory
+   (D114), which the runtime creates before extensions load, never the
+   sidecar's process directory.
 
 ## 8. Commands
 
@@ -514,7 +525,13 @@ runtime, main, and renderer tracks in parallel.
 
 ## 13. Versioning policy
 
-- Upgrading any pi package upgrades all three together.
+- Upgrading the sidecar kernel upgrades `pi-agent-core`, `pi-ai`, and
+  `pi-coding-agent` together at one exact version; the dependency gate verifies
+  the direct pins. Desktop's `pi-ai` and `pi-mcp` development dependencies
+  follow that release.
+- The `VERSION` field on the extension compatibility shim uses the shared
+  `TRUSTED_EXTENSION_KERNEL_VERSION` marker, not the package release. Change
+  that marker only with an explicit compatibility review and shim contract test.
 - A fixture set of sample extensions covering each supported member runs as a
   contract test on every upgrade.
 - New `ExtensionAPI` members land in the Unsupported class with a

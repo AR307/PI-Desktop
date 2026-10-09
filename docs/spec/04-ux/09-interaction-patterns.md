@@ -23,6 +23,8 @@
 | `Cmd/Ctrl + ]` | Next destination | Global |
 | `Cmd/Ctrl + .` | Abort active turn | Global (same as abort button) |
 | `Cmd/Ctrl + K` | Open command palette | Global |
+| `Cmd/Ctrl + Shift + V` | Start Live Voice when idle; end an active call | Application focused; Live Voice enabled with a selectable binding |
+| `Escape` | Cancel Live Voice startup; never end a connected call | Application focused; startup pending |
 
 ### 1.2 Conversation context shortcuts
 
@@ -51,6 +53,9 @@
   application menubar; command-only shortcuts are discoverable via command
   palette search (keyword "shortcut" or "keybinding").
 - Shortcuts must not conflict with macOS system shortcuts or common browser shortcuts
+- The main application shell consumes unmodified `Ctrl + R` before Chromium
+  handles its browser reload shortcut; the macOS `Cmd + R` menu accelerator
+  and explicit **Reload** menu action remain unchanged.
 - Never override `Cmd/Ctrl + C`, `Cmd/Ctrl + V`, `Cmd/Ctrl + A`, `Cmd/Ctrl + S`
 - Shortcuts are consistent across macOS (Cmd) and Windows/Linux (Ctrl)
 - A missing shortcut override uses the shared platform default; a valid
@@ -246,9 +251,12 @@ may be retained while exactly one workspace supplies the visible shell context.
   trims and persists a 1–80 Unicode-code-point group name and lists every
   registered folder. The Primary folder stays first and cannot be removed;
   additional folders can be added through the native multi-selection picker or
-  removed individually. Saving updates the host-owned group while preserving
-  the normalized paths, workspace identity, sessions, transcripts, and on-disk
-  folders. A folder with existing chats cannot be removed.
+  removed individually. Saving updates group membership without rewriting path
+  identities, workspace identity, session ownership, transcripts, or on-disk
+  folders. Removing an additional folder with chats detaches it as a standalone
+  project and keeps its chats available there. Future chats use that project's
+  path-scoped context; shared instructions and memory stay with the original
+  group.
 - **Pin** toggles presentation priority. Pinned projects/conversations appear
   before unpinned rows within the selected secondary order. In the sidebar, a
   pinned project replaces its Folder glyph with a filled accent Star so its
@@ -374,6 +382,21 @@ may be retained while exactly one workspace supplies the visible shell context.
   completed send clears only the draft belonging to the session that submitted
   it, even if the user switches sessions while the request is in flight;
   deleted sessions cannot retain drafts.
+- The composer also recalls the accepted submissions of its own conversation,
+  newest-first, with ArrowUp/ArrowDown (D632). ArrowUp starts browsing only when
+  the draft is empty (no text and no references), and while browsing both keys
+  keep walking history even through a multi-line entry; ArrowDown past the
+  newest entry returns to the empty draft. A user edit, a submission, or a
+  session change ends browsing, after which the arrows are native caret movement
+  again. The open autocomplete menu and IME composition keep priority. Another
+  conversation's prompts are never recalled, so a recalled entry always brings
+  its own file and image references back with its text. History survives a
+  restart (renderer-local `localStorage`: 100 entries per conversation, 20
+  conversations, consecutive duplicates collapsed) and records only accepted
+  submissions: a normal or steering prompt, or a dispatched slash, extension, or
+  mode command. The empty home composer has no conversation, so it recalls
+  nothing; its accepted prompt is stored under the session ID returned by the
+  submission flow, even if the user navigates elsewhere before acceptance.
 - Every tool call resolves `workspaceRoot` from the originating durable
   session, not from the currently selected project tab. Background completion
   refreshes the matching row without redirecting the active conversation.
@@ -527,7 +550,7 @@ may be retained while exactly one workspace supplies the visible shell context.
 - On every platform, opening and collapsing the visible panel change only the
   internal flex allocation; native window bounds remain unchanged. The inner
   divider updates the renderer-owned panel target from 244px upward, capped by
-  the live three-column budget, while native window edges resize only the fixed
+  the live three-column budget, while window edges resize only the fixed
   application window (ADR 0151).
 - No tool result creates or activates a work-panel tab. Review opens only from
   an explicit user action — its `+` launcher row, or the retained context the
@@ -574,20 +597,26 @@ may be retained while exactly one workspace supplies the visible shell context.
 - Settings → Info and application-menu checks share one typed update state.
   Manual checks expose up-to-date or error feedback; automatic failures do not
   open a toast or ambient banner.
-- Manual delivery (non-AppImage Linux and Windows ZIP runs, or legacy Windows
-  portable runs with `PORTABLE_EXECUTABLE_FILE`) stops at `available` and
-  offers the fixed GitHub Releases page. In-app delivery (packaged macOS,
-  Windows NSIS, and Linux AppImage) automatically advances through
-  `downloading` to the stable `downloaded` state.
+- Settings → Info adds a persisted Automatic / Manual update preference.
+  Automatic preserves the existing in-app flow where supported; Manual keeps
+  scheduled checks but never starts an automatic download or install-on-quit.
+  Installed Windows NSIS, packaged macOS, and Linux AppImage default to
+  Automatic. Windows ZIP/portable defaults to Manual, with a warning before an
+  explicit Automatic opt-in; packages without an automatic installer remain
+  Manual.
+- Manual mode raises one ambient reminder for each newly available version.
+  The last reminded version is Host-persisted, so repeated checks, dismissal,
+  route remounts, and app restarts do not re-announce that version. Settings →
+  Info continues to show the available version and the Releases action.
 - `downloaded` remains actionable until Restart to update or normal app quit;
   later scheduled/manual checks do not replace it with `checking`.
-- A compact update notice appears in the main pane's top-right safe area only
-  for manual `available`, in-app `downloading`, or `downloaded`. It stays clear
-  of the bottom composer at every supported window size and draft height. The
-  notice uses a stable icon/title/message hierarchy, shows determinate download
-  progress when available, and keeps the relevant action inside the same
-  surface. Dismissal suppresses the current version-and-status stage; a later
-  stage such as `downloaded` appears again.
+- A compact update notice appears in the main pane's top-right safe area for
+  the one-time manual reminder, in-app `downloading`, or `downloaded`. It stays
+  clear of the bottom composer at every supported window size and draft height.
+  The notice uses a stable icon/title/message hierarchy, shows determinate
+  download progress when available, and keeps the relevant action inside the
+  same surface. Dismissal remains local to the current renderer session; the
+  persisted version marker prevents the same manual reminder from returning.
 - When Main attaches localized product notes for the discovered version
   (`UpdateState.releaseNotes`, D164), the notice and Settings → Info Updates
   row show a compact "What's new" list under the status message. Notes come
@@ -624,7 +653,10 @@ may be retained while exactly one workspace supplies the visible shell context.
   approaches the viewport; thinking disclosures always retain Mermaid source.
 - Diagram render failure or the 20,000-character / 500-edge safety limit keeps
   the source visible and copyable instead of failing the assistant turn.
-- Cursor indicator: subtle pulsing accent dot or line at the end of streaming content
+- Cursor indicator: subtle pulsing accent line at the end of streaming inline
+  content. For Markdown lists and quotes, attach it to the terminal paragraph
+  or text leaf; never append it to a nested list container, which creates an
+  extra line box and shifts content while the response streams.
 - Before the first assistant or tool event, the active turn shows one compact
   localized `Working…` status with elapsed time. When the runtime reports a
   quiet interval, that same row names the wait: starting, waiting for the
@@ -853,11 +885,12 @@ may be retained while exactly one workspace supplies the visible shell context.
   groups otherwise start closed. Compact starts the process and groups closed,
   except an untouched active process with any recorded failed/denied tool remains
   open through recovery and closes on completion.
-- In Detailed, leaf auto-open applies only when the literal final item of the last
-  activity group is an eligible tool-call or hosted-search row. Failed/denied
-  items stay closed, and a final thinking item never causes a backward scan.
-  Compact keeps every item payload closed and hides reasoning text/excerpts while
-  retaining its active thinking indicator.
+- No item payload opens itself in either mode: a tool, hosted-search or plan call
+  stays a header row until the user opens it, including the literal final item of
+  the last activity group. Group and whole-process defaults are unchanged, so a
+  final thinking item never causes a backward scan. Compact keeps every item
+  payload closed and hides reasoning text/excerpts while retaining its active
+  thinking indicator.
 - Activating a process, group or item header toggles only that level. Closing a
   parent preserves child state, reopening restores it, and sibling groups remain
   independent. Opening a parent is never an expand-all action.
@@ -892,7 +925,6 @@ may be retained while exactly one workspace supplies the visible shell context.
 Agent calls a permission-gated tool (including Plan/Goal Bash under Ask or Accept edits)
   → PermissionCard inserted inline in transcript
   → Composer disabled (cannot send new prompt)
-  → Countdown starts (120s)
   → User responds: Allow once / Allow session / Deny
   → Card transitions to resolved state
   → Composer re-enabled
@@ -904,8 +936,8 @@ Agent calls a permission-gated tool (including Plan/Goal Bash under Ask or Accep
 - Each session has at most one active permission card because that agent loop
   is paused; multiple sessions may wait independently.
 - Abort cancels only the active session's pending permission.
-- Timeout (120s from original receipt) auto-denies only the matching request;
-  switching sessions never resets the deadline.
+- An unanswered request remains pending; switching sessions does not remove or
+  reset it. Explicit cancellation still clears only the matching request.
 
 ### 5.3 Focus management during permission
 
@@ -989,6 +1021,11 @@ Running turns and pending approvals continue to gate the controls.
 | Manual menu update check failure | Error | 8s | Direct feedback for an explicit command |
 | Context checkpoint completed | Info (Warning before overflow retry) | 4s/8s | Confirms a background context transition without altering transcript rows |
 | Manual context checkpoint failure | Error | 8s | Direct feedback for explicit `/compact`; automatic terminal failures stay inline |
+| Settings or dialog action failure (save, JSON import, endpoint probe) | Error | 8s | Result of an explicit action; the surface keeps the fields to correct and, when it owns one, the retry control |
+| Vendor sign-in failure | Error | 8s | Result of an explicit sign-in; the dialog keeps its status, link, and Cancel |
+| Config-sync or plugin-settings action result | Success / Warning / Error | 4s/8s | Confirmation or failure of an explicit action |
+| Live Voice session or settings failure | Error | 8s | Result of an explicit action; the retry control stays on the surface |
+| Model-list probe result (connected, catalog, refused) | Success / Info / Error | 4s/8s | One answer per settled probe; idle, in flight, and cache-only results are not announced |
 
 ### 6.2 Inline errors (use for)
 
@@ -1001,6 +1038,9 @@ Running turns and pending approvals continue to gate the controls.
 | Provider configuration validation error | Inline in settings form | User needs to see which field is wrong |
 | Application update status/error | Settings → Info Updates row | Preserves the latest Main-owned state without interrupting background checks |
 | Composer validation (no model) | Disabled state + tooltip on send button | Immediate context |
+| Failed model list | One-line empty state in the picker | Says the list is missing and stays beside the Fetch list action; the reason is toasted |
+| Surface whose own content failed to load and that owns a retry control | Inline state label + retry | The label is what explains the retry; only the one-off reason is toasted |
+| Broken plugin row, permission or consequence warning, app-level backend or update banner | Inline | Persistent state until the user changes it |
 
 ### 6.3 Rules
 
@@ -1012,6 +1052,11 @@ Running turns and pending approvals continue to gate the controls.
 - Toasts stack vertically, newest on top, at top-center
 - Error toasts require manual dismiss or timeout at 8s (longer than success)
 - Success toasts auto-dismiss at 4s
+- One-off results of an explicit action (save, import, probe, sign-in, connection
+  test) report through a toast; the surface they came from keeps the fields,
+  state label, and retry control it needs to stay actionable
+- Persistent state — a plugin that stays broken, a permission or consequence
+  warning, an app-level backend or update banner — stays inline
 
 ### 6.4 Icon-only action labels
 
@@ -1025,6 +1070,10 @@ Running turns and pending approvals continue to gate the controls.
 - Decorative icons remain `aria-hidden` and do not need a tooltip.
 - Tooltip text must describe the action, not the icon shape, and must come from
   the active i18n catalog.
+- The conversation-topbar New task and Search tooltips append the effective,
+  platform-formatted binding (user override or default). Explicitly unbound
+  shortcuts are omitted; their accessible names remain the localized action
+  labels.
 - Clicking an action dismisses its tooltip immediately and suppresses it until
   the pointer leaves or focus moves away; keyboard focus still reveals the
   tooltip before activation.
@@ -1282,9 +1331,21 @@ Project drag/drop follows these patterns:
   the work panel follows the folder that answered: a file of the primary folder
   travels as a project-relative path, a file of a sibling folder of the same
   project as an absolute one, exactly as a scratch or attachment file does. A
-  chip whose reference matches nothing opens nothing and reports itself; the OS
-  default application is no longer what this click does, though that action
-  stays reachable from the file view's own context menu.
+  chip whose reference matches nothing opens nothing and reports itself, and so
+  does a right-click on it: the file-reference menu — offered on every
+  reference the transcript renders, a sent `@path` chip, an inline code span, a
+  local link, a local image, a tool row's own file path, a path in a tool
+  result's file or match list, and an image attachment's thumbnail — shows the
+  file in the system file manager through that same completion and that same
+  address, and copies that file's full path or its project-relative path. A file
+  outside the project has no relative path to copy and says so. The OS default
+  application is no longer what this click does, though that action stays
+  reachable from the file view's own context menu.
+- In the host `file:` tab, a conversation MP4 that cannot be previewed because
+  it is binary or exceeds the text preview limit offers **Open with default
+  application**. This applies to named `.mp4` files and extensionless
+  attachment blobs carrying `video/mp4` metadata. A failed OS handoff shows an
+  error; the user can still reveal the contained file in the file manager.
 - The same destination rule governs every other surface of the transcript that
   names a file, because one opener serves them all: clicking the file path in a
   tool row's summary (Read, Write, Edit, fetch) and clicking a path in a tool
@@ -1309,7 +1370,10 @@ Project drag/drop follows these patterns:
 - All autocomplete key handling sits behind the standard guard
   (`isComposing || keyCode === 229`).
 - During active composition the trigger detector neither opens, updates,
-  nor closes the menu; state re-evaluates on `compositionend`.
+  nor closes the menu; state re-evaluates on `compositionend`. An input event
+  that is not part of a composition also ends the composition, so an IME that
+  drops `compositionend` (a Windows Chinese IME deleting its composing text)
+  cannot leave the menu frozen until the composer unmounts (#929).
 - Enter that confirms an IME candidate never sends and never accepts a menu
   item; ↑/↓ during candidate navigation belong to the IME.
 
@@ -1563,7 +1627,8 @@ This does not prevent state changes — it makes them instant.
     finishes the current boundary before releasing its prioritized prompt
 4. Long content (>50 lines for messages, >10 for args, >20 for results) is collapsed by default with expand link
 5. Tool results that were cut short show a truncation marker or chip per D306; a filled Read window of a longer file does not
-6. Permission interrupt inserts inline card, disables composer, shows countdown, and re-enables after resolution
+6. Permission interrupt inserts an inline card, disables the composer, and
+   re-enables it after explicit resolution or cancellation
 7. Toasts used for transient background operations; inline errors used for context-specific failures
 8. Focus returns to composer after session switch, message send, permission resolution, and abort
 9. Background message, tool, completion, and permission events never change

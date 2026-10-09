@@ -107,17 +107,21 @@ still clears on success; failed dispatch preserves the draft.
 ## 8. Composer skill entries
 
 Active built-in, plugin, and user-owned Skills also surface in the composer `/`
-menu. They use the exact Skill id as the slash name, show the Skill's display
-name and description, and form a separate **Skills** group after extension
-commands. This group is always last; a Skill never shadows a command or
-template with the same name.
+menu. Their slash names use the explicit `skill:<id>` prefix while retaining
+the original Skill id for send-time resolution. The menu shows each Skill's
+display name and description in a separate **Skills** group after extension
+commands. This group is always last; a Skill with the same unprefixed name as a
+command or template remains independently addressable.
 
-Selecting a Skill inserts `/<skill-id> `. Sending `/<skill-id>` with optional
-prompt text keeps that typed form as the visible transcript chip and asks the
-model to call the existing `Skill` tool with the validated id before answering.
+Selecting a Skill inserts `/skill:<skill-id> `. After the first token, typing `/`
+offers Skills only; app commands and templates remain first-token actions.
+Multiple Skills may be selected in one message. Sending keeps each validated
+Skill as its own transcript chip, with ordinary prompt text between chips, and
+asks the model to call the existing `Skill` tool for each id before answering.
 Only Skills active for the current project are listed or accepted, so project
 scope and plugin activation remain enforced at send time. If the Skill is no
-longer active, the text follows the normal unknown-slash prompt path.
+longer active, its token remains literal prompt text. Unprefixed names are not
+Skill aliases; existing app commands and prompt templates keep their names.
 
 ## 9. Ideographic comma opens the slash menu (D405)
 

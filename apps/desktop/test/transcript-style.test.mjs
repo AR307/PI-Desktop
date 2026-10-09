@@ -60,10 +60,16 @@ test("tool rows render structured blocks instead of dumping JSON", async () => {
   assert.match(transcriptSource, /if \(variant !== "topology" && open && hasDetails && disclosure\.parentVisible/);
   assert.match(transcriptSource, /const blocks = variant !== "topology" && open && hasDetails \? presentation\.current\?\.blocks : null/);
   assert.match(transcriptSource, /<ToolChips chips=\{chips\} \/>/);
-  assert.match(transcriptSource, /<ToolDetailBlocks blocks=\{blocks\} plain=\{runHead\} \/>/);
+  assert.match(
+    transcriptSource,
+    /<ToolDetailBlocks blocks=\{blocks\} plain=\{runHead\} streaming=\{status === "running"\} \/>/,
+  );
   assert.match(permissionSource, /<ToolDetailBlocks blocks=\{argBlocks\} \/>/);
   // Code bodies share the transcript highlighter rather than a second cache.
-  assert.match(detailsSource, /<HighlightedCode code=\{block\.text\} lang=\{block\.lang\} \/>/);
+  assert.match(
+    detailsSource,
+    /block\.highlight \? <HighlightedCode code=\{page\} lang=\{block\.lang\} \/> : page/,
+  );
   // Diffs reuse the review card rails; hits and paths open in the work panel.
   assert.match(detailsSource, /className="diff-hunk"/);
   assert.match(detailsSource, /openTarget\(\{ kind: "file", path: rel \}\)/);
@@ -295,6 +301,20 @@ test("wrapped user links keep plaintext alignment", () => {
   assert.ok(userLinkStyles);
   assert.match(userLinkStyles, /text-align:\s*start;/);
   assert.match(userLinkStyles, /overflow-wrap:\s*anywhere;/);
+});
+
+test("user-message links stay selectable inside the inert button baseline", () => {
+  // base.css makes every <button> unselectable, and a class selector outranks
+  // that type rule. Without this opt-in a drag across the message skips the
+  // URL and copying drops it.
+  assert.match(
+    stylesSource,
+    /button,\s*\[role="button"\],[\s\S]*?\{\s*-webkit-user-select:\s*none;\s*user-select:\s*none;/,
+  );
+  const userLinkStyles = stylesSource.match(/\.chat-text-link \{([^}]*)\}/)?.[1];
+  assert.ok(userLinkStyles);
+  assert.match(userLinkStyles, /-webkit-user-select:\s*text;/);
+  assert.match(userLinkStyles, /(?<!-webkit-)user-select:\s*text;/);
 });
 
 test("user-message file chips reuse the composer chip node", () => {

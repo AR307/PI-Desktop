@@ -15,18 +15,20 @@
 | 主机后端 | **Rust** | 稳定的 Rust 工具链 | tools/plugins/permissions/persistence 适配器 |
 | Rust 异步 | 东京 | 稳定 | 主机服务 |
 | 主机 RPC | stdio JSON-RPC (NDJSON) | 冷冻（D001） | Electron 主 ↔ Rust 主机 |
-| Agent 引擎 | `@earendil-works/pi-agent-core` | 0.87.1 | 代理循环 |
-| 模型 API | `@earendil-works/pi-ai` | 0.87.1 | 提供商 |
-| 模型目录 | `https://models.dev/api.json` | 随发版内置的快照 + 进程内刷新 | 唯一的提供商/模型元数据来源 |
+| Agent 引擎 | `@earendil-works/pi-agent-core` | 1.0.1 | Agent 循环及稳定的 agent/event/tool 类型 |
+| 模型 API | `@earendil-works/pi-ai` | 1.0.1 | 提供商 |
+| Model catalog | pi-ai Providers/Models | pinned 1.0.1 + explicit provider refresh | account-scoped metadata and typed operations |
 
-> 当前引脚为 **0.87.1**。ChatGPT / Copilot OAuth 目录包含
-> `gpt-6-sol`、`gpt-6-luna`、`grok-4.7` 及已有的 `gpt-6-astra`；Claude
-> Opus 5.5 目录元数据也已可用。0.87.1 的 pi-ai 目录还注册了
-> Meta/Muse 订阅 OAuth；桌面端动态枚举这些条目，不维护独立的供应商列表。
->（`claude-opus-5`，1M 上下文，适应性思维）。
+> pi-ai 提供已发布的模型元数据、原生思考能力、传输和认证。
+> Host 持有 Desktop 账户行、凭据和显式绑定覆盖。
+> Agent Runtime 自行维护桌面上下文投影和检查点压缩。过渡期内，
+> pi-coding-agent 仅用于原生 Pi 会话续接和可信扩展兼容 shim；它不负责
+> Desktop Agent 循环、压缩或持久会话存储。详见
+> [pi 运行时依赖边界](06-pi-runtime-dependency-boundary.md)。
+
 | Node 运行时 | Node.js | `>= 22.19` | 圆周率要求 |
 | 数据库 | SQLite | Rust host-core 通过 `rusqlite` | sessions/settings |
-| 包装 | 电子制造商 | 稳定 | macOS arm64、Intel x64、Windows x64 和 Linux x64 释放通道 |
+| 包装 | 电子制造商 | 稳定 | macOS arm64、Intel x64、Windows x64 和 Linux x64 及 arm64 释放通道 |
 | 包管理器 | PNPM | 11.18.x | JS 单一仓库 |
 | Lint/test | 样式令牌检查器（`scripts/check-style-tokens.mjs`）+ vitest + 货物测试；一般 JS linter 仍然打开（biome vs oxlint） | 稳定 | 双堆栈质量 |
 | 架构 (TS) | 打字机 | 冷冻（D011） | 共享合约 |

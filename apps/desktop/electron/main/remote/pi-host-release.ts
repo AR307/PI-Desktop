@@ -22,12 +22,12 @@ export type PiHostTarget = {
 };
 
 /**
- * Release-matrix parity. `release.yml`'s `pi-host-bundle` job publishes Linux
- * x64 only today; the desktop matrix ships no other Linux platform. A target
+ * Release-matrix parity. `release.yml`'s `pi-host-bundle` job publishes the
+ * Linux architectures the desktop build matrix ships (x64 and arm64). A target
  * outside this list is refused with a typed failure instead of a 404 halfway
  * through a download.
  */
-const PUBLISHED_TARGETS: readonly string[] = ["linux-x64"];
+const PUBLISHED_TARGETS: readonly string[] = ["linux-x64", "linux-arm64"];
 
 export function targetKey(target: PiHostTarget): string {
   return `${target.platform}-${target.arch}`;
@@ -113,9 +113,8 @@ export function parseChecksumFile(text: string, artifactName: string): string | 
   for (const line of text.split("\n")) {
     const trimmed = line.trim();
     if (!trimmed) continue;
-    const [digest, ...rest] = trimmed.split(/\s+/);
-    if (!digest) continue;
-    const normalized = normalizeChecksum(digest);
+    const [rawChecksum, ...rest] = trimmed.split(/\s+/);
+    const normalized = normalizeChecksum(rawChecksum ?? "");
     if (!normalized) continue;
     // `sha256sum` writes the bare name; some tools prefix `*` or a path.
     const named = rest.join(" ").replace(/^\*/, "").split("/").pop() ?? "";

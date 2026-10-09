@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { MAX_SMOOTH_TEXT_CODE_UNITS } from "../lib/render-content-limits";
 
 /**
  * Progressively reveals `source` text at an adaptive rate.
@@ -15,36 +16,50 @@ export function useSmoothText(
   streaming: boolean,
   enabled: boolean,
 ): string {
+  const shouldSmooth =
+    enabled &&
+    streaming &&
+    source.length <= MAX_SMOOTH_TEXT_CODE_UNITS;
   const [revealed, setRevealed] = useState(source.length);
   const revealedRef = useRef(source.length);
   const rafRef = useRef<number | null>(null);
   const lastFrameRef = useRef(0);
+  const fractionalAdvanceRef = useRef(0);
 
   // When not enabled or not streaming, always show full text
   useEffect(() => {
-    if (!enabled || !streaming) {
+    if (!shouldSmooth) {
       revealedRef.current = source.length;
+      lastFrameRef.current = 0;
+      fractionalAdvanceRef.current = 0;
       setRevealed(source.length);
       if (rafRef.current !== null) {
         cancelAnimationFrame(rafRef.current);
         rafRef.current = null;
       }
     }
-  }, [enabled, streaming, source.length]);
+  }, [shouldSmooth, source.length]);
 
   // Core release loop
   useEffect(() => {
-    if (!enabled || !streaming) return;
+    if (!shouldSmooth) return;
 
     const tick = (now: number) => {
       const backlog = source.length - revealedRef.current;
       if (backlog <= 0) {
-        // Nothing to release; wait for more content
-        rafRef.current = requestAnimationFrame(tick);
+        // The source dependency restarts this effect when more text arrives.
+        rafRef.current = null;
+        lastFrameRef.current = 0;
+        fractionalAdvanceRef.current = 0;
         return;
       }
 
       const elapsed = now - lastFrameRef.current;
+      // Keep React and Markdown commits at or below 60 Hz on high-refresh screens.
+      if (elapsed < 1000 / 60) {
+        rafRef.current = requestAnimationFrame(tick);
+        return;
+      }
       lastFrameRef.current = now;
 
       // Base speed: ~60 chars/sec. Adapt: if backlog > ~30 chars (~500ms),
@@ -57,7 +72,14 @@ export function useSmoothText(
           : baseCharsPerSec;
 
       const dt = Math.min(elapsed, 100) / 1000; // cap dt to avoid big jumps
-      const advance = Math.max(1, Math.round(speed * dt));
+      // Carry fractional characters so skipped frames do not slow the reveal.
+      const exactAdvance = fractionalAdvanceRef.current + speed * dt;
+      const advance = Math.floor(exactAdvance);
+      fractionalAdvanceRef.current = exactAdvance - advance;
+      if (advance === 0) {
+        rafRef.current = requestAnimationFrame(tick);
+        return;
+      }
       const next = Math.min(revealedRef.current + advance, source.length);
 
       revealedRef.current = next;
@@ -66,7 +88,9 @@ export function useSmoothText(
       rafRef.current = requestAnimationFrame(tick);
     };
 
-    lastFrameRef.current = performance.now();
+    if (lastFrameRef.current === 0) {
+      lastFrameRef.current = performance.now();
+    }
     rafRef.current = requestAnimationFrame(tick);
 
     return () => {
@@ -75,7 +99,7 @@ export function useSmoothText(
         rafRef.current = null;
       }
     };
-  }, [enabled, streaming, source]);
+  }, [shouldSmooth, source]);
 
   // Flush on unmount
   useEffect(() => {
@@ -87,7 +111,7 @@ export function useSmoothText(
     };
   }, []);
 
-  if (!enabled || !streaming) return source;
+  if (!shouldSmooth) return source;
   // Avoid slicing in the middle of a UTF-16 surrogate pair.
   let end = revealed;
   if (end < source.length && end > 0) {

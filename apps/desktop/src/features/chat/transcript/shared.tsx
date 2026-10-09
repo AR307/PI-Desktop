@@ -15,10 +15,11 @@ import type {
 import {
   formatCompactTokenCount,
   isCertificateVerificationError,
-  THINKING_LEVELS,
-  type ThinkingLevel,
 } from "@pi-desktop/shared";
 import { useOpenChatFileRef, useOpenPreviewTarget } from "../../../hooks/use-preview-target";
+import { useChatFileMenu } from "../../../hooks/use-chat-file-menu";
+import { ContextMenu } from "../../../components/ContextMenu";
+import { ImageHoverCard, type ImageHoverAnchor } from "../../../components/ImageHoverCard";
 import { useDisclosureAnchorNotifier } from "../../../lib/disclosure-anchor-context";
 import { isThinkingActive, resolveThinkingDisplayMode } from "../../../lib/turn-process";
 import { TranscriptSearchContext } from "../../../lib/transcript-search-context";
@@ -29,7 +30,7 @@ import { useReferencedImageDataUrl } from "../../../lib/use-referenced-image-dat
 import { useVerifiedChatText } from "../../../hooks/use-verified-chat-text";
 import { isHtmlFilePath } from "../../../lib/chat-links";
 import type { SourcePositionProps } from "../../../lib/markdown-source";
-import { getToolAction, type ToolAction } from "../../../lib/tool-display";
+import type { ToolAction } from "../../../lib/tool-display";
 import { calculateTokenRate } from "../../../lib/context-usage";
 import { useAppStore } from "../../../stores/app-store";
 import { Markdown, useCopy } from "../../../components/Markdown";
@@ -38,8 +39,8 @@ import {
   IconAudio,
   IconBot,
   IconBranch,
+  IconChat,
   IconCheck,
-  IconChevronDown,
   IconChevronRight,
   IconCircleAlert,
   IconCode,
@@ -48,6 +49,7 @@ import {
   IconFolder,
   IconGlobe,
   IconImage,
+  IconListChecks,
   IconPencil,
   IconSearch,
   IconSheet,
@@ -321,7 +323,6 @@ export function AssistantErrorMessage({ message }: { message: UiMessage }) {
     </section>
   );
 }
-
 export const TOOL_ACTION_KEYS: Record<ToolAction, string> = {
   read: "chat.toolRead",
   list: "chat.toolListed",
@@ -332,6 +333,7 @@ export const TOOL_ACTION_KEYS: Record<ToolAction, string> = {
   fetch: "chat.toolFetched",
   fork: "chat.toolUsed",
   delegate: "chat.toolDelegated",
+  todo: "chat.todo.updated",
   use: "chat.toolUsed",
 };
 
@@ -362,6 +364,7 @@ export const TOOL_RUNNING_KEYS: Record<ToolAction, string> = {
   fetch: "chat.toolFetching",
   fork: "chat.toolUsing",
   delegate: "chat.toolDelegating",
+  todo: "chat.todo.updating",
   use: "chat.toolUsing",
 };
 
@@ -377,6 +380,8 @@ export function ToolActionIcon({ action }: { action: ToolAction }) {
     case "write":
     case "edit":
       return <IconPencil {...props} />;
+    case "todo":
+      return <IconListChecks {...props} />;
     case "run":
       return <IconTerminal {...props} />;
     case "fetch":
@@ -417,74 +422,171 @@ export function FileRefChip({
   name,
   path,
   kind,
+  mimeType,
   onOpen,
+  line,
+  column,
   ...position
 }: {
   name: string;
   path: string;
   kind?: "image" | "file";
-  onOpen: (path: string) => void;
+  mimeType?: string;
+  onOpen: (
+    path: string,
+    baseDir?: string,
+    mimeType?: string,
+    position?: { line?: number; column?: number },
+  ) => void;
+  line?: number;
+  column?: number;
 } & SourcePositionProps) {
   const { t } = useTranslation();
   const Icon = fileChipIcon(name, kind);
+  const { fileMenu, openFileMenu, closeFileMenu } = useChatFileMenu();
   const html = isHtmlFilePath(path) || isHtmlFilePath(name);
   return (
-    <button
-      type="button"
-      className="composer-chip chat-file-chip"
-      {...position}
-      title={`${html ? t("chat.previewUrl") : t("chat.openFile")} — ${path}`}
-      aria-label={`${name} — ${path}`}
-      onClick={() => onOpen(path)}
-    >
-      <span className="composer-chip-icon" aria-hidden>
-        <Icon size={13} />
-      </span>
-      <span className="composer-chip-name">{name}</span>
-    </button>
+    <>
+      <button
+        type="button"
+        className="composer-chip chat-file-chip"
+        {...position}
+        title={`${html ? t("chat.previewUrl") : t("chat.openFile")} — ${path}`}
+        aria-label={`${name} — ${path}`}
+        onClick={() => onOpen(path, undefined, mimeType, { line, column })}
+        onContextMenu={(event) => openFileMenu(event, { path })}
+      >
+        <span className="composer-chip-icon" aria-hidden>
+          <Icon size={13} />
+        </span>
+        <span className="composer-chip-name">{name}</span>
+      </button>
+      <ContextMenu state={fileMenu} onClose={closeFileMenu} />
+    </>
   );
 }
 
 /**
- * User-message image attachment as a thumbnail. The host resolves the ref
- * into a bounded data URL; an unresolvable load falls back to the file chip.
- * Clicking opens the files viewer on the same contained ref.
+ * A referenced conversation as a chip. The draft carried a
+ * `pi-desktop://session/<id>` link; main attached a bounded excerpt for the
+ * model, and this chip is how the reader sees and reopens it.
+ */
+function SessionChip({ sessionId, fallbackName, ...position }: {
+  sessionId: string;
+  fallbackName: string;
+} & SourcePositionProps) {
+  const { t } = useTranslation();
+  const selectSession = useAppStore((state) => state.selectSession);
+  // The chip names a conversation, not the name that conversation carried when
+  // the link was pasted: a rename — manual, or the first-turn summary — follows
+  // through to every message that references it. The recorded name is what the
+  // model block quotes, and it stays the fallback for a conversation this
+  // viewer no longer lists.
+  const liveTitle = useAppStore(
+    (state) => state.sessions.find((session) => session.id === sessionId)?.title,
+  );
+  const name = (liveTitle ?? "").trim() || fallbackName;
+  const label = `${t("chat.sessionReference")} · ${name}`;
+  const open = () => void selectSession(sessionId).catch(() => undefined);
+  // This chip carries a conversation title, so it can be wider than whatever
+  // space a line has left. Chromium never fragments a `<button>` across lines:
+  // as one it is pushed whole onto the next line and the rest of the line it
+  // left stays blank. The button role and its keyboard behaviour therefore sit
+  // on a span, which the message stylesheet lays out as an inline run that
+  // breaks with the text.
+  return (
+    <span
+      role="button"
+      tabIndex={0}
+      className="composer-chip chat-file-chip"
+      {...position}
+      data-action="open-session-reference"
+      data-session-id={sessionId}
+      title={t("chat.sessionReferenceOpen", { title: name })}
+      aria-label={label}
+      onClick={open}
+      onKeyDown={(event) => {
+        if (event.key !== "Enter" && event.key !== " ") return;
+        event.preventDefault();
+        open();
+      }}
+    >
+      <span className="composer-chip-icon" aria-hidden>
+        <IconChat size={13} />
+      </span>
+      <span className="composer-chip-name">{label}</span>
+    </span>
+  );
+}
+
+/** A bare `pi-desktop://session/<id>` link in prose, rendered as that chip. */
+export function SessionLinkChip({ sessionId, ...position }: { sessionId: string } & SourcePositionProps) {
+  return (
+    <SessionChip sessionId={sessionId} fallbackName={sessionId.slice(0, 8)} {...position} />
+  );
+}
+
+/**
+ * User-message image attachment as the same compact chip as any other file
+ * reference. The host resolves the ref into a bounded data URL that the hover
+ * (or focus) card shows; an unresolved load simply keeps the chip. Clicking
+ * opens the files viewer on the same contained ref.
  */
 export function MessageAttachmentImage({
   attachment,
   onOpenFile,
+  inline = false,
 }: {
   attachment: MessageAttachment;
-  onOpenFile: (path: string) => void;
+  onOpenFile: (path: string, baseDir?: string, mimeType?: string) => void;
+  /** Inline placement inside the message prose; only the trailing list has a list parent. */
+  inline?: boolean;
 }) {
   const dataUrl = useReferencedImageDataUrl(attachment.ref, attachment.mimeType);
-  if (!dataUrl) {
-    return (
-      <FileRefChip
-        name={attachment.name}
-        path={attachment.ref}
-        kind="image"
-        onOpen={onOpenFile}
-      />
-    );
-  }
+  const [anchor, setAnchor] = useState<ImageHoverAnchor | null>(null);
+  const chipRef = useRef<HTMLSpanElement>(null);
+  const reveal = () => {
+    const element = chipRef.current;
+    if (!element) return;
+    const rect = element.getBoundingClientRect();
+    setAnchor({ left: rect.left, top: rect.top, bottom: rect.bottom, width: rect.width });
+  };
+  const dismiss = () => setAnchor(null);
   return (
-    <button
-      type="button"
-      className="message-attachment-image"
-      role="listitem"
-      title={`${attachment.name} — ${attachment.ref}`}
-      onClick={() =>
-        useAppStore.getState().openFileInWorkPanel(attachment.ref, attachment.mimeType)
-      }
-    >
-      <img src={dataUrl} alt={attachment.name} />
-    </button>
+    <>
+      <span
+        ref={chipRef}
+        className="message-attachment-image-chip"
+        role={inline ? undefined : "listitem"}
+        onPointerEnter={reveal}
+        onPointerLeave={dismiss}
+        onFocus={reveal}
+        onBlur={dismiss}
+      >
+        <FileRefChip
+          name={attachment.name}
+          path={attachment.ref}
+          kind="image"
+          mimeType={attachment.mimeType}
+          onOpen={onOpenFile}
+        />
+      </span>
+      <ImageHoverCard src={dataUrl} anchor={anchor} onDismiss={dismiss} />
+    </>
   );
 }
 
 /** Plain user text: @paths become composer-like chips; URLs stay text links. */
-export function LinkifiedText({ text, attachments }: { text: string; attachments?: readonly MessageAttachment[] }) {
+export function LinkifiedText({
+  text,
+  attachments,
+  sourceOffset = 0,
+}: {
+  text: string;
+  attachments?: readonly MessageAttachment[];
+  /** Where this run starts in the message content, so offsets stay absolute. */
+  sourceOffset?: number;
+}) {
   const { t } = useTranslation();
   const openTarget = useOpenPreviewTarget();
   const openFileRef = useOpenChatFileRef();
@@ -493,9 +595,9 @@ export function LinkifiedText({ text, attachments }: { text: string; attachments
   return (
     <>
       {segments.map((segment, index) => {
-        const start = offset;
+        const start = sourceOffset + offset;
         offset += segment.text.length;
-        const position = { "data-source-start": start, "data-source-end": offset };
+        const position = { "data-source-start": start, "data-source-end": sourceOffset + offset };
         return segment.kind === "text" ? (
           <span key={index} {...position}>{segment.text}</span>
         ) : segment.target.kind === "file" ? (
@@ -503,9 +605,13 @@ export function LinkifiedText({ text, attachments }: { text: string; attachments
             key={index}
             name={segment.label}
             path={segment.target.path}
+            line={segment.target.line}
+            column={segment.target.column}
             onOpen={openFileRef}
             {...position}
           />
+        ) : segment.target.kind === "session" ? (
+          <SessionLinkChip key={index} sessionId={segment.target.sessionId} {...position} />
         ) : (
           <TooltipButton
             key={index}

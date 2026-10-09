@@ -17,6 +17,7 @@
  */
 
 import { randomUUID } from "node:crypto";
+import { createInstallationIdentity } from "./installation-identity.ts";
 
 import { InMemoryModelsStore } from "@earendil-works/pi-ai";
 import type {
@@ -31,12 +32,19 @@ import type {
   MutableModels,
   Provider,
 } from "@earendil-works/pi-ai";
+import type {
+  PluginProviderOAuthCredential,
+  PluginProviderOAuthEvent,
+  PluginProviderOAuthPrompt,
+  PluginProviderOAuthRequest,
+} from "@pi-desktop/plugin-sdk";
 import { registerBunOAuthFlows } from "@earendil-works/pi-ai/bun-oauth";
 import { builtinModels } from "@earendil-works/pi-ai/providers/all";
 import {
   capabilitiesFromModelConfig,
   genericModelConfig,
   installProviderHeadersFetch,
+  modelConfigWithBinding,
   runWithProviderHeaders,
   type ModelConfig,
   type VendorModelBinding,
@@ -44,11 +52,12 @@ import {
 import {
   isConversationModelId,
   parseVendorModelIds,
-  pinnedSiblingId,
   readVendorModelList,
+  VendorModelListError,
   vendorModelListRequest,
   wireForLiveModel,
 } from "./vendor-live-models.ts";
+import type { ThinkingLevel } from "@pi-desktop/shared";
 import {
   OAUTH_AUTH_KIND,
   type OAuthLoginEvent,
@@ -57,7 +66,6 @@ import {
   type OAuthStartResult,
   type OAuthVendor,
   type ModelBinding,
-  type ThinkingLevel,
 } from "@pi-desktop/shared";
 
 export { OAUTH_AUTH_KIND };
@@ -94,36 +102,33 @@ export function apiStyleForWireApi(api: string): string {
   return API_STYLE_BY_WIRE_API[api] ?? "chat_completions";
 }
 
+function wireApiForStyle(style: string): Api {
+  return Object.entries(API_STYLE_BY_WIRE_API).find(([, value]) => value === style)?.[0] ?? "openai-completions";
+}
+
+/** Interpret an explicitly supplied wire map without borrowing another model's record. */
+function withMappedThinkingLevels(config: ModelConfig): ModelConfig {
+  if (!config.thinkingLevelMap) return config;
+  const supportedThinkingLevels = Object.entries(config.thinkingLevelMap).flatMap(([level, value]) =>
+    typeof value === "string" ? [level as ThinkingLevel] : [],
+  );
+  return {
+    ...config,
+    reasoning: supportedThinkingLevels.some((level) => level !== "off"),
+    supportedThinkingLevels,
+  };
+}
+
 export function protocolForApiStyle(apiStyle: string): string {
   return PROTOCOL_BY_API_STYLE[apiStyle] ?? "openai_compatible";
 }
 
 const LIVE_MODELS_TTL_MS = 30_000;
 const LIVE_MODELS_NEGATIVE_TTL_MS = 15_000;
-const THINKING_LEVEL_ORDER = [
-  "off",
-  "minimal",
-  "low",
-  "medium",
-  "high",
-  "xhigh",
-  "max",
-] as const satisfies readonly ThinkingLevel[];
 
 /** xAI and the other account lists also publish generators. Those are not conversation models. */
 export function isXaiConversationModel(modelId: string): boolean {
   return isConversationModelId(modelId);
-}
-
-function thinkingLevelsFromPiModel(model: Model<Api>): ThinkingLevel[] {
-  const map = model.thinkingLevelMap as Partial<Record<string, string | null>> | undefined;
-  if (!map) return model.reasoning ? ["low", "medium", "high"] : ["off"];
-  const levels = THINKING_LEVEL_ORDER.filter((level) => typeof map[level] === "string");
-  return levels.length > 0
-    ? [...levels]
-    : model.reasoning
-      ? ["low", "medium", "high"]
-      : ["off"];
 }
 
 export type HostCall = <T = unknown>(
@@ -134,13 +139,39 @@ export type HostCall = <T = unknown>(
 /** The slice of a provider row this module reads; the rest stays in index.ts. */
 export type OAuthProviderRow = {
   id: string;
+  name?: string;
   vendorKey?: string;
+  ownerPluginId?: string;
   authKind?: string;
   hasOauth?: boolean;
   oauthAccountLabel?: string;
   headers?: Record<string, string>;
   baseUrl?: string;
+  apiStyle?: string;
+  models?: ModelBinding[];
+  enabled?: boolean;
   defaultModelId?: string;
+};
+
+export type PluginOAuthProvider = {
+  pluginId: string;
+  runtimeId: string;
+  contributionId: string;
+  providerId: string;
+  name: string;
+  loginLabel?: string;
+  isSubscription: boolean;
+};
+
+export type PluginOAuthBridge = {
+  listOAuthProviders: () => PluginOAuthProvider[];
+  invokeProviderOAuth: (
+    pluginId: string,
+    contributionId: string,
+    request: PluginProviderOAuthRequest,
+    signal?: AbortSignal,
+    expectedRuntimeId?: string,
+  ) => Promise<unknown>;
 };
 
 /** A model ID offered by a signed-in account and its required wire identity. */
@@ -157,15 +188,23 @@ export type VendorOAuthDeps = {
   emit: (event: OAuthLoginEvent) => void;
   /** Open the vendor's consent page; rejects when no browser could be launched. */
   openExternal: (url: string) => Promise<void>;
+  /** Loaded plugin OAuth providers and their isolated callback hooks. */
+  getPluginOAuthBridge?: () => PluginOAuthBridge | undefined;
   log?: (
     level: "info" | "warn" | "error",
     message: string,
     data?: Record<string, unknown>,
   ) => void;
+  /** Stable local installation identity, owned by Host secrets. */
+  getInstallationId?: () => Promise<string>;
+  /** Share account-owned Models with the catalog without duplicating credentials. */
+  onAccountModels?: (providerId: string, models: MutableModels) => void;
+  onAccountRemoved?: (providerId: string) => void;
   /** Test seam: build the pi-ai collection without touching the real flows. */
   createModels?: (credentials: CredentialStore) => MutableModels;
   /** Model configuration is supplied by the main-process models.dev catalog. */
   modelConfigFor?: (input: {
+    providerId: string;
     vendorKey: string;
     option: OAuthModelOption;
   }) => Promise<ModelConfig | undefined>;
@@ -193,6 +232,7 @@ type AccountModels = {
   providerId: string;
   vendorId: string;
   models: MutableModels;
+  pinnedProvider?: Provider;
 };
 
 type LoginSession = {
@@ -207,6 +247,20 @@ type LoginSession = {
   /** Serializes renderer events so `authUrl` cannot overtake an earlier notice. */
   tail: Promise<void>;
   /** Settles once the attempt has torn down; set as soon as it is running. */
+  finished?: Promise<void>;
+};
+
+type PluginLoginSession = {
+  loginId: string;
+  vendorId: string;
+  providerId: string;
+  pluginId: string;
+  contributionId: string;
+  runtimeId: string;
+  prompts: Map<string, PendingPrompt>;
+  controller: AbortController;
+  tail: Promise<void>;
+  cancelled: boolean;
   finished?: Promise<void>;
 };
 
@@ -230,9 +284,100 @@ function promptRequest(
   };
 }
 
+function clippedText(value: unknown, maxLength: number): string {
+  return typeof value === "string" ? value.trim().slice(0, maxLength) : "";
+}
+
+function isHttpUrl(value: unknown): value is string {
+  if (typeof value !== "string" || value.length > 4_096) return false;
+  try {
+    const url = new URL(value);
+    return (url.protocol === "https:" || url.protocol === "http:") && !url.username && !url.password;
+  } catch {
+    return false;
+  }
+}
+
+function normalizePluginCredential(raw: unknown): PluginProviderOAuthCredential {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
+    throw new Error("plugin OAuth credential must be an object");
+  }
+  const value = raw as Record<string, unknown>;
+  const accessToken = value.accessToken;
+  if (
+    typeof accessToken !== "string" ||
+    !accessToken.trim() ||
+    Buffer.byteLength(accessToken, "utf8") > 16 * 1024
+  ) {
+    throw new Error("plugin OAuth credential has an invalid accessToken");
+  }
+  const result: PluginProviderOAuthCredential = { accessToken };
+  if (value.refreshToken !== undefined) {
+    if (typeof value.refreshToken !== "string" || Buffer.byteLength(value.refreshToken, "utf8") > 16 * 1024) {
+      throw new Error("plugin OAuth credential has an invalid refreshToken");
+    }
+    result.refreshToken = value.refreshToken;
+  }
+  if (value.expiresAt !== undefined) {
+    if (
+      typeof value.expiresAt !== "number" ||
+      !Number.isSafeInteger(value.expiresAt) ||
+      value.expiresAt <= 0
+    ) {
+      throw new Error("plugin OAuth credential has an invalid expiresAt");
+    }
+    result.expiresAt = value.expiresAt;
+  }
+  if (value.accountLabel !== undefined) {
+    if (typeof value.accountLabel !== "string" || value.accountLabel.length > 256) {
+      throw new Error("plugin OAuth credential has an invalid accountLabel");
+    }
+    result.accountLabel = value.accountLabel.trim();
+  }
+  if (value.headers !== undefined) {
+    if (!value.headers || typeof value.headers !== "object" || Array.isArray(value.headers)) {
+      throw new Error("plugin OAuth credential headers must be an object");
+    }
+    const entries = Object.entries(value.headers as Record<string, unknown>);
+    if (entries.length > 32) throw new Error("plugin OAuth credential has too many headers");
+    const headers: Record<string, string> = {};
+    const seenHeaderNames = new Set<string>();
+    const blocked = new Set([
+      "authorization",
+      "proxy-authorization",
+      "host",
+      "cookie",
+      "set-cookie",
+      "content-length",
+      "transfer-encoding",
+      "connection",
+      "proxy-connection",
+    ]);
+    for (const [name, headerValue] of entries) {
+      const normalizedName = name.toLowerCase();
+      if (
+        !/^[A-Za-z0-9-]{1,128}$/.test(name) ||
+        blocked.has(normalizedName) ||
+        seenHeaderNames.has(normalizedName) ||
+        typeof headerValue !== "string" ||
+        Buffer.byteLength(headerValue, "utf8") > 4_096 ||
+        /[\r\n\0]/.test(headerValue)
+      ) {
+        throw new Error("plugin OAuth credential has an invalid header");
+      }
+      seenHeaderNames.add(normalizedName);
+      headers[name] = headerValue;
+    }
+    result.headers = headers;
+  }
+  return result;
+}
+
 export class VendorOAuth {
   private readonly deps: VendorOAuthDeps;
   private readonly logins = new Map<string, LoginSession>();
+  private readonly pluginLogins = new Map<string, PluginLoginSession>();
+  private readonly pluginRefreshControllers = new Map<string, AbortController>();
   /** One pi-ai collection and credential store per local OAuth account row. */
   private readonly accountModels = new Map<string, AccountModels>();
   /** Successful and failed account model lists, so launch does not refetch per model. */
@@ -242,9 +387,11 @@ export class VendorOAuth {
   private readonly chains = new Map<string, Promise<unknown>>();
   private catalogPromise?: Promise<MutableModels>;
   private oauthFlowsRegistered = false;
+  private readonly getInstallationId: () => Promise<string>;
 
   constructor(deps: VendorOAuthDeps) {
     this.deps = deps;
+    this.getInstallationId = deps.getInstallationId ?? createInstallationIdentity(deps.call);
     installProviderHeadersFetch();
   }
 
@@ -252,7 +399,7 @@ export class VendorOAuth {
   async listVendors(): Promise<OAuthVendor[]> {
     const models = await this.ensureCatalogModels();
     const rows = await this.rows();
-    return models
+    const vendors = models
       .getProviders()
       .filter((provider) => provider.auth.oauth)
       .map((provider) => {
@@ -261,6 +408,7 @@ export class VendorOAuth {
           .filter(
             (candidate) =>
               candidate.authKind === OAUTH_AUTH_KIND &&
+              !candidate.ownerPluginId &&
               candidate.vendorKey === provider.id,
           )
           .map((row) => ({
@@ -276,6 +424,30 @@ export class VendorOAuth {
           accounts,
         };
       });
+    const pluginBridge = this.deps.getPluginOAuthBridge?.();
+    if (!pluginBridge) return vendors;
+    for (const provider of pluginBridge.listOAuthProviders()) {
+      const row = rows.find(
+        (candidate) =>
+          candidate.id === provider.providerId &&
+          candidate.ownerPluginId === provider.pluginId &&
+          candidate.authKind === OAUTH_AUTH_KIND,
+      );
+      if (!row) continue;
+      const credential = row.hasOauth ? await this.readPluginCredential(row.id) : undefined;
+      vendors.push({
+        vendorId: row.id,
+        name: provider.name,
+        loginLabel: provider.loginLabel,
+        isSubscription: provider.isSubscription,
+        accounts: [{
+          providerId: row.id,
+          accountLabel: credential?.accountLabel || undefined,
+          connected: row.hasOauth === true,
+        }],
+      });
+    }
+    return vendors;
   }
 
   /**
@@ -284,6 +456,20 @@ export class VendorOAuth {
    * accounts instead of silently replacing the first one.
    */
   async start(vendorId: string): Promise<OAuthStartResult> {
+    const pluginProvider = this.deps
+      .getPluginOAuthBridge?.()
+      ?.listOAuthProviders()
+      .find((provider) => provider.providerId === vendorId);
+    if (pluginProvider) {
+      const row = (await this.rows()).find(
+        (candidate) =>
+          candidate.id === vendorId &&
+          candidate.ownerPluginId === pluginProvider.pluginId &&
+          candidate.authKind === OAUTH_AUTH_KIND,
+      );
+      if (!row) throw new Error(`unknown plugin OAuth provider: ${vendorId}`);
+      return this.startPluginLogin(pluginProvider);
+    }
     const models = await this.ensureCatalogModels();
     const provider = models.getProvider(vendorId);
     if (!provider?.auth.oauth) {
@@ -325,14 +511,38 @@ export class VendorOAuth {
     return { loginId: session.loginId };
   }
 
+  private startPluginLogin(provider: PluginOAuthProvider): OAuthStartResult {
+    const superseded = [...this.pluginLogins.values()].filter(
+      (running) => running.providerId === provider.providerId,
+    );
+    for (const running of superseded) this.cancelPluginLogin(running);
+    const session: PluginLoginSession = {
+      loginId: this.nextId(),
+      vendorId: provider.providerId,
+      providerId: provider.providerId,
+      pluginId: provider.pluginId,
+      contributionId: provider.contributionId,
+      runtimeId: provider.runtimeId,
+      prompts: new Map(),
+      controller: new AbortController(),
+      tail: Promise.resolve(),
+      cancelled: false,
+    };
+    this.pluginLogins.set(session.loginId, session);
+    session.finished = this.runPluginLogin(session);
+    return { loginId: session.loginId };
+  }
+
   /** Answer a prompt. An absent value cancels the prompt and the login. */
   respond(input: OAuthRespondInput): boolean {
     const session = this.logins.get(input.loginId);
-    const pending = session?.prompts.get(input.promptId);
-    if (!session || !pending) return false;
+    const pluginSession = this.pluginLogins.get(input.loginId);
+    const pending = session?.prompts.get(input.promptId) ?? pluginSession?.prompts.get(input.promptId);
+    if ((!session && !pluginSession) || !pending) return false;
     if (input.value === undefined) {
       pending.reject(new Error("login cancelled"));
-      session.controller.abort();
+      if (session) session.controller.abort();
+      if (pluginSession) this.cancelPluginLogin(pluginSession);
     } else {
       pending.resolve(input.value);
     }
@@ -342,9 +552,133 @@ export class VendorOAuth {
   /** Abort a login: stops the local callback server or device-code polling. */
   cancel(loginId: string): boolean {
     const session = this.logins.get(loginId);
-    if (!session) return false;
-    session.controller.abort();
+    if (session) {
+      session.controller.abort();
+      return true;
+    }
+    const pluginSession = this.pluginLogins.get(loginId);
+    if (!pluginSession) return false;
+    this.cancelPluginLogin(pluginSession);
     return true;
+  }
+
+  /** Plugin callbacks can ask the same Host-rendered question as native OAuth flows. */
+  promptPluginOAuth(
+    pluginId: string,
+    loginId: string,
+    input: PluginProviderOAuthPrompt,
+  ): Promise<string> {
+    const session = this.pluginLogins.get(loginId);
+    if (!session || session.pluginId !== pluginId || session.cancelled) {
+      return Promise.reject(new Error("provider OAuth login is no longer active"));
+    }
+    if (
+      !input ||
+      typeof input !== "object" ||
+      !["text", "secret", "select", "manual_code"].includes(input.type) ||
+      typeof input.message !== "string" ||
+      !input.message.trim() ||
+      input.message.length > 2_000
+    ) {
+      return Promise.reject(new Error("provider OAuth prompt is invalid"));
+    }
+    if (input.type === "select" && (!Array.isArray(input.options) || input.options.length === 0 || input.options.length > 32)) {
+      return Promise.reject(new Error("provider OAuth select prompt requires 1 to 32 options"));
+    }
+    const options = input.type === "select"
+      ? (input.options ?? []).flatMap((option) =>
+          option && typeof option.id === "string" && typeof option.label === "string"
+            ? [{
+                id: option.id.slice(0, 128),
+                label: option.label.slice(0, 256),
+                ...(typeof option.description === "string"
+                  ? { description: option.description.slice(0, 512) }
+                  : {}),
+              }]
+            : [],
+        )
+      : undefined;
+    if (input.type === "select" && options?.length === 0) {
+      return Promise.reject(new Error("provider OAuth select prompt options are invalid"));
+    }
+    const promptId = this.nextId();
+    return new Promise((resolve, reject) => {
+      const settle = () => session.prompts.delete(promptId);
+      session.prompts.set(promptId, {
+        resolve: (value) => { settle(); resolve(value); },
+        reject: (error) => { settle(); reject(error); },
+      });
+      const request: OAuthPromptRequest = {
+        promptId,
+        type: input.type,
+        message: input.message.trim(),
+        ...(typeof input.placeholder === "string" && input.placeholder.length <= 512
+          ? { placeholder: input.placeholder }
+          : {}),
+        ...(options ? { options } : {}),
+      };
+      this.pushPluginEvent(session, { kind: "prompt", request });
+    });
+  }
+
+  /** Relay only bounded, non-secret progress to the renderer. */
+  async notifyPluginOAuth(
+    pluginId: string,
+    loginId: string,
+    event: PluginProviderOAuthEvent,
+  ): Promise<void> {
+    const session = this.pluginLogins.get(loginId);
+    if (!session || session.pluginId !== pluginId || session.cancelled) {
+      throw new Error("provider OAuth login is no longer active");
+    }
+    if (event.kind === "authUrl") {
+      if (!isHttpUrl(event.url)) throw new Error("provider OAuth URL must use HTTP or HTTPS");
+      const url = event.url.slice(0, 4_096);
+      session.tail = session.tail.then(async () => {
+        const opened = await this.deps.openExternal(url).then(() => true, () => false);
+        this.deps.emit({
+          loginId,
+          vendorId: session.vendorId,
+          kind: "authUrl",
+          url,
+          instructions: clippedText(event.instructions, 2_000),
+          opened,
+        });
+      });
+      await session.tail;
+      return;
+    }
+    if (event.kind === "deviceCode") {
+      if (!isHttpUrl(event.verificationUri)) throw new Error("verificationUri must use HTTP or HTTPS");
+      this.pushPluginEvent(session, {
+        kind: "deviceCode",
+        userCode: clippedText(event.userCode, 256),
+        verificationUri: event.verificationUri.slice(0, 4_096),
+        ...(Number.isFinite(event.intervalSeconds) ? { intervalSeconds: event.intervalSeconds } : {}),
+        ...(Number.isFinite(event.expiresInSeconds) ? { expiresInSeconds: event.expiresInSeconds } : {}),
+      });
+      await session.tail;
+      return;
+    }
+    if (event.kind === "info") {
+      this.pushPluginEvent(session, {
+        kind: "info",
+        message: clippedText(event.message, 2_000),
+        ...(Array.isArray(event.links)
+          ? {
+              links: event.links.slice(0, 4).flatMap((link) =>
+                isHttpUrl(link?.url)
+                  ? [{ url: link.url.slice(0, 4_096), ...(typeof link.label === "string" ? { label: link.label.slice(0, 128) } : {}) }]
+                  : [],
+              ),
+            }
+          : {}),
+      });
+      await session.tail;
+      return;
+    }
+    this.pushPluginEvent(session, { kind: "progress", message: clippedText(event.message, 2_000) });
+    await session.tail;
   }
 
   /**
@@ -356,6 +690,20 @@ export class VendorOAuth {
     if (!row || row.authKind !== OAUTH_AUTH_KIND) {
       throw new Error(`unknown vendor account provider: ${providerId}`);
     }
+    if (row.ownerPluginId) {
+      this.pluginRefreshControllers.get(providerId)?.abort(new Error("provider sign-out requested"));
+      const running = [...this.pluginLogins.values()].find(
+        (session) => session.providerId === providerId,
+      );
+      if (running) this.cancelPluginLogin(running);
+      await this.serialize(providerId, () =>
+        this.deps.call("secrets.delete", {
+          secretRef: secretRefForProviderOauth(providerId),
+        }),
+      );
+      this.clearAccountModels(providerId);
+      return;
+    }
     const running = [...this.logins.values()].find(
       (session) => session.providerId === providerId,
     );
@@ -363,10 +711,11 @@ export class VendorOAuth {
       this.cancel(running.loginId);
       await running.finished?.catch(() => undefined);
     }
+    await this.deps.call("providers.delete", { id: providerId });
     this.accountModels.delete(providerId);
+    this.deps.onAccountRemoved?.(providerId);
     this.liveModelCache.delete(providerId);
     this.liveModelLoads.delete(providerId);
-    await this.deps.call("providers.delete", { id: providerId });
   }
 
   /**
@@ -375,6 +724,10 @@ export class VendorOAuth {
    * short-lived access token, headers and per-credential baseUrl.
    */
   async resolveAuth(providerId: string): Promise<ModelAuth> {
+    const row = (await this.rows()).find((candidate) => candidate.id === providerId);
+    if (row?.ownerPluginId && row.authKind === OAUTH_AUTH_KIND) {
+      return this.resolvePluginAuth(row);
+    }
     return this.withRowHeaders(providerId, async () => {
       const account = await this.accountForProvider(providerId);
       if (!account) throw new Error(`vendor account not signed in: ${providerId}`);
@@ -392,13 +745,21 @@ export class VendorOAuth {
    * be read. Radius keeps its gateway refresh and does not get a second probe.
    */
   async listModels(providerId: string): Promise<OAuthModelOption[]> {
+    const row = (await this.rows()).find((candidate) => candidate.id === providerId);
+    if (row?.ownerPluginId && row.authKind === OAUTH_AUTH_KIND) {
+      if (!row.baseUrl) return [];
+      const baseUrl = row.baseUrl;
+      return (row.models ?? []).map((model) => ({
+        modelId: model.id,
+        apiStyle: row.apiStyle ?? "chat_completions",
+        baseUrl,
+      }));
+    }
     return this.withRowHeaders(providerId, async () => {
       const account = await this.accountForProvider(providerId);
       if (!account) throw new Error(`unknown vendor account provider: ${providerId}`);
       // Dynamic catalogs (radius) are empty until refreshed.
       await account.models.refresh({ providers: [account.vendorId] });
-      const live = await this.liveAccountModels(account);
-      if (live) return live;
       const available = await account.models.getAvailable(account.vendorId);
       return available.map((model) => this.optionFor(model));
     });
@@ -425,6 +786,38 @@ export class VendorOAuth {
     providerId: string,
     modelId: string,
   ): Promise<VendorModelBinding | undefined> {
+    const row = (await this.rows()).find((candidate) => candidate.id === providerId);
+    if (row?.ownerPluginId && row.authKind === OAUTH_AUTH_KIND) {
+      const declared = row.models?.find((model) => model.id === modelId);
+      if (!declared || !row.baseUrl) return undefined;
+      const option: OAuthModelOption = {
+        modelId: declared.id,
+        apiStyle: row.apiStyle ?? "chat_completions",
+        baseUrl: row.baseUrl,
+      };
+      const published = await this.deps.modelConfigFor?.({
+        providerId: row.id,
+        vendorKey: row.vendorKey ?? "custom",
+        option,
+      }).catch(() => undefined);
+      const baseline = withMappedThinkingLevels(
+        published ?? genericModelConfig(option.modelId, option.baseUrl),
+      );
+      const model = modelConfigWithBinding(baseline, {
+        ...declared,
+        contextWindow: declared.contextWindow > 0 ? declared.contextWindow : baseline.contextWindow,
+        maxTokens: declared.maxTokens > 0 ? declared.maxTokens : baseline.maxTokens,
+      });
+      const modelConfig = declared.thinkingLevels.length > 0
+        ? withMappedThinkingLevels(model)
+        : { ...model, reasoning: false, supportedThinkingLevels: [] };
+      return {
+        apiStyle: option.apiStyle,
+        baseUrl: option.baseUrl,
+        modelConfig,
+        ...capabilitiesFromModelConfig(modelConfig),
+      };
+    }
     return this.withRowHeaders(providerId, () =>
       this.bindingForUnscoped(providerId, modelId),
     );
@@ -436,19 +829,8 @@ export class VendorOAuth {
   ): Promise<VendorModelBinding | undefined> {
     const account = await this.accountForProvider(providerId);
     if (!account) return undefined;
-    let model = account.models.getModel(account.vendorId, modelId);
-    if (!model) {
-      await account.models.refresh({ providers: [account.vendorId] });
-      model = account.models.getModel(account.vendorId, modelId);
-    }
-    const live = await this.liveAccountModels(account);
-    if (live) {
-      const option = live.find((item) => item.modelId === modelId);
-      // A successful account list replaces the pinned catalog. An id it did
-      // not return is not offered, even when pi-ai still ships that id.
-      if (!option) return undefined;
-      return this.bindingFromOption(account, option);
-    }
+    await account.models.refresh({ providers: [account.vendorId] });
+    const model = account.models.getModel(account.vendorId, modelId);
     if (!model) return undefined;
     return this.bindingFromOption(account, this.optionFor(model));
   }
@@ -470,17 +852,19 @@ export class VendorOAuth {
     const pending = this.liveModelLoads.get(account.providerId);
     if (pending) return pending;
     const load = this.loadLiveAccountModels(account).finally(() => {
-      this.liveModelLoads.delete(account.providerId);
+      if (this.liveModelLoads.get(account.providerId) === load) this.liveModelLoads.delete(account.providerId);
     });
     this.liveModelLoads.set(account.providerId, load);
     return load;
   }
 
   private rememberLiveModels(
-    providerId: string,
+    account: AccountModels,
     models: OAuthModelOption[] | null,
   ): OAuthModelOption[] | undefined {
-    this.liveModelCache.set(providerId, { at: Date.now(), models });
+    if (this.accountModels.get(account.providerId) === account) {
+      this.liveModelCache.set(account.providerId, { at: Date.now(), models });
+    }
     return models ?? undefined;
   }
 
@@ -509,8 +893,8 @@ export class VendorOAuth {
     try {
       const body = await readVendorModelList(request, this.deps.fetch ?? globalThis.fetch);
       const ids = parseVendorModelIds(account.vendorId, body, request.allowPolicyFallback);
-      if (!ids || ids.length === 0) return this.rememberLiveModels(account.providerId, null);
-      const pinned = await account.models.getAvailable(account.vendorId);
+      if (!ids || ids.length === 0) return this.rememberLiveModels(account, null);
+      const pinned = account.pinnedProvider?.getModels() ?? await account.models.getAvailable(account.vendorId);
       const known = new Map(pinned.map((model) => [model.id, model]));
       const wires = pinned.map((model) => ({
         id: model.id,
@@ -528,14 +912,17 @@ export class VendorOAuth {
           baseUrl: wire.baseUrl,
         }];
       });
-      if (models.length === 0) return this.rememberLiveModels(account.providerId, null);
-      return this.rememberLiveModels(account.providerId, models);
+      if (models.length === 0) return this.rememberLiveModels(account, null);
+      return this.rememberLiveModels(account, models);
     } catch (error) {
       this.log("warn", "vendor account model list failed", {
         vendorId: account.vendorId,
         message: error instanceof Error ? error.message : String(error),
+        ...(error instanceof VendorModelListError
+          ? { status: error.status, responseExcerpt: error.responseExcerpt }
+          : {}),
       });
-      return this.rememberLiveModels(account.providerId, null);
+      return this.rememberLiveModels(account, null);
     }
   }
 
@@ -544,10 +931,13 @@ export class VendorOAuth {
     option: OAuthModelOption,
   ): Promise<VendorModelBinding> {
     const published = await this.deps.modelConfigFor?.({
+      providerId: account.providerId,
       vendorKey: account.vendorId,
       option,
     }).catch(() => undefined);
-    const modelConfig = await this.withPinnedSiblingFallback(account, option, published);
+    const modelConfig = withMappedThinkingLevels(
+      published ?? genericModelConfig(option.modelId, option.baseUrl),
+    );
     const capabilities = capabilitiesFromModelConfig(modelConfig);
     return {
       apiStyle: option.apiStyle,
@@ -557,53 +947,16 @@ export class VendorOAuth {
     };
   }
 
-  /**
-   * models.dev is the metadata source when it already knows the id. A model
-   * that exists only on the live list otherwise inherits limits and thinking
-   * levels from a pinned sibling of the same tier. xAI uses an explicit
-   * newest-first order so pin order cannot pick an older Grok.
-   */
-  private async withPinnedSiblingFallback(
-    account: AccountModels,
-    option: OAuthModelOption,
-    published: ModelConfig | undefined,
-  ): Promise<ModelConfig> {
-    const config = published ?? genericModelConfig(option.modelId, option.baseUrl);
-    if (config.source !== "generic") return config;
-    const pinned = await account.models.getAvailable(account.vendorId);
-    if (pinned.some((model) => model.id === option.modelId)) return config;
-    const siblingId = pinnedSiblingId(
-      account.vendorId,
-      option.modelId,
-      pinned.map((model) => model.id),
-    );
-    const sibling = siblingId ? pinned.find((model) => model.id === siblingId) : undefined;
-    if (!sibling) return config;
-    const input = (sibling.input ?? []).filter(
-      (modality): modality is "text" | "image" => modality === "text" || modality === "image",
-    );
-    return {
-      ...config,
-      reasoning: sibling.reasoning,
-      input: input.length > 0 ? input : config.input,
-      contextWindow: sibling.contextWindow,
-      maxTokens: sibling.maxTokens,
-      limit: {
-        context: sibling.contextWindow,
-        input: sibling.contextWindow,
-        output: sibling.maxTokens,
-      },
-      supportedThinkingLevels: thinkingLevelsFromPiModel(sibling),
-    };
-  }
-
   private async run(session: LoginSession, provider: Provider): Promise<void> {
     try {
+      const installationId = await this.getInstallationId();
+      session.controller.signal.throwIfAborted();
       await this.withRowHeaders(session.providerId, () =>
         session.account.models.login(
           session.vendorId,
           "oauth",
           this.interactionFor(session),
+          { getDeviceId: () => installationId },
         ),
       );
       const accountLabel = provider.auth.oauth?.name || provider.name;
@@ -632,6 +985,221 @@ export class VendorOAuth {
       await session.tail;
       this.logins.delete(session.loginId);
     }
+  }
+
+  private async runPluginLogin(session: PluginLoginSession): Promise<void> {
+    try {
+      const bridge = this.deps.getPluginOAuthBridge?.();
+      if (!bridge) throw new Error("provider OAuth is unavailable");
+      const raw = await bridge.invokeProviderOAuth(
+        session.pluginId,
+        session.contributionId,
+        {
+          operation: "login",
+          providerId: session.contributionId,
+          loginId: session.loginId,
+        },
+        session.controller.signal,
+        session.runtimeId,
+      );
+      if (session.cancelled) throw new Error("login cancelled");
+      const credential = normalizePluginCredential(raw);
+      await this.serialize(session.providerId, async () => {
+        const row = (await this.rows()).find((candidate) => candidate.id === session.providerId);
+        const currentProvider = bridge.listOAuthProviders().find(
+          (candidate) => candidate.providerId === session.providerId,
+        );
+        if (
+          session.cancelled ||
+          currentProvider?.runtimeId !== session.runtimeId ||
+          row?.ownerPluginId !== session.pluginId ||
+          row.authKind !== OAUTH_AUTH_KIND ||
+          row.enabled === false
+        ) {
+          throw new Error("plugin provider changed during OAuth sign-in");
+        }
+        await this.writePluginCredential(session.providerId, credential);
+        const savedRow = (await this.rows()).find((candidate) => candidate.id === session.providerId);
+        const savedProvider = this.deps.getPluginOAuthBridge?.()
+          ?.listOAuthProviders()
+          .find((candidate) => candidate.providerId === session.providerId);
+        if (
+          savedRow?.ownerPluginId !== session.pluginId ||
+          savedRow.authKind !== OAUTH_AUTH_KIND ||
+          savedRow.enabled === false ||
+          savedProvider?.runtimeId !== session.runtimeId
+        ) {
+          await this.deps.call("secrets.delete", {
+            secretRef: secretRefForProviderOauth(session.providerId),
+          });
+          throw new Error("plugin provider changed during OAuth sign-in");
+        }
+      });
+      this.invalidateAccountModels(session.providerId);
+      this.pushPluginEvent(session, {
+        kind: "done",
+        providerId: session.providerId,
+        accountLabel: credential.accountLabel,
+      });
+    } catch {
+      if (session.cancelled) {
+        this.pushPluginEvent(session, { kind: "cancelled" });
+      } else {
+        // Callback errors are plugin-controlled and may contain token material.
+        // Keep the user-facing diagnostic useful without reflecting the error.
+        this.pushPluginEvent(session, {
+          kind: "error",
+          code: "PLUGIN_OAUTH_FAILED",
+          message: "",
+        });
+        this.log("warn", "plugin provider OAuth sign-in failed", {
+          pluginId: session.pluginId,
+          providerId: session.providerId,
+        });
+      }
+    } finally {
+      for (const pending of session.prompts.values()) {
+        pending.reject(new Error("login finished"));
+      }
+      await session.tail;
+      this.pluginLogins.delete(session.loginId);
+    }
+  }
+
+  private cancelPluginLogin(session: PluginLoginSession): void {
+    if (session.cancelled) return;
+    session.cancelled = true;
+    session.controller.abort(new Error("login cancelled"));
+    for (const pending of session.prompts.values()) {
+      pending.reject(new Error("login cancelled"));
+    }
+  }
+
+  private pushPluginEvent(
+    session: PluginLoginSession,
+    event: OAuthEventBody,
+  ): void {
+    session.tail = session.tail.then(() => {
+      if (session.cancelled && event.kind !== "cancelled") return;
+      this.deps.emit({
+        ...event,
+        loginId: session.loginId,
+        vendorId: session.vendorId,
+      } as OAuthLoginEvent);
+    });
+  }
+
+  private async resolvePluginAuth(row: OAuthProviderRow): Promise<ModelAuth> {
+    if (!row.ownerPluginId || !row.hasOauth) {
+      throw new Error(`plugin provider account not signed in: ${row.id}`);
+    }
+    const credential = await this.serialize(row.id, async () => {
+      let current = await this.readPluginCredential(row.id);
+      if (!current) throw new Error(`plugin provider account not signed in: ${row.id}`);
+      if (current.expiresAt !== undefined && current.expiresAt <= Date.now() + 30_000) {
+        if (!current.refreshToken) throw new Error(`plugin provider credential expired: ${row.id}`);
+        const provider = this.deps.getPluginOAuthBridge?.()
+          ?.listOAuthProviders()
+          .find((candidate) => candidate.providerId === row.id);
+        const bridge = this.deps.getPluginOAuthBridge?.();
+        if (!provider || !bridge) throw new Error(`plugin provider OAuth is unavailable: ${row.id}`);
+        const refreshController = new AbortController();
+        this.pluginRefreshControllers.set(row.id, refreshController);
+        let rawRefreshed: unknown;
+        try {
+          rawRefreshed = await bridge.invokeProviderOAuth(
+            provider.pluginId,
+            provider.contributionId,
+            {
+              operation: "refresh",
+              providerId: provider.contributionId,
+              credential: current,
+            },
+            refreshController.signal,
+            provider.runtimeId,
+          );
+        } finally {
+          if (this.pluginRefreshControllers.get(row.id) === refreshController) {
+            this.pluginRefreshControllers.delete(row.id);
+          }
+        }
+        const refreshed = normalizePluginCredential(rawRefreshed);
+        current = {
+          ...refreshed,
+          ...(refreshed.refreshToken ? {} : { refreshToken: current.refreshToken }),
+          ...(refreshed.accountLabel ? {} : current.accountLabel ? { accountLabel: current.accountLabel } : {}),
+          ...(refreshed.headers ? {} : current.headers ? { headers: current.headers } : {}),
+        };
+        const latest = (await this.rows()).find((candidate) => candidate.id === row.id);
+        if (
+          !latest ||
+          latest.ownerPluginId !== row.ownerPluginId ||
+          latest.authKind !== OAUTH_AUTH_KIND ||
+          latest.enabled === false
+        ) {
+          throw new Error(`plugin provider changed during OAuth refresh: ${row.id}`);
+        }
+        await this.writePluginCredential(row.id, current);
+        const savedRow = (await this.rows()).find((candidate) => candidate.id === row.id);
+        const savedProvider = this.deps.getPluginOAuthBridge?.()
+          ?.listOAuthProviders()
+          .find((candidate) => candidate.providerId === row.id);
+        if (
+          !savedRow ||
+          savedRow.ownerPluginId !== row.ownerPluginId ||
+          savedRow.authKind !== OAUTH_AUTH_KIND ||
+          savedRow.enabled === false ||
+          savedProvider?.runtimeId !== provider.runtimeId
+        ) {
+          await this.deps.call("secrets.delete", {
+            secretRef: secretRefForProviderOauth(row.id),
+          });
+          throw new Error(`plugin provider changed during OAuth refresh: ${row.id}`);
+        }
+      }
+      return current;
+    });
+    return {
+      apiKey: credential.accessToken,
+      ...(credential.headers ? { headers: credential.headers } : {}),
+    };
+  }
+
+  private async readPluginCredential(
+    providerId: string,
+  ): Promise<PluginProviderOAuthCredential | undefined> {
+    const { value } = await this.deps.call<{ value?: string | null }>(
+      "secrets.getForRuntime",
+      { secretRef: secretRefForProviderOauth(providerId) },
+    );
+    if (!value) return undefined;
+    try {
+      return normalizePluginCredential(JSON.parse(value));
+    } catch {
+      this.log("warn", "stored plugin provider credential is not readable", { providerId });
+      return undefined;
+    }
+  }
+
+  private async writePluginCredential(
+    providerId: string,
+    credential: PluginProviderOAuthCredential,
+  ): Promise<void> {
+    await this.deps.call("secrets.set", {
+      secretRef: secretRefForProviderOauth(providerId),
+      value: JSON.stringify(credential),
+    });
+  }
+
+  private clearAccountModels(providerId: string): void {
+    this.invalidateAccountModels(providerId);
+    this.deps.onAccountRemoved?.(providerId);
+  }
+
+  private invalidateAccountModels(providerId: string): void {
+    this.accountModels.delete(providerId);
+    this.liveModelCache.delete(providerId);
+    this.liveModelLoads.delete(providerId);
   }
 
   /** Point the row at a usable model now that the catalog can be read. */
@@ -686,9 +1254,12 @@ export class VendorOAuth {
 
   private async discardRow(session: LoginSession): Promise<void> {
     if (!session.createdRow) return;
-    this.accountModels.delete(session.providerId);
     try {
       await this.deps.call("providers.delete", { id: session.providerId });
+      this.accountModels.delete(session.providerId);
+      this.liveModelCache.delete(session.providerId);
+      this.liveModelLoads.delete(session.providerId);
+      this.deps.onAccountRemoved?.(session.providerId);
     } catch (error) {
       this.log("warn", "could not remove the half-created provider row", {
         vendorId: session.vendorId,
@@ -829,6 +1400,7 @@ export class VendorOAuth {
     }
     return builtinModels({
       credentials,
+      authContext: { env: async () => undefined, fileExists: async () => false },
       modelsStore: new InMemoryModelsStore(),
     });
   }
@@ -836,12 +1408,50 @@ export class VendorOAuth {
   private createAccount(vendorId: string, providerId: string): AccountModels {
     const existing = this.accountModels.get(providerId);
     if (existing) return existing;
-    const account = {
+    const account: AccountModels = {
       providerId,
       vendorId,
       models: this.createModels(this.credentialsFor(providerId, vendorId)),
     };
+    const original = account.models.getProvider(vendorId);
+    account.pinnedProvider = original;
+    if (original && vendorId !== "radius") {
+      let offered: Model<Api>[] | undefined;
+      account.models.setProvider({
+        ...original,
+        getModels: () => offered ?? original.getModels(),
+        getAllModels: () => [...(offered ?? original.getModels()), ...(original.getAllModels?.() ?? []).filter(model => model.type && model.type !== "chat")],
+        // The successful live list is the account's entitlement authority.
+        filterModels: (models, credential) => offered ? models : original.filterModels?.(models, credential) ?? models,
+        refreshModels: async context => {
+          await original.refreshModels?.(context);
+          if (!context.allowNetwork) return;
+          context.signal.throwIfAborted();
+          if (context.force) this.liveModelCache.delete(providerId);
+          const live = await this.withRowHeaders(providerId, () => this.liveAccountModels(account));
+          if (!live) return;
+          const projected = await Promise.all(live.map(async option => {
+            const config = withMappedThinkingLevels(await this.deps.modelConfigFor?.({
+              providerId,
+              vendorKey: account.vendorId,
+              option,
+            }).catch(() => undefined) ?? genericModelConfig(option.modelId, option.baseUrl));
+            return {
+              ...config, id: option.modelId, provider: vendorId,
+              api: wireApiForStyle(option.apiStyle), baseUrl: option.baseUrl,
+              // Generic limits and zero-price defaults are not published data.
+              cost: config.source === "generic"
+                ? { input: NaN, output: NaN, cacheRead: NaN, cacheWrite: NaN }
+                : config.cost ?? { input: NaN, output: NaN, cacheRead: NaN, cacheWrite: NaN },
+            } as Model<Api>;
+          }));
+          context.signal.throwIfAborted();
+          await context.publish({ update: () => { offered = projected; } });
+        },
+      });
+    }
     this.accountModels.set(providerId, account);
+    this.deps.onAccountModels?.(providerId, account.models);
     return account;
   }
 
@@ -856,8 +1466,6 @@ export class VendorOAuth {
   private async accountForProvider(
     providerId: string,
   ): Promise<AccountModels | undefined> {
-    const existing = this.accountModels.get(providerId);
-    if (existing) return existing;
     const row = (await this.rows()).find(
       (candidate) =>
         candidate.id === providerId &&

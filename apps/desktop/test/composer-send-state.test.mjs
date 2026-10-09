@@ -23,6 +23,7 @@ const [
   eventsSlice,
   queueSlice,
   transcriptSlice,
+  storeHelpers,
   toolbar,
   submitHook,
   draftHook,
@@ -38,6 +39,7 @@ const [
   readStoreModule("slices/events-slice.ts"),
   readStoreModule("slices/queue-slice.ts"),
   readStoreModule("slices/transcript-slice.ts"),
+  readStoreModule("helpers/store-helpers.ts"),
   readComposerModule("ComposerToolbar.tsx"),
   readComposerModule("hooks/useComposerSubmit.ts"),
   readComposerModule("hooks/useComposerDraft.ts"),
@@ -68,14 +70,14 @@ test("composer send/stop button follows draft content and the visible session's 
   assert.match(submitSlot, /onClick=\{\(\) => void abort\(\)\}/);
   assert.doesNotMatch(composerRight, /\{runActive \? \(/);
   const modelIndex = composerRight.indexOf("<ComposerModelPicker");
-  const enhanceIndex = composerRight.indexOf("composer-enhance-btn");
+  const transformIndex = composerRight.indexOf("composerTransforms.map");
   const submitIndex = Math.max(
     composerRight.indexOf('className="stop-btn"'),
     composerRight.indexOf('className="send-btn"'),
   );
   assert.ok(
-    modelIndex >= 0 && modelIndex < enhanceIndex && enhanceIndex < submitIndex,
-    "The enhancement action should sit between model selection and the submit slot",
+    modelIndex >= 0 && modelIndex < transformIndex && transformIndex < submitIndex,
+    "Plugin Composer actions should sit between model selection and the submit slot",
   );
   const modelTrigger =
     composer.match(
@@ -238,9 +240,9 @@ test("send clears the composer before the round trip and restores a rejected dra
   // still pending under load must not drop the last characters typed.
   assert.match(
     submit,
-    /const text = draft\.ref\.current \? readEditorValue\(draft\.ref\.current\) : value;/,
+    /const rawText = draft\.ref\.current \? readEditorValue\(draft\.ref\.current\) : value;/,
   );
-  assert.match(submit, /serializeInlineComposerFileReferences\(\s*text,\s*activeFileReferences,\s*\)/);
+  assert.match(submit, /serializeInlineComposerFileReferences\(rawText, activeFileReferences\)/);
   // Blocked and not-ready states are said, not swallowed.
   assert.match(submit, /if \(pasting\) showToast\(t\("chat\.pasteInProgress"\)/);
   assert.match(
@@ -260,8 +262,8 @@ test("send clears the composer before the round trip and restores a rejected dra
   // draft in its cache slot for the next switch back.
   assert.match(restore, /if \(valueRef\.current\.trim\(\)\) return;/);
   assert.match(restore, /if \(currentKey !== key\) \{[\s\S]*?writeComposerDraft\(key, snapshot\);/);
-  assert.match(restore, /setValue\(snapshot\.text\);/);
-  assert.match(restore, /setCursor\(snapshot\.text\.length\);/);
+  assert.match(restore, /setValue\(restored\.text\);/);
+  assert.match(restore, /setCursor\(restored\.text\.length\);/);
 });
 
 test("mode slash prefixes send the trailing prompt and retain failed drafts", () => {
@@ -281,24 +283,30 @@ test("mode slash prefixes send the trailing prompt and retain failed drafts", ()
   );
   assert.match(
     submit,
-    /const submittedDraftRevision = draft\.draftRevision\(submittedDraftKey\);\s*const submittedDraft = draft\.draftSnapshot\(text\);[\s\S]*?draft\.clearDraftForKey\(submittedDraftKey, submittedDraftRevision, submittedDraft\);\s*const accepted = steering[\s\S]*?await steerPrompt\(inlineContent, submittedDraft\)[\s\S]*?await sendPrompt\(inlineContent, submittedDraft\);\s*if \(!accepted\) draft\.restoreDraftForKey\(submittedDraftKey, submittedDraft\);/,
+    /const submittedDraftRevision = draft\.draftRevision\(submittedDraftKey\);\s*const submittedDraft = draft\.draftSnapshot\(rawText\);[\s\S]*?draft\.clearDraftForKey\(submittedDraftKey, submittedDraftRevision, submittedDraft\);\s*const accepted = steering\s*\?\s*await steerPrompt\(inlineContent, submittedDraft\)\s*:\s*await sendPrompt\(\s*inlineContent,\s*submittedDraft,\s*activeSessionId \?\? undefined,\s*captureAcceptedSession,\s*\);\s*if \(!accepted\) draft\.restoreDraftForKey\(submittedDraftKey, submittedDraft\);/,
   );
   assert.match(store, /draft\?: ComposerDraftSnapshot/);
   const sendPrompt = queueSlice.slice(
-    queueSlice.indexOf("sendPrompt: async (content, draft, requestedSessionId)"),
+    queueSlice.indexOf("sendPrompt: async (content, draft, requestedSessionId, onAccepted)"),
   );
   assert.match(sendPrompt, /return false;/);
   assert.match(
     sendPrompt,
     // The prompt call carries the submitted content and attachment mapping.
-    /await api\.prompt\(\{[\s\S]*?sessionId,[\s\S]*?content,[\s\S]*?attachments:[\s\S]*?promptAttachmentsFromDraft\(draft\.fileReferences\)[\s\S]*?\}\);[\s\S]*?return true/,
+    /await api\.prompt\(\{[\s\S]*?sessionId,[\s\S]*?content,[\s\S]*?attachments:[\s\S]*?promptAttachmentsFromDraft\(draft\.fileReferences\)[\s\S]*?\}\);[\s\S]*?onAccepted\?\.\(startedIn\);\s*return true/,
+  );
+  assert.match(
+    sendPrompt,
+    /const accepted = await get\(\)\.enqueuePrompt\(content, draft, sessionId\);\s*if \(accepted\) onAccepted\?\.\(sessionId\);\s*return accepted/,
   );
 });
 
 test("draft attachment routing keeps image chips structured and file chips textual", () => {
-  const helperSource = appStore.match(
-    /function promptAttachmentsFromDraft\([\s\S]*?\n\}\n\nfunction promptAttachmentsFromMessage/,
-  )?.[0]?.replace(/\n\nfunction promptAttachmentsFromMessage[\s\S]*$/, "");
+  const helperSource = storeHelpers.match(
+    /(?:export\s+)?function promptAttachmentsFromDraft\([\s\S]*?\n\}\n\n(?:export\s+)?function promptAttachmentsFromMessage/,
+  )?.[0]
+    ?.replace(/\n\n(?:export\s+)?function promptAttachmentsFromMessage[\s\S]*$/, "")
+    .replace(/^export\s+/, "");
   assert.ok(helperSource, "prompt attachment mapper not found");
   const executable = helperSource.replace(
     /function promptAttachmentsFromDraft\(\s*references: ComposerDraftSnapshot\["fileReferences"\],\s*\): AgentPromptAttachment\[\] \{/,
@@ -346,7 +354,7 @@ test("draft attachment routing keeps image chips structured and file chips textu
 
 test("the user row is inserted before the host round trip and echoed under the same id (D288)", () => {
   const sendPrompt = queueSlice.slice(
-    queueSlice.indexOf("sendPrompt: async (content, draft, requestedSessionId)"),
+    queueSlice.indexOf("sendPrompt: async (content, draft, requestedSessionId, onAccepted)"),
   );
   assert.ok(sendPrompt.length > 0, "sendPrompt not found");
   const insertAt = sendPrompt.indexOf("insertOptimisticUserMessage(startedIn, optimisticMessage)");

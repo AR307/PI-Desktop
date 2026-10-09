@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { api } from "../lib/api";
+import { listableSessions } from "../lib/session-origin";
 import { runPaletteCommand } from "../lib/commands";
 import { isDefaultSessionTitle, useAppStore } from "../stores/app-store";
 import { normalizeProjectPath } from "../lib/sidebar-session-groups";
@@ -14,7 +15,6 @@ import {
   IconAt,
   IconClock,
   IconNewSession,
-  IconPullRequest,
   IconSearch,
   IconSettings,
   IconSliders,
@@ -22,7 +22,6 @@ import {
 
 /** Navigable pages surfaced by the global search alongside sessions. */
 const PAGE_ENTRIES = [
-  { page: "pulls", labelKey: "pulls.title", icon: IconPullRequest },
   { page: "scheduled", labelKey: "scheduled.title", icon: IconClock },
   { page: "plugins", labelKey: "nav.plugins", icon: IconAt },
 ] as const;
@@ -147,7 +146,10 @@ export function SearchDialog({ open, onClose }: { open: boolean; onClose: () => 
   const rows = useMemo<SearchRow[]>(() => {
     const q = query.trim().toLowerCase();
     const candidates: Omit<SearchRow, "optionIndex">[] = [];
-    const source = q ? search.hits.map((hit) => hit.session) : sessions;
+    // Recents come from the store, so the same ownership rule applies here:
+    // a scheduled run's transcript is entered from the Scheduled page, never
+    // offered as a conversation to switch to (issue #1291).
+    const source = listableSessions(q ? search.hits.map((hit) => hit.session) : sessions);
     const hits = new Map(search.hits.map((hit) => [hit.session.id, hit]));
     for (const session of source) {
       // Untitled drafts carry no searchable signal; they stay sidebar-only.
@@ -207,7 +209,11 @@ export function SearchDialog({ open, onClose }: { open: boolean; onClose: () => 
   }, [query, t]);
 
   const settingsHits = useMemo<SettingsSearchHit[]>(
-    () => searchSettings(query, t, { developerMode }),
+    () =>
+      searchSettings(query, t, {
+        developerMode,
+        includeDevelopmentOnly: import.meta.env.DEV,
+      }),
     [query, t, developerMode],
   );
 

@@ -34,6 +34,12 @@ fn validation_accepts_http_endpoints_and_rejects_bad_ids() {
     assert!(McpServerRegistry::validate_config(&config).is_err());
     config.command = Some("node".into());
     assert!(McpServerRegistry::validate_config(&config).is_ok());
+    config.timeout_seconds = Some(0);
+    assert!(McpServerRegistry::validate_config(&config).is_err());
+    config.timeout_seconds = Some(601);
+    assert!(McpServerRegistry::validate_config(&config).is_err());
+    config.timeout_seconds = Some(60);
+    assert!(McpServerRegistry::validate_config(&config).is_ok());
 }
 
 #[test]
@@ -51,6 +57,35 @@ fn config_round_trips_without_activation_fields() {
 }
 
 #[test]
+fn clearing_a_custom_timeout_restores_the_default() {
+    // A global server is written to the global capability root, which is the
+    // real home directory unless a test repoints it. Parallel tests do repoint
+    // it, so this case has to take the same lock or it reads their directory.
+    let home = tempdir().unwrap();
+    let app = tempdir().unwrap();
+    test_support::with_global_agents(home.path(), || {
+        let mut registry = McpServerRegistry::new(app.path());
+        let mut initial = stdio("slow-server");
+        initial.timeout_seconds = Some(Some(45));
+        let saved = registry.upsert(initial).unwrap();
+        assert_eq!(saved.timeout_seconds, Some(45));
+
+        let preserve = serde_json::from_value(serde_json::json!({ "id": "slow-server" })).unwrap();
+        let preserved = registry.upsert(preserve).unwrap();
+        assert_eq!(preserved.timeout_seconds, Some(45));
+
+        let clear = serde_json::from_value(serde_json::json!({
+            "id": "slow-server",
+            "timeoutSeconds": null
+        }))
+        .unwrap();
+        let updated = registry.upsert(clear).unwrap();
+
+        assert_eq!(updated.timeout_seconds, None);
+    });
+}
+
+#[test]
 fn disabled_project_server_shadows_global_server() {
     let global = McpServerRecord {
         id: "files".into(),
@@ -65,6 +100,7 @@ fn disabled_project_server_shadows_global_server() {
         env: BTreeMap::new(),
         url: None,
         headers: BTreeMap::new(),
+        timeout_seconds: None,
         enabled: true,
         scope: ActivationScope::default(),
         created_at: String::new(),
@@ -164,7 +200,10 @@ fn a_global_server_moves_into_a_project_with_its_state() {
             .unwrap();
 
         assert_eq!(moved.level.as_deref(), Some("project"));
-        assert_eq!(moved.project_path.as_deref(), Some(project_path.as_str()));
+        assert_eq!(
+            moved.project_path.as_deref(),
+            Some(crate::agent_capabilities::normalize_project_path(&project_path).as_str())
+        );
         assert!(!moved.enabled);
         assert!(!home.path().join("servers/files.json").exists());
         assert!(project.path().join(".agents/servers/files.json").is_file());

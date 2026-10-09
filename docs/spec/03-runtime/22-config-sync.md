@@ -41,6 +41,9 @@ The instruction adapter reads only the fixed global `~/.pi/agent/AGENTS.md`
 and each registered project's root `AGENTS.md`; it does not scan nested
 repositories or arbitrary files. Imported instruction files are written only
 after their scope is explicitly selected, mapped where required, and approved.
+Instruction files carry no instruction-specific byte cap; their content is
+bounded only by the shared portable-entity payload bound Host checks when it
+uploads a revision and when it validates a remote one.
 Directory-shaped skills carry bounded sibling resources as authenticated
 objects. Package paths, symlinks, collisions, file counts, and total size are
 validated by Host before approved resources are written: at most 256 resources
@@ -163,6 +166,10 @@ unchanged.
 
 ## 5. Settings workflow
 
+The destination is a development-build-only surface for now: a packaged build
+omits the Settings → Cloud sync row, page, and settings-search hits, while
+the Host-owned sync behavior described here is unchanged.
+
 Settings → Cloud sync provides WebDAV endpoint credentials, vault password,
 device label, server compatibility mode, category selection, a capability test,
 sync-now, unlock, pause, folder mapping, approval/rejection, revision
@@ -175,6 +182,16 @@ support. The renderer displays
 `offline`, `unsupportedServer`, `conflict`, `awaitingActivation`, `paused`,
 and `error` as distinct states. Disconnect keeps local data and does not delete
 remote data.
+
+Reopening the page paints the last redacted host state and history from a
+short-lived renderer cache, then refreshes the host in the background. The
+connection draft (endpoint, username, remote directory, device label,
+compatibility mode, and category choices) is kept in renderer-local storage so
+an unfinished form survives navigation or reload. It is marked saved again
+when the host confirms the persisted configuration. WebDAV app passwords stay
+in the Host secret store and are reused only for the same endpoint and account;
+the renderer never stores either password, and a vault password is only needed
+when a new or locked device must open the vault.
 
 A manual sync reports what it is doing while it runs. `configSync.progress`
 carries the current phase — `capture`, `download`, `merge`, `upload`, `apply`,

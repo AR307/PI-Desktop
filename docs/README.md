@@ -37,3 +37,8 @@ path-for-path companion for every specification. Each translated page links to
 the canonical English source and preserves code, protocol fields, and
 identifiers. The generated sidebar keeps both locale trees complete as the
 specification set grows.
+
+`check:locales` also checks the standalone plugin development guide's Chinese
+mirror and canonical source notice. Its theme section must preserve the English
+JSON/CSS examples and table structure. Other standalone guide sections are not
+covered by that theme-contract comparison.

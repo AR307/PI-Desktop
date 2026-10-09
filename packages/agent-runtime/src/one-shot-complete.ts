@@ -1,7 +1,7 @@
 /**
- * Host-owned one-shot completion used by prompt enhancement and plugin
- * `agent.complete`. No session history is implied: the caller supplies the
- * full Context. tools stay empty.
+ * Host-owned one-shot completion behind the plugin `agent.complete` API. No
+ * session history is implied: the caller supplies the full Context and tools
+ * stay empty.
  */
 
 import type {
@@ -11,7 +11,9 @@ import type {
   Model,
   SimpleStreamOptions,
 } from "@earendil-works/pi-ai";
-import type { MessageUsage, ThinkingLevel } from "@pi-desktop/shared";
+import { addUsage, type MessageUsage, type ThinkingLevel } from "@pi-desktop/shared";
+import { accountModelStream } from "./request-usage.js";
+import { requestThinkingLevel } from "./thinking-level.js";
 import { classifyAgentError } from "./agent-errors.js";
 import { clampOutputToContext } from "./output-cap.js";
 import { assistantContent, usageFromPi } from "./agent-messages.js";
@@ -19,6 +21,7 @@ import {
   buildProviderModel,
   copilotRequestHeaders,
   createProviderModels,
+  providerRequestFetch,
   type RuntimeProviderConfig,
 } from "./provider-binding.js";
 import {
@@ -47,6 +50,8 @@ export type OneShotCompleteStream = (
 export type OneShotCompleteOptions = {
   signal?: AbortSignal;
   stream?: OneShotCompleteStream;
+  /** Optional hard cap for callers whose response schema has a small bound. */
+  maxOutputTokens?: number;
   emptyErrorCode?: string;
   emptyErrorMessage?: string;
   /** Conversation id forwarded to OpenCode as `x-opencode-session`. */
@@ -86,6 +91,7 @@ export async function completeOneShot(
     options.stream ??
     ((requestModel, requestContext, streamOptions) =>
       models.streamSimple(requestModel, requestContext, streamOptions));
+  let usage: MessageUsage | undefined;
   let providerStatus: number | undefined;
   let providerHeaders: Record<string, string> | undefined;
   let providerFailure: ProviderFetchFailure | undefined;
@@ -95,15 +101,24 @@ export async function completeOneShot(
   const requestOptions: SimpleStreamOptions = withProviderHeaders(
     withOpenCodeSessionHeaders(
       {
-        maxTokens: clampOutputToContext(model, context, undefined),
+        maxTokens: clampOutputToContext(
+          model,
+          context,
+          options.maxOutputTokens === undefined
+            ? undefined
+            : Math.min(model.maxTokens, Math.max(1, Math.floor(options.maxOutputTokens))),
+        ),
         ...(options.signal ? { signal: options.signal } : {}),
         maxRetries: 0,
-        ...(thinkingLevel !== "off" ? { reasoning: thinkingLevel } : {}),
-        fetch: captureProviderResponse(undefined, (response, _requestBytes, failure) => {
-          providerStatus = response?.status;
-          providerHeaders = response?.headers;
-          providerFailure = failure;
-        }),
+        reasoning: requestThinkingLevel(model, thinkingLevel),
+        fetch: providerRequestFetch(
+          model.api,
+          captureProviderResponse(undefined, (response, _requestBytes, failure) => {
+            providerStatus = response?.status;
+            providerHeaders = response?.headers;
+            providerFailure = failure;
+          }),
+        ),
       },
       {
         ...openCodeEndpointFromProvider(provider, model),
@@ -114,12 +129,16 @@ export async function completeOneShot(
       copilotRequestHeaders(provider, context),
       provider.headers,
     ),
+    model.api,
   );
   const stream = createProviderRetryStream(
     model,
     context,
     requestOptions,
-    (retryOptions) => streamSimple(model, context, retryOptions),
+    (retryOptions) => accountModelStream(model, () => streamSimple(model, context, retryOptions), {
+      providerId: provider.id, nativeCost: provider.modelConfig?.nativeCost,
+      onUsage: attemptUsage => { usage = addUsage(usage, attemptUsage); },
+    }),
     {
       claim: (error, phase) => {
         if (phase !== "request" || !error.retriable) return undefined;
@@ -167,5 +186,5 @@ export async function completeOneShot(
       options.emptyErrorMessage ?? "The model returned no text.",
     );
   }
-  return { text, usage: usageFromPi(result.usage) };
+  return { text, usage: usage ?? usageFromPi(result.usage) };
 }

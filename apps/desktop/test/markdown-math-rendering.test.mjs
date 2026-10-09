@@ -15,7 +15,7 @@ import { fileURLToPath } from "node:url";
  * block splitting, `remark-math`, the TeX bracket normalizer, `rehype-raw`,
  * `rehype-sanitize` and `rehype-katex`.
  */
-test("TeX bracket math renders through the production Markdown pipeline", async () => {
+test("TeX math and wrapped HTTP links render through the production Markdown pipeline", async () => {
   const server = await createServer({
     root: fileURLToPath(new URL("..", import.meta.url)),
     configFile: false,
@@ -36,17 +36,28 @@ test("TeX bracket math renders through the production Markdown pipeline", async 
       lng: "en",
       resources: { en: { translation: catalogs.en } },
     });
-    const render = (source) =>
+    const render = (source, streaming = false) =>
       renderToStaticMarkup(
         createElement(
           I18nextProvider,
           { i18n },
-          createElement(Markdown, { source }),
+          createElement(Markdown, { source, streaming }),
         ),
       );
     const display = (html) => html.includes("katex-display");
     const inline = (html) =>
       html.includes('class="katex"') && !html.includes("katex-display");
+
+    // A nested linked-host destination must be normalized before the
+    // production rehype sanitizer removes its invalid wrapper href.
+    const wrappedLink = render(
+      "[#1106](([github.com](https://github.com/vastsa/PI-Desktop/issues/1106)))",
+    );
+    assert.match(
+      wrappedLink,
+      /<a[^>]*href="https:\/\/github\.com\/vastsa\/PI-Desktop\/issues\/1106"/,
+    );
+    assert.match(wrappedLink, /target="_blank"/);
 
     // The issue's exact replies: a display formula on its own lines.
     const issueMultiline = render("\\[\nD \\leftrightarrow H\n\\]");
@@ -81,6 +92,19 @@ test("TeX bracket math renders through the production Markdown pipeline", async 
     // Escaped and unmatched markers stay literal.
     assert.doesNotMatch(render("\\\\(escaped\\\\)"), /katex/);
     assert.doesNotMatch(render("text \\(unmatched"), /katex/);
+
+    const largeMarkdown = "raw-source-".repeat(12_000);
+    const largeMarkdownHtml = render(largeMarkdown);
+    assert.match(largeMarkdownHtml, /role="status"/);
+    assert.match(largeMarkdownHtml, /data-source-start="0"/);
+    assert.match(largeMarkdownHtml, /data-source-end="132000"/);
+    assert.match(largeMarkdownHtml, /<pre>raw-source-/);
+    assert.doesNotMatch(largeMarkdownHtml, /<p>raw-source-/);
+
+    const streamingMarkdownHtml = render(`# Settled\n\n${"large-tail-".repeat(3_000)}`, true);
+    assert.match(streamingMarkdownHtml, /role="status"/);
+    assert.match(streamingMarkdownHtml, /<pre># Settled/);
+    assert.match(streamingMarkdownHtml, /large-tail-/);
 
     // Issue #541: display math whose body puts `=`, `-`, `+` or `*` on their
     // own lines used to be shredded by marked's block lexer (setext headings /

@@ -1,6 +1,6 @@
 # Image generation and editing
 
-The desktop exposes `AppSettings.imageGeneration` as the current default image-generation binding and `AppSettings.imageGenerationModels` as the optional list of models marked for image generation. The legacy single binding remains supported: when the list is absent, it is treated as the only candidate. A null or empty current binding means no default; host-core validates and persists both fields through the existing settings store. No schema bump is needed. Each candidate is independent of the conversation default and references an existing enabled API-key or no-auth provider and one of its configured models.
+The desktop exposes `AppSettings.imageGeneration` as the current default image-generation binding and `AppSettings.imageGenerationModels` as the optional list of models marked for image generation. The legacy single binding remains supported: when the list is absent, it is treated as the only candidate. A null or empty current binding means no default; host-core validates and persists both fields through the existing settings store. No schema bump is needed. A reference that no longer matches an existing provider row is not persisted: host-core drops the current binding and the matching candidate on every settings read and write, mirroring the reference rule config sync applies when it applies a bundle, so a deleted provider cannot leave behind a default the runtime must reject. Each candidate is independent of the conversation default and references an existing enabled API-key or no-auth provider and one of its configured models.
 
 ## Configuration
 
@@ -9,7 +9,7 @@ image capabilities were marked or unmarked. It must not claim that an image
 model was selected after deselection. Choosing an image default from the
 summary menu retains the image-selection confirmation.
 
-Model Advanced exposes **Set as image model** alongside the image and document attachment capabilities in the model capability group, not as a separate control row. The checkbox is multi-select: saving a provider persists every checked model in `imageGenerationModels`; Cancel leaves settings unchanged. Saving candidates does not replace the default conversation model. Unchecking every image model on the provider that holds the current default clears that default, even when another provider still has a runnable candidate. The Models page drops the check and does not select the other candidate automatically. Unchecking the current model while another model on the same provider stays marked moves the default to the first runnable marked candidate. The unmarked model is available for chat again after saving and reopening settings. Saving another provider preserves a still-runnable image default. Below the default model row in the same defaults panel, **Image generation model** shows the current default and offers a menu to choose one from all marked candidates. When no candidate is configured, or none of them can be selected, the summary row is hidden. An existing candidate that is missing, disabled, credential-less or removed displays only **Currently unavailable** while another marked candidate can still be selected. OAuth accounts are not eligible; there is no fallback.
+Model Advanced exposes **Set as image model** alongside the image and document attachment capabilities in the model capability group, not as a separate control row. The checkbox is multi-select: saving a provider persists every checked model in `imageGenerationModels`; Cancel leaves settings unchanged. Saving candidates does not replace the default conversation model. Unchecking every image model on the provider that holds the current default clears that default, even when another provider still has a runnable candidate. The Models page drops the check and does not select the other candidate automatically. Unchecking the current model while another model on the same provider stays marked moves the default to the first runnable marked candidate. The unmarked model is available for chat again after saving and reopening settings. Saving another provider preserves a still-runnable image default. Below the default model row in the same defaults panel, **Image generation model** shows the current default and offers a menu to choose one from all marked candidates. When no candidate is configured, or none of them can be selected, the summary row is hidden. A candidate whose provider still exists but is disabled, credential-less or otherwise unusable displays only **Currently unavailable** while another marked candidate can still be selected; a candidate whose provider row is gone is dropped from the stored list on the next settings read or write instead of staying listed. A signed-in ChatGPT (Codex) account is eligible for its own image model, which its provider row offers next to the models it configures; every other OAuth account is not, and there is no fallback.
 All marked provider/model pairs are excluded from the default conversation picker, provider quick-default action, and Composer model menu. Other providers with the same model ID remain independent. Existing conversation bindings and history are preserved; a conversation still pinned to any image candidate must select a chat model before sending. Runtime launch rejects every marked image model before inference.
 
 ### Provider model removal
@@ -20,7 +20,7 @@ touched. If it was the active image default, clear the default, even when anothe
 runnable candidate remains on this or another provider. Cancel preserves
 both the provider models and the image settings. Legacy single bindings follow
 the same rule. Unchanged image selections retain the ordinary provider-save
-path. External provider changes can still leave an unavailable binding visible.
+path. External provider changes can still leave an unavailable binding visible until the next settings read or write, which drops a binding whose provider row is gone.
 The existing chat-default repair still runs if the saved provider no longer
 contains its selected chat model; otherwise the chat default is preserved.
 
@@ -96,6 +96,11 @@ path. A missing or unreadable preview has no download action; revealing a
 missing file reports an error. These actions do not move or overwrite the
 original scratch file.
 
+The renderer owns successful-result previews in the conversation. The bundled
+imagegen skill confirms generation in text and reports failures, but does not
+embed those same result paths as Markdown images; doing so duplicates the
+renderer preview.
+
 Each result records index, status (`succeeded`, `failed`, `cancelled`), successful
 path/MIME type or a safe error code. New files get unique names in session scratch;
 editing never overwrites its source. The tool result and transcript retain file
@@ -122,3 +127,24 @@ model/image HTTP fixtures: adjacent default settings, composer submission, batch
 previews, editing a generated file, collapsed results, and setup navigation.
 Live verification is opt-in via `scripts/test-image-generation-live.mjs`, limited
 to one generation plus one edit and never a default test command.
+
+## Pi 1.0.1 operation boundary
+
+Image generation and edits execute through account-scoped Pi `Models.generateImages`.
+Use native OpenRouter images or a registered compatible OpenAI-images adapter,
+with JSON generations and multipart edits preserved. Each prompt is one physical
+operation; no automatic retry may duplicate a billable image request. Batch
+workers preserve output order, propagate cancellation/timeouts, and bound download
+sizes and URL safety. Returned text, response ID and operation usage survive the
+artifact projection. Multiple images from one response count as one operation.
+
+A signed-in ChatGPT (Codex) account is the one OAuth candidate: its
+`gpt-image-2.5` and `gpt-image-2` models are offered next to the models a
+provider configures, even though the account's chat model list never carries
+them. Such a request goes to the
+vendor's Codex image routes (`{baseUrl}/codex/images/generations` and
+`.../images/edits`) with the account's own OAuth token, JSON on both routes and
+input images inline as data URLs. Every other OAuth account stays ineligible,
+and the adapter cannot fabricate entitlement or fall back to another account.
+The candidate disappears as soon as the account's credential is removed.
+Unknown pricing remains unknown. Images never route through the chat selector.

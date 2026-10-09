@@ -2,12 +2,11 @@ import { BrowserWindow, dialog, shell, type OpenDialogOptions } from "electron";
 import { dirname } from "node:path";
 import { homedir } from "node:os";
 import { existsSync, statSync } from "node:fs";
-import { realpath } from "node:fs/promises";
+import { realpath, stat } from "node:fs/promises";
 import { isAbsolute, join, resolve } from "node:path";
 import {
   ErrorCodes,
   IPC,
-  type ComposerCommand,
   type ComposerPasteFile,
   type FsChatRefProjectRoot,
   type FsChatRefResolveResult,
@@ -33,10 +32,10 @@ import {
   listDir,
   readOpenableFile,
   readOpenableImage,
-  resolveOpenablePath,
   resolveRealOpenablePath,
 } from "@pi-desktop/host-runtime";
-import { resolveChatFileRef } from "../chat-ref-resolve";
+import { openableMp4Path } from "../open-attachment-video";
+import { isChatRefOutsideRoots, resolveChatFileRef } from "../chat-ref-resolve";
 import { getWorkspaceFileIndex } from "../fs-index";
 import {
   projectFolderPaths,
@@ -49,6 +48,7 @@ import type { AgentSidecar } from "../agent-sidecar";
 import type { HostProcess } from "../host-process";
 import type { Logger } from "../logger";
 import type { ClipboardHistory } from "../clipboard-history";
+import { getModuleDirectory } from "../module-path";
 import type { PluginRuntime } from "../plugin-runtime";
 import type { IpcRegistrar } from "./types";
 
@@ -83,7 +83,6 @@ export type WorkspaceIpcDependencies = {
   plugins: PluginRuntime;
   browserHost: BrowserHost;
   clipboardHistory: ClipboardHistory;
-  logger: Pick<Logger, "app">;
   recordPastedClipboardFiles: (files: ComposerPasteFile[]) => void;
   currentWorkspacePath: () => string | null;
   setCurrentWorkspacePath: (path: string | null) => void;
@@ -101,7 +100,6 @@ export function registerWorkspaceIpc({
   plugins,
   browserHost,
   clipboardHistory,
-  logger,
   recordPastedClipboardFiles,
   currentWorkspacePath,
   setCurrentWorkspacePath,
@@ -207,7 +205,9 @@ export function registerWorkspaceIpc({
     const seed =
       process.env.PI_DESKTOP_SEED_WORKSPACE ||
       process.env.PI_DESKTOP_WORKSPACE ||
-      (isDevelopmentBuild ? join(__dirname, "../../..") : "");
+      (isDevelopmentBuild
+        ? join(getModuleDirectory(import.meta.url), "../../..")
+        : "");
     if (!res.workspace && seed) {
       try {
         res = (await host.call("workspace.set", { path: seed })) as {
@@ -873,10 +873,11 @@ export function registerWorkspaceIpc({
     return { ok: true };
   });
 
-  handle(IPC.invoke.fsOpen, async (input: { path?: string } = {}) => {
+  handle(IPC.invoke.fsOpen, async (input: { path?: string; mimeType?: string } = {}) => {
     const workspaceRoot = await optionalWorkspaceRoot();
-    const target = resolveOpenablePath(
-      String(input.path ?? ""),
+    const requested = String(input.path ?? "").trim();
+    const target = await resolveRealOpenablePath(
+      requested,
       workspaceRoot,
       await fsExtraRoots(workspaceRoot),
     );
@@ -885,7 +886,13 @@ export function registerWorkspaceIpc({
         errorCode: ErrorCodes.INVALID_ARGUMENT,
       });
     }
-    const openError = await shell.openPath(stripWinLongPrefix(target));
+    if (!(await stat(target)).isFile()) {
+      throw Object.assign(new Error("not a file"), {
+        errorCode: ErrorCodes.INVALID_ARGUMENT,
+      });
+    }
+    const openPath = await openableMp4Path(dataDir, target, input.mimeType);
+    const openError = await shell.openPath(stripWinLongPrefix(openPath));
     if (openError) throw new Error(openError);
     return { ok: true };
   });
@@ -912,13 +919,19 @@ export function registerWorkspaceIpc({
       const ref = String(input.ref ?? "").trim();
       if (!ref) return { match: null };
       const workspaceRoot = await optionalWorkspaceRoot();
-      return {
-        match: await resolveChatFileRef(ref, {
-          project: projectRootsFor(workspaceRoot),
-          scratch: await sessionScratchRoot(input.sessionId),
-          attachments: join(dataDir, "attachments"),
-        }),
+      const roots = {
+        project: projectRootsFor(workspaceRoot),
+        scratch: await sessionScratchRoot(input.sessionId),
+        // The read guards accept the whole scratch store, so an absolute image
+        // path from an earlier conversation completes instead of reporting a
+        // restriction; shorthands still search the session's own store alone.
+        containment: [{ kind: "scratch" as const, path: join(dataDir, "scratch") }],
+        attachments: join(dataDir, "attachments"),
       };
+      if (await isChatRefOutsideRoots(ref, roots)) {
+        return { match: null, reason: "outside-allowed-roots" };
+      }
+      return { match: await resolveChatFileRef(ref, roots) };
     },
   );
 

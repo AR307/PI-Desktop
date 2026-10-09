@@ -2,7 +2,9 @@ import { api } from "../../lib/api";
 import {
   activateWorkPanelTabState,
   browserPluginTab,
+  browserTabLabel,
   closeWorkPanelTabState,
+  createWorkPanelFileRequest,
   emptyWorkPanelContext,
   fileWorkPanelTab,
   newWorkPanelTab,
@@ -113,8 +115,13 @@ export function createWorkPanelSlice({
   | "setWorkPanelWidth"
   | "openFileInWorkPanel"
   | "openUrlInWorkPanel"
+  | "updateBrowserWorkPanelTab"
 > {
   let workPanelFileRequestSeq = 0;
+  const nextFileRequest = (tab?: WorkPanelTab): WorkPanelContext["fileRequest"] => {
+    if (!tab || tab.kind !== "file" || !tab.resource) return null;
+    return createWorkPanelFileRequest(tab, ++workPanelFileRequestSeq);
+  };
 
   return {
   openSubagentTab: (delegationId, agentName) => {
@@ -162,14 +169,7 @@ export function createWorkPanelSlice({
         },
         tab,
       );
-      const fileRequest =
-        tab.kind === "file" && tab.resource
-          ? {
-              path: tab.resource,
-              seq: ++workPanelFileRequestSeq,
-              ...(tab.mimeType ? { mimeType: tab.mimeType } : {}),
-            }
-          : context.fileRequest;
+      const fileRequest = nextFileRequest(tab) ?? context.fileRequest;
       const nextContext: WorkPanelContext = {
         open: true,
         tabs: next.tabs,
@@ -215,14 +215,7 @@ export function createWorkPanelSlice({
         tab,
       );
       const activeTab = next.tabs.find((item) => item.id === next.activeTabId);
-      const fileRequest =
-        activeTab?.kind === "file" && activeTab.resource
-          ? {
-              path: activeTab.resource,
-              seq: ++workPanelFileRequestSeq,
-              ...(activeTab.mimeType ? { mimeType: activeTab.mimeType } : {}),
-            }
-          : state.workPanelFileRequest;
+      const fileRequest = nextFileRequest(activeTab) ?? state.workPanelFileRequest;
       const nextContext: WorkPanelContext = {
         open: true,
         tabs: next.tabs,
@@ -253,14 +246,7 @@ export function createWorkPanelSlice({
         tabId,
       );
       const activeTab = next.tabs.find((tab) => tab.id === next.activeTabId);
-      const fileRequest =
-        activeTab?.kind === "file" && activeTab.resource
-          ? {
-              path: activeTab.resource,
-              seq: ++workPanelFileRequestSeq,
-              ...(activeTab.mimeType ? { mimeType: activeTab.mimeType } : {}),
-            }
-          : state.workPanelFileRequest;
+      const fileRequest = nextFileRequest(activeTab) ?? state.workPanelFileRequest;
       const nextContext: WorkPanelContext = {
         open: state.workPanelOpen,
         tabs: next.tabs,
@@ -308,6 +294,11 @@ export function createWorkPanelSlice({
     });
   },
   closeWorkPanelTab: (tabId) => {
+    const current = get();
+    if (current.activeSessionId && current.workPanelTabs.some((tab) => tab.id === tabId && tab.resource === "pi.browser/browser")) {
+      void api.pluginViewClose("pi.browser", "browser", { sessionId: current.activeSessionId, tabId })
+        .catch((error) => get().showToast(String(error), { variant: "error" }));
+    }
     set((state) => {
       const sessionId = state.activeSessionId;
       if (!sessionId) return {};
@@ -319,14 +310,7 @@ export function createWorkPanelSlice({
         tabId,
       );
       const activeTab = next.tabs.find((tab) => tab.id === next.activeTabId);
-      const fileRequest =
-        activeTab?.kind === "file" && activeTab.resource
-          ? {
-              path: activeTab.resource,
-              seq: ++workPanelFileRequestSeq,
-              ...(activeTab.mimeType ? { mimeType: activeTab.mimeType } : {}),
-            }
-          : state.workPanelFileRequest;
+      const fileRequest = nextFileRequest(activeTab) ?? state.workPanelFileRequest;
       const nextContext: WorkPanelContext = {
         // Closing the final tab leaves the panel open so the user can choose
         // another tool from the new-tab launcher instead of losing the dock.
@@ -373,8 +357,22 @@ export function createWorkPanelSlice({
     saveWorkPanelWidth(get().workPanelWidth);
   },
 
-  openFileInWorkPanel: (path, mimeType) => {
-    get().openWorkPanelTab(fileWorkPanelTab(path, mimeType));
+  openFileInWorkPanel: (path, mimeType, position) => {
+    get().openWorkPanelTab(fileWorkPanelTab(path, mimeType, position));
+  },
+  updateBrowserWorkPanelTab: (event) => {
+    const sessionId = event.sessionId;
+    if (!sessionId || !event.tabId || !event.url) return;
+    set((state) => {
+      const visible = state.activeSessionId === sessionId && !isSessionSelectionPending(sessionId);
+      const context = visible ? currentWorkPanelContext(state) : state.workPanelContexts[sessionId];
+      if (!context || !context.tabs.some((tab) => tab.id === event.tabId && tab.resource === "pi.browser/browser")) return {};
+      const tabs = context.tabs.map((tab) => tab.id === event.tabId
+        ? { ...tab, location: event.url, label: !event.isLoading && !event.loadError && event.title ? event.title : browserTabLabel(event.url) }
+        : tab);
+      return { ...(visible ? { workPanelTabs: tabs } : {}),
+        workPanelContexts: { ...state.workPanelContexts, [sessionId]: { ...context, tabs } } };
+    });
   },
   openUrlInWorkPanel: (url) => {
     const hasBrowser = get().pluginViews.some(

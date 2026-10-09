@@ -52,6 +52,26 @@ test("work panel replaces the context panel overlay", async () => {
   assert.doesNotMatch(appSource, /key\.toLowerCase\(\) === "j"/);
 });
 
+test("work panel code is preloaded on demand behind an accessible dock fallback", () => {
+  assert.match(
+    appSource,
+    /const loadWorkPanel = \(\) => import\("\.\.\/\.\.\/components\/workpanel\/WorkPanel"\)/,
+  );
+  assert.match(appSource, /const WorkPanel = lazy\(\(\) =>\s*loadWorkPanel\(\)/);
+  assert.match(
+    appSource,
+    /if \(!ready \|\| page !== "chat" \|\| !workPanelOpen\) return;[\s\S]*?loadWorkPanel\(\)\.catch/,
+  );
+  assert.match(
+    appSource,
+    /<Suspense[\s\S]*?className="work-panel work-panel-pending"[\s\S]*?role="status"[\s\S]*?aria-label=\{t\("app\.loadingView"\)\}[\s\S]*?<WorkPanel/,
+  );
+  assert.match(
+    appSource,
+    /className="work-panel work-panel-pending"[\s\S]*?"--work-panel-width": `\$\{pendingWorkPanelWidth\}px`/,
+  );
+});
+
 test("a viewport-fixed toggle is the sole pointer collapse control", () => {
   assert.match(appSource, /className="app-work-panel-toggle no-drag"/);
   assert.match(appSource, /aria-pressed=\{workPanelOpen \|\| presentedWorkPanelOpen\}/);
@@ -176,7 +196,7 @@ test("work panel uses the fixed-window internal dock", () => {
   // before unmounting, so MainChat reflows continuously in both directions.
   assert.match(
     appSource,
-    /<\/section>\s*\)\}\s*\{\(presentedWorkPanelOpen \|\| workPanelExiting\) && \(?\s*<WorkPanel/,
+    /<\/section>\s*\)\}\s*\{\(presentedWorkPanelOpen \|\| workPanelExiting\) && \(?\s*<Suspense[\s\S]*?<WorkPanel/,
   );
   assert.doesNotMatch(
     appSource,
@@ -451,15 +471,18 @@ test("work panel separator exposes internal panel width resizing", () => {
 });
 
 test("Electron enforces the responsive shell minimum", () => {
-  assert.match(mainSource, /const WINDOW_MIN_WIDTH = 1040/);
-  assert.match(mainSource, /const WINDOW_MIN_HEIGHT = 700/);
-  // The window creation clamps the minimum to fit the current work area, so
-  // the props are the clamped `initialMin*` values, both derived from
-  // `windowMin*` via `Math.min(windowMin*, restoreWorkArea.*)`.
+  assert.match(mainSource, /export const WINDOW_MIN_WIDTH = 800/);
+  assert.match(mainSource, /export const WINDOW_MIN_HEIGHT = 560/);
+  // The window creation clamps the minimum to fit the current work area
+  // (issues #544 / #1175), so the props are the clamped `initialMin*` values.
   assert.match(mainSource, /minWidth:\s*initialMinWidth/);
   assert.match(mainSource, /minHeight:\s*initialMinHeight/);
-  assert.match(mainSource, /initialMinWidth = Math\.min\(windowMinWidth/);
-  assert.match(mainSource, /initialMinHeight = Math\.min\(windowMinHeight/);
+  assert.match(
+    mainSource,
+    /\{ width: initialMinWidth, height: initialMinHeight \} =\s*clampMinimumSizeToWorkArea\(/,
+  );
+  // Every unconditional app-minimum reassertion goes through the same clamp.
+  assert.doesNotMatch(mainSource, /setMinimumSize\(windowMinWidth, windowMinHeight\);\n\s*\/\/ Prefer normal layer/);
 });
 
 test("built-in terminal is absent while the work panel keeps its other surfaces", () => {
@@ -503,9 +526,13 @@ test("work panel context is retained by session instead of cleared on selection"
 
 test("file preview request ids stay unique across session contexts", () => {
   assert.match(storeSource, /let workPanelFileRequestSeq = 0/);
+  assert.match(
+    storeSource,
+    /const nextFileRequest = \(tab\?: WorkPanelTab\)[\s\S]*?createWorkPanelFileRequest\(tab, \+\+workPanelFileRequestSeq\)/,
+  );
   assert.ok(
-    storeSource.match(/seq:\s*\+\+workPanelFileRequestSeq/g)?.length >= 3,
-    "open and activation paths must use the shared request sequence",
+    storeSource.match(/nextFileRequest\((?:tab|activeTab)\)/g)?.length === 4,
+    "open, replace, activation, and close paths must share the position-preserving request",
   );
   assert.doesNotMatch(storeSource, /seq:\s*\([^)]*fileRequest\?\.seq[^)]*\) \+ 1/);
 });

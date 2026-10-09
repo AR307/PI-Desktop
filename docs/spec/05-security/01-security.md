@@ -96,6 +96,13 @@ and byte size, and only then creates the `plan_approvals` record with
 structured title/question fields. Renderer and sidecar state cannot write or
 replace an artifact.
 
+Tools from user-configured MCP servers (`mcp_<serverId>_<tool>`) are never
+low-risk by default: host-core classifies them `medium` and ignores any risk
+level the MCP server declares for itself. `ask` and `accept-edits` require
+approval (an `allow-session` grant covers the same tool name for the rest of
+that session, in memory only), `auto` auto-allows, and Plan/Goal still deny
+them (D640, ADR `mcp-tool-approval-risk`).
+
 ## 4.1 Skill market egress
 
 The renderer does not fetch skill catalogs or SKILL.md documents. Electron
@@ -106,11 +113,13 @@ request will actually take. Before each hop the client asks the session that
 carries `net.fetch` for its own proxy decision (`Session.resolveProxy`): on a
 proxied route the hop is judged on its route rather than on a local address the
 app would never dial, so only the resolver-artifact class (`benchmark`, a TUN
-fake-IP) is tolerated there, while a direct or unreadable route keeps the full
-local classification and rejects loopback, RFC1918, ULA, link-local, mapped
-IPv6, and every other non-public class by default. The explicit `allowFakeIp`
-setting may additionally permit only the `benchmark` placeholder for a
-transparent router/TUN deployment. Install writes markdown only through
+fake-IP) is tolerated there. A direct route rejects non-public answers when
+none of the DNS results is acceptable; if a mixed answer contains an acceptable
+public address, Main pins the request to that address and never connects to the
+rejected result (ADR 0321). The explicit `allowFakeIp` setting may additionally
+permit only the `benchmark` placeholder for a transparent router/TUN deployment,
+and only an accepted address is pinned. ULA-only answers and every other
+non-public-only result remain blocked. Install writes markdown only through
 `skills.create`. The host document cap remains 128 KiB after sibling markdown
 is inlined.
 
@@ -236,15 +245,10 @@ claim availability or freshness against a malicious server.
 - The client carries no GitHub token. A private or otherwise unreachable feed
   fails closed; automatic failures stay ambient and explicit checks expose the
   error.
-- Unsigned macOS distributions keep a narrow first-launch fallback for trusted
-  sources. The DMG is a two-icon install and does not include that note. The ZIP
-  package includes a text note and the executable helper, which searches only
-  `/Applications/PI-Desktop.app` and `~/Applications/PI-Desktop.app`,
-  verifies `CFBundleIdentifier` is `net.aiuo.pi-desktop`, removes only
-  `com.apple.quarantine` recursively when present, and opens the app. It accepts
-  no arbitrary path, uses no privilege escalation, and is not a substitute for
-  Developer ID signing or notarization. The note gives the manual
-  `com.apple.quarantine` command and says signed/notarized builds do not need it.
+- Neither macOS DMG nor ZIP ships first-launch guidance or an executable
+  quarantine-clearing helper. GitHub tag artifacts remain Developer ID-signed,
+  notarized, and stapled; opt-in unsigned builds are debug artifacts and do not
+  imply Gatekeeper qualification.
 - Localized product "what's new" text (D164/D345) is selected in Main from the
   shipped changelog catalog and attached to `UpdateState.releaseNotes`. The
   renderer cannot supply a notes URL, feed, or remote body; missing catalog

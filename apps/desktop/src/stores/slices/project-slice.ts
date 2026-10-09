@@ -1,8 +1,5 @@
 import i18n from "i18next";
-import type {
-  ProjectWorkspace,
-  SessionSummary,
-} from "@pi-desktop/shared";
+import type { ProjectWorkspace } from "@pi-desktop/shared";
 import { api } from "../../lib/api";
 import {
   rememberProject,
@@ -30,9 +27,6 @@ import {
   sortSessions,
   normalizeProjectName,
   type ProjectMeta,
-  type ProjectSort,
-  type SessionMeta,
-  type SessionSort,
 } from "../../lib/sidebar-preferences";
 import {
   normalizeProjectPath,
@@ -44,7 +38,6 @@ import type { StoreAccess } from "./types";
 
 export type ProjectSliceDependencies = StoreAccess & {
   runtime: SessionRuntime;
-  manualSessionTitles: Set<string>;
   withoutRecordKey: <T>(record: Record<string, T>, key: string) => Record<string, T>;
   withProjectDisplayName: (
     workspace: ProjectWorkspace,
@@ -102,6 +95,28 @@ async function createNamedProjectGroup(
     ),
   ];
   const intent = runtime.beginNavigationIntent();
+  // Closing a project only removes it from the sidebar. Its host-owned group
+  // remains durable, so choosing that one folder again means reopen the group
+  // instead of trying to create a duplicate owner for the same path.
+  if (orderedFolders.length === 1) {
+    const { groups } = await api.listProjectGroups();
+    if (!runtime.navigationIntentIsCurrent(intent)) return;
+    const selectedPath = normalizeProjectPath(orderedFolders[0]);
+    const existing = groups.find((group) =>
+      group.roots.some((root) => normalizeProjectPath(root.path) === selectedPath),
+    );
+    if (existing) {
+      const existingPrimary = existing.primaryPath || orderedFolders[0];
+      const workspace = await get().activateProject(existingPrimary, {
+        navigationIntent: intent,
+      });
+      if (!workspace || !runtime.navigationIntentIsCurrent(intent)) return;
+      const onboarding = await api.getOnboarding();
+      if (!runtime.navigationIntentIsCurrent(intent)) return;
+      set({ createProjectDialogOpen: false, onboarding, page: "chat" });
+      return;
+    }
+  }
   const created = await api.createProjectGroup(normalizedName, orderedFolders);
   if (!runtime.navigationIntentIsCurrent(intent)) return;
   const groupPrimary = created.group.primaryPath || primary;
@@ -128,15 +143,13 @@ function clearLocalSessionState(
     get,
     set,
     runtime,
-    manualSessionTitles,
     withoutRecordKey,
   }: Pick<
     ProjectSliceDependencies,
-    "get" | "set" | "runtime" | "manualSessionTitles" | "withoutRecordKey"
+    "get" | "set" | "runtime" | "withoutRecordKey"
   >,
   id: string,
 ): void {
-  manualSessionTitles.delete(id);
   runtime.pendingSessionConfigurations.delete(id);
   runtime.sessionTranscriptCache.delete(id);
   runtime.sessionHistoryCache.delete(id);
@@ -203,7 +216,6 @@ export function createProjectSlice({
   get,
   set,
   runtime,
-  manualSessionTitles,
   withoutRecordKey,
   withProjectDisplayName,
   promoteProjectPath,
@@ -430,7 +442,7 @@ export function createProjectSlice({
       await api.removeProject(path);
       for (const id of removedSessionIds) {
         clearLocalSessionState(
-          { get, set, runtime, manualSessionTitles, withoutRecordKey },
+          { get, set, runtime, withoutRecordKey },
           id,
         );
       }
@@ -518,14 +530,9 @@ export function createProjectSlice({
       if (!id) return;
       const nextTitle = title.trim();
       if (!nextTitle) throw new Error(i18n.t("errors.sessionTitleEmpty"));
-      manualSessionTitles.add(id);
       const result = await api.renameSession(id, nextTitle);
       if (!result.ok) throw new Error(i18n.t("errors.sessionNotFound"));
       set((state) => ({
-        sessionMeta: {
-          ...state.sessionMeta,
-          [id]: { ...(state.sessionMeta[id] || {}), manualTitle: true },
-        },
         sessions: state.sessions.map((session) =>
           session.id === id ? { ...session, title: nextTitle } : session,
         ),
@@ -559,10 +566,9 @@ export function createProjectSlice({
     deleteSession: async (id) => {
       if (!id) return;
       await api.deleteSession(id);
-      clearLocalSessionState(
-        { get, set, runtime, manualSessionTitles, withoutRecordKey },
-        id,
-      );
+      void api.pluginViewClose("pi.browser", "browser", { sessionId: id })
+        .catch((error) => get().showToast(String(error), { variant: "error" }));
+      clearLocalSessionState({ get, set, runtime, withoutRecordKey }, id);
       persistCurrentSidebar(get);
       await get().refreshSessions();
     },

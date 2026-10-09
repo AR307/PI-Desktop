@@ -18,6 +18,7 @@ const [dialog, editDialog, store, api, protocol, main, styles] = await Promise.a
 
 test("create project dialog supports named multi-folder setup", () => {
   assert.match(dialog, /role="dialog"/);
+  assert.match(dialog, /useBlockingOverlay\(\)/);
   assert.doesNotMatch(dialog, /project\.createNamePlaceholder/);
   assert.match(dialog, /api\.pickProjectFolders\(\)/);
   assert.match(dialog, /result\.folders/);
@@ -67,6 +68,10 @@ test("project creation creates one logical group with a primary workspace", () =
   assert.match(store, /createProjectFromFolders: async \(\{ name, folders, primaryPath \}\)/);
   assert.match(store, /const orderedFolders = \[/);
   assert.match(store, /api\.createProjectGroup\(normalizedName, orderedFolders\)/);
+  assert.match(store, /const \{ groups \} = await api\.listProjectGroups\(\)/);
+  assert.match(store, /group\.roots\.some\(\(root\) => normalizeProjectPath\(root\.path\) === selectedPath\)/);
+  assert.match(store, /const existingPrimary = existing\.primaryPath \|\| orderedFolders\[0\]/);
+  assert.match(store, /get\(\)\.activateProject\(existingPrimary/);
   assert.match(store, /created\.group\.primaryPath/);
   assert.doesNotMatch(store, /for \(const path of orderedFolders\)/);
   assert.match(store, /get\(\)\.renameProject\(groupPrimary, normalizedName\)/);

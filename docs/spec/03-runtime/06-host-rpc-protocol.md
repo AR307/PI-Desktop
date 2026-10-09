@@ -53,9 +53,14 @@ Permission prompts do not consume an execution slot. A full queue returns
 `HOST_OVERLOADED` with retryable semantics in the tool result instead of
 waiting indefinitely or spawning more work. The limits are host-owned so
 Electron and the sidecar cannot independently over-admit the same resources.
-The per-session mutation permit is acquired before the global mutation slot;
-queued `Write`/`Edit` calls therefore do not hold global capacity while waiting
-for an earlier mutation in the same session.
+Admission reserves total, tool-class, session, and session-mutation capacity
+atomically. A queued call holds no execution capacity. When capacity returns,
+the oldest runnable request is admitted; a request blocked by one class or
+session does not block unrelated runnable work. Calls wait at most 30 seconds.
+Dropping a waiting admission future or letting it time out removes its queue
+entry and releases any reservation made before the caller receives its permit. The health counters report only
+fully admitted reservations, including those awaiting delivery to the caller;
+`queued` counts only requests still waiting for capacity.
 
 Electron's `HostProcess` treats an explicit `HOST_OVERLOADED` response as
 retryable backpressure for renderer-facing calls. It waits 50, 100, 200, and
@@ -166,12 +171,14 @@ Rules:
    advertises `"a2a"`. A v10 host or client is rejected before the UI becomes
    interactive, so a mixed pair cannot call a missing domain.
 
-Protocol v11 is paired with host-core storage schema v16. Schema v12 had added
+Protocol v11 is paired with host-core storage schema v23. Schema v12 had added
 the A2A tables (`a2a_tasks`, `a2a_messages`, `a2a_artifacts`,
 `a2a_push_configs`) via `migrate_v11_to_v12`; `migrate_v12_to_v13` drops those
 tables, and v14 adds the plugin-session ownership sidecar and soft-delete
 column. Schema v15 adds the Host-owned turn queue, and schema v16 adds the
-session collaboration ledger and its turn-queue binding. A fresh database
+session collaboration ledger and its turn-queue binding. Schema v23 adds
+`sessions.title_source` to preserve default, manual, and plugin-generated title
+ownership. A fresh database
 creates neither A2A tables nor unowned plugin-session rows. The schema version is an
 internal persistence invariant, not an additional JSON-RPC field; the
 checkpoint architecture remains host-owned.
@@ -217,10 +224,13 @@ type ToolBudgetHealth = {
   every session attached to it, removing those sessions' transcript, scratch,
   and review files and the project's durable memory, and never touching the
   project folder on disk. Idempotent: an unknown path returns
-  `{ removed: false, sessionsRemoved: 0 }`. A path that is a root of a stored
-  multi-folder project group is refused so the group keeps a valid primary root,
-  and the call is refused (1008 / `CONFLICT`) while any attached session has a
-  running turn, so a live turn never loses the transcript it is writing.
+  `{ removed: false, sessionsRemoved: 0 }`. If the path belongs to a stored
+  project group, deletion detaches that root in the same flow; deleting the
+  primary promotes the first remaining root, and deleting the last root also
+  removes the group record. The call is refused (1008 / `CONFLICT`) while any
+  attached session has a running turn, before changing group membership, so a
+  live turn never loses the transcript it is writing and a rejected delete
+  leaves the project group unchanged.
 - `project.memory.get({ path })` — returns the durable memory for the canonical
   project path, or an empty record when no memory has been saved
 - `project.memory.set({ path, entries })` — normalizes and stores visual memory
@@ -323,8 +333,15 @@ to later refresh and inference; the vendor picker does not collect them.
 - `session.rename({ id, title })` trims and validates the title at the host
   boundary. It accepts 1–80 Unicode code points and returns `{ ok: boolean }`;
   blank or overlong titles are `INVALID_PARAMS`. A successful rename changes
-  only session metadata and does not update `updated_at`, transcript content,
-  message count, or historical notification title snapshots.
+  title metadata and marks the title source `manual`; it does not update
+  `updated_at`, transcript content, message count, or historical notification
+  title snapshots.
+- `session.deriveTitle({ id, title })` applies the deterministic first-prompt
+  fallback and returns `{ updated: boolean }`. It validates the title with the
+  same 1–80 code-point rule, then writes only when the stored title is still a
+  recognized placeholder whose title source is `default`. The write keeps that
+  source so a title plugin can still replace the derived text, and it does not
+  update `updated_at`, transcript content, or message count.
 - `session.configure` — atomically persists `mode`, `providerId`, `modelId`,
   and optional `thinkingLevel` (`off|minimal|low|medium|high|xhigh|max|omit`)
   for the next pi turn; omitting/null
@@ -439,6 +456,11 @@ Electron main after plugin permission and manifest-source checks:
 - `plugin.session.importBatch` — bounded `skip` or all-or-nothing `fail` batch
 - `plugin.session.list` / `plugin.session.get` / `plugin.session.listMessages` —
   read only the calling plugin's active imported sessions
+- `plugin.session.autoTitleContext` — under Electron's `session.autoTitle`
+  permission, return only the first user prompt (≤1,000 characters) and first
+  assistant reply (≤500 characters) for an active `default`-titled session
+- `plugin.session.setAutoTitle` — validate a title and update only when the
+  expected title and `default` source still match; returns `{ updated }`
 - `plugin.session.rename` — rename an owned active imported session
 - `plugin.session.delete` — `trash` hides and retains the transcript; `purge`
   removes it and permits re-import
@@ -488,6 +510,28 @@ The host rejects unknown roles, non-RFC3339 or non-monotonic timestamps, and
 oversized/deep payloads. Tool values are sanitized for host-reserved keys. The
 per-plugin rolling limits are 10 single imports, 5 batch imports, and 20
 deletes per 60 seconds. P2/P3 methods are not present in protocol v11.
+
+### Session Todo checklist
+
+- `todos.get({ sessionId })` returns the committed checklist snapshot for a live
+  Desktop session: `{ sessionId, todos, revision, updatedAt }`. Unknown or
+  soft-deleted sessions return `NOT_FOUND`; native Pi sessions and blank ids are
+  rejected as `INVALID_ARGUMENT`.
+- `tools.execute` with `toolName: "TodoWrite"` accepts only `{ todos }` and
+  replaces the complete ordered checklist. The host trims content, defaults
+  priority to `medium`, truncates overlong Unicode content at 500 characters
+  with a warning, demotes later `in_progress` items to `pending`, and rejects
+  more than 50 items or malformed values. The owner session and running turn
+  come from the trusted transport fields, never from tool arguments.
+- TodoWrite is allowed only for an Agent session's own running turn. Plan/Goal,
+  delegated, plugin, and MCP calls receive a tool result error and do not mutate
+  storage. A successful replacement advances the session revision even when
+  `todos` is empty and emits `todos.changed` after the transaction commits.
+  The event payload is the same complete snapshot returned by `todos.get`.
+- SQLite ownership is host-core only. The renderer receives snapshots through
+  Electron Main IPC, keeps them by session id, and ignores revisions older than
+  or equal to the cached revision. Remote RACP sessions are local-only for this
+  vertical slice because RACP v1 has no Todo snapshot operation.
 
 ### Stats
 
@@ -567,6 +611,12 @@ Tool execution starts only after admission. Shell spawn retries transient
 resource exhaustion (`EAGAIN` / `WouldBlock`) with bounded backoff, never
 retries a command after it has started, and reaps timed-out children before
 releasing the execution slot.
+Admitted `Read`, `Glob`, `Grep`, `Write`, and `Edit` calls run their
+synchronous filesystem work, including the `rg` child wait, on Tokio's blocking
+pool rather than on an async worker, so a long traversal cannot delay unrelated
+RPCs. The read and mutation class limits above also bound those blocking
+threads. Results and error codes are unchanged; a blocking task that panics
+returns `INTERNAL` instead of dropping the response.
 
 `session.appendMessage` is idempotent by message id. An id already indexed in
 another session is remapped to `{sessionId}:{id}` before the JSONL write, and
@@ -799,7 +849,7 @@ Authoritative mode and workspace resolution are session-scoped:
 For `Read`/`Glob`/`Grep`/`Write`/`Edit`, the host classifies an explicit path
 outside the workspace and scratch roots before the low-risk auto-allow rule.
 `auto` executes it, while `ask` and `accept-edits` emit
-`permissions.request`; denial, timeout, or cancellation returns `TOOL_DENIED`
+`permissions.request`; denial or cancellation returns `TOOL_DENIED`
 without executing the operation. Relative `..` and symlink escapes use the
 same classification. Bash's working directory and implicit recursive walks do
 not inherit this exception.
@@ -1061,7 +1111,6 @@ params: {
   risk: "low" | "medium" | "high"
   argsPreview: unknown
   reason: string
-  timeoutMs: 120000
 }
 ```
 
@@ -1075,14 +1124,16 @@ params: {
 }
 ```
 
-Timeout behavior (**D005**): after 120s unresolved → deny.
+Local permission behavior (**D636 / ADR 0310**): an unresolved request remains
+pending until an explicit decision, cancellation, or host/process shutdown.
+The transport does not apply a deadline to `tools.execute`; tool-specific
+execution budgets still apply after approval.
 
 `permissions.pending` returns the open requests as Host state (D374/D375):
 `{ requests: PendingPermission[] }`, oldest first, optionally scoped by
 `sessionId`. Each entry carries the same fields as the `permissions.request`
-notification plus `createdAt`, `expiresAt`, and `remainingMs`. Requests past
-the timeout are omitted. A client that attaches after the notification was
-emitted reads this list and answers through the unchanged
+notification plus `createdAt`. Requests remain listed until settled. A client
+that attaches after the notification was emitted reads this list and answers through the unchanged
 `permissions.resolve`; the notification path itself does not change.
 
 ## 7. Error codes
@@ -1173,7 +1224,7 @@ Tool outcomes (`TOOL_DENIED`, `TOOL_TIMEOUT`, `PATH_OUTSIDE_WORKSPACE`,
 1. Electron spawns host and completes handshake
 2. health method returns ok
 3. denied tool path returns `TOOL_DENIED`
-4. timeout path returns deny decision after 120s
+4. an unresolved permission remains pending until an explicit decision or cancellation
 5. switching the selected workspace from A to B does not change the tool root
    of a call issued by session A
 6. Protocol v4 `session.endTurn` creates/returns exactly one notification for

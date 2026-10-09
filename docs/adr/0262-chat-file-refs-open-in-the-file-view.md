@@ -48,13 +48,22 @@ work-panel tab already carries was honoured by main for `pi.browser` only.
    - a reference that matches nothing opens **nothing** and reports itself. No
      empty panel, no blank browser page.
 2. **The destination follows where the reference resolved.** A project file
-   opens in the `pi.file-manager` view. A file in the session scratch or
-   attachment store opens in the host `file:` tab, because it lives outside that
-   view's project root — see point 4. A workspace `.html` / `.htm` file still
-   opens in the side browser (ADR 0163), for an agent reply and a user chip
-   alike: it is a page to run, not a file to read. When the file view is not
-   loaded, a project file falls back to the host `file:` tab, so the click never
-   regresses to nothing.
+   opens in the `pi.file-manager` view, except a `path:line` reference, which
+   opens in the host's read-only `file:` tab so the requested source line can
+   be brought into view. The bundled view accepts opaque path locations and has
+   no line-navigation contract; this keeps the path unchanged and uses the
+   host viewer's existing scroll support. A file in the session scratch or
+   attachment store opens in the
+   host `file:` tab, because it lives outside that view's project root — see
+   point 4. A workspace `.html` / `.htm` file still opens in the side browser
+   (ADR 0163), for an agent reply and a user chip alike: it is a page to run,
+   not a file to read. A direct user click on a project file actively ensures
+   the bundled file view is running: an off plugin is enabled, and an enabled
+   plugin with no contributed view is reloaded before the tab opens. This click
+   is explicit intent to use the bundled view. The host does not restore a
+   missing `ui.view` grant or widen project scope; if either boundary excludes
+   the current project, or the plugin still cannot start, the host `file:` tab
+   opens with a notice.
 3. **A contributed view's `location` stops being browser-only.** It travels as
    the view entry URL's `piViewOpen` query parameter on creation — the only
    channel that cannot race a document that has not run yet — and as the
@@ -86,9 +95,13 @@ work-panel tab already carries was honoured by main for `pi.browser` only.
   distinguishable.
 - The transcript's file surface is the same editable view the launcher offers,
   so "show me that file" and "let me change it" are one surface.
-- The host now depends on a plugin version for a chat affordance. The fallback
-  in point 2 bounds that dependency: an absent, disabled or older view degrades
-  to the surface the click used before.
+- The host now depends on a plugin version for a chat affordance. A direct
+  project-file click starts or retries the bundled view before falling back;
+  missing permissions, an out-of-scope project, or a failed load still degrades
+  to the host `file:` tab and reports that the File Manager could not start.
+- A direct project-file click can re-enable the bundled plugin, because the
+  click is an explicit request to use it. The plugin's recorded permission
+  grants and project scope remain unchanged.
 - The file view is no longer confined to the project root whenever, and only
   when, the host asks it for a path the host itself picked. A defect in that
   path handling is not caught by the host gateway; that is the same trust

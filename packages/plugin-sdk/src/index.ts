@@ -8,7 +8,6 @@ import {
 import { validateMcpServer } from "./mcp-config.js";
 import { parseNetDomains, type PluginNetDomain } from "./net-policy.js";
 import {
-  isExternalThemeAssetPath,
   isThemeAssetPath,
   normalizeThemeAssetPath,
   THEME_ASSET_EXTENSIONS,
@@ -61,6 +60,27 @@ export type PluginManifest = {
   author?: PluginManifestAuthor;
   homepage?: string;
   repository?: string;
+  /**
+   * Renderer entry (ES module path relative to the plugin root). Declaring it
+   * requires the `renderer.extension` permission; the module loads into the
+   * host renderer and registers UI slot components through `pi.slots`.
+   */
+  renderer?: string;
+  /**
+   * Outbound actions the renderer components may dispatch
+   * (`PLUGIN_RENDERER_ACTIONS`). Declaring fewer is safe; an action outside
+   * this list is refused with `PLUGIN_ACTION_UNDECLARED`. A word this host does
+   * not implement still installs, so a manifest written for a newer host
+   * loads, and is refused at dispatch with `PLUGIN_ACTION_UNKNOWN`. Requires
+   * `renderer.extension`.
+   */
+  rendererActions?: string[];
+  /**
+   * Methods the plugin's `onRendererCall` answers for `plugin.call`.
+   * Whitelist: an undeclared method is refused with `PLUGIN_CALL_NO_HANDLER`.
+   * Requires `renderer.extension`.
+   */
+  rendererCallMethods?: string[];
   main: string;
   icon?: string;
   /**
@@ -121,7 +141,10 @@ export type PluginManifest = {
     /**
      * Providers this plugin adds to Settings' provider list. Requires the
      * `provider.register` permission; each row is read-only for the user and
-     * refreshed from this manifest on every load.
+     * refreshed from this manifest on every load. API-key providers are also
+     * offered in the Add Service chooser until the user stores a key. An
+     * optional category groups those chooser entries; it is display metadata
+     * and may be localized.
      */
     providers?: PluginProviderContrib[];
     settings?: PluginSettingContrib[];
@@ -143,6 +166,8 @@ export type PluginManifest = {
      * host registers, conflict-checks, and releases it with the plugin.
      */
     globalShortcuts?: PluginGlobalShortcutContrib[];
+    /** User-invoked text actions beside the Composer controls. */
+    composerTransforms?: PluginComposerTransformContrib[];
   };
   permissions?: string[];
   /**
@@ -175,6 +200,20 @@ export type PluginLocalizedString = {
 export type PluginSessionSourceContrib = {
   id: string;
   label?: string | PluginLocalizedString;
+};
+
+/** A user-invoked transformation of the current Composer text. */
+export type PluginComposerTransformContrib = {
+  id: string;
+  title: string | PluginLocalizedString;
+  undoTitle?: string | PluginLocalizedString;
+};
+
+/** Input excludes conversation history, attachments, and file paths. */
+export type PluginComposerTransformInput = {
+  id: string;
+  text: string;
+  modelKey?: string;
 };
 
 export type PluginSessionMessage =
@@ -278,6 +317,15 @@ export type PluginSessionGetResult = {
   messageCount: number;
   createdAt: string;
   updatedAt: string;
+};
+
+/** Bounded first-turn data for an eligible default-titled session, never a full transcript. */
+export type PluginAutoTitleContext = {
+  sessionId: string;
+  expectedTitle: string;
+  userPrompt: string;
+  assistantReply?: string;
+  modelKey?: string;
 };
 
 /**
@@ -446,17 +494,63 @@ export const PLUGIN_PROVIDER_API_STYLES = [
 export type PluginProviderApiStyle = (typeof PLUGIN_PROVIDER_API_STYLES)[number];
 
 /**
- * Credential a contributed provider accepts. Absent means `api_key`. `oauth`
- * is deliberately absent: a plugin OAuth provider needs a Host-owned login
- * flow that does not exist yet, so a declaration asking for one is refused
- * instead of materializing a row nobody can sign in to.
+ * Credential a contributed provider accepts. Absent means `api_key`.
  */
-export const PLUGIN_PROVIDER_AUTH_KINDS = ["api_key", "none"] as const;
+export const PLUGIN_PROVIDER_AUTH_KINDS = ["api_key", "none", "oauth"] as const;
 
 export type PluginProviderAuthKind = (typeof PLUGIN_PROVIDER_AUTH_KINDS)[number];
 
-/** Upper bound on `contributes.providers` entries one plugin may declare. */
-export const MAX_PLUGIN_PROVIDERS_PER_PLUGIN = 8;
+/** Host-rendered sign-in metadata for an OAuth provider contribution. */
+export type PluginProviderOAuthContrib = {
+  loginLabel?: string;
+  isSubscription?: boolean;
+};
+
+/** Secret state stored encrypted by the Host and passed only to the plugin callback. */
+export type PluginProviderOAuthCredential = {
+  accessToken: string;
+  refreshToken?: string;
+  /** Unix epoch milliseconds. Omit when the access token does not expire. */
+  expiresAt?: number;
+  accountLabel?: string;
+  headers?: Record<string, string>;
+};
+
+export type PluginProviderOAuthPrompt = {
+  type: "text" | "secret" | "select" | "manual_code";
+  message: string;
+  placeholder?: string;
+  options?: Array<{ id: string; label: string; description?: string }>;
+};
+
+/** Non-secret progress the Host may show during a plugin-owned OAuth flow. */
+export type PluginProviderOAuthEvent =
+  | { kind: "info"; message: string; links?: Array<{ url: string; label?: string }> }
+  | { kind: "authUrl"; url: string; instructions?: string }
+  | {
+      kind: "deviceCode";
+      userCode: string;
+      verificationUri: string;
+      intervalSeconds?: number;
+      expiresInSeconds?: number;
+    }
+  | { kind: "progress"; message: string };
+
+export type PluginProviderOAuthRequest = {
+  operation: "login" | "refresh";
+  /** Plugin-local provider contribution id. */
+  providerId: string;
+  /** Present during login; use it for Host-rendered prompts and progress. */
+  loginId?: string;
+  /** Present during refresh; never sent to the renderer or Agent Runtime. */
+  credential?: PluginProviderOAuthCredential;
+};
+
+/** Runtime context for a provider OAuth callback. */
+export type PluginProviderOAuthContext = {
+  /** Aborted when the user cancels sign-in, the plugin unloads, or the call times out. */
+  signal: AbortSignal;
+};
 
 /** Upper bound on the model list of one contributed provider. */
 export const MAX_PLUGIN_PROVIDER_MODELS = 64;
@@ -487,23 +581,29 @@ export type PluginProviderModelContrib = {
 };
 
 /**
- * One provider a plugin adds to Settings' provider list. The plugin supplies
- * the endpoint and model catalog; the user's API key stays in the host and is
- * never handed to the plugin. The row appears as `plugin:<pluginId>:<id>` and
- * is read-only in Settings.
+ * One provider a plugin adds to Settings' provider list. The row appears as
+ * `plugin:<pluginId>:<id>` and is read-only in Settings. API-key credentials
+ * stay in the Host; OAuth callbacks can access only this provider's own OAuth
+ * credential under the `provider.oauth` permission.
  */
 export type PluginProviderContrib = {
   /** Plugin-local id matching [a-zA-Z][a-zA-Z0-9_-]{0,63}, unique per plugin. */
   id: string;
   /** Display name for the provider row; required and non-empty. */
   name: string;
+  /** Optional Add Service chooser group; defaults to the plugin name. */
+  category?: string | PluginLocalizedString;
+  /** Optional short introduction shown on hover/focus in Add Service. */
+  description?: string | PluginLocalizedString;
   /** Vendor the row is attributed to; `custom` when omitted. */
   vendorKey?: string;
   /** Endpoint the runtime reaches; must be an absolute http(s) URL. */
   baseUrl?: string;
   apiStyle?: PluginProviderApiStyle;
   authKind?: PluginProviderAuthKind;
-  /** 1..64 models with unique ids. */
+  /** OAuth sign-in metadata; valid only when `authKind` is `oauth`. */
+  oauth?: PluginProviderOAuthContrib;
+  /** Up to 64 models with unique ids. An empty list enables endpoint discovery after key setup. */
   models: PluginProviderModelContrib[];
 };
 
@@ -515,7 +615,11 @@ export type PluginProviderContrib = {
 export type PluginWindowAppearanceContrib = {
   /** `#rrggbb` or `#rrggbbaa`, applied per resolved palette. */
   backgroundColor?: { light?: string; dark?: string };
+  /** Windows main-window radius in DIP. Applies while a contributed theme is selected. */
+  cornerRadius?: number;
 };
+
+export const MAX_WINDOW_CORNER_RADIUS = 24;
 
 /** The only colour form a contributed window background may take. */
 export const WINDOW_BACKGROUND_COLOR_PATTERN = /^#[0-9a-fA-F]{6}([0-9a-fA-F]{2})?$/;
@@ -1038,6 +1142,13 @@ export type PluginHostApi = {
   project: {
     create: (input: { path: string }) => Promise<PluginProjectRecord>;
   };
+  /** Host-rendered interaction surface for a declared OAuth provider. */
+  providers: {
+    oauth: {
+      prompt: (loginId: string, input: PluginProviderOAuthPrompt) => Promise<string>;
+      notify: (loginId: string, event: PluginProviderOAuthEvent) => Promise<void>;
+    };
+  };
   workspace: {
     get: () => Promise<{ path: string; name: string } | null>;
   };
@@ -1130,6 +1241,12 @@ export type PluginHostApi = {
   };
   session: {
     getLlmContext: () => Promise<PluginLlmContext>;
+    getAutoTitleContext: (input: { sessionId: string }) => Promise<PluginAutoTitleContext | null>;
+    setAutoTitle: (input: {
+      sessionId: string;
+      expectedTitle: string;
+      title: string;
+    }) => Promise<{ updated: boolean }>;
     list: (input?: {
       limit?: number;
       cursor?: string;
@@ -1246,8 +1363,23 @@ export type PluginHostApi = {
 export type PluginModule = {
   onLoad?: () => Promise<void> | void;
   onUnload?: () => Promise<void> | void;
+  /** Performs OAuth login or refresh for one `contributes.providers` entry. */
+  onProviderOAuth?: (
+    request: PluginProviderOAuthRequest,
+    context: PluginProviderOAuthContext,
+  ) => Promise<PluginProviderOAuthCredential> | PluginProviderOAuthCredential;
   /** Optional fixed-channel operations for an isolated plugin panel. */
   onPanelInvoke?: (channel: string, payload: unknown) => Promise<unknown> | unknown;
+  /**
+   * Answers the renderer entry's `plugin.call` for a method listed in
+   * `manifest.rendererCallMethods`. `args` defaults to `{}`; the answer must
+   * be JSON. Throw an `Error` with a `code` to hand that code to the caller.
+   */
+  onRendererCall?: (method: string, args: unknown) => Promise<unknown> | unknown;
+  /** Handle one explicitly invoked Composer text action. */
+  onComposerTransform?: (
+    input: PluginComposerTransformInput,
+  ) => Promise<string> | string;
 };
 
 /** Upper bound on ExtensionAPI modules one plugin may contribute. */
@@ -1271,8 +1403,14 @@ export const PLUGIN_PERMISSIONS = [
   "agent.tool.register",
   "agent.prompt.inject",
   "agent.complete",
+  "composer.transform",
   "agent.extension",
+  // Renderer slots (`docs/plugin-plan/ui/`): the entry module loads into the
+  // host renderer's own document, so the surface it can touch is the
+  // renderer itself. One umbrella permission, like `agent.extension`.
+  "renderer.extension",
   "provider.register",
+  "provider.oauth",
   "desktop.control",
   "models.list",
   "project.create",
@@ -1281,10 +1419,15 @@ export const PLUGIN_PERMISSIONS = [
   "session.read.own",
   "session.update.own",
   "session.delete.own",
+  "session.autoTitle",
   // Read-only usage facts (pi.usage.listTurns):
   // completed-turn counters and session titles, never message bodies.
   "usage.read",
+  // Install-time escape hatch from the net.domains allowlist (issue #1201):
+  // user-typed endpoints, e.g. a self-hosted server, that no manifest written
+  // ahead of time can name. Enforced by net-policy's grant-aware checks.
   "net.fetch",
+  "net.anyHost",
   "shell.openExternal",
   "mcp.server.local",
   "mcp.server.remote",
@@ -1326,6 +1469,8 @@ export function validateManifest(raw: unknown): {
   }
   const mainError = relativePathError(m.main, "manifest.main");
   if (mainError) return { ok: false, error: mainError };
+  const rendererError = manifestRendererError(m);
+  if (rendererError) return { ok: false, error: rendererError };
   if (typeof m.schemaVersion !== "number") {
     return { ok: false, error: "manifest.schemaVersion is required" };
   }
@@ -1392,6 +1537,13 @@ export function validateManifest(raw: unknown): {
   }
   if (
     !contributesError &&
+    (m.contributes?.providers ?? []).some((provider) => provider?.authKind === "oauth") &&
+    !(m.permissions ?? []).includes("provider.oauth")
+  ) {
+    return { ok: false, error: "OAuth providers require the provider.oauth permission" };
+  }
+  if (
+    !contributesError &&
     m.contributes?.windowAppearance !== undefined &&
     !(m.permissions ?? []).includes("ui.window.appearance")
   ) {
@@ -1408,6 +1560,16 @@ export function validateManifest(raw: unknown): {
     return {
       ok: false,
       error: "contributes.globalShortcuts requires the keyboard.globalShortcut permission",
+    };
+  }
+  if (
+    !contributesError &&
+    (m.contributes?.composerTransforms?.length ?? 0) > 0 &&
+    !(m.permissions ?? []).includes("composer.transform")
+  ) {
+    return {
+      ok: false,
+      error: "contributes.composerTransforms requires the composer.transform permission",
     };
   }
   if (contributesError) {
@@ -1503,6 +1665,45 @@ export function validateContributions(
       return `global shortcut "${shortcut.id}" has an invalid default`;
     }
   }
+  const composerTransforms = contributes.composerTransforms ?? [];
+  if (!Array.isArray(composerTransforms)) {
+    return "contributes.composerTransforms must be an array";
+  }
+  const transformIds = new Set<string>();
+  for (const transform of composerTransforms) {
+    if (!transform || typeof transform !== "object" || Array.isArray(transform)) {
+      return "contributes.composerTransforms entries must be objects";
+    }
+    if (
+      typeof transform.id !== "string" ||
+      !/^[a-zA-Z][a-zA-Z0-9_-]{0,63}$/.test(transform.id)
+    ) {
+      return "composer transform id is missing or invalid";
+    }
+    if (transformIds.has(transform.id)) {
+      return `duplicate composer transform id "${transform.id}"`;
+    }
+    transformIds.add(transform.id);
+    if (transform.title === undefined) {
+      return `composer transform "${transform.id}" requires a title`;
+    }
+    const titleError = localizedStringError(
+      transform.title,
+      `composer transform "${transform.id}" title`,
+    );
+    if (titleError) return titleError;
+    if (typeof transform.title === "string" && !transform.title.trim()) {
+      return `composer transform "${transform.id}" title must not be empty`;
+    }
+    const undoTitleError = localizedStringError(
+      transform.undoTitle,
+      `composer transform "${transform.id}" undoTitle`,
+    );
+    if (undoTitleError) return undoTitleError;
+    if (typeof transform.undoTitle === "string" && !transform.undoTitle.trim()) {
+      return `composer transform "${transform.id}" undoTitle must not be empty`;
+    }
+  }
   for (const setting of settings) {
     if (!setting || typeof setting !== "object") {
       return "contributes.settings entries must be objects";
@@ -1591,9 +1792,6 @@ export function validateContributions(
 
   const declaredProviders = contributes.providers ?? [];
   if (!Array.isArray(declaredProviders)) return "contributes.providers must be an array";
-  if (declaredProviders.length > MAX_PLUGIN_PROVIDERS_PER_PLUGIN) {
-    return `contributes.providers allows at most ${MAX_PLUGIN_PROVIDERS_PER_PLUGIN} entries`;
-  }
   const providerIds = new Set<string>();
   for (const provider of declaredProviders) {
     if (!provider || typeof provider !== "object" || Array.isArray(provider)) {
@@ -1608,6 +1806,44 @@ export function validateContributions(
     providerIds.add(provider.id);
     if (typeof provider.name !== "string" || !provider.name.trim()) {
       return `provider "${provider.id}" requires a name`;
+    }
+    const categoryError = localizedStringError(
+      provider.category,
+      `provider "${provider.id}" category`,
+    );
+    if (categoryError) return categoryError;
+    if (typeof provider.category === "string") {
+      if (!provider.category.trim()) {
+        return `provider "${provider.id}" category must not be empty`;
+      }
+      if (provider.category.length > 128) {
+        return `provider "${provider.id}" category must be at most 128 characters`;
+      }
+    } else if (provider.category) {
+      for (const locale of ["en", "zh-CN"] as const) {
+        if (provider.category[locale].length > 128) {
+          return `provider "${provider.id}" category.${locale} must be at most 128 characters`;
+        }
+      }
+    }
+    const descriptionError = localizedStringError(
+      provider.description,
+      `provider "${provider.id}" description`,
+    );
+    if (descriptionError) return descriptionError;
+    if (typeof provider.description === "string") {
+      if (!provider.description.trim()) {
+        return `provider "${provider.id}" description must not be empty`;
+      }
+      if (provider.description.length > 280) {
+        return `provider "${provider.id}" description must be at most 280 characters`;
+      }
+    } else if (provider.description) {
+      for (const locale of ["en", "zh-CN"] as const) {
+        if (provider.description[locale].length > 280) {
+          return `provider "${provider.id}" description.${locale} must be at most 280 characters`;
+        }
+      }
     }
     if (
       provider.vendorKey !== undefined &&
@@ -1641,17 +1877,50 @@ export function validateContributions(
         return `provider "${provider.id}" has unsupported authKind ${provider.authKind}`;
       }
     }
-    // A Host-owned plugin login flow does not exist yet, so a declaration that
-    // asks for one is refused rather than turned into a row nobody can sign in
-    // to.
-    if ((provider as { oauth?: unknown }).oauth !== undefined) {
-      return `provider "${provider.id}" declares oauth; plugin OAuth providers are not supported in this release`;
+    const oauth = (provider as { oauth?: unknown }).oauth;
+    if (oauth !== undefined) {
+      if (provider.authKind !== "oauth") {
+        return `provider "${provider.id}" oauth metadata requires authKind "oauth"`;
+      }
+      if (!oauth || typeof oauth !== "object" || Array.isArray(oauth)) {
+        return `provider "${provider.id}" oauth must be an object`;
+      }
+      const oauthMetadata = oauth as { loginLabel?: unknown; isSubscription?: unknown };
+      const unsupportedOAuthField = Object.keys(oauthMetadata).find(
+        (key) => key !== "loginLabel" && key !== "isSubscription",
+      );
+      if (unsupportedOAuthField) {
+        return `provider "${provider.id}" oauth has unsupported field ${unsupportedOAuthField}`;
+      }
+      if (
+        oauthMetadata.loginLabel !== undefined &&
+        (typeof oauthMetadata.loginLabel !== "string" ||
+          !oauthMetadata.loginLabel.trim() ||
+          oauthMetadata.loginLabel.length > 128)
+      ) {
+        return `provider "${provider.id}" oauth.loginLabel must be a non-empty string of at most 128 characters`;
+      }
+      if (
+        oauthMetadata.isSubscription !== undefined &&
+        typeof oauthMetadata.isSubscription !== "boolean"
+      ) {
+        return `provider "${provider.id}" oauth.isSubscription must be a boolean`;
+      }
+    }
+    if (provider.authKind === "oauth" && !provider.baseUrl) {
+      return `provider "${provider.id}" requires baseUrl for OAuth`;
     }
     if (!Array.isArray(provider.models)) {
       return `provider "${provider.id}" requires models`;
     }
-    if (provider.models.length === 0 || provider.models.length > MAX_PLUGIN_PROVIDER_MODELS) {
-      return `provider "${provider.id}" declares 1 to ${MAX_PLUGIN_PROVIDER_MODELS} models`;
+    if (provider.models.length > MAX_PLUGIN_PROVIDER_MODELS) {
+      return `provider "${provider.id}" declares at most ${MAX_PLUGIN_PROVIDER_MODELS} models`;
+    }
+    if (
+      provider.models.length === 0 &&
+      ((provider.authKind ?? "api_key") !== "api_key" || !provider.baseUrl)
+    ) {
+      return `provider "${provider.id}" may omit models only for an API-key provider with a baseUrl`;
     }
     const modelIds = new Set<string>();
     for (const model of provider.models) {
@@ -1770,6 +2039,14 @@ export function validateContributions(
       return "contributes.windowAppearance must be an object";
     }
     const backgroundColor = windowAppearance.backgroundColor;
+    const cornerRadius = windowAppearance.cornerRadius;
+    if (
+      cornerRadius !== undefined &&
+      (typeof cornerRadius !== "number" || !Number.isInteger(cornerRadius) ||
+        cornerRadius < 0 || cornerRadius > MAX_WINDOW_CORNER_RADIUS)
+    ) {
+      return `contributes.windowAppearance.cornerRadius must be an integer from 0 to ${MAX_WINDOW_CORNER_RADIUS}`;
+    }
     if (backgroundColor !== undefined) {
       if (
         typeof backgroundColor !== "object" ||
@@ -1952,6 +2229,45 @@ function manifestI18nError(value: unknown): string | undefined {
   }
   return undefined;
 }
+
+/** Upper bounds for the renderer-slot declarations one plugin may carry. */
+export const MAX_RENDERER_ACTIONS_PER_PLUGIN = 16;
+export const MAX_RENDERER_CALL_METHODS_PER_PLUGIN = 32;
+
+/**
+ * `manifest.renderer` and its two whitelists. The entry is a relative
+ * `.js`/`.mjs` module, the whitelists are bounded arrays of non-empty strings
+ * that mean nothing without the entry, and any of it requires the
+ * `renderer.extension` permission. Unknown action words are accepted here so a
+ * manifest written for a newer host still loads; dispatch refuses them.
+ */
+function manifestRendererError(m: Partial<PluginManifest>): string | undefined {
+  for (const [field, max] of [
+    ["rendererActions", MAX_RENDERER_ACTIONS_PER_PLUGIN],
+    ["rendererCallMethods", MAX_RENDERER_CALL_METHODS_PER_PLUGIN],
+  ] as const) {
+    const value: unknown = m[field];
+    if (value === undefined) continue;
+    if (!Array.isArray(value) || value.some((entry) => typeof entry !== "string" || !entry.trim())) {
+      return `manifest.${field} must be an array of non-empty strings`;
+    }
+    if (value.length > max) return `manifest.${field} allows at most ${max} entries`;
+  }
+  const declaresWhitelist = Boolean(m.rendererActions?.length || m.rendererCallMethods?.length);
+  if (m.renderer === undefined && !declaresWhitelist) return undefined;
+  if (!m.permissions?.includes("renderer.extension")) {
+    return "renderer modules require the renderer.extension permission";
+  }
+  if (m.renderer === undefined) return "renderer whitelists require manifest.renderer";
+  if (typeof m.renderer !== "string" || !m.renderer.trim()) {
+    return "manifest.renderer must be a non-empty string";
+  }
+  const pathError = relativePathError(m.renderer, "manifest.renderer");
+  if (pathError) return pathError;
+  if (!/\.m?js$/.test(m.renderer)) return "manifest.renderer must be a .js or .mjs module";
+  return undefined;
+}
+
 function relativePathError(value: string, field: string): string | undefined {
   if (/^[a-zA-Z]:[\\/]/.test(value) || value.startsWith("/") || value.startsWith("\\")) {
     return `${field} must not be an absolute path`;
@@ -2047,11 +2363,14 @@ export {
 } from "./mcp-config.js";
 export {
   isLocalNetDomain,
+  isMetadataNetHost,
   isNetHostAllowed,
+  isNetSocketUrlAllowedWithGrant,
   isNetUrlAllowed,
-  isNetSocketUrlAllowed,
+  isNetUrlAllowedWithGrant,
   parseNetDomains,
   type PluginNetDomain,
+  type PluginNetEgressGrant,
 } from "./net-policy.js";
 export {
   fsGlobIgnoresCase,
@@ -2073,3 +2392,72 @@ export {
   type PluginFsRule,
   type ResolvedFsAccess,
 } from "./fs-policy.js";
+
+export {
+  PLUGIN_RENDERER_SCHEME,
+  PLUGIN_RENDERER_SLOTS,
+  PLUGIN_SLOT_POSITIONS,
+  PLUGIN_RENDERER_ACTIONS,
+  PLUGIN_INSERT_TEXT_MAX_BYTES,
+  blockRendererLanguageKey,
+  slotRegistrationRefusal,
+  type PiRendererApi,
+  type PiRendererModule,
+  type PluginRendererSlot,
+  type PluginSlotPosition,
+  type PluginSlotMessage,
+  type PluginActionSlotProps,
+  type PluginEntryExtraSlotProps,
+  type PluginToolCardStatus,
+  type PluginToolCardSlotProps,
+  type PluginBlockRendererSlotProps,
+  type PluginComposerControlSlotProps,
+  type PluginSlotComponent,
+  type PluginActionSlotRegistration,
+  type PluginEntryExtraSlotRegistration,
+  type PluginToolCardSlotRegistration,
+  type PluginBlockRendererSlotRegistration,
+  type PluginComposerControlSlotRegistration,
+  type PluginSlotRegistration,
+  type PluginDisposer,
+  type PluginLayer,
+  type PluginRendererActionName,
+  type PluginRendererActionMap,
+  type PluginRendererDispatch,
+  type PluginCallPayload,
+  type PluginInsertTextPayload,
+  type PluginSlotErrorCode,
+  type PluginRendererErrorCode,
+  type PluginSlotRefusal,
+  type PluginComponentSlot,
+} from "./renderer.js";
+
+export {
+  PLUGIN_COMPOSER_TRIGGERS,
+  PLUGIN_TRIGGER_MAX_ITEMS,
+  PLUGIN_TRIGGER_TIMEOUT_MS,
+  PLUGIN_MARK_LABEL_MAX_CHARS,
+  PLUGIN_TRIGGER_DETAIL_MAX_CHARS,
+  PLUGIN_MARK_SEND_MAX_BYTES,
+  PLUGIN_DRAFT_MAX_MARKS,
+  PLUGIN_DRAFT_TEXT_MAX_BYTES,
+  PLUGIN_DRAFT_MARK_CHAR,
+  PLUGIN_ATTACHMENT_MAX_BYTES,
+  PLUGIN_ATTACHMENTS_MAX,
+  composerTriggerKey,
+  type PluginComposerTrigger,
+  type PluginTriggerQuery,
+  type PluginTriggerItem,
+  type PluginComposerTriggerRegistration,
+  type PluginDraftMark,
+  type PluginDraftSnapshot,
+  type PluginDraftMarkInput,
+  type PluginReadDraftPayload,
+  type PluginReplaceDraftPayload,
+  type PluginDraftWriteResult,
+  type PluginAttachmentAddPayload,
+  type PluginAttachmentRef,
+  type PluginAttachment,
+  type PluginAttachmentListPayload,
+  type PluginDraftListener,
+} from "./renderer-composer.js";

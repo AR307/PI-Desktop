@@ -1,9 +1,12 @@
 import { useTranslation } from "react-i18next";
 import { HighlightedCode, useCopy } from "./Markdown";
+import { LargeTextPreview } from "./LargeTextPreview";
 import { IconCheck, IconCircleAlert, IconCopy, IconInfo } from "./icons";
 import { TooltipButton, cx } from "./ui";
 import { toWorkspaceRel } from "../lib/chat-links";
 import { useOpenPreviewTarget } from "../hooks/use-preview-target";
+import { useChatFileMenu } from "../hooks/use-chat-file-menu";
+import { ContextMenu } from "./ContextMenu";
 import { useAppStore } from "../stores/app-store";
 import type { ToolBlock, ToolChip } from "../lib/tool-presentation";
 
@@ -84,6 +87,7 @@ function FileList({ paths }: { paths: string[] }) {
   const { t } = useTranslation();
   const root = useAppStore((s) => s.workspace?.path);
   const openTarget = useOpenPreviewTarget();
+  const { fileMenu, openFileMenu, closeFileMenu } = useChatFileMenu();
   return (
     <div className="tool-file-list">
       {paths.map((path, index) => {
@@ -102,11 +106,13 @@ function FileList({ paths }: { paths: string[] }) {
             key={`${path}-${index}`}
             tooltip={t("chat.previewFile")}
             onClick={() => openTarget({ kind: "file", path: rel })}
+            onContextMenu={(event) => openFileMenu(event, { path: rel })}
           >
             {path}
           </TooltipButton>
         );
       })}
+      <ContextMenu state={fileMenu} onClose={closeFileMenu} />
     </div>
   );
 }
@@ -116,6 +122,7 @@ function MatchList({ block }: { block: Extract<ToolBlock, { kind: "matches" }> }
   const { t } = useTranslation();
   const root = useAppStore((s) => s.workspace?.path);
   const openTarget = useOpenPreviewTarget();
+  const { fileMenu, openFileMenu, closeFileMenu } = useChatFileMenu();
   return (
     <div className="tool-match-list">
       {block.groups.map((group, index) => {
@@ -128,6 +135,9 @@ function MatchList({ block }: { block: Extract<ToolBlock, { kind: "matches" }> }
                 className="tool-match-path is-linked"
                 tooltip={t("chat.previewFile")}
                 onClick={() => openTarget({ kind: "file", path: rel })}
+                onContextMenu={(event) =>
+                  openFileMenu(event, { path: rel })
+                }
               >
                 {group.path}
               </TooltipButton>
@@ -143,21 +153,23 @@ function MatchList({ block }: { block: Extract<ToolBlock, { kind: "matches" }> }
           </div>
         );
       })}
+      <ContextMenu state={fileMenu} onClose={closeFileMenu} />
     </div>
   );
 }
 
-function BlockBody({ block }: { block: ToolBlock }) {
+function BlockBody({ block, streaming }: { block: ToolBlock; streaming: boolean }) {
   switch (block.kind) {
     case "code":
       return (
-        <pre className={cx("tool-row-content", block.tone === "error" && "is-error")}>
-          {block.highlight ? (
-            <HighlightedCode code={block.text} lang={block.lang} />
-          ) : (
-            block.text
-          )}
-        </pre>
+        <LargeTextPreview
+          text={block.text}
+          followLatest={streaming}
+          preClassName={cx("tool-row-content", block.tone === "error" && "is-error")}
+          renderPage={(page) =>
+            block.highlight ? <HighlightedCode code={page} lang={block.lang} /> : page
+          }
+        />
       );
     case "diff":
       return (
@@ -219,9 +231,11 @@ function BlockBody({ block }: { block: ToolBlock }) {
 export function ToolDetailBlocks({
   blocks,
   plain = false,
+  streaming = false,
 }: {
   blocks: ToolBlock[];
   plain?: boolean;
+  streaming?: boolean;
 }) {
   const { t } = useTranslation();
   return (
@@ -241,7 +255,7 @@ export function ToolDetailBlocks({
             ) : (
               <BlockHead label={label} copy={blockCopyText(block)} />
             )}
-            <BlockBody block={block} />
+            <BlockBody block={block} streaming={streaming} />
           </section>
         );
       })}

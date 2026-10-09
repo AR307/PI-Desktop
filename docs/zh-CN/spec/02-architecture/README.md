@@ -10,3 +10,4 @@
 | [03-repo-struct.md](/zh-CN/spec/02-architecture/03-repo-structure) | 存储库结构 |
 | [04-documentation-site.md](/zh-CN/spec/02-architecture/04-documentation-site) | 文档站点 |
 | [05-remote-agent-control.md](/zh-CN/spec/02-architecture/05-remote-agent-control) | 远程 Agent Host 和 Gateway 目标架构 |
+| [06-pi-runtime-dependency-boundary.md](/zh-CN/spec/02-architecture/06-pi-runtime-dependency-boundary) | pi 运行时依赖边界、pi-durable 评估和 pi-coding-agent 后续移除路径 |

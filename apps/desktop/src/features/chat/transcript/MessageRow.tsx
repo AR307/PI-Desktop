@@ -5,11 +5,12 @@ import {
   useRef,
   useState,
   type MouseEvent as ReactMouseEvent,
+  type ReactNode,
 } from "react";
 import { useTranslation } from "react-i18next";
 import type { UiMessage } from "@pi-desktop/shared";
+import { splitInlineContent } from "@pi-desktop/shared";
 import { useOpenChatFileRef } from "../../../hooks/use-preview-target";
-import { splitChatText } from "../../../lib/chat-links";
 import { useAppStore } from "../../../stores/app-store";
 import { Markdown } from "../../../components/Markdown";
 import {
@@ -20,6 +21,8 @@ import {
 } from "../../../components/icons";
 import { TooltipButton } from "../../../components/ui";
 import { userMessageMenuItems } from "./menu-items";
+import { ActionSlotSide } from "./ActionBarSlots";
+import { slotMessage } from "../../../plugins/renderer-slots/slot-message";
 import { SessionMessageOrigin } from "./SessionMessageOrigin";
 import {
   CopyButton,
@@ -32,6 +35,38 @@ import {
   useChatTextActions,
   useTranscriptMenu,
 } from "./TranscriptMenu";
+import { getExtraMessageAttachments } from "./extra-attachments";
+
+function SkillInvocationText({ message }: { message: UiMessage }) {
+  const command = message.command ?? "";
+  const mentions = message.skillMentions ?? [];
+  const parts: ReactNode[] = [];
+  let cursor = 0;
+  for (const mention of mentions) {
+    if (
+      !Number.isInteger(mention.start) ||
+      !Number.isInteger(mention.end) ||
+      mention.start < cursor ||
+      mention.end > command.length ||
+      !command.slice(mention.start, mention.end).startsWith("/")
+    ) {
+      return <LinkifiedText text={command} attachments={message.attachments} />;
+    }
+    if (mention.start > cursor) {
+      parts.push(<LinkifiedText key={`text-${cursor}`} text={command.slice(cursor, mention.start)} attachments={message.attachments} />);
+    }
+    parts.push(
+      <code key={`skill-${mention.start}`} className="chat-command-chip" title={mention.id}>
+        {command.slice(mention.start, mention.end)}
+      </code>,
+    );
+    cursor = mention.end;
+  }
+  if (cursor < command.length) {
+    parts.push(<LinkifiedText key={`text-${cursor}`} text={command.slice(cursor)} attachments={message.attachments} />);
+  }
+  return <>{parts}</>;
+}
 
 export const MessageRow = memo(function MessageRow({
   message,
@@ -52,6 +87,8 @@ export const MessageRow = memo(function MessageRow({
   const editableUserMessage = isUser && !isSessionMessage;
   const workspaceRoot = useAppStore((s) => s.workspace?.path);
   const openFileRef = useOpenChatFileRef();
+  // userAction belongs to user cards; other rows keep a plugin-free bar.
+  const slotUser = isUser ? slotMessage("user", message) : undefined;
   // Slash prompts are stored expanded; editing works on the typed form so the
   // resent turn re-expands the template (D123).
   const editSeed =
@@ -73,15 +110,67 @@ export const MessageRow = memo(function MessageRow({
   const activeRevision = message.activeRevision ?? revisionCount;
   const showRevisionPager = editableUserMessage && revisionCount > 1;
   const extraAttachments = useMemo(() => {
-    const attachments = message.attachments;
-    if (!attachments?.length) return [];
-    const inline = new Set(
-      splitChatText(String(message.content || ""), workspaceRoot)
-        .filter((segment): segment is { kind: "target"; text: string; label: string; target: { kind: "file"; path: string } } => segment.kind === "target" && segment.target.kind === "file")
-        .map((segment) => segment.target.path),
+    return getExtraMessageAttachments(
+      String(message.content || ""),
+      message.attachments,
+      workspaceRoot,
     );
-    return attachments.filter((attachment) => !inline.has(attachment.ref));
   }, [message.attachments, message.content, workspaceRoot]);
+  // The user's own order: an image chip the draft named inline renders between
+  // the text runs it sat between, exactly where the Composer showed it.
+  const userContentParts = useMemo(
+    () => splitInlineContent(String(message.content || ""), message.attachments ?? []).parts,
+    [message.attachments, message.content],
+  );
+  const renderContentPart = (
+    part: (typeof userContentParts)[number],
+    index: number,
+    keyPrefix: string,
+  ) =>
+    part.kind === "text" ? (
+      <LinkifiedText
+        key={`${keyPrefix}-${index}`}
+        text={part.text}
+        attachments={message.attachments}
+        sourceOffset={part.start}
+      />
+    ) : (
+      <MessageAttachmentImage
+        key={`${keyPrefix}-${index}`}
+        attachment={part.attachment}
+        onOpenFile={openFileRef}
+        inline
+      />
+    );
+  // An attachment the body does not already name inline continues the body
+  // text instead of taking a line of its own above it.
+  const attachmentChips = extraAttachments.length ? (
+    <span
+      className="message-attachments"
+      role="list"
+      aria-label={t("chat.messageAttachments")}
+    >
+      {extraAttachments.map((attachment) =>
+        attachment.kind === "image" ? (
+          <MessageAttachmentImage
+            key={`${attachment.ref}:${attachment.name}`}
+            attachment={attachment}
+            onOpenFile={openFileRef}
+          />
+        ) : (
+          <span key={`${attachment.ref}:${attachment.name}`} role="listitem">
+            <FileRefChip
+              name={attachment.name}
+              path={attachment.ref}
+              kind={attachment.kind}
+              mimeType={attachment.mimeType}
+              onOpen={openFileRef}
+            />
+          </span>
+        ),
+      )}
+    </span>
+  ) : null;
   const beginEdit = async () => {
     if (!editableUserMessage || isRunning || loadingEdit) return;
     const request = new AbortController();
@@ -215,54 +304,35 @@ export const MessageRow = memo(function MessageRow({
               </form>
             ) : isUser ? (
               <>
-                {extraAttachments.length ? (
-                  <div
-                    className="message-attachments"
-                    role="list"
-                    aria-label={t("chat.messageAttachments")}
-                  >
-                    {extraAttachments.map((attachment) =>
-                      attachment.kind === "image" ? (
-                        <MessageAttachmentImage
-                          key={`${attachment.ref}:${attachment.name}`}
-                          attachment={attachment}
-                          onOpenFile={openFileRef}
-                        />
-                      ) : (
-                        <span
-                          key={`${attachment.ref}:${attachment.name}`}
-                          role="listitem"
-                        >
-                          <FileRefChip
-                            name={attachment.name}
-                            path={attachment.ref}
-                            kind={attachment.kind}
-                            onOpen={openFileRef}
-                          />
-                        </span>
-                      ),
-                    )}
-                  </div>
-                ) : null}
                 {message.content ? (
                   <div className="message-user-text selectable">
                     {editableUserMessage && message.command ? (
-                      // Slash invocations show the typed form as a chip; the
-                      // expanded template body lives in `content` (hover reveals
-                      // it) and is what regenerate/reseed replay (D123).
-                      <code
-                        className="chat-command-chip"
-                        data-source-start={0}
-                        data-source-end={message.content.length}
-                        title={String(message.content || "")}
-                      >
-                        {message.command}
-                      </code>
+                      <>
+                        {message.skillMentions?.length ? (
+                          <SkillInvocationText message={message} />
+                        ) : (
+                          // Templates retain the existing whole-invocation chip.
+                          <code
+                            className="chat-command-chip"
+                            data-source-start={0}
+                            data-source-end={message.content.length}
+                            title={String(message.content || "")}
+                          >
+                            {message.command}
+                          </code>
+                        )}
+                        {userContentParts
+                          .filter((part) => part.kind === "attachment")
+                          .map((part, index) => renderContentPart(part, index, "inline"))}
+                      </>
                     ) : (
-                      <LinkifiedText text={String(message.content || "")} attachments={message.attachments} />
+                      userContentParts.map((part, index) =>
+                        renderContentPart(part, index, "content"),
+                      )
                     )}
+                    {attachmentChips}
                   </div>
-                ) : null}
+                ) : attachmentChips}
               </>
             ) : (
               <div className="prose-chat">
@@ -274,6 +344,7 @@ export const MessageRow = memo(function MessageRow({
         {!editing && (hasAnswer || showRevisionPager) ? (
           <div className="message-actions">
             <MessageTimestamp createdAt={message.createdAt} />
+            <ActionSlotSide slot="userAction" side="left" message={slotUser} />
             {showRevisionPager ? (
               <div className="message-revision-pager" role="group" aria-label={t("chat.revisions")}>
                 <TooltipButton
@@ -332,6 +403,7 @@ export const MessageRow = memo(function MessageRow({
                 <IconTrash size={13} />
               </TooltipButton>
             ) : null}
+            <ActionSlotSide slot="userAction" side="right" message={slotUser} />
           </div>
         ) : null}
       </div>

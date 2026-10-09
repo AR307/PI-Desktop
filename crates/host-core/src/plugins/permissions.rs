@@ -60,6 +60,9 @@ pub(crate) fn derive_capabilities(manifest: &PluginManifest) -> Vec<String> {
     {
         out.push("panel".into());
     }
+    if manifest.renderer.is_some() {
+        out.push("rendererUi".into());
+    }
     let map = manifest.contributes.as_ref().and_then(Value::as_object);
     let has = |key: &str| -> bool {
         map.and_then(|m| m.get(key))
@@ -75,6 +78,9 @@ pub(crate) fn derive_capabilities(manifest: &PluginManifest) -> Vec<String> {
     }
     if has("agentExtensions") {
         out.push("agentExtension".into());
+    }
+    if has("composerTransforms") {
+        out.push("composerTransform".into());
     }
     if has("providers") {
         out.push("providers".into());

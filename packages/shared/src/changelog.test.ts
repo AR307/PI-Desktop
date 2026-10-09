@@ -6,6 +6,7 @@ import {
   normalizeChangelogVersion,
   resolveChangelogLocale,
 } from "./changelog.js";
+import { loadChangelogCatalog } from "./changelog-loader.js";
 
 const STABLE_FROM = "0.1.1";
 
@@ -33,12 +34,17 @@ describe("changelog catalog", () => {
 
   it("lists stable releases from 0.1.1 newest-first without pre-releases", () => {
     const versions = CHANGELOG.en.map((e) => e.version);
-    expect(versions[0]).toBe("0.15.6");
+    expect(versions[0]).toBe("0.17.0");
     expect(versions.at(-1)).toBe(STABLE_FROM);
     // 0.11.1 is intentionally absent: that tag was pushed before the release
     // branch was complete, and 0.11.2 is the tag that actually ships its
     // highlights. The in-app changelog lists shipped releases, not tags.
     expect(versions).toEqual([
+      "0.17.0",
+      "0.16.1",
+      "0.16.0",
+      "0.15.10",
+      "0.15.9",
       "0.15.6",
       "0.15.5",
       "0.15.2",
@@ -151,5 +157,12 @@ describe("changelog catalog", () => {
     );
     expect(formatChangelogNotes("9.9.9", "en")).toBeUndefined();
     expect(formatChangelogNotes("0.2.0-rc.6", "en")).toBeUndefined();
+  });
+
+  it("loads and caches the catalog for the resolved locale", async () => {
+    const catalog = await loadChangelogCatalog("fr-CA");
+
+    expect(catalog).toBe(CHANGELOG.fr);
+    expect(await loadChangelogCatalog("fr")).toBe(catalog);
   });
 });

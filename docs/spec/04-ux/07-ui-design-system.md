@@ -16,7 +16,8 @@ The desktop shell targets a 1:1 visual match with the local Codex desktop client
 1. A consumer-brand identity system with vibrant gradients or playful illustrations
 2. A full component library spec (that is [08-component-spec.md](08-component-spec.md))
 3. Custom font services or CDN font hosting — use local bundling
-4. Complex theme marketplace or user-customizable color palettes (MVP: system/light/dark only)
+4. An interactive color-palette editor; built-in system/light/dark choices and
+   plugin-contributed `ui.theme` entries are supported
 5. Pixel-perfect Figma handoff artifacts
 
 ## 3. Visual principles
@@ -124,12 +125,14 @@ Codex as a visual reference. The identity contract is deliberately small:
   and NSIS shortcut identity stay aligned so native notifications,
   notification settings, and taskbar groups identify the app as `PI-Desktop`
   rather than Electron.
-- The empty-home hero uses a 100px `HomeMascotLogo` GIF. The standard
-  eight-frame wave remains in light mode and non-Chinese dark mode. Chinese
-  locales (`lang` beginning with `zh`) use the supplied 30-frame transparent
-  GIF in dark mode. Reduced motion swaps each variant to its matching first
-  frame without changing the 100px slot. Playback is native to GIF; there is
-  no random pose selection, JavaScript timer, or hover-driven speed change.
+- The empty-home hero uses a 100px `HomeMascotLogo` GIF: an eight-frame waving
+  mascot compiled from the supplied light and dark action sets, with a short
+  idle hold on the first frame. CSS selects the pair from
+  `document.documentElement[data-theme]`; anything other than `light` uses the
+  dark artwork. Playback is native to the GIF. There is no random pose
+  selection, JavaScript timer, or hover-driven speed change. Reduced motion
+  swaps the GIF for the matching first-frame PNG without changing the 100px
+  slot.
   `BrandLogo` remains 20px/18px in the expanded/collapsed sidebar and 64px in
   the startup splash. Composer prompt rows do not render a leading brand icon
   in either home or thread-docked mode.
@@ -251,7 +254,7 @@ token rather than introducing a decorative palette:
 | State | Semantic color | Shape / motion | Meaning |
 |---|---|---|---|
 | Selected | neutral accent | static outlined ring | current conversation |
-| In progress | warning orange | filled dot with a restrained breathing pulse | agent is producing or executing |
+| In progress | warning orange | filled dot; two breathing cycles, then steady | agent is producing or executing |
 | Completed | success green | check mark | latest unread task turn completed |
 | Failed | error red | circled alert mark | latest unread task turn failed |
 
@@ -260,12 +263,28 @@ turn clears the prior terminal outcome; abort clears the live indicator without
 creating a failure. Opening a conversation acknowledges its unread terminal
 outcome: the terminal mark clears immediately and the matching durable task
 notification is marked read so the mark cannot return after a notification
-refresh or app restart. Outcomes already marked read never produce a terminal
-mark. Marking the row read, marking all rows read, or clearing the inbox also
-dismisses any matching task-native banner; a late event for that durable id
-cannot restore the mark, row, or banner. Reduced-motion mode disables the
-breathing animation while retaining its orange fill and localized accessible
-name.
+refresh or app restart. Restoring/focusing the app with that conversation still
+visible in the chat applies the same acknowledgement without requiring a
+session switch; other sessions remain unread. Outcomes already marked read
+never produce a terminal mark. Marking the row read, marking all rows read, or
+clearing the inbox also dismisses any matching task-native banner; a late event
+for that durable id cannot restore the mark, row, or banner. Reduced-motion mode
+disables the breathing animation while retaining its orange fill and localized
+accessible name. Running dots in task rows and related-session hover cards
+animate for two 1.6-second cycles when mounted or entering the running state,
+then remain steady until the status changes. They must not continuously
+submit frames while the rest of the window is idle.
+
+The same bound covers every idle-reachable status indicator, because any
+one of them keeps the transparent macOS window dirty and therefore
+re-composited even when nothing is happening: the permission dot on a
+session waiting for approval, the plan-mode chip in the composer toolbar,
+and the warning dot on the backend banner each play two cycles and then
+hold a steady state that carries the meaning by itself (purple fill,
+planning-tinted icon, warning fill). Only indicators that describe work in
+flight — a streaming cursor, a running tool row, a recording microphone —
+may animate for as long as that work lasts. Reduced-motion mode disables
+all of them.
 
 ### 4.6 Tailwind CSS variable stub
 
@@ -850,10 +869,11 @@ model):
   controls remain icon-only and use the semantic hover wash
 - Empty hero title uses `var(--ds-text-primary)` (light override `#1a1c1f`);
   never hardcode light ink for shared hero styles
-- Empty-home branding stays quiet: the 100px mascot GIF is the sole animated
-  hero mark. The standard light/dark variants keep their eight-frame wave;
-  dark Chinese locales use a 30-frame transparent variant. Pointer hover does
-  not change cadence; reduced motion shows the matching still first frame.
+- Empty-home branding stays quiet: the 100px eight-frame mascot GIF is the
+  sole animated hero mark. Light and dark themes each use a dedicated asset
+  pair. It loops a short wave with an idle hold so the composer remains the
+  primary task surface. Pointer hover does not change the cadence; reduced
+  motion shows the matching still first frame.
 - Night home composer plate styles are **dark-scoped only** (elevated-primary
   `#212121f5` + standard elevation-prominent)
 - Empty draft row keeps **one visible line / 28px optical minimum** so the
@@ -918,9 +938,10 @@ The composer renders only controls connected to the active pi session:
 - The model trigger shows only the active model ID. Its menu selects a
   configured provider/default-model pair for the active session and links to
   Agent.
-- The right toolbar exposes one combined model × reasoning trigger immediately
-  before the standalone prompt-enhancement Sparkles action and Send/Abort. The
-  trigger shows a Bot icon, the current model, and reasoning level; `off` omits
+- The right toolbar exposes one combined model × reasoning trigger. Explicitly
+  installed plugins may contribute user-invoked text actions after it; prompt
+  enhancement is not built in. The trigger shows a Bot icon, the current model,
+  and reasoning level; `off` omits
   the level text. Its single `role="menu"`
   popover opens above the trigger at `bottom: calc(100% + 8px)` and starts with
   exactly two current-value entries. When the menu lists more than one
@@ -1054,8 +1075,8 @@ Codex parity decisions (D034/D070) supersede any older value here.
 | Composer toolbar | MainChat `≥450px` | Left/right control groups stay on one row and do not shrink; mode/permission labels stay single-line and ellipsize |
 | Composer draft height | 1–7 text lines | Auto-grow; internal scroll beyond line 7 |
 | Chat message max width | 760px default band (user-resizable, min 560px) / 600px user plate | Band follows `min(pane, preferred)`; user turns stay compact |
-| Window min width | 1040px | Enforced by Electron for the whole app; opening the panel never changes native bounds |
-| Window min height | 700px | Enforced by Electron |
+| Window min width | 800px | Enforced by Electron for the whole app, capped to the current display work area (D635); opening the panel never changes native bounds |
+| Window min height | 560px | Enforced by Electron, capped to the current display work area (D635) |
 
 An open work panel is a fixed-width in-flow column inside the existing client
 area (ADR 0033 / ADR 0151). Its flex allocation comes from MainChat, but MainPane
@@ -1094,16 +1115,29 @@ header-height background behind the excluded lane without covering its controls.
 - The inner panel divider changes the panel width in the renderer. Moving it
   left takes internal space from MainChat until the 450px floor is reached, at
   which point the expanded sidebar yields; moving it right returns that space.
-  Native window edges resize only the fixed app window.
+  Window edges resize only the fixed app window.
 - Panel open and collapse change only the in-flow flex allocation. No positive
   native reservation is requested, and the panel's preferred width remains a
   renderer-local setting.
-- The outer shell keeps native edge/corner resizing enabled on every platform.
-  Frameless titlebar drag regions never replace the OS resize ownership. A
+- All platforms retain native edge/corner resizing. On Windows the main window
+  disables the frameless `WS_THICKFRAME` rim while Electron 43.6's frameless
+  hit test continues to own edge and corner resizing; no border is painted on
+  the left, right, or bottom. The Windows main window uses the global
+  `--radius-md` token (12 DIP) as its default rounded hit/draw shape: pixels
+  outside its corners have no fill or mouse target. A selected
+  plugin theme with `ui.window.appearance` may set `cornerRadius` to an integer
+  from 0 through 24 DIP; removing that theme restores the 12 DIP global
+  default. The shape becomes
+  rectangular while maximized or fullscreen and follows every resize. Native
+  window background colors remain theme-owned inside the shape. Electron's borderless
+  fullscreen fallback fills the display without reporting `isFullScreen()`;
+  Main tracks its state so toggling back restores the previous bounds and
+  fullscreen geometry is never persisted. Frameless titlebar drag
+  regions remain separate from window-edge resizing. A
   300ms stable-bounds settle window prevents recovery logic from competing with
   a slow pointer gesture, and normal base bounds persist 600ms after the last
-  native resize/move event. Width < 1040px or height < 700px is unsupported and
-  prevented by Electron.
+  native resize/move event. Electron enforces an 800×560 minimum, capped to the
+  current display's work area (D635); smaller sizes are unsupported.
 
 ## 11. Component foundations
 
@@ -1286,6 +1320,10 @@ Every dropdown / option-list in Settings **must** use `SettingsMenuSelect`
 instead of the native `Select` (`<select>`) component. Native `Select`
 is reserved for non-Settings contexts where OS-level rendering is acceptable.
 
+Appearance pickers use the scaled `--ds-settings-picker-height` metric.
+`SettingsMenuSelect` triggers keep `--ds-field-height` so they align with
+adjacent form inputs; dense surfaces may override that metric locally.
+
 
 ## 12. State patterns
 
@@ -1414,11 +1452,10 @@ is reserved for non-Settings contexts where OS-level rendering is acceptable.
   per D092, the content cards fill the pane width available from the current
   window instead of retaining D070's fixed 720px cap — the earlier in-shell
   200px rail and broad grouped directory are superseded
-- **Import**: four kinds (sessions / models / skills / MCP) behind one
-  page-scale segmented switcher, composed like the agent capability pages: a
-  quiet pre-scan next-action state per kind, one toolbar per kind (select-all
-  with both counts, the kind's own option, re-scan, import selected), and one
-  list whose group headers are quiet label lines and whose candidates are
-  individual tiles. No per-kind scan card, no tinted group band, no second
-  copy of the settings row scaffold
+- **Inline import workbenches**: model configuration, external skills, and
+  external MCP scans live in Models, Skills, and MCP respectively. Each page
+  exposes an explicit scan action and an inline selection workbench; opening a
+  workbench never scans automatically. Skills and MCP imports follow the
+  selected global/project scope. Settings has no session-import destination;
+  plugins retain session ingestion through their existing API.
 - Light destination cards use white elevated plates (not flat gray fills)

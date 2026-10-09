@@ -6,6 +6,7 @@ const {
   activateWorkPanelTabState,
   browserPluginTab,
   closeWorkPanelTabState,
+  createWorkPanelFileRequest,
   emptyWorkPanelContext,
   fileWorkPanelTab,
   hasPluginView,
@@ -47,14 +48,15 @@ test("new tabs are unique launcher pages and replace themselves with a tool", ()
     openWorkPanelTabState({ tabs: [], activeTabId: null }, first),
     second,
   );
+  const browser = browserPluginTab("https://example.com");
   const replaced = replaceWorkPanelTabState(
     state,
     second.id,
-    browserPluginTab("https://example.com"),
+    browser,
   );
 
-  assert.deepEqual(replaced.tabs.map((tab) => tab.id), [first.id, "plugin:pi.browser/browser"]);
-  assert.equal(replaced.activeTabId, "plugin:pi.browser/browser");
+  assert.deepEqual(replaced.tabs.map((tab) => tab.id), [first.id, browser.id]);
+  assert.equal(replaced.activeTabId, browser.id);
   assert.equal(replaced.tabs.find((tab) => tab.id === first.id)?.kind, "new");
 });
 
@@ -81,6 +83,22 @@ test("file tabs normalize lexical paths and remain distinct by resource", () => 
   assert.notEqual(first.id, second.id);
   assert.equal(normalizeWorkPanelFilePath("../src/../App.tsx"), "../App.tsx");
   assert.equal(normalizeWorkPanelFilePath("/repo/./src/../App.tsx"), "/repo/App.tsx");
+});
+
+test("file-view requests preserve a positioned file tab", () => {
+  const tab = fileWorkPanelTab("src/App.tsx", "text/typescript", {
+    line: 65,
+    column: 4,
+  });
+
+  assert.deepEqual(createWorkPanelFileRequest(tab, 7), {
+    path: "src/App.tsx",
+    seq: 7,
+    mimeType: "text/typescript",
+    line: 65,
+    column: 4,
+  });
+  assert.equal(createWorkPanelFileRequest(toolWorkPanelTab("review"), 8), null);
 });
 
 test("closing the active tab selects its right neighbor then its left", () => {

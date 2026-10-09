@@ -107,7 +107,9 @@ turn that has ended.
    tool row begins, abort preserves the partial transcript and restores no
    draft. The snapshot keeps structured file/image references and is never
    reconstructed by parsing model-facing `@path` text.
-5. Permission timeout moves to tool denied, then agent may continue or end based on runtime handling
+5. A local permission remains in `waiting_permission` until explicit allow,
+   deny, cancellation, or host shutdown; an explicit deny then moves to tool
+   denied and the agent may continue or end based on runtime handling
 6. Session status returns to idle after terminal turn states are persisted
 7. Changing the renderer's active project/session does not transition or abort
    any background session
@@ -156,7 +158,9 @@ turn that has ended.
     snapshot.
 17. A terminal parent provider/stream error aborts leftover delegates and
     returns the session to idle so Continue is accepted. Parent idle with
-    running delegates still keeps the turn open (D328 / D352).
+    running delegates still keeps the turn open (D328 / D352). System-interrupted
+    delegates settle as failed and remain manually resumable; explicit Stop and
+    dispose remain non-resumable cancellations.
 
 ## 4. Persistence points
 
