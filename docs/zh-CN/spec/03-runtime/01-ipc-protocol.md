@@ -935,8 +935,9 @@ Electron拥有本地化并提供面向用户的分支名称；主机
 转录本，但被排除在恢复的模型上下文之外。
 
 上下文检查器消耗两个附加使用信号。 `MessageUsage` 是
-提供商报告的助理使用情况，`responseDurationMs` 是已用时间
-sidecar 用于显示每秒输出令牌的流时间。 `ToolTokenUsage`
+提供商报告的助理使用情况，`responseDurationMs` 是用于显示每秒输出令牌的
+请求耗时。完整响应优先使用 pi-ai 1.1.0 的单调时钟
+`AssistantMessage.durationMs`；没有该值时仍使用 sidecar 秒表。 `ToolTokenUsage`
 是根据工具调用参数和结果估计的运行时间；提供商不
 报告每个工具的分配，因此渲染器将这些行标记为估计值并
 永远不会将它们合并到确切的提供商总数中。年长的同行可能会忽略所有

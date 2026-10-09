@@ -1164,8 +1164,10 @@ assistant message before `message_end`. Error messages persist with the
 transcript but are excluded from restored model context.
 
 The context inspector consumes two additive usage signals. `MessageUsage` is
-the provider-reported assistant usage and `responseDurationMs` is the elapsed
-sidecar stream time used to display output tokens per second. `ToolTokenUsage`
+the provider-reported assistant usage and `responseDurationMs` is the
+elapsed request duration used to display output tokens per second. Completed
+responses use pi-ai 1.1.0's monotonic `AssistantMessage.durationMs`; when
+that value is unavailable, the sidecar stopwatch remains the fallback. `ToolTokenUsage`
 is a runtime estimate from the tool call arguments and result; providers do not
 report per-tool allocation, so the renderer labels these rows as estimates and
 never merges them into the exact provider total. Older peers may omit all of

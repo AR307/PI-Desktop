@@ -417,7 +417,7 @@ Headroom 是 16,384 个代币储备底线的最大值，模型最大输出
 可配置。
 
 **估算校准（D606）。** 上述每个阈值都对着同一个数字比较，而该数字会按请求的真实开销校正。pi 的 `estimateContextTokens`
-以最后一条助手用量为锚，其余一律按 `chars / 4` 估算：该常数会低估中文文本，且在没有锚点时完全不含系统提示与工具结构，
+以最后一条助手用量为锚，并使用 pi-ai 1.1.0 的 provider 消息估算（文本按每个 token 3.5 个字符）；文本截断也按相同比例换算 token 预算。没有锚点时，估算完全不含系统提示与工具结构，
 而下一次请求仍要为它们付费。两类误差分开处理——逐字符偏差以「猜测尾部」上的比例表示（与量级无关）；无锚点残差只在与之
 量级相当的样本（0.5×–2×）上按比例应用，否则只加上观测到的固定开销（上限 32,000 词元）。
 
@@ -1204,7 +1204,7 @@ System/Direct/Custom 代理路由保持不变。
 provider transport 重建。`EPROTO` 等协议错误继续使用原有重试行为。详见
 [证书信任 ADR](../../../adr/provider-system-certificates.md)。
 
-## Pi 1.0.1 execution boundary
+## Pi 1.1.0 execution boundary
 
 Published model metadata and account entitlement come from one account-scoped
 Pi Models collection. Effective binding projection is shared by launch, delegates
