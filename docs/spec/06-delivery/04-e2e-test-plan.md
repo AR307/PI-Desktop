@@ -2823,13 +2823,18 @@ identify the platform validation still needed.
 
 #### E2E-021: Delete session works
 
-- **Preconditions**: Session exists.
-- **Steps**: 1) Delete a session. 2) Observe session list.
-- **Expected**: Session removed from list; data gone.
-- **Specs linked**: `03-runtime/04-data-storage.md`
+- **Preconditions**: A session exists near the bottom of the expanded Sidebar.
+- **Steps**: 1) Open its overflow menu. 2) Verify the menu and Delete action stay
+  inside the window. 3) Repeat in a short window and scroll the menu to its last
+  action. 4) Delete the session and observe the session list.
+- **Expected**: The menu stays within the viewport, the last action is reachable,
+  and the deleted session disappears from the list with its data removed.
+- **Specs linked**: `03-runtime/04-data-storage.md`,
+  `04-ux/09-interaction-patterns.md`
 - **Acceptance**: F (delete session)
 - **Milestone**: M2
-- **Status**: Draft
+- **Status**: Unit-covered (`sidebar-floating-menu.test.mjs`,
+  `sidebar-navigation.test.mjs`); rendered viewport scenario Draft
 
 #### E2E-021a: Rename session title persists without changing activity
 
