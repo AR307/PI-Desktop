@@ -232,6 +232,29 @@ globalThis.imageGenerationProbe = async () => {
       assert(settings.defaultProviderId === "chat" && settings.defaultModelId === "chat-model", "image switch changed chat default");
       assert(useAppStore.getState().toasts.at(-1)?.message === i18n.t("settings.imageModelSelected"),
         "explicit image default selection lost its specific confirmation");
+      // A pick the page can no longer accept reports the failure instead of
+      // doing nothing: the stored candidate list is read when the pick is
+      // accepted, so narrowing it first is exactly the stale-picker race this
+      // covers.
+      const rejectionCandidates = structuredClone(settings.imageGenerationModels);
+      click(row.querySelector<HTMLButtonElement>('button[aria-haspopup="listbox"]'));
+      await until(
+        () => !!document.querySelector('[role="option"]'),
+        "image candidate picker did not reopen for the refusal case",
+      );
+      const refusedOption = [...document.querySelectorAll<HTMLElement>('[role="option"]')].find(
+        (element) => element.textContent?.includes("image-two"),
+      );
+      assert(refusedOption, "stale candidate missing from the picker");
+      settings = { ...settings, imageGenerationModels: [{ providerId: "q", modelId: "image-one" }] };
+      click(refusedOption);
+      await until(
+        () => useAppStore.getState().toasts.at(-1)?.message === i18n.t("settings.imageModelSaveFailed"),
+        "refused image default selection must report the failure",
+      );
+      assert(settings.imageGeneration?.providerId === "q" && settings.imageGeneration?.modelId === "image-one",
+        "refused image default selection changed the default");
+      settings = { ...settings, imageGenerationModels: rejectionCandidates };
       assert(row.textContent?.includes("Images B"), "new provider name missing");
       for (const invalid of [
         { ...alternate, enabled: false },
@@ -409,6 +432,7 @@ globalThis.imageGenerationProbe = async () => {
         "image-preview-partial-failure",
         "setup-navigation",
         "absolute-image-markdown",
+        "refused-image-selection-report",
       ],
       apiBoundary: "fixture",
     };
