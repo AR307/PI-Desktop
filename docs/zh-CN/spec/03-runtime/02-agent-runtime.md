@@ -585,7 +585,10 @@ Goal 批准所承诺的内容与 Plan 批准所承诺的内容完全相同：`mo
   `message_update.deltaThinking`。他们从不附加到 `content` 或
   `deltaText`。
 - 恢复的助手历史重建单独的文本和思维块
-  在下一个回合之前。
+  在下一个回合之前。助手传输身份使用 `model.provider` / `model.id`
+  （与实时请求相同），而不是账户行 id；`vendorKey` 绑定的模型上两者不同。
+  Task(resume) 的 `seedDelegateMessages` 同样遵守该规则，避免 pi-ai 把同模型
+  reasoning 当成跨模型历史而清空 `reasoning_content`。
 - 恢复的历史记录还可以从持久保存的工具 call/result 对中重建工具
   工具行（`off`/`minimal`/`low`），因此重新创建了运行时
   保持其完整的工作上下文——读取的文件内容、命令输出——
