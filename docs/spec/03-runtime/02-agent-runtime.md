@@ -1138,7 +1138,9 @@ When a summary cannot be generated or installed below the hard limit, the run
 degrades: it keeps the original task brief plus the most recent message(s),
 discards the rest of its history, continues, and records that it was degraded,
 so the report and lifecycle details say the delegate lost history rather than
-presenting a complete answer. When even that does not fit, the run fails with
+presenting a complete answer. Empty or whitespace-only extracted summary text
+(including a thinking-only or output-limited reply with no text blocks) counts
+as "cannot be generated" — it must not install an empty successful checkpoint. When even that does not fit, the run fails with
 `SUBAGENT_CONTEXT_OVERFLOW` (not retriable) naming what the parent can change —
 narrow the task, delegate to a model with a larger window, read less at once —
 instead of forwarding the provider's overflow text.
