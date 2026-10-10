@@ -13,6 +13,7 @@ export const trEntries: ChangelogEntry[] = [
       "Göreli bağlantılar ve satır başvuruları dahil yerel Markdown dosya bağlantılarını sohbetten yerleşik Dosya Yöneticisi'nde açın.",
       "Composer'ın model listesi artık yapılandırılmış bağlam penceresi sınırlarını gösterir.",
       "Eklentiler ağ yönlendirmelerini inceleyebilir veya reddedebilir; mevcut fetch çağrıları varsayılan olarak yönlendirmeleri izlemeyi sürdürür.",
+      "Çalışan bir alt ajanı kartından veya ayrıntı panelinden ya da geçerli oturumdaki tüm alt ajanları koordinatörü durdurmadan durdurabilirsiniz.",
     ],
   },
   {
@@ -37,7 +38,6 @@ export const trEntries: ChangelogEntry[] = [
     "version": "0.16.1",
     "date": "2026-10-04",
     "highlights": [
-      "Çalışan bir alt ajanı kartından veya ayrıntı panelinden ya da geçerli oturumdaki tüm alt ajanları koordinatörü durdurmadan durdurabilirsiniz.",
       "Ayarlar'dan özel bir veri konumu seçin, doğrulanmış soğuk taşımayı izleyin ve yalnızca yeniden oluşturulabilir önbellekleri temizleyin.",
       "Zamanlanmış görevler aralık temposunda çalışabilir: görev kurulduktan sonra 5 dakikadan 24 saate kadar.",
       "Zamanlanmış sayfası görev listesini seçili görevle birlikte sunar: son sonucu, sonraki çalışmayı, talimatı ve çalışma geçmişini.",

@@ -13,6 +13,7 @@ export const enEntries: ChangelogEntry[] = [
       "Open local Markdown links from chat in the bundled File Manager, including relative links and line references.",
       "Show configured context-window limits in the Composer's model list.",
       "Plugins can inspect or refuse network redirects; existing fetch calls still follow redirects by default.",
+      "Stop a running subagent directly from its card or detail panel, or stop all subagents in the current session without stopping the coordinator.",
     ],
   },
   {
@@ -37,7 +38,6 @@ export const enEntries: ChangelogEntry[] = [
     version: "0.16.1",
     date: "2026-10-04",
     highlights: [
-      "Stop a running subagent directly from its card or detail panel, or stop all subagents in the current session without stopping the coordinator.",
       "Choose a custom data location in Settings, follow a verified cold migration, and clean only rebuildable caches.",
       "Scheduled tasks can run on an interval cadence: every 5 minutes up to 24 hours, counted from when the task was armed.",
       "The Scheduled page pairs the task list with the selected task: its last outcome, next run, instruction and run history.",
