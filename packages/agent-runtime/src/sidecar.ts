@@ -537,6 +537,16 @@ async function handle(method: string, params: any): Promise<unknown> {
       }
       return { ok: true };
     }
+    case "agent.stopSubagents": {
+      const runtime = runtimes.get(String(params.sessionId));
+      if (!runtime) throw new Error("No active runtime for this session");
+      const ids = params.delegationIds;
+      if (ids !== undefined && (!Array.isArray(ids) || ids.length === 0 || ids.length > 100 || ids.some(id => typeof id !== "string" || !id.trim()))) {
+        throw new Error("Invalid delegation IDs");
+      }
+      const result = await runtime.stopSubagents(ids as string[] | undefined);
+      return { pending: result.details.stopPending?.flatMap(record => typeof record.delegationId === "string" ? [record.delegationId] : []) ?? [] };
+    }
     case "agent.stop": {
       const sessionId = String(params.sessionId);
       const turnId = typeof params.turnId === "string" ? params.turnId : undefined;

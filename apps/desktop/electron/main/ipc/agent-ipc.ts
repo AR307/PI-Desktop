@@ -1,5 +1,5 @@
 import { expandMcpInvocation } from "../composer-mcp";
-import { IPC, ErrorCodes, compactionRecordId, findSkillMentions, isGlobalPermissionMode, isRpcTimeoutError, type AgentEventEnvelope, type AgentPromptRequest, type AgentSteerRequest, type UiMessage, type AgentQueuePushRequest, type AgentStopRequest, type AskToolResolution, type GlobalPermissionMode, type MessageUsage, type PendingInteractiveRequests, type PlanExecutionFinishStatus, type PlanResolutionResult, type PlanResolveRequest, type VoiceOrigin } from "@pi-desktop/shared";
+import { IPC, ErrorCodes, compactionRecordId, findSkillMentions, isGlobalPermissionMode, isRpcTimeoutError, type AgentEventEnvelope, type AgentPromptRequest, type AgentSteerRequest, type UiMessage, type AgentQueuePushRequest, type AgentStopRequest, type AgentStopSubagentsRequest, type AskToolResolution, type GlobalPermissionMode, type MessageUsage, type PendingInteractiveRequests, type PlanExecutionFinishStatus, type PlanResolutionResult, type PlanResolveRequest, type VoiceOrigin } from "@pi-desktop/shared";
 import type { FinishTurn } from "../runtime/plans";
 import { expandSlashInvocation, visionFromModelConfig, type ComposerTemplate } from "@pi-desktop/agent-runtime";
 import { appendPromptFallbackPaths, durableUserMessageId, preparePromptAttachments, type PreparedPromptAttachment } from "../prompt-attachments";
@@ -668,6 +668,18 @@ export function registerAgentIpc({
     } finally {
       releaseSessionOperation?.();
     }
+  });
+
+  handle(IPC.invoke.agentStopSubagents, async (req: AgentStopSubagentsRequest) => {
+    if (!req || typeof req.sessionId !== "string" || !req.sessionId.trim() ||
+      (req.delegationIds !== undefined && (!Array.isArray(req.delegationIds) ||
+        req.delegationIds.length === 0 || req.delegationIds.length > 100 ||
+        req.delegationIds.some(id => typeof id !== "string" || !id.trim())))) {
+      throw new Error("Invalid subagent stop request");
+    }
+    rejectNativeAgentOperation(req.sessionId);
+    if (!sidecar) throw new Error("sidecar unavailable");
+    return sidecar.call("agent.stopSubagents", req);
   });
 
   handle(IPC.invoke.agentStop, async (req: AgentStopRequest) => {

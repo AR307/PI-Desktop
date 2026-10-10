@@ -17,6 +17,8 @@ import type {
   SpeechSynthesizeResult,
   SpeechTranscribeRequest,
   AgentStopResponse,
+  AgentStopSubagentsRequest,
+  AgentStopSubagentsResponse,
   AgentQueueChangedEvent,
   AgentQueuePushRequest,
   QueuedTurnSummary,
@@ -967,6 +969,8 @@ export const api = {
     invoke<AgentCompactResponse>(IPC.invoke.agentCompact, req),
   abort: (sessionId: string) =>
     invoke(IPC.invoke.agentAbort, { sessionId }),
+  stopSubagents: (req: AgentStopSubagentsRequest) =>
+    invoke<AgentStopSubagentsResponse>(IPC.invoke.agentStopSubagents, req),
   stop: (sessionId: string, turnId?: string) =>
     invoke<AgentStopResponse>(IPC.invoke.agentStop, { sessionId, ...(turnId ? { turnId } : {}) }),
   queuePrompt: (req: AgentQueuePushRequest) =>

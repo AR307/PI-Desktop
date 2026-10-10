@@ -115,6 +115,7 @@ export const IPC = {
     liveVoiceWidgetVisibility: "pi-desktop/voice/live/widget/visibility",
     agentCompact: "pi-desktop/agent/compact",
     agentAbort: "pi-desktop/agent/abort",
+    agentStopSubagents: "pi-desktop/agent/stop-subagents",
     agentStop: "pi-desktop/agent/stop",
     agentQueuePush: "pi-desktop/agent/queue/push",
     agentQueueList: "pi-desktop/agent/queue/list",

@@ -935,6 +935,13 @@ core set rather than the on-demand catalog of §7.1:
   waits for each abort to settle, then persists `status: "stopped"` with
   `completedAt` on `details.stopped[]`. Stopped delegations read as `stopped`.
 
+**Explicit desktop cancellation.** A running delegate can be stopped from its
+card or detail panel. The subagent group header also offers session-wide stop-all.
+These controls call the same cancellation routine as `TaskStop` without a model
+round trip. Cancellation is cooperative: the UI shows a pending state until
+termination is confirmed, preserving partial output and existing parent Stop
+semantics. A completed delegate is not relabeled by a late stop request.
+
 **Live settlement.** When a delegate settles, the runtime refreshes its original
 `Task` transcript row with the terminal delegation summary (`status`,
 `completedAt`, counters, and failure details when present), using the existing
