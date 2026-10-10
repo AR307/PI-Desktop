@@ -14,6 +14,7 @@ export const trEntries: ChangelogEntry[] = [
       "Composer'ın model listesi artık yapılandırılmış bağlam penceresi sınırlarını gösterir.",
       "Eklentiler ağ yönlendirmelerini inceleyebilir veya reddedebilir; mevcut fetch çağrıları varsayılan olarak yönlendirmeleri izlemeyi sürdürür.",
       "Çalışan bir alt ajanı kartından veya ayrıntı panelinden ya da geçerli oturumdaki tüm alt ajanları koordinatörü durdurmadan durdurabilirsiniz.",
+      "Bağlam kullanımı panelinde toplam oturum süresini, birikimli model yanıt süresini ve oturum içindeki payını görün.",
     ],
   },
   {
