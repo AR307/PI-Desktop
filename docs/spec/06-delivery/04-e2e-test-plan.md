@@ -11906,7 +11906,8 @@ This test plan spec is accepted when:
 - **Preconditions**: The same injected small-window fake provider. One settled
   `reader` chain read enough to exceed the delegate hard limit while staying
   under `MAX_RESUMABLE_READ_LINES`; a second settled chain fits well inside
-  the budget.
+  the budget. The resumed fixture uses `vendorKey: "deepseek"` and includes a
+  persisted assistant row with both answer text and thinking.
 - **Steps**:
   1. `Task.resume` the over-budget chain and capture its first provider
      request in full.
@@ -11917,6 +11918,8 @@ This test plan spec is accepted when:
      the over-budget chain again.
   5. Accumulate more than `MAX_RESUMABLE_READ_LINES` of read-only output in a
      chain and read the reusable list the next prompt offers.
+  6. Inspect the resumed assistant history in the captured request and verify
+     its same-model reasoning remains in `reasoning_content`.
 - **Expected**: The first request of a resumed run is below the hard limit. It
   opens with the original task brief and holds the most recent turns; the
   oldest tool results are dropped first, and dropping an assistant message
@@ -11925,8 +11928,11 @@ This test plan spec is accepted when:
   conclusion is answered from the seeded context; the first round's may be
   gone, and the run says so rather than inventing it. A resume never fails
   with `CONTEXT_TOO_LARGE` or `SUBAGENT_CONTEXT_OVERFLOW` on its first
-  request. `MAX_RESUMABLE_READ_LINES` still removes an over-read chain from
-  the reusable list; truncation does not make it resumable again.
+  request. With a vendorKey binding, restored assistant history uses the same
+  `model.provider` / `model.id` identity as live requests, and its thinking
+  stays in the native `reasoning_content` field. `MAX_RESUMABLE_READ_LINES`
+  still removes an over-read chain from the reusable list; truncation does not
+  make it resumable again.
 - **Specs linked**: `03-runtime/02-agent-runtime.md` §5f, ADR 0299, ADR 0279
 - **Acceptance criterion**: C — Conversation & stream; Quality
 - **Milestone**: M6+
