@@ -770,7 +770,10 @@ criterion-by-criterion report of what was met and the evidence observed.
   deltas every 16ms, and flushes before tool/terminal/abort/error/retry
   boundaries. `message_end` is the authoritative snapshot (D412).
 - Restored assistant history reconstructs separate text and thinking blocks
-  before the next turn.
+  before the next turn. Assistant transport identity is `model.provider` /
+  `model.id` (same as live requests), not the account row id — including when
+  `seedDelegateMessages` rebuilds a Task(resume) history — so same-model
+  Completions reasoning stays in `reasoning_content` under a vendorKey binding.
 - Restored history also reconstructs tool call/result pairs from persisted
   tool rows (`toolCallId`/`toolArgs`/`toolResult`), so a recreated runtime
   keeps its full working context — file contents read, command output —
@@ -1382,7 +1385,9 @@ model's provider identity and retain recorded model IDs. A different recorded
 account or model remains distinct. Legacy rows without identity retain the
 current-model fallback. Same-model Completions reasoning stays in its native
 reasoning field, never appended to visible answer text because of an account
-UUID/vendor-name mismatch.
+UUID/vendor-name mismatch. The same rule applies when `seedDelegateMessages`
+rebuilds a Task(resume) history: tag restored assistants and synthetic
+tool-call carriers with `model.provider` / `model.id`, not the account row id.
 
 ### 7.0.1 User custom system prompt files (issue #542)
 
