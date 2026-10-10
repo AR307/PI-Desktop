@@ -1839,6 +1839,9 @@ sklm: {
   },
   askTool: {
     title: "Birkaç soru",
+    historyTitle: "Sorular ve yanıtlar",
+    answerLabel: "Yanıt",
+    skipped: "Atlandı",
     progress: "Soru {{current}} / {{total}}",
     questionNumber: "Soru {{number}}",
     indicatorLabel: "Soru durumu",

@@ -1849,6 +1849,9 @@ sklm: {
   },
   askTool: {
     title: "몇 가지 질문",
+    historyTitle: "질문과 답변",
+    answerLabel: "답변",
+    skipped: "건너뜀",
     progress: "질문 {{current}} / {{total}}",
     questionNumber: "질문 {{number}}",
     indicatorLabel: "질문 상태",

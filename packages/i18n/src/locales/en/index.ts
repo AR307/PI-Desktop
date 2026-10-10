@@ -1856,6 +1856,9 @@ sklm: {
   },
   askTool: {
     title: "A few questions",
+    historyTitle: "Questions and answers",
+    answerLabel: "Answer",
+    skipped: "Skipped",
     progress: "Question {{current}} of {{total}}",
     questionNumber: "Question {{number}}",
     indicatorLabel: "Question status",
