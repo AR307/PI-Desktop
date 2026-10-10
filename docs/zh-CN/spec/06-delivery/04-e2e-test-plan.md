@@ -2460,6 +2460,19 @@ MainChat 弥补了缺口。 Maximized/fullscreen 调用保留最新的
 - **里程碑**：M5
 - **状态**：草案（手动）
 
+#### E2E-BROWSER-capture-resize：截图期间保持预览位置并恢复最新视口
+
+- **前提条件**：隔离的 Electron 配置；本地响应式网页高于浏览器可见视口。无需配置模型服务。
+- **步骤**：开始整页截图并保持其等待状态，期间两次调整浏览器占位区域；通过原始
+  `Page.captureScreenshot` 重复。截图等待期间依次最大化、还原、进入和退出全屏，使面板移动或改变尺寸。
+  同时覆盖：排队中的截图、切换资源标签、隐藏并恢复截图页、截图失败、带排队任务的标签关闭，以及销毁后的 guest 重建。
+- **预期**：截图等待期间，原生 guest 跟随面板当前位置，并裁剪在面板边界内，不覆盖聊天区域。
+  截图视口在完成前保持稳定，完成后 `innerWidth`/`innerHeight` 与最新请求尺寸一致。同一页面的截图串行执行，
+  不阻塞其他标签。失败截图会解除尺寸锁定；隐藏或关闭页面不会意外显示页面，也不会把排队截图转发到其他页面。
+  重建或释放销毁的 guest 后不残留孤立原生视图。无需重复截图来修复布局。
+- **关联规范**：英文源规格中的 [E2E-BROWSER-capture-resize](../../../spec/06-delivery/04-e2e-test-plan.md#e2e-browser-capture-resize-capture-preserves-live-placement-and-restores-the-latest-viewport)。
+- **状态**：原生 Electron 截图/尺寸及窗口切换期间的位置验证由 `node scripts/e2e-browser-capture-resize.mjs` 自动执行（保留产物）。`apps/desktop/test/browser-capture-resize.test.mjs` 覆盖生产 Host/Pane/CDP 路径、失败、排队、标签关闭、guest 重建及面板裁剪。
+
 #### E2E-BROWSER-session-preview-race：切换会话不显示过期预览
 
 - **前置条件**：两个会话具有不同 HTML 预览，浏览器面板上下文分别保留。夹具可以独立
