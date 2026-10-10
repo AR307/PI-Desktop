@@ -14,6 +14,7 @@ export const ptBREntries: ChangelogEntry[] = [
       "A lista de modelos do Composer agora mostra os limites de contexto configurados.",
       "Plugins podem inspecionar ou recusar redirecionamentos de rede; chamadas fetch existentes continuam seguindo redirecionamentos por padrão.",
       "Pare um subagente em execução pelo cartão ou painel de detalhes, ou todos os subagentes da sessão atual, sem parar o coordenador.",
+      "Veja o tempo total da sessão, o tempo acumulado de resposta do modelo e sua proporção no painel de uso de contexto.",
     ],
   },
   {

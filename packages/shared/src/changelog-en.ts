@@ -14,6 +14,7 @@ export const enEntries: ChangelogEntry[] = [
       "Show configured context-window limits in the Composer's model list.",
       "Plugins can inspect or refuse network redirects; existing fetch calls still follow redirects by default.",
       "Stop a running subagent directly from its card or detail panel, or stop all subagents in the current session without stopping the coordinator.",
+      "See total session time beside cumulative model response time and its share of the session.",
     ],
   },
   {

@@ -14,6 +14,7 @@ export const deEntries: ChangelogEntry[] = [
       "Die Modellliste im Composer zeigt jetzt konfigurierte Kontextfensterlimits.",
       "Plugins können Netzwerkweiterleitungen prüfen oder ablehnen; bestehende Fetch-Aufrufe folgen Weiterleitungen weiterhin standardmäßig.",
       "Stoppen Sie einen laufenden Unteragenten direkt über seine Karte oder Detailansicht oder alle Unteragenten der aktuellen Sitzung, ohne den Hauptagenten zu stoppen.",
+      "Sehen Sie die gesamte Sitzungsdauer, die kumulierte Modellantwortzeit und deren Anteil an der Sitzung im Kontextverbrauchsfenster.",
     ],
   },
   {
