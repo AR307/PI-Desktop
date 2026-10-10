@@ -4832,9 +4832,12 @@ must keep splitting are covered by `markdown-blocks.test.mjs`.
   badge and no context inspector under the answer. 3) Hover the composer
   toolbar inspector trigger, confirm the panel stays closed, then click it.
   4) Inspect the remaining-token-plus-percentage heading, used/window counts,
-  unboxed turn/speed values, one inline provider-usage summary, and one
-  aggregate tool-usage summary, with no doubled heading rule and no inner
-  section hairlines. 5) Scroll the transcript and resize the window while the
+  unboxed turn/speed values, session duration, cumulative model response time
+  with its share of session duration, one inline provider-usage summary, and
+  one aggregate tool-usage summary, with no doubled heading rule and no inner
+  section hairlines. For a transcript with more than one loaded page, wait for
+  the earlier response timings to finish loading and confirm the cumulative
+  value includes them. 5) Scroll the transcript and resize the window while the
   panel is open. Toggle and resize the sidebar and work panel while the panel
   remains open. 6) Move the pointer away from the panel, then dismiss it by
   clicking the trigger again, clicking outside it, and pressing Escape from
@@ -4852,7 +4855,11 @@ must keep splitting are covered by `markdown-blocks.test.mjs`.
   warning/error states; click or keyboard activation toggles the same compact
   summary while pointer hover alone never opens or closes it. An open panel
   survives the pointer leaving it and closes on a second trigger activation,
-  an outside click, or Escape, which returns focus to the trigger. Provider
+  an outside click, or Escape, which returns focus to the trigger. Session
+  duration runs from session creation to the latest activity (or to now while
+  running); cumulative model response time sums recorded top-level model
+  request durations and its percentage is relative to that wall-time span.
+  Earlier transcript pages load only while the inspector is open. Provider
   values remain exact, tool values remain visibly approximate through the `~`
   aggregate total, and no per-tool list, source badge, progress bar, or
   explanatory estimate paragraph is rendered. Occupancy, turn total, and
@@ -10708,8 +10715,8 @@ This test plan spec is accepted when:
   inline code, and a short list. 2) Confirm each card renders the formatting
   while keeping choices keyboard/selectable. 3) Answer the first question,
   click Next, and select two answers on the multi-select question. 4) Skip the final
-  question without entering text. 5) Inspect the completed tool row and the
-  next model response.
+  question without entering text. 5) Expand the completed tool row and inspect
+  its question-and-answer summary, then inspect the next model response.
 - **Expected**: One question is visible at a time; the small indicators show
   answered, current, and skipped states in the composer approval area, at the
   same dock position used by Plan and Goal approval. The request has no
@@ -10730,7 +10737,10 @@ This test plan spec is accepted when:
   keeps `question：` for the skipped question. Markdown renders as rich text
   without activating embedded links or loading images. Selecting a formatted
   option returns its original Markdown source label. Decline all produces empty placeholders for every
-  question and still completes the tool call. A pending ask shows a stable
+  question and still completes the tool call. The completed row shows the
+  ordered questions and answers, keeps multi-select labels separate, marks
+  skipped questions with localized copy, and does not expose the structured
+  JSON details. Its model-facing result stays unchanged. A pending ask shows a stable
   localized title and the first question in its toast; generated session-title
   text never replaces that title. Background sessions retain the existing
   native notification policy. Exactly one soft chime plays for the ask; the
