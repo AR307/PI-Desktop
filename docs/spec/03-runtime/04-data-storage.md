@@ -47,6 +47,17 @@ their path-scoped memory and filesystem instructions remain readable.
    hash, and size; the existing approval row also carries execution fields.
    Startup interruption is the process-epoch fence and no work is replayed.
 
+### Delegation settlement snapshots
+
+A completed `Task` tool call may still describe a running delegate. A later
+terminal snapshot with the same session, message/call ID and delegation ID
+replaces only that tool result and its display text. Existing metadata, message
+order and index identity are preserved, including namespaced IDs after a
+cross-session tool-call collision. A stale running replay, another delegation's
+result or a later terminal replay cannot overwrite the settled snapshot. Other
+duplicate appends retain their existing idempotent behavior. No schema migration
+or transcript format change is required.
+
 ## 2. File layout
 
 ### User-selected storage location (issue #1213)

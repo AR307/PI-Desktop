@@ -37,6 +37,7 @@ export const frEntries: ChangelogEntry[] = [
     "version": "0.16.1",
     "date": "2026-10-04",
     "highlights": [
+      "Arrêtez un sous-agent depuis sa carte ou ses détails, ou tous ceux de la session en cours, sans arrêter le coordinateur.",
       "Choisissez un emplacement de données personnalisé dans les paramètres, suivez une migration à froid vérifiée et ne nettoyez que les caches régénérables.",
       "Les tâches planifiées peuvent s’exécuter par intervalle : de 5 minutes à 24 heures, compté à partir du moment où la tâche a été activée.",
       "La page des tâches planifiées associe la liste des tâches à la tâche sélectionnée : dernier résultat, prochaine exécution, instruction et historique des exécutions.",

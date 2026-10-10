@@ -17123,6 +17123,19 @@ host-created files. The full app's file-preview viewer is covered separately.
   default-model-picker.test.mjs, and scripts/e2e-composer-model-selection.mjs.
 
 
+#### E2E-CHAT-subagent-direct-stop
+
+- Environment: isolated Desktop profile, real Main/sidecar/Host and a local
+  streaming provider fixture; no real API account or user data.
+- Start two delegates, open A's detail panel and stop A. Verify B and the parent
+  remain active, A's partial output remains readable, and no model request was
+  needed. Stop all from the group header; B stops and the parent remains active.
+- Terminal cards remove their Stop controls and persisted Task snapshots record
+  `stopped`. An empty explicit ID list is rejected rather than stopping all.
+- Run `node scripts/e2e-subagent-stop.mjs`. Runtime tests additionally cover
+  cross-session isolation and uncooperative cancellation remaining pending;
+  `e2e-subagent-parent-error.mjs` covers explicit cancellation/resume semantics.
+
 ## BOM-marked UTF-16 text tools
 
 - Create a UTF-16LE PowerShell build log with a BOM and CRLF, then ask the agent
