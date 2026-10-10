@@ -9,6 +9,21 @@
 
 ---
 
+### E2E-LEGACY-DICTATION-idle-model-release
+
+- **前提：** 通过 `VoiceService` 接口测试保留的本地 Dictation 服务，使用确定性的
+  Controller/ModelManager stub 和受控时钟。不访问物理麦克风，也不下载模型。
+- **步骤：** 启动并停止一次录音，将时间推进到 10 分钟空闲边界之前和边界时，检查
+  卸载调用。分别在边界前开始新录音、下一次启动被拒绝、进入 error 终态以及服务
+  dispose 时重复检查。
+- **预期：** 已结束的空闲模型只在边界到达时卸载一次，不会提前卸载。新录音会取消
+  计时器，其终态会启动新的等待窗口。新录音启动被拒绝时不会遗失卸载计划。回调时
+  处于活动阶段或服务已 dispose 都不会触发卸载。
+- **覆盖：** `apps/desktop/test/voice-service-idle-unload.test.mjs` 使用真实
+  `VoiceService` 生命周期，仅 mock 运行时边界和时钟。独立 Linux RSS 测量验证
+  `TranscribeModel.dispose()` 会向操作系统归还内存，且现有延迟加载路径可重新加载。
+- **规格：** [实时语音](../03-runtime/live-voice.md)。
+
 ### E2E-LIVE-VOICE-public-settings-and-reconnect
 
 - **前提：** 生产 Renderer 构建、真实 Electron/Main/Host、隔离数据和测试项目、关闭开发者模式、本地 TLS Realtime fixture 及合成麦克风。仅在测试子进程中信任 fixture CA，不关闭 TLS、sender、沙盒或麦克风权限校验。

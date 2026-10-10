@@ -91,6 +91,19 @@ test("starting the next recording cancels the pending idle unload", async (t) =>
   assert.equal(modelManager.unloadCalls, 1);
 });
 
+test("a rejected next start re-arms the idle unload", async (t) => {
+  const { service, controller, modelManager, clock } = await startedService(t);
+
+  await service.stop();
+  controller.start = async () => {
+    throw new Error("fixture start failure");
+  };
+
+  await assert.rejects(service.start(), /fixture start failure/);
+  clock.advance(MODEL_IDLE_UNLOAD_MS);
+  assert.equal(modelManager.unloadCalls, 1);
+});
+
 test("a recording that began after scheduling is never interrupted by the unload", async (t) => {
   const { service, controller, modelManager, clock } = await startedService(t);
 

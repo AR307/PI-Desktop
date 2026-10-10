@@ -25,7 +25,7 @@ type ModelManagerT = import("@pi-desktop/voice-runtime").ModelManager;
 // The recommended whisper-large-v3-turbo weights alone hold ~1.5 GiB of
 // main-process memory once loaded, and transcription buffers sit on top of
 // that. Unloading after a quiet spell keeps an idle app from pinning that
-// memory forever (issue #1496); the model reloads from disk in a few seconds
+// memory forever (issue #1528); the model reloads from disk in a few seconds
 // on the next recording.
 const MODEL_IDLE_UNLOAD_MS = 10 * 60 * 1000;
 
@@ -135,17 +135,20 @@ export class VoiceService {
 
     this.cancelModelIdleUnload();
 
-    if (overrides) {
-      this.updateSettings(overrides);
-    }
-
-    await this.ensureRuntime();
-    this.releaseCurrentMicrophoneLease();
-    this.releaseMicrophoneLease = this.acquireMicrophoneLease(randomUUID());
     try {
+      if (overrides) {
+        this.updateSettings(overrides);
+      }
+
+      await this.ensureRuntime();
+      this.releaseCurrentMicrophoneLease();
+      this.releaseMicrophoneLease = this.acquireMicrophoneLease(randomUUID());
       await this.controller!.start();
     } catch (error) {
       this.releaseCurrentMicrophoneLease();
+      // A rejected start may leave the controller in a terminal phase without
+      // emitting stateChange; do not strand the pending idle unload.
+      this.scheduleModelIdleUnload();
       throw error;
     }
   }

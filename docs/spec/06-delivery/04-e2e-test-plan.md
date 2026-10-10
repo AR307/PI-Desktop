@@ -37,6 +37,26 @@
   and Rust `data_relocation` tests cover rollback and path/filesystem boundaries.
 
 
+### E2E-LEGACY-DICTATION-idle-model-release
+
+- **Preconditions:** Exercise the retained local Dictation service through its
+  `VoiceService` interface with a deterministic controller/model-manager stub
+  and a controlled clock. Do not access a physical microphone or download a
+  model.
+- **Steps:** Start and stop a recording, advance time to just before and then
+  to the 10-minute idle boundary, and inspect unload calls. Repeat with a new
+  recording before the boundary, a rejected new start, an error terminal phase,
+  and service disposal.
+- **Expected:** A settled idle model unloads once at the boundary, never early.
+  A new recording cancels the timer and its terminal phase starts a fresh
+  window. A rejected start does not strand the unload. An active phase at the
+  callback or service disposal prevents unloading.
+- **Coverage:** `apps/desktop/test/voice-service-idle-unload.test.mjs` runs the
+  production `VoiceService` lifecycle with only the runtime and clock mocked.
+  The separate Linux RSS measurement verifies that `TranscribeModel.dispose()`
+  returns memory to the OS and that the existing lazy-load path reloads it.
+- **Specs:** [Live Voice](../03-runtime/live-voice.md).
+
 ### E2E-LIVE-VOICE-public-settings-and-reconnect
 
 - **Preconditions:** A built production Renderer and real Electron/Main/Host,
