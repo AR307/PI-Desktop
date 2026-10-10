@@ -14,7 +14,7 @@ import { contextBudgetLimitsFor } from "./context-budget.js";
  * reasoning_content. Tagging with the account row id instead makes the
  * adapter treat the history as foreign-model and empties that field.
  */
-function replay(vendorKey?: string) {
+function replay(vendorKey?: string, rows?: UiMessage[]) {
   const provider: RuntimeProviderConfig = {
     id: "account-row-uuid",
     vendorKey,
@@ -28,7 +28,7 @@ function replay(vendorKey?: string) {
   const model = buildProviderModel(provider);
   const originalThinking =
     "Inspect the authorization boundary before reading the file.";
-  const rows: UiMessage[] = [
+  const transcriptRows: UiMessage[] = rows ?? [
     {
       id: "assistant-1",
       role: "assistant",
@@ -48,7 +48,7 @@ function replay(vendorKey?: string) {
   ];
   const messages = seedDelegateMessages({
     originalTask: "Inspect permissions.",
-    rows,
+    rows: transcriptRows,
     provider,
     model,
     budget: contextBudgetLimitsFor(model),
@@ -90,4 +90,25 @@ it("resuming on the same vendor account preserves its original reasoning field",
 it("control: the old no-vendor-key binding preserves reasoning", () => {
   const { assistant, originalThinking } = replay();
   expect(assistant?.reasoning_content).toBe(originalThinking);
+});
+
+it("tags synthetic tool-call carriers with the transport model identity", () => {
+  const { messages, model } = replay("deepseek", [
+    {
+      id: "result-1",
+      role: "tool",
+      content: "file contents",
+      toolCallId: "call-1",
+      toolName: "Read",
+      toolArgs: { path: "permissions.ts" },
+      createdAt: "2026-10-10T00:00:01.000Z",
+    },
+  ]);
+  const carrier = messages.find((message) => message.role === "assistant");
+
+  expect(carrier).toMatchObject({
+    provider: model.provider,
+    model: model.id,
+    stopReason: "toolUse",
+  });
 });
