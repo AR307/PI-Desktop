@@ -2236,6 +2236,46 @@
   content: "";
 }
 
+.subagent-stop-button {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 5px;
+  white-space: nowrap;
+}
+
+.subagent-activity-header {
+  display: flex;
+  align-items: center;
+  padding-right: 10px;
+}
+
+.subagent-activity-header > .tool-activity-header {
+  flex: 1;
+}
+
+.tool-activity-group.open > .subagent-activity-header > .tool-activity-header > .tool-activity-caret {
+  transform: rotate(90deg);
+}
+
+.subagent-topology-node-actions {
+  position: relative;
+}
+
+.subagent-topology-node-actions > .subagent-stop-button {
+  position: absolute;
+  right: 10px;
+  bottom: 10px;
+}
+
+.subagent-topology-node-actions:has(> .subagent-stop-button) .subagent-topology-node-header {
+  min-height: 88px;
+}
+
+.subagent-topology-node-actions:has(> .subagent-stop-button) :is(.subagent-topology-node-summary, .subagent-topology-node-steps) {
+  padding-right: 100px;
+}
+
 .subagent-topology-node-header {
   display: flex;
   width: 100%;
@@ -2356,14 +2396,25 @@
 }
 
 .subagent-topology-node-model {
+  display: inline-flex;
   min-width: 0;
-  max-width: 38%;
-  overflow: hidden;
+  max-width: 100%;
+  flex: 0 1 auto;
   color: var(--ds-text-muted);
   font-family: var(--font-mono);
   font-size: var(--text-2xs);
-  text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.subagent-topology-node-model-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.subagent-topology-node-thinking {
+  flex: none;
+  white-space: pre;
 }
 
 .subagent-topology-node-status {

@@ -183,13 +183,21 @@ provider disappears from the picker.
 
 The sheet also offers an ordered **Fallback models** list using that same
 configured-model picker. Users can add, move up/down, or remove alternatives.
-Already-selected models are excluded from the add menu. Each saved row shows the
-configured provider display name and model ID when the catalog still contains it.
+Already-selected models are excluded from the add menu. Saved-row display
+identity is resolved from all configured providers, independently of which
+models are currently selectable. A configured provider keeps its display name
+and the saved model ID after it is disabled, with a localized disabled status;
+disabling it must not turn its label back into a raw provider UUID. Other
+unavailable bindings are marked unavailable. Exact stored provider IDs take
+precedence over aliases, and ambiguous aliases are not guessed. Only an
+unresolved provider or model binding retains the raw pin as its display label. The add
+menu continues to offer only the existing runnable model choices.
 When selected fallback rows have the same visible label, resolved rows include
 the provider ID; unresolved or same-provider duplicates include their position
-and stored pin instead. The stored pin is unchanged. Saved pins that become
-unavailable stay visible and removable; reopening or editing another field
-must not drop them. Clearing the list saves `fallbackModels: []`. Inherit-session
+and stored pin instead. Display labels and move/remove accessible names use
+the same resolved identity and status. The stored pin is unchanged. Saved pins
+that become unavailable stay visible and removable; reopening or editing another
+field must not drop them. Clearing the list saves `fallbackModels: []`. Inherit-session
 remains a primary-only choice. The hint explains that alternatives run after
 model retries fail, completed tool results are kept, and Stop cancels the whole
 task. See runtime §5f and ADR subagent-model-fallback.

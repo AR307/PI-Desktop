@@ -1,3 +1,4 @@
+import { SubagentStopButton } from "./SubagentStopButton";
 import { activityTimingInputs, cachedVisibleActivityItems } from "../../../lib/transcript-activity-summary";
 import { reuseReferences } from "../../../lib/transcript-summary";
 import { ActivityItems } from "./ActivityItems";
@@ -352,6 +353,7 @@ export const ActivityGroup = memo(function ActivityGroup({
         runtimeActivity ? ` phase-${runtimeActivity.phase}` : ""
       }`}
     >
+      <div className="subagent-activity-header">
       <button
         ref={titleRef}
         className="tool-activity-header"
@@ -389,6 +391,8 @@ export const ActivityGroup = memo(function ActivityGroup({
           <IconChevronRight size={12} />
         </span>
       </button>
+      <SubagentStopButton running={topologyLive} />
+      </div>
       {tail ? (
         <div className="tool-activity-preview" aria-hidden>
           {tail}

@@ -13,6 +13,7 @@ export const ptBREntries: ChangelogEntry[] = [
       "Abra links locais para arquivos Markdown pelo chat no Gerenciador de arquivos integrado, incluindo links relativos e referências a linhas.",
       "A lista de modelos do Composer agora mostra os limites de contexto configurados.",
       "Plugins podem inspecionar ou recusar redirecionamentos de rede; chamadas fetch existentes continuam seguindo redirecionamentos por padrão.",
+      "Pare um subagente em execução pelo cartão ou painel de detalhes, ou todos os subagentes da sessão atual, sem parar o coordenador.",
     ],
   },
   {
