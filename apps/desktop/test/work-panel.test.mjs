@@ -28,13 +28,12 @@ const panelSource = await readFile(
 const transcriptSource = await readTranscriptSource();
 const storeSource = await readStoreSource();
 const globalStyles = await loadStyles();
-test("work-panel header leaves empty tab-strip space draggable", () => {
+test("only the visible tab viewport excludes native window dragging", () => {
   assert.match(panelSource, /className="work-panel-tab-strip-wrap"/);
-  assert.match(
-    panelSource,
-    /className=\{cx\(\s*"work-panel-tab no-drag",/s,
-  );
+  assert.match(panelSource, /className="work-panel-tab-strip no-drag"/);
+  assert.doesNotMatch(panelSource, /work-panel-tab no-drag/);
   assert.doesNotMatch(panelSource, /work-panel-tab-strip-wrap no-drag/);
+  assert.match(globalStyles, /\.work-panel-tab-strip \{[^}]*width:\s*max-content;[^}]*flex:\s*0 1 auto;/s);
 });
 
 test("closing a tab restores focus to its neighbor or the new-tab action", () => {
@@ -249,7 +248,7 @@ test("work panel uses the fixed-window internal dock", () => {
 
 test("work panel header exposes a scrollable tab strip and direct new-page action", () => {
   const headerIndex = panelSource.indexOf('className="work-panel-header"');
-  const stripIndex = panelSource.indexOf('className="work-panel-tab-strip"');
+  const stripIndex = panelSource.indexOf('className="work-panel-tab-strip no-drag"');
   const actionsIndex = panelSource.indexOf('className="work-panel-actions no-drag"');
   const bodyIndex = panelSource.indexOf('<div className="work-panel-body">');
 

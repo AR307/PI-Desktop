@@ -1004,6 +1004,11 @@ singleton without duplicating it:
   can show. The trigger is outside it and never scrolls away. A New launcher
   tab carries the concise **New** title and the same data-driven tool rows as
   the former entry point. Shortcut labels are rendered only for real bindings.
+- The visible scroll viewport owns the native no-drag exclusion, not the
+  individual tabs. Offscreen tab rectangles must not block the sidebar or
+  conversation titlebar after scrolling or restoring a session. The viewport
+  sizes to its content and shrinks to the available width; unused header space
+  remains draggable when there are few or no tabs.
 - Tab close uses a hover/focus/active `×` affordance and middle-click. The
   active tab uses the normal active fill, while overflow is handled by the
   strip rather than by a second resource list. Launcher rows use the same

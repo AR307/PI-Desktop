@@ -1,5 +1,28 @@
 # PI-Desktop MirrorCoding Edition
 
+## 2026-10-12 - Keep overflowed panel tabs inside their native hit region
+
+- Reproduced titlebar drag loss with twelve horizontally scrolled panel tabs.
+  Restoring a conversation restores its tabs; offscreen per-tab no-drag
+  rectangles extended across the sidebar and conversation titlebars.
+- The visible tab viewport now owns the exclusion. Its content-sized,
+  shrinkable width preserves empty-header dragging without changing tab
+  selection, close, pointer/keyboard reorder, session state or agent execution.
+- Added a Windows Electron regression using the real WorkPanel/store actions
+  and read-only native hit testing: the old source fails, the fixed source
+  passes overflow, session return, scroll-back, reorder and sparse/empty tabs.
+- Targeted tests (92), reorder Electron interaction, matching workspace builds,
+  Desktop typecheck and Electron Main/Preload/Renderer build passed. The full
+  isolated candidate started with clean synthetic sessions and the matching
+  0.16.2 host; the user confirmed all three drag areas and buttons work after
+  switching away and back. No paid model request or production restart was used.
+- Style-token and changed/new-file unused-variable checks passed. The existing
+  reorder fixture has three baseline unused loop bindings outside this change;
+  the broader targeted lint reports those unchanged findings, not a clean run.
+- Windows acceptance is complete for this reported path. macOS/Linux native
+  dragging and an installer build were not run. This is a local fix, not a
+  published release or an update applied to the user's running application.
+
 ## 2026-10-07 - Align account sync with the MC server handoff
 
 - Desktop account sharing exposes its existing persisted pending state and

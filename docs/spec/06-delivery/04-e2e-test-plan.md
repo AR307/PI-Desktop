@@ -4371,6 +4371,22 @@ identify the platform validation still needed.
   `work-panel-window.test.mjs`, `work-panel-presentation.test.mjs`,
   `work-panel.test.mjs`); full UI scenario Draft
 
+#### E2E-056-overflow-drag: Restoring scrolled tabs preserves native titlebar dragging
+
+- **Steps**: Open at least twelve work-panel tabs in session A, scroll to the
+  last tab, switch to session B and back to A. Drag unused sidebar, conversation
+  title and panel-header areas. Select the first tab, reorder with the pointer
+  and Alt+ArrowRight, then close down to one tab and finally no tabs. Check that
+  tab selection, close, add and maximize controls still work without moving the
+  window. Repeat the session return while the strip is scrolled to either edge.
+- **Expected**: Invisible tabs never block neighboring titlebars. The visible
+  tab viewport remains interactive; unused header space remains draggable.
+- **Automation**: On Windows, pnpm test:e2e:work-panel-drag uses the real
+  WorkPanel/store actions and read-only WM_NCHITTEST. It requires Python 3 on
+  PATH (or PI_TEST_PYTHON) and retains its isolated test profile. Pointer
+  lifecycle coverage also runs via test:e2e:work-panel-reorder. Native hit
+  testing does not replace manual mouse-drag acceptance.
+
 #### E2E-057: Message-owned review history survives commits and rolls back safely
 
 - **Preconditions**: A project-bound Agent session with a writable workspace;
