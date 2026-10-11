@@ -267,6 +267,11 @@ Rules:
   keeps integer ms.
 - Readers skip unknown `type` lines and a torn trailing line: new line kinds
   need no migration, and a crash mid-append cannot poison the file.
+- JSONL boundaries are read as bytes before strict UTF-8 decoding. An invalid
+  UTF-8 record is logged and excluded from reads, without truncating the file
+  or substituting characters. Complete surrounding records remain readable.
+  An unfinished trailing record is rescanned when more bytes arrive; metadata
+  updates preserve unrelated raw bytes, including damaged records.
 - A `revision_live` line is meaningful only while its branch is the live
   transcript suffix. Three writers keep that true: `archive_live_branch`
   (revision switch) and `archive_discarded_regenerate_branch` (regenerate,

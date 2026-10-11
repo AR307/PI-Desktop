@@ -17357,3 +17357,17 @@ host-created files. The full app's file-preview viewer is covered separately.
 - **Steps:** Save a 500K user context limit for a model whose catalog publishes 1M. Open the Composer model list, then send a short message and inspect context usage. Repeat with a catalog-owned limit and with discovery unavailable.
 - **Expected:** The user-configured row and context inspector show 500K; a catalog-owned row follows the published limit; a configured model without discovery retains its saved context label. Model selection remains unchanged.
 - **Status:** Automated unit regression in `apps/desktop/test/composer-models.test.mjs` covers user overrides, catalog inheritance, and missing discovery; the full save → picker → message → context-inspector path remains a manual validation scenario.
+
+## History recovery after an interrupted Unicode append
+
+- Stop an isolated Desktop after a completed tool-and-answer turn. Append a
+  synthetic JSONL record ending midway through a Chinese character and restart.
+  Open the same session: existing messages remain visible, no fork or model
+  replay is required, and merely reading history does not change file bytes.
+- Regenerate, quit at completion and restart. Both branches remain readable.
+  Run `node scripts/e2e-regenerate-quit.mjs --torn-unicode` with a freshly built
+  candidate host. The model server is controlled; data and screenshots remain
+  isolated under `.artifacts/`.
+- Rust regressions cover every interior boundary of 2/3/4-byte characters,
+  continued writes, cold/incremental layout, indexed reads, tool lookup,
+  revisions and metadata updates that retain unrelated damaged bytes.

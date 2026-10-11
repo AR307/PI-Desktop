@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { createServer } from "node:http";
 import { createRequire } from "node:module";
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { appendFile, mkdir, readFile, writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { once } from "node:events";
 
@@ -96,6 +96,22 @@ try {
   await until(() => page.evaluate(() => window.__firstReplyEnded), "initial turn completion");
   check("native Read delivers the fixture log to the real sidecar", sawLog);
   await page.screenshot({ path: join(output, "log-read.png") });
+  if (process.argv.includes("--torn-unicode")) {
+    await close();
+    const transcript = join(output, "data/sessions", session.id + ".jsonl");
+    await appendFile(transcript, Buffer.concat([
+      Buffer.from('{"type":"message","id":"interrupted","content":"'),
+      Buffer.from("中").subarray(0, 2),
+    ]));
+    const original = await readFile(transcript);
+    await launch();
+    await page.evaluate((id) => window.__PI_DESKTOP__.selectSession(id), session.id);
+    await page.getByText("REGRESSION_REPLY_2", { exact: true }).waitFor();
+    check("reopening a torn Unicode transcript displays intact history without a fork");
+    await page.screenshot({ path: join(output, "unicode-tail-reopened.png") });
+    check("opening history neither calls the provider nor alters torn bytes",
+      requestCount === 2 && (await readFile(transcript)).equals(original));
+  }
   await app.evaluate(() => { process.env.PI_DESKTOP_BOOT_PROBE = "1"; });
   await page.evaluate((id) => {
     window.piDesktop.on("pi-desktop/agent/event/message", (envelope) => {

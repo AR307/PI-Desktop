@@ -395,12 +395,15 @@ pub fn find_message_position(
         id: String,
     }
     let mut reader = BufReader::new(File::open(transcript_path(data_dir, session_id)?)?);
-    let mut line = String::new();
+    let mut bytes = Vec::new();
     for (position, offset) in layout.message_offsets.iter().enumerate().rev() {
         reader.seek(SeekFrom::Start(*offset))?;
-        line.clear();
-        reader.read_line(&mut line)?;
-        if serde_json::from_str::<Identity>(&line).is_ok_and(|identity| identity.id == message_id) {
+        bytes.clear();
+        reader.read_until(b'\n', &mut bytes)?;
+        let Some(line) = decode_transcript_line(&bytes) else {
+            continue;
+        };
+        if serde_json::from_str::<Identity>(line).is_ok_and(|identity| identity.id == message_id) {
             return Ok(Some(position));
         }
     }
@@ -426,7 +429,7 @@ pub fn read_tool_call(
         blocks: Vec<CallIdentity>,
     }
     let mut reader = BufReader::new(File::open(transcript_path(data_dir, session_id)?)?);
-    let mut line = String::new();
+    let mut bytes = Vec::new();
     // A provider tool-call id is an opaque token, so it appears verbatim in the
     // line that stores it. A byte scan rejects a line before serde walks its
     // payload, which for a tool result is the whole cost of this loop. An id
@@ -434,19 +437,22 @@ pub fn read_tool_call(
     let verbatim = is_json_verbatim(call_id);
     for offset in layout.message_offsets.iter().rev() {
         reader.seek(SeekFrom::Start(*offset))?;
-        line.clear();
-        reader.read_line(&mut line)?;
+        bytes.clear();
+        reader.read_until(b'\n', &mut bytes)?;
+        let Some(line) = decode_transcript_line(&bytes) else {
+            continue;
+        };
         if verbatim && !line.contains(call_id) {
             continue;
         }
-        if serde_json::from_str::<ToolIdentity>(&line).is_ok_and(|identity| {
+        if serde_json::from_str::<ToolIdentity>(line).is_ok_and(|identity| {
             identity.role == "tool"
                 && identity
                     .blocks
                     .iter()
                     .any(|block| block.call_id.as_deref() == Some(call_id))
         }) {
-            return Ok(Some(serde_json::from_str(&line)?));
+            return Ok(Some(serde_json::from_str(line)?));
         }
     }
     Ok(None)
@@ -484,12 +490,15 @@ pub fn transcript_contains_id(data_dir: &Path, session_id: &str, message_id: &st
     };
     let verbatim = is_json_verbatim(message_id);
     let mut reader = BufReader::new(file);
-    let mut line = String::new();
+    let mut bytes = Vec::new();
     loop {
-        line.clear();
-        if reader.read_line(&mut line)? == 0 {
+        bytes.clear();
+        if reader.read_until(b'\n', &mut bytes)? == 0 {
             return Ok(false);
         }
+        let Some(line) = decode_transcript_line(&bytes) else {
+            continue;
+        };
         let trimmed = line.trim();
         if sniff_line_kind(trimmed) != Some("message") {
             continue;
@@ -660,33 +669,49 @@ fn scan_layout(path: &Path, mut layout: TranscriptLayout) -> Result<TranscriptLa
             .with_context(|| format!("seek {}", path.display()))?;
     }
     let mut reader = BufReader::new(file);
-    let mut line = String::new();
+    let mut bytes = Vec::new();
     loop {
-        line.clear();
-        let read = reader.read_line(&mut line)?;
+        // Release large records even when decoding or classification skipped them.
+        if bytes.capacity() > 1024 * 1024 {
+            bytes = Vec::new();
+        }
+        bytes.clear();
+        let read = reader.read_until(b'\n', &mut bytes)?;
         if read == 0 {
             break;
         }
         // A torn trailing line (crash mid-append) has no newline yet. Keeping it
         // out of both the offsets and `file_len` lets a later refresh pick it up
         // once the writer completes it.
-        if !line.ends_with('\n') {
+        if !bytes.ends_with(b"\n") {
             break;
         }
-        match sniff_line_kind(line.trim_end()) {
-            Some("message") => layout.message_offsets.push(offset),
-            Some("compaction") => layout.compaction_offsets.push(offset),
-            _ => {}
-        }
+        let start = offset;
         offset += read as u64;
-        // A skipped multi-megabyte line must not leave its capacity attached to
-        // every following read.
-        if line.capacity() > 1024 * 1024 {
-            line = String::new();
+        let Some(line) = decode_transcript_line(&bytes) else {
+            continue;
+        };
+        match sniff_line_kind(line.trim_end()) {
+            Some("message") => layout.message_offsets.push(start),
+            Some("compaction") => layout.compaction_offsets.push(start),
+            _ => {}
         }
     }
     layout.file_len = offset;
     Ok(layout)
+}
+
+/// Decode only after finding a byte-level JSONL boundary. A torn UTF-8
+/// record must not prevent reading subsequent intact records; keep its bytes
+/// on disk for recovery rather than replacing characters or truncating history.
+fn decode_transcript_line(bytes: &[u8]) -> Option<&str> {
+    match std::str::from_utf8(bytes) {
+        Ok(line) => Some(line),
+        Err(error) => {
+            tracing::warn!(%error, "skipping invalid UTF-8 transcript record; original bytes retained");
+            None
+        }
+    }
 }
 
 /// Serialize one JSONL line with its `type` discriminator first.
@@ -1184,15 +1209,21 @@ pub fn read_transcript_window_with_layout(
         Err(e) => return Err(e).with_context(|| format!("read {}", path.display())),
     };
     let mut reader = BufReader::new(file);
-    let mut line = String::new();
+    let mut bytes = Vec::new();
     for (offset, is_message) in wanted {
+        if bytes.capacity() > 1024 * 1024 {
+            bytes = Vec::new();
+        }
         reader
             .seek(SeekFrom::Start(offset))
             .with_context(|| format!("seek {}", path.display()))?;
-        line.clear();
-        if reader.read_line(&mut line)? == 0 {
+        bytes.clear();
+        if reader.read_until(b'\n', &mut bytes)? == 0 {
             continue;
         }
+        let Some(line) = decode_transcript_line(&bytes) else {
+            continue;
+        };
         let trimmed = line.trim();
         if is_message {
             match serde_json::from_str::<MessageRecord>(trimmed) {
@@ -1208,9 +1239,6 @@ pub fn read_transcript_window_with_layout(
                     tracing::warn!(path = %path.display(), %error, "skipping invalid compaction line");
                 }
             }
-        }
-        if line.capacity() > 1024 * 1024 {
-            line = String::new();
         }
     }
     Ok(out)
@@ -1233,15 +1261,23 @@ pub fn read_transcript_window(
         Err(e) => return Err(e).with_context(|| format!("read {}", path.display())),
     };
     let mut reader = BufReader::new(file);
-    let mut line = String::new();
+    let mut bytes = Vec::new();
     let end = message_limit.map(|limit| message_start.saturating_add(limit));
     let mut message_index = 0usize;
     let mut out = TranscriptRead::default();
     loop {
-        line.clear();
-        if reader.read_line(&mut line)? == 0 {
+        // Reclaim skipped large records, including invalid UTF-8 or JSON. Full
+        // history reads keep the buffer reusable as they already read every row.
+        if message_limit.is_some() && bytes.capacity() > 1024 * 1024 {
+            bytes = Vec::new();
+        }
+        bytes.clear();
+        if reader.read_until(b'\n', &mut bytes)? == 0 {
             break;
         }
+        let Some(line) = decode_transcript_line(&bytes) else {
+            continue;
+        };
         // Classify by a bounded prefix scan: a full parse here walks every byte
         // of a large tool payload before the line is even selected.
         let Some(kind) = sniff_line_kind(line.trim_end()) else {
@@ -1269,12 +1305,6 @@ pub fn read_transcript_window(
                 }
             },
             _ => {}
-        }
-        // A skipped 50 MB line must not leave its capacity attached to every
-        // following read. The selected full-history path intentionally keeps
-        // the buffer reusable because it is already paying for every record.
-        if message_limit.is_some() && line.capacity() > 1024 * 1024 {
-            line = String::new();
         }
     }
     Ok(out)
@@ -1401,7 +1431,7 @@ pub fn update_message(data_dir: &Path, session_id: &str, record: &MessageRecord)
     // layout refresh handles by itself — and dropping that invalidation is what
     // keeps the next read of a long session from scanning all of it again.
     crate::sessions::invalidate_transcript_layout(session_id);
-    let raw = match fs::read_to_string(&path) {
+    let raw = match fs::read(&path) {
         Ok(raw) => raw,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(false),
         Err(e) => return Err(e).with_context(|| format!("read {}", path.display())),
@@ -1412,25 +1442,29 @@ pub fn update_message(data_dir: &Path, session_id: &str, record: &MessageRecord)
     {
         let file = File::create(&tmp)?;
         let mut writer = BufWriter::new(file);
-        for line in raw.lines() {
-            let trimmed = line.trim();
-            let is_target = !trimmed.is_empty()
-                && serde_json::from_str::<Value>(trimmed).is_ok_and(|value| {
+        for bytes in raw.split_inclusive(|byte| *byte == b'\n') {
+            let line = decode_transcript_line(bytes);
+            let is_target = line.is_some_and(|line| {
+                serde_json::from_str::<Value>(line.trim()).is_ok_and(|value| {
                     value.get("type").and_then(Value::as_str) == Some("message")
                         && value.get("id").and_then(Value::as_str) == Some(record.id.as_str())
-                });
+                })
+            });
             if is_target {
                 carries_target = true;
             }
-            if is_target && line != replacement {
+            if is_target
+                && line.map(|line| line.trim_end_matches(['\r', '\n']))
+                    != Some(replacement.as_str())
+            {
                 // A retried append can leave the same id on two lines; keep-last
                 // dedupe means every copy has to carry the new metadata.
                 writer.write_all(replacement.as_bytes())?;
+                writer.write_all(b"\n")?;
                 rewrote = true;
             } else {
-                writer.write_all(line.as_bytes())?;
+                writer.write_all(bytes)?;
             }
-            writer.write_all(b"\n")?;
         }
         writer.flush()?;
         if !rewrote {
@@ -1658,16 +1692,16 @@ pub fn read_revision(
     // (byte offset, line kind) of every matching line, oldest first.
     let mut matches: Vec<(u64, &'static str)> = Vec::new();
     let mut reader = BufReader::new(file);
-    let mut line = String::new();
+    let mut bytes = Vec::new();
     let mut offset = 0u64;
     loop {
         // A rejected snapshot must not leave its capacity attached to every
         // following read.
-        if line.capacity() > 1024 * 1024 {
-            line = String::new();
+        if bytes.capacity() > 1024 * 1024 {
+            bytes = Vec::new();
         }
-        line.clear();
-        let read = reader.read_line(&mut line)?;
+        bytes.clear();
+        let read = reader.read_until(b'\n', &mut bytes)?;
         if read == 0 {
             break;
         }
@@ -1675,25 +1709,32 @@ pub fn read_revision(
         // before the next record, which turns it into a complete line that this
         // head read rejects on its own; until then there is nothing after it to
         // find, so the scan is done.
-        if !line.ends_with('\n') {
+        if !bytes.ends_with(b"\n") {
             break;
         }
+        let start = offset;
+        offset += read as u64;
+        let Some(line) = decode_transcript_line(&bytes) else {
+            continue;
+        };
         if let Some((kind, root, index)) = revision_line_head(line.trim()) {
             if root == root_user_id && index == revision_index {
-                matches.push((offset, kind));
+                matches.push((start, kind));
             }
         }
-        offset += read as u64;
     }
     for (offset, kind) in matches.iter().rev() {
-        if line.capacity() > 1024 * 1024 {
-            line = String::new();
+        if bytes.capacity() > 1024 * 1024 {
+            bytes = Vec::new();
         }
-        line.clear();
+        bytes.clear();
         reader.seek(SeekFrom::Start(*offset))?;
-        if reader.read_line(&mut line)? == 0 {
+        if reader.read_until(b'\n', &mut bytes)? == 0 {
             continue;
         }
+        let Some(line) = decode_transcript_line(&bytes) else {
+            continue;
+        };
         let body = line.trim();
         let decoded = if *kind == "revision_live" {
             serde_json::from_str::<LiveRevisionRecord>(body)
@@ -1742,6 +1783,10 @@ pub fn remove_session_files(data_dir: &Path, session_id: &str) {
 #[cfg(test)]
 #[path = "transcripts_layout_tests.rs"]
 mod layout_tests;
+
+#[cfg(test)]
+#[path = "transcripts_utf8_tests.rs"]
+mod utf8_tests;
 
 #[cfg(test)]
 mod tests {
