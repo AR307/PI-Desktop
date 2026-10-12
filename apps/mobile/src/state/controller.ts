@@ -15,7 +15,7 @@ import { applyTranscriptEvent, itemMessage, mergeMessages, snapshotMessages } fr
 
 export type MobileView = {
   signedIn: boolean; loading: boolean; error?: string; notice?: string; challenge?: MobileAuthChallenge;
-  retryAt?: number;
+  retryAt?: number; syncError?: string;
   directories: DesktopDirectory[]; desktopId?: string; projects: MobileProject[];
   grants: MobileGrant[]; devices: MobileDevice[]; grant?: MobileGrant; sessions: MobileSession[];
   selectedId?: string; snapshot?: MobileSessionSnapshot; messages: UiMessage[]; catalog?: MobileModelCatalog;
@@ -168,7 +168,7 @@ export class MobileController {
     this.connectingEvents = [];
     const history = new MobileHistory({ accountId, desktopDeviceId, sessionId }, this.cache);
     this.history = history;
-    this.patch({ selectedId: sessionId, snapshot: undefined, catalog: undefined, messages: [], loading: true, uncertainMessageId: this.uncertain.get(this.draftKey(sessionId))?.messageId });
+    this.patch({ selectedId: sessionId, snapshot: undefined, catalog: undefined, messages: [], syncError: undefined, loading: true, uncertainMessageId: this.uncertain.get(this.draftKey(sessionId))?.messageId });
     await this.action(async () => {
       const cached = await history.read();
       if (!valid()) return;
@@ -183,10 +183,8 @@ export class MobileController {
       if (result.kind === "state") {
         await history.run(async () => {
           if (!valid()) return;
-          const messages = await history.changes(relay, this.value.messages, valid);
-          if (!valid()) return;
-          this.patch({ messages });
           this.acceptState(result.state, { restoreActive: true });
+          await this.reconcileHistory(history, relay, valid);
         });
       } else {
         await history.initialize(result.snapshot);
@@ -194,12 +192,11 @@ export class MobileController {
         this.acceptSnapshot(result.snapshot, false);
       }
       if (!valid()) return;
-      const buffered = this.connectingEvents ?? []; this.connectingEvents = undefined;
-      for (const event of buffered) this.handleEvent(event);
+      this.releaseBufferedEvents();
       this.persistCacheSoon();
       await this.background(() => this.loadCatalog(sessionId));
     });
-    if (valid()) { this.connectingEvents = undefined; this.patch({ loading: false }); }
+    if (valid()) { this.releaseBufferedEvents(); this.patch({ loading: false }); }
   }
   private async loadCatalog(sessionId = this.value.selectedId) {
     const relay = this.relay;
@@ -298,6 +295,22 @@ export class MobileController {
     else clearTimeout(this.frameTimer as ReturnType<typeof setTimeout>);
     this.frameTimer = undefined;
   }
+  private releaseBufferedEvents() {
+    const buffered = this.connectingEvents ?? []; this.connectingEvents = undefined;
+    for (const event of buffered) this.handleEvent(event);
+  }
+  private async reconcileHistory(history: MobileHistory, relay: MobileRelay, valid: () => boolean) {
+    try {
+      await history.changes(relay, this.value.messages, valid, (messages) => {
+        if (!valid()) return;
+        if (this.value.snapshot) this.reconcile(this.value.snapshot, messages);
+        else this.patch({ messages });
+      });
+      if (valid()) this.patch({ syncError: undefined });
+    } catch (error) {
+      if (valid()) this.patch({ syncError: error instanceof Error ? error.message : String(error) });
+    }
+  }
   /** Coalesced live state and durable changes, preserving events during I/O. */
   async refreshState() {
     const relay = this.relay; const sessionId = this.value.selectedId;
@@ -320,14 +333,12 @@ export class MobileController {
               // delta may be overwritten by the later changes response.
               this.connectingEvents = [];
               await this.flushCacheNow();
-              const updated = await history.changes(relay, this.value.messages, () => history === this.history);
-              if (history === this.history) this.patch({ messages: updated });
+              await this.reconcileHistory(history, relay, () => history === this.history);
             });
           } finally {
             this.syncingHistory = false;
             if (history === this.history) {
-              const buffered = this.connectingEvents ?? []; this.connectingEvents = undefined;
-              for (const event of buffered) this.handleEvent(event);
+              this.releaseBufferedEvents();
             }
           }
         }
@@ -337,6 +348,7 @@ export class MobileController {
     return this.stateJob;
   }
   async refreshSession() { await this.refreshState(); }
+  async retryHistorySync() { await this.action(() => this.refreshState()); }
   async earlier() {
     const history = this.history;
     if (!history) return;
@@ -455,7 +467,7 @@ export class MobileController {
     await this.flushCache();
     if (this.value.selectedId && this.value.grant?.scope.kind !== "session") {
       ++this.selection; this.clearFrameEvents(); await this.history?.close(); await this.relay?.detach(); this.history = undefined;
-      this.patch({ selectedId: undefined, snapshot: undefined, messages: [] });
+      this.patch({ selectedId: undefined, snapshot: undefined, messages: [], syncError: undefined });
     } else await this.disconnect();
   }); }
   async resume() { if (this.value.signedIn) await this.background(async () => { await this.refreshGrants(); await this.refreshState(); }); }
@@ -465,7 +477,7 @@ export class MobileController {
     this.relay = undefined; this.history = undefined; this.connectingEvents = undefined;
     await history?.close();
     await relay?.detach();
-    this.patch({ desktopId: undefined, grant: undefined, selectedId: undefined, snapshot: undefined, messages: [], sessions: [], projects: [], catalog: undefined, connection: "disconnected", configuring: false, uncertainMessageId: undefined });
+    this.patch({ desktopId: undefined, grant: undefined, selectedId: undefined, snapshot: undefined, messages: [], sessions: [], projects: [], catalog: undefined, syncError: undefined, connection: "disconnected", configuring: false, uncertainMessageId: undefined });
   }
   async logout() {
     const accountId = this.account.session?.account.id;

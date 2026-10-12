@@ -6,6 +6,7 @@ import { pathToFileURL } from "node:url";
 import { execFileSync } from "node:child_process";
 import { mobileFixture } from "./fixture.mjs";
 import { accountAndroid } from "./account-android.mjs";
+import { syncFailureAcceptance } from "./sync-failure.mjs";
 
 // Actual Electron/Rust and phone-sized browser acceptance against a controlled
 // MC boundary. No model requests, production accounts, or user profiles.
@@ -303,6 +304,7 @@ try {
   await appearance("en", "Dark");
   await screenshot("mobile-two-computers");
   await openSession(second); await readAllHistory(4);
+  await syncFailureAcceptance({ fixture, device: second, phone, view, until, check, screenshot, close, withHost, launch, backHome, openSession });
   await close(second);
   await until(async () => (await view()).directories.find(row => row.desktopDeviceId === second.deviceId)?.device.online === false, "sleeping computer remains discoverable");
   await phone.evaluate(() => window.__PI_MOBILE_CONTROLLER__.clearError());

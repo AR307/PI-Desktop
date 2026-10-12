@@ -1,4 +1,6 @@
 export const mobileEn = {
+  historySyncFailed: "History sync failed. Received content is kept; retry syncing without resending your message. If this persists, update the paired desktop.",
+  historySyncRetry: "Retry history sync", historySyncDetails: "Technical details",
   accountPairing: "Account pairing", ungrouped: "Ungrouped", showArchived: "Show archived", hideArchived: "Hide archived",
   cacheFailed: "Unable to save offline history. Free some device storage and retry.", cacheBlocked: "Close other PI Mobile windows and retry offline storage.",
 
@@ -65,6 +67,8 @@ export const mobileEn = {
 };
 
 export const mobileZhCN: typeof mobileEn = {
+  historySyncFailed: "历史同步失败，已收到的内容会保留。可重试同步，无需重新发送消息；如持续出现，请更新配对的桌面端。",
+  historySyncRetry: "重试历史同步", historySyncDetails: "技术详情",
   accountPairing: "账号配对", ungrouped: "未分组", showArchived: "显示归档", hideArchived: "隐藏归档",
   cacheFailed: "离线历史保存失败，请释放设备存储后重试。", cacheBlocked: "请关闭其他 PI Mobile 窗口后重试离线存储。",
   RATE_LIMITED: "账号请求暂时受限，请等待后重试；现有登录已保留。",

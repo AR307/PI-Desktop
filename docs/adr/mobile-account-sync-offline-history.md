@@ -44,6 +44,16 @@ introduced.
 
 ## Consequences
 
+### Failed delta reads (2026-10-12)
+
+Commit and publish each delta page together instead of publishing only after the
+entire multi-page read succeeds. Otherwise a later failure leaves the visible
+transcript stale while the saved revision has advanced, and the next cache flush
+can overwrite the earlier committed content. Session-scoped read errors preserve
+live events and expose a read-only retry; no model replay or full-snapshot recovery
+path is added. The existing desktop transcript identity fix remains authoritative
+for invalid Windows layout offsets; a phone-only update cannot repair them.
+
 ### Upstream 0.18 integration (2026-10-12)
 
 The fork and upstream independently allocated schema v22. The integrated host

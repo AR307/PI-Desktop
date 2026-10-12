@@ -37,7 +37,7 @@ export class MobileHistory {
     return job;
   }
   async close(): Promise<void> { this.active = false; await this.writes; }
-  async changes(relay: MobileRelay, messages: UiMessage[], valid: () => boolean): Promise<UiMessage[]> {
+  async changes(relay: MobileRelay, messages: UiMessage[], valid: () => boolean, applied: (messages: UiMessage[]) => void): Promise<UiMessage[]> {
     if (!this.entry) return messages;
     await this.writes;
     while (this.entry) {
@@ -58,6 +58,7 @@ export class MobileHistory {
       catch (error) { this.entry = previous; throw error; }
       if (!valid()) return messages;
       messages = mergeMessages(messages.filter((message) => !deleted.includes(message.id)), upserts.filter((message) => !messages.length || message.createdAt >= messages[0]!.createdAt || messages.some((row) => row.id === message.id)));
+      applied(messages);
       if (!page.hasMore) return messages;
     }
     return messages;

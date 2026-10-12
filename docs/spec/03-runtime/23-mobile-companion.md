@@ -191,6 +191,21 @@ Running chat edits affect the next turn only; image and auxiliary requests do no
 inherit it. MC transports these existing RACP payloads without new server state.
 
 
+## History-read failures
+
+A failed durable delta page does not discard already applied pages or buffered
+live events. Each successfully committed page updates the visible transcript
+before requesting the next page; a later failure cannot let a stale UI overwrite
+the committed cache. Live controls and the model catalog remain available after
+a cached attach whose history read fails. A session-scoped notice retains the
+technical error and offers a read-only retry, without sending another prompt,
+clearing history or downloading a replacement snapshot. Successful reconciliation
+clears that notice; changing session does not carry it to another conversation.
+
+The Windows host must reject persistent transcript offsets with unsupported
+file identity. Mobile cannot repair desktop-owned offsets: paired older desktop
+versions exhibiting JSON errors after transcript rewrites must also be updated.
+
 ## Android application updates
 
 Account settings show the installed Android version, manual update check,

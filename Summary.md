@@ -1303,3 +1303,30 @@ Captured native windows and the Android login screen were visually checked.
   increment did not rerun unrelated Rust or the entire desktop suite. No
   artifacts, profiles or credentials are committed. This documentation-only
   completion commit leaves the tested executable source tree unchanged.
+
+## Mobile history recovery and coordinated 0.18.0 release (2026-10-12)
+
+- The installed older Windows host reproduces an expected-value JSON error
+  on isolated synthetic history after a large transcript and tool-result
+  rewrite. Its persistent layout identity of zero permits obsolete byte
+  offsets. The integrated 0.18 host rejects that unsupported identity; a
+  host delta regression now protects the mobile changes path. This does not
+  establish the unique cause in the reporting user's unavailable history.
+- Mobile applies each successfully committed delta page to its visible state
+  before requesting another. A later read failure keeps those changes,
+  buffered live events, live controls and the model catalog. A localized
+  conversation-scoped notice offers technical details and an explicit
+  history-only retry; it never resends a prompt or replaces the whole cache.
+- Targeted checks pass: 22 mobile tests, mobile typecheck, five Rust session
+  sync tests, Rust formatting, workspace JS packages, runtime bundle, full
+  Electron production build and optimized Windows host build. Controlled
+  Electron/browser account acceptance includes failed second-page recovery,
+  retained live events, 610-row offline history and authorization changes.
+- Initial actual PiMobileQA acceptance passed; the final committed candidate
+  will be rerun after the last event-reconciliation adjustment. Installer,
+  Portable ZIP/EXE and Android release acceptance and publication are recorded
+  below once completed, not inferred from build success.
+- Release scope is Windows and Android in their separate AR307 repositories.
+  No new macOS/Linux binaries, production MC changes, paid requests, user
+  profile operations or unrelated full-suite repairs are part of this fix.
+  The upstream integration's previously recorded test failures remain open.

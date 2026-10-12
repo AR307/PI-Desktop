@@ -16,6 +16,14 @@ file must still be rejected.
 
 ## Mobile companion acceptance
 
+The account-sync suite also runs sync-failure.mjs in both touch-browser and native
+Android lanes: reopen a cached conversation, commit the first changed page,
+inject a live update and fail the next page at the relay boundary. Confirm the
+first page and live update remain visible, controls/catalog are restored, the
+technical details are expandable, and explicit retry retrieves only the missing
+delta without another prompt or snapshot. Existing offline, revocation, desktop
+restart and 610-row history checks then continue on the same app instance.
+
 Validate this opt-in post-baseline feature on the dedicated request candidate
 containing the latest applicable `origin/main`, per root AGENTS.md. Do not merge
 into local main to prepare validation. Historical main-integration instructions

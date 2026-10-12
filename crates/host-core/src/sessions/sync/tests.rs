@@ -28,6 +28,48 @@ fn apply(page: SessionChangesPage, cache: &mut HashMap<String, (i64, UiMessage)>
 }
 
 #[test]
+fn mobile_delta_after_large_tool_rewrite_rejects_stale_windows_layout() {
+    let dir = tempfile::tempdir().unwrap();
+    let db = Database::open_in_dir(dir.path()).unwrap();
+    let session = create_session(&db, None, None, None, None, None).unwrap();
+    let mut messages = vec![
+        message("large", "user", &"x".repeat(2_200_000)),
+        message("tool", "tool", "small"),
+        message("answer", "assistant", "after tool"),
+    ];
+    for row in &messages {
+        append_message(&db, &session.id, row, None).unwrap();
+    }
+    let old_layout = session_layout(&db, &session.id).unwrap();
+    let revision = session_sync_revision(&db, &session.id).unwrap();
+    // Existing Windows releases persisted identity 0. Keep that stale file
+    // through a rewrite, just as a previously paired phone would encounter it.
+    let path = transcripts::transcript_path(db.data_dir(), &session.id).unwrap();
+    let offsets = old_layout
+        .message_offsets
+        .iter()
+        .map(u64::to_string)
+        .collect::<Vec<_>>()
+        .join(" ");
+    std::fs::write(
+        path.with_extension("jsonl.layout"),
+        format!("0 {}\n3 0\n{}\n", old_layout.file_len, offsets),
+    )
+    .unwrap();
+    messages[1].content = "progress changed ".repeat(300);
+    replace_messages(&db, &session.id, &messages).unwrap();
+    let page = list_session_changes(&db, &session.id, revision, 50, None).unwrap();
+    assert_eq!(page.changes.len(), 1);
+    let mut cache = HashMap::new();
+    let next = apply(page, &mut cache);
+    assert_eq!(cache["tool"].1.content, messages[1].content);
+    assert!(list_session_changes(&db, &session.id, next, 50, None)
+        .unwrap()
+        .changes
+        .is_empty());
+}
+
+#[test]
 fn cached_history_over_500_messages_survives_restart_and_reconciles_only_changes() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("pi.sqlite");
