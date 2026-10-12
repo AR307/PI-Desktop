@@ -1254,3 +1254,28 @@ Captured native windows and the Android login screen were visually checked.
   mutations are serialized, and unreadable/newer files cannot be overwritten
   by a pairing operation. All 12 real-filesystem registry tests pass, including
   concurrent pairing and recovery from a corrupt file.
+
+### Final synchronization cut
+
+- Pin this request to upstream 93a9a828f896edc468ff15f74b9c2a93fedefd5b,
+  fetched at 2026-10-12 10:16 +08:00. This also includes PR #1576 (our drag
+  overflow fix), #1577 (long AskTool prompts), #1559 (relay model capacities)
+  and #1574 (atomic voice-model downloads and stream-write error propagation).
+  The drag implementation was already retained locally; no duplicate path
+  or new native window workaround was introduced.
+- Final full desktop run before these isolated increments: 3798 passed,
+  47 failed, 8 skipped. Failures cover Windows/POSIX path or permission
+  assumptions, macOS/SSH process fixtures, and the hidden S3 settings fixture.
+  Not every failing test was independently checked on pristine upstream.
+- Host-runtime 120 passed / 3 skipped, RACP 22, agent-host 60, Plugin SDK 382,
+  Plugin DevKit 52, and voice-runtime 51 passed. The first voice test invocation
+  hit an incomplete reused dependency tree; referencing the intact installed
+  Vitest 3.2.7 fixed the environment without changing package versions.
+- On executable candidate 866bfb58c20503bb4a37bd8c5849700c07c1f71b, actual
+  Electron subagent 15, mobile interaction 89 and account-sync 46 checks passed
+  with no renderer or cleanup errors. Screenshots were inspected. Browser
+  capture timed out while other UI fixtures were active; its isolated rerun
+  passed all resize/fullscreen/lifecycle assertions without source changes.
+- The final upstream increments receive a rebuilt sidecar/Electron app and
+  affected-model/download/AskTool/drag checks, followed by the same controlled
+  fork user journeys. Those final results are recorded after candidate testing.

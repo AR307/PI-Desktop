@@ -278,11 +278,23 @@ remote catalog and uses no ambient credentials. `providers.refreshModelCatalog`
 refreshes models.dev explicitly; settings metadata lookups themselves are local.
 
 For keyed endpoints, live discovery supplies IDs and models.dev enriches their
-metadata. For OAuth, the live account endpoint supplies entitled IDs, which are
-then enriched from models.dev. Successful account lists are authoritative; a
-failed list preserves the last usable IDs. A live-only ID with no models.dev
-match stays generic; pi-ai sibling metadata never supplies its chat limits,
-reasoning or price.
+metadata. A positive safe integer context/input or output limit reported on a live
+model-list row takes precedence over the catalog for that field; each field
+falls back independently to catalog metadata when the endpoint omits it. An
+omitted or non-positive value is not guessed. For OAuth, the live account
+endpoint supplies entitled IDs, which are then enriched from models.dev.
+Successful account lists are authoritative; a failed list preserves the last
+usable IDs. A live-only ID with no service or catalog capacity stays generic;
+pi-ai sibling metadata never supplies its chat limits, reasoning or price.
+
+For an unanchored OpenAI-compatible relay, a known model family may use the
+weight owner's published record when that owner names the model. This record
+outranks shared reseller matches without changing the configured wire ID.
+Lookup accepts dotted/dashed version notation, one whitelisted deployment
+label, and the owner's published canonical generation ID; semantic variants
+and unpublished generations remain distinct. If owner aliases disagree on
+capabilities or limits, no owner record is borrowed. When the owner publishes
+no matching record, the existing shared catalog matching rules still apply.
 
 `source: "cache"` reads Host caches and configured bindings without network.
 `source: "refresh"` probes the selected endpoint/account and decorates returned

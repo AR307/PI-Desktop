@@ -1138,11 +1138,17 @@ identify the platform validation still needed.
 - **Expected**: `providers.lookupModel` answers a hand-typed id from the local snapshot only — no provider network request and no host call — and a hit seeds the binding the way a picked model is seeded (published context window, max output tokens, thinking levels, `contextWindowSource: "catalog"`) while the stored id stays exactly what the user typed. A miss, a failed call, or an id the current discovery already described leaves the previous behavior intact: one usable row, the generic seed, and no stalled or duplicated list.
   A record published under another spelling of that id — a route prefix, a dated
   stamp, a marker the deployment appends — is a hit too: the row is upgraded in
-  place as soon as the answer arrives, without waiting for a save.
+  place as soon as the answer arrives, without waiting for a save. In a live
+  discovered row, a positive safe integer context/input or output limit reported by
+  the endpoint takes precedence over the catalog for that field; omitted fields
+  independently use catalog metadata. For an unanchored relay, a published
+  owner record outranks reseller matches; dotted/dashed version aliases and one
+  whitelisted deployment label keep the served ID intact, and conflicting
+  owner records do not supply guessed limits.
 - **Specs linked**: `03-runtime/12-provider-config-schema.md`, `03-runtime/13-model-catalog-and-selection.md`
 - **Acceptance**: B (multi-model provider configuration)
 - **Milestone**: M2
-- **Status**: Documented; covered by `apps/desktop/test/model-custom-lookup.test.mjs` and `apps/desktop/test/provider-lookup-model-handler.test.mjs`
+- **Status**: Documented; covered by `apps/desktop/test/model-custom-lookup.test.mjs`, `apps/desktop/test/provider-lookup-model-handler.test.mjs`, and `apps/desktop/test/provider-endpoint-metadata.test.mjs`
 
 #### E2E-PROVIDER-configured-models-search: The chosen pane's search narrows the configured list
 
@@ -10879,8 +10885,12 @@ This test plan spec is accepted when:
   fixture contains enough options to overflow, only that list scrolls and the
   question header, custom-answer input, and Skip / Next / Submit actions remain
   reachable. Scrolling the list does not move the conversation page or hide the
-  action row. The tool output is ordered as
-  `question：answer`, uses `、` between multiple answers and `\n---\n`
+  action row. A long question prompt is bounded the same way: the question body
+  scrolls inside the card (`min(208px, 24dvh)`, with a `24vh` fallback) and the
+  header actions stay outside that scroller. The question body is keyboard
+  focusable with a visible focus ring. Next, Skip, and the step indicators open
+  each question at the top of that body. The tool output is
+  ordered as `question：answer`, uses `、` between multiple answers and `\n---\n`
   between questions, and
   keeps `question：` for the skipped question. Markdown renders as rich text
   without activating embedded links or loading images. Selecting a formatted
@@ -10897,7 +10907,11 @@ This test plan spec is accepted when:
   `04-ux/11-asktool-question-card.md`, ADR 0077
 - **Acceptance**: E (interactive tool output), C (inline card)
 - **Milestone**: M5
-- **Status**: Draft (runtime/unit coverage active; desktop journey pending)
+- **Automated coverage**: `pnpm test:e2e:asktool-card` mounts the production
+  component in Electron and covers long-prompt scrolling, keyboard reachability,
+  visible header actions, and scroll reset on Next.
+- **Status**: Partially automated (component paths and long-prompt behavior are
+  covered; full application journey pending)
 
 - **Request transition regression**: Keep a one-question request pending in chat
   B. In chat A, advance a two-question request to question two, then select B.
@@ -15734,6 +15748,24 @@ plugin-form fixtures in an isolated temporary directory at runtime.
   states). DOM clicks and CDP input are not native hit-test proof; native pointer,
   window-drag and visual checks remain required on each platform. Branch runs
   are exploratory and do not satisfy the integrated-main gate.
+
+### E2E-WORK-PANEL-overflow-tab-drag-exclusion
+
+- **Preconditions**: On Windows, open a desktop session and create enough work-panel
+  tabs to overflow the horizontal tab strip.
+- **Steps**: Scroll the strip toward both ends, switch to another conversation and
+  back, reorder a tab with the keyboard, then close tabs until one and none remain.
+  Query native `WM_NCHITTEST` over the adjacent sidebar and conversation titlebars,
+  visible tabs, header actions, and spare header space.
+- **Expected**: Offscreen tabs do not block native dragging outside the visible
+  scroll viewport. Adjacent titlebars and unused header space return `HTCAPTION`;
+  visible tabs and actions return `HTCLIENT`. Switching, reordering, and closing
+  tabs preserve those hit regions.
+- **Specs linked**: `04-ux/07-ui-design-system.md` §10
+- **Acceptance**: Quality
+- **Status**: Windows native regression covered by
+  `scripts/e2e-work-panel-drag.mjs` (`pnpm test:e2e:work-panel-drag`). macOS/Linux
+  native dragging remains unqualified.
 
 #### E2E-LAYOUT-sidebar-project-group-fold
 

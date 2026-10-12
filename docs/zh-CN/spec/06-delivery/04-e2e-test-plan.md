@@ -407,10 +407,11 @@ task-candidate E2E 从请求工作树运行，但使用主工作区已经准备�
 - **预期**：`providers.lookupModel` 只从本地快照回答手输 id —— 不访问提供商网络、不调用主机 —— 命中时按「被勾选的模型」同样的口径播种绑定（已发布的上下文长度、最大输出、思考等级，`contextWindowSource: "catalog"`），而存储的 id 保持用户输入的原样。未命中、调用失败，或该 id 已被本次发现结果描述过时，行为与之前一致：一行可用，通用种子，列表既不卡住也不重复。
   该 id 以另一种拼写发布（路由前缀、日期戳、部署自己追加的标记）同样算命中：
   答复到达即就地升级该行，不必等到保存。
+- 实时发现的模型行若由服务报告正安全整数上下文/输入或输出上限，则该字段优先使用服务值；未报告字段独立回退到目录元数据。对于未锚定的中继，若模型所有者发布了匹配记录，则优先使用所有者记录；带点/连字符版本别名和一个白名单部署标签不会改写服务端 ID，所有者记录冲突时不会猜测限额。
 - **链接规格**：`03-runtime/12-provider-config-schema.md`、`03-runtime/13-model-catalog-and-selection.md`
 - **接受**：B（多模型提供商配置）
 - **里程碑**：M2
-- **状态**：已文档化；由 `apps/desktop/test/model-custom-lookup.test.mjs` 与 `apps/desktop/test/provider-lookup-model-handler.test.mjs` 覆盖
+- **状态**：已文档化；由 `apps/desktop/test/model-custom-lookup.test.mjs`、`apps/desktop/test/provider-lookup-model-handler.test.mjs` 与 `apps/desktop/test/provider-endpoint-metadata.test.mjs` 覆盖
 
 #### E2E-005H：从较长的服务模型列表一次全选当前可见模型
 
@@ -6609,7 +6610,8 @@ eleven-tool-round desktop paths are verified by
 - **预期**：一次可见一个问题；小指标显示
   输入框批准区域中已回答、当前和跳过的状态
   Plan 和 Goal 批准使用的停靠位置相同。请求没有
-  倒计时。工具输出排序为 `question：answer`，使用 `、`
+  倒计时。过长的问题正文在卡片内滚动（`min(208px, 24dvh)`，并有 `24vh` 回退），可通过键盘聚焦且显示焦点环；标题栏上的
+  Decline、Skip 和 Next/Submit 留在该滚动区域之外。切换问题后正文从顶部开始。工具输出排序为 `question：answer`，使用 `、`
   多个答案之间和问题之间的 `\n---\n` 之间，并保持
   `question：` 用于跳过的问题。拒绝所有产生空
   每个问题的占位符，仍然完成工具调用。
@@ -6617,7 +6619,8 @@ eleven-tool-round desktop paths are verified by
   `04-ux/11-asktool-question-card.md`、ADR 0077
 - **验收**：E（交互式工具输出）、C（内联卡）
 - **里程碑**：M5
-- **状态**：草案（单位覆盖范围有效；桌面旅程待定）
+- **自动化覆盖**：`pnpm test:e2e:asktool-card` 在 Electron 中挂载生产组件，覆盖长问题滚动、键盘可达性、标题栏动作可见性和点击 Next 后的滚动重置。
+- **状态**：部分自动化（组件路径和长问题行为已覆盖；完整应用桌面旅程仍待完成）
 
 - **请求切换回归**：在聊天 B 留下一个单题请求。在聊天 A 将双题请求推进到第二题，
   再切换到 B。B 应显示自己的第一题、空白答案和可用输入框，不应出现应用错误页。
@@ -8391,6 +8394,15 @@ runner 会在运行时的隔离临时目录中生成六个插件形态 fixture�
   row/spacer ownership, all-platform/fullscreen CSS fixtures in both sidebar
   states). DOM/CDP clicks are not native hit-test proof. Native pointer, drag
   and visual checks remain required; branch runs are exploratory only.
+
+### E2E-WORK-PANEL-overflow-tab-drag-exclusion
+
+- **前提条件**：在 Windows 上打开桌面会话，并创建足够多的工作面板标签，使横向标签栏发生溢出。
+- **步骤**：将标签栏分别滚到两端，切换到另一个对话再切回，用键盘重排标签，然后逐个关闭标签，直到只剩一个和没有标签。使用原生 `WM_NCHITTEST` 检查相邻侧边栏与对话标题栏、可见标签、标题栏操作按钮和多余空白。
+- **预期**：视口外的标签不会阻挡可见滚动视口以外的原生拖动。相邻标题栏和未使用的标题栏空白返回 `HTCAPTION`；可见标签和操作返回 `HTCLIENT`。切换、重排和关闭标签后，这些命中区域保持正确。
+- **链接规格**：`04-ux/07-ui-design-system.md` §10
+- **验收**：品质
+- **状态**：Windows 原生回归由 `scripts/e2e-work-panel-drag.mjs`（`pnpm test:e2e:work-panel-drag`）覆盖；macOS/Linux 原生拖动尚未验证。
 
 #### E2E-LAYOUT-sidebar-project-group-fold
 
