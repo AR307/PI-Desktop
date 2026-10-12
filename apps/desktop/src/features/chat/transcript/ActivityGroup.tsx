@@ -152,8 +152,6 @@ type ActivityGroupProps = {
   embedded?: boolean;
   isActive: boolean;
   endedAt?: string;
-  /** Last activity chunk of this assistant turn. */
-  isLast?: boolean;
   /** Current runtime wait phase, when the group owns the live turn tail. */
   runtimeActivity?: AgentActivity;
   /** Delegation statuses from the entire assistant turn (cross-activity-part). */
@@ -188,7 +186,6 @@ function activityGroupPropsEqual(
     previous.embedded !== next.embedded ||
     previous.isActive !== next.isActive ||
     previous.endedAt !== next.endedAt ||
-    previous.isLast !== next.isLast ||
     previous.runtimeActivity !== next.runtimeActivity ||
     previous.items.length !== next.items.length
   ) {
@@ -216,7 +213,6 @@ export const ActivityGroup = memo(function ActivityGroup({
   embedded: _embedded = false,
   isActive,
   endedAt,
-  isLast = false,
   runtimeActivity,
   turnDelegationStatuses,
   turnDelegationTimings,
@@ -334,8 +330,6 @@ export const ActivityGroup = memo(function ActivityGroup({
 
   const renderedItems = <ActivityItems
     items={items}
-    compact={compact}
-    isLast={isLast}
     isActive={isActive}
     live={live}
     delegateItems={delegateItems}
@@ -365,45 +359,45 @@ export const ActivityGroup = memo(function ActivityGroup({
         runtimeActivity ? ` phase-${runtimeActivity.phase}` : ""
       }`}
     >
-      <div className="subagent-group-actions">
-        <button
-          ref={titleRef}
-          className="tool-activity-header"
-          aria-expanded={open}
-          aria-controls={detailsId}
-          onClick={toggleDisclosure}
-        >
-          <span className="tool-activity-icon" aria-hidden>
-            {hasSubagentTopology ? (
-              <IconWorkflow size={15} />
-            ) : (
-              <IconSparkles size={14} />
-            )}
-          </span>
-          <span className={`tool-activity-label ${live ? "running" : ""}`}>
-            {label}
-          </span>
+      <div className="subagent-activity-header">
+      <button
+        ref={titleRef}
+        className="tool-activity-header"
+        aria-expanded={open}
+        aria-controls={detailsId}
+        onClick={toggleDisclosure}
+      >
+        <span className="tool-activity-icon" aria-hidden>
           {hasSubagentTopology ? (
-            <span className="subagent-activity-metrics">
-              {t("chat.subagentCount", { count: subagentSummary.total })}
-              <span aria-hidden> · </span>
-              {t("chat.subagentFinishedCount", {
-                finished: subagentSummary.finished,
-                total: subagentSummary.total,
-              })}
-              <span aria-hidden> · </span>
-              {elapsed}
-            </span>
-          ) : items.length > 1 ? (
-            <span className="tool-activity-count">
-              {t("chat.processingSteps", { count: items.length })}
-            </span>
-          ) : null}
-          <span className="tool-activity-caret" aria-hidden>
-            <IconChevronRight size={12} />
+            <IconWorkflow size={15} />
+          ) : (
+            <IconSparkles size={14} />
+          )}
+        </span>
+        <span className={`tool-activity-label ${live ? "running" : ""}`}>
+          {label}
+        </span>
+        {hasSubagentTopology ? (
+          <span className="subagent-activity-metrics">
+            {t("chat.subagentCount", { count: subagentSummary.total })}
+            <span aria-hidden> · </span>
+            {t("chat.subagentFinishedCount", {
+              finished: subagentSummary.finished,
+              total: subagentSummary.total,
+            })}
+            <span aria-hidden> · </span>
+            {elapsed}
           </span>
-        </button>
-        {topologyLive ? <SubagentStopButton /> : null}
+        ) : items.length > 1 ? (
+          <span className="tool-activity-count">
+            {t("chat.processingSteps", { count: items.length })}
+          </span>
+        ) : null}
+        <span className="tool-activity-caret" aria-hidden>
+          <IconChevronRight size={12} />
+        </span>
+      </button>
+      <SubagentStopButton running={topologyLive} />
       </div>
       {tail ? (
         <div className="tool-activity-preview" aria-hidden>

@@ -1,5 +1,6 @@
 import type { SessionDetail } from "@pi-desktop/shared";
 import type { SessionHistoryReadOptions } from "../../lib/api";
+import { isRemoteSession } from "../../lib/remote-session-safety";
 import {
   EMPTY_TRANSCRIPT,
   extendTranscriptView,
@@ -104,6 +105,10 @@ export function createTranscriptReadingRuntime({ get, set }: StoreAccess, read: 
     },
     loadTranscriptPage: async (sessionId, direction) => {
       const view = currentView(sessionId);
+      const remote = isRemoteSession({ id: sessionId });
+      // Remote history exposes older-item cursors only; never synthesize a
+      // forward cursor by applying local physical-offset arithmetic.
+      if (remote && direction === "after") return;
       if (view.loading || !(direction === "before" ? view.hasMoreBefore : view.hasMoreAfter))
         return;
       const limit = view.focus ? TRANSCRIPT_SEARCH_PAGE_SIZE : TRANSCRIPT_PAGE_SIZE;
@@ -118,7 +123,16 @@ export function createTranscriptReadingRuntime({ get, set }: StoreAccess, read: 
         });
         if (get().transcriptViews[sessionId] !== pending) return;
         if (!session) throw new Error("Conversation no longer exists.");
-        publish(sessionId, extendTranscriptView(pending, session, direction));
+        const extended = extendTranscriptView(pending, session, direction);
+        // Remote numeric values represent opaque Host item cursors. Preserve
+        // the returned cursor rather than depending on its ordering. Local
+        // transcripts continue merging physical message offsets unchanged.
+        publish(sessionId, remote ? {
+          ...extended,
+          messageStart: session.messageStart ?? 0,
+          messageEnd: undefined,
+          hasMoreAfter: false,
+        } : extended);
       } catch (error) {
         reportError(sessionId, pending, error);
       }

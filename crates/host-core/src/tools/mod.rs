@@ -1034,6 +1034,51 @@ pub async fn execute_tool_with_options(
     .await
 }
 
+/// Run a synchronous file-tool body on Tokio's blocking pool so a long
+/// traversal, read, or rg child wait cannot occupy an async worker (#1071).
+async fn run_file_tool(
+    workspace: Option<&Path>,
+    scratch: Option<&Path>,
+    tool_name: &str,
+    args: &Value,
+    allow_external_paths: bool,
+    hashline: Option<&HashlineContext<'_>>,
+) -> Result<Value, hashline::ToolError> {
+    let workspace = workspace.map(Path::to_path_buf);
+    let scratch = scratch.map(Path::to_path_buf);
+    let tool_name = tool_name.to_string();
+    let args = args.clone();
+    let hashline = hashline.map(|ctx| (ctx.session_id.to_string(), ctx.store.clone()));
+    #[cfg(test)]
+    let test_rg = grep_rg::current_test_rg();
+    tokio::task::spawn_blocking(move || {
+        // The test rg override is thread-local; carry it onto the blocking
+        // thread for the duration of the body.
+        #[cfg(test)]
+        let _test_rg = test_rg.map(grep_rg::install_test_rg);
+        let hashline = hashline.as_ref().map(|(id, store)| HashlineContext {
+            session_id: id,
+            store,
+        });
+        let (workspace, scratch, hashline) =
+            (workspace.as_deref(), scratch.as_deref(), hashline.as_ref());
+        let args = &args;
+        match tool_name.as_str() {
+            "Read" => tool_read(workspace, scratch, args, allow_external_paths, hashline)
+                .map_err(Into::into),
+            "Glob" => tool_glob(workspace, scratch, args, allow_external_paths).map_err(Into::into),
+            "Grep" => tool_grep(workspace, scratch, args, allow_external_paths, hashline)
+                .map_err(Into::into),
+            "Write" => tool_write(workspace, scratch, args, allow_external_paths, hashline)
+                .map_err(Into::into),
+            // "Edit": the caller routes only these five file tools here.
+            _ => tool_edit(workspace, scratch, args, allow_external_paths, hashline),
+        }
+    })
+    .await
+    .map_err(|error| hashline::ToolError::new("INTERNAL", format!("tool task failed: {error}")))?
+}
+
 /// Execute a builtin tool after the host permission gate has decided whether
 /// an explicit outside-workspace path is allowed for this call.
 pub async fn execute_tool_with_path_access(
@@ -1070,38 +1115,17 @@ pub async fn execute_tool_with_path_access(
         // Authorize the desktop-owned image request through the normal host gate.
         // Only the trusted desktop runner performs the external call.
         "GenerateImages" => Ok(serde_json::json!({ "authorized": true })),
-        "Read" => tool_read(
-            workspace,
-            scratch,
-            args,
-            allow_external_paths,
-            hashline.as_ref(),
-        )
-        .map_err(Into::into),
-        "Glob" => tool_glob(workspace, scratch, args, allow_external_paths).map_err(Into::into),
-        "Grep" => tool_grep(
-            workspace,
-            scratch,
-            args,
-            allow_external_paths,
-            hashline.as_ref(),
-        )
-        .map_err(Into::into),
-        "Write" => tool_write(
-            workspace,
-            scratch,
-            args,
-            allow_external_paths,
-            hashline.as_ref(),
-        )
-        .map_err(Into::into),
-        "Edit" => tool_edit(
-            workspace,
-            scratch,
-            args,
-            allow_external_paths,
-            hashline.as_ref(),
-        ),
+        "Read" | "Glob" | "Grep" | "Write" | "Edit" => {
+            run_file_tool(
+                workspace,
+                scratch,
+                tool_name,
+                args,
+                allow_external_paths,
+                hashline.as_ref(),
+            )
+            .await
+        }
         "Bash" => {
             let options = bash_options.unwrap_or_else(|| {
                 let id = shell::catalog(None)
@@ -1640,6 +1664,14 @@ fn tool_edit(
         if ignore_rules::is_sensitive_path(&dest_resolved) {
             let (code, message) = ignore_rules::denied_error(dest);
             return Err(hashline::ToolError::new(code, message));
+        }
+        // Both paths have passed the same canonical, permission-aware resolver.
+        // Writing then unlinking an alias of the source would delete the file.
+        if dest_resolved == resolved {
+            return Err(hashline::ToolError::new(
+                "EDIT_NO_CHANGE",
+                "MV destination resolves to the source file; choose a different destination",
+            ));
         }
         if let Some(parent) = dest_resolved.parent() {
             std::fs::create_dir_all(parent).map_err(|e| {
@@ -2738,7 +2770,12 @@ async fn tool_bash(
         program: invocation.program,
         args: invocation.args,
         workspace: root.to_path_buf(),
-        scratch_dir: scratch.map(Path::to_path_buf),
+        scratch_dir: scratch.map(|path| {
+            shell::format_scratch_dir_for_shell(
+                shell::dialect_for_id(&options.command_shell_id),
+                path,
+            )
+        }),
         env_path: shell::user_login_path().map(str::to_string),
     };
     let SpawnedToolRunner {
@@ -2821,7 +2858,15 @@ async fn tool_bash(
     notifier.finish();
 
     match stop {
-        BashStop::TimedOut => Err(("TOOL_TIMEOUT".into(), "bash timed out".into())),
+        BashStop::TimedOut => Err((
+            "TOOL_TIMEOUT".into(),
+            format!(
+                "bash timed out after {timeout_ms}ms and was stopped; \
+                 the command did not finish within the Bash tool's timeoutMs budget. \
+                 Raise timeoutMs for a legitimately long command, or split the work \
+                 into shorter commands that each finish inside the budget"
+            ),
+        )),
         BashStop::Aborted => Err(("TOOL_ABORTED".into(), "bash aborted".into())),
         BashStop::LifecycleFailed(error) => Err((
             "TOOL_FAILED".into(),
@@ -3086,6 +3131,45 @@ mod tests {
                 > MCP_CONNECT_TIMEOUT_MS + MCP_TOOL_DISCOVERY_TIMEOUT_MS + MCP_CALL_TIMEOUT_MS
         );
         assert_eq!(desktop_dispatch_timeout_ms(Some(5_000)), 5_000);
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
+    async fn glob_traversal_does_not_occupy_the_async_worker() {
+        let dir = tempfile::tempdir().unwrap();
+        for directory in 0..60 {
+            let path = dir.path().join(format!("dir-{directory}"));
+            std::fs::create_dir(&path).unwrap();
+            for file in 0..100 {
+                std::fs::File::create(path.join(format!("file-{file}.txt"))).unwrap();
+            }
+        }
+
+        let root = dir.path().to_path_buf();
+        let glob = tokio::spawn(async move {
+            execute_tool(
+                Some(&root),
+                None,
+                "Glob",
+                &serde_json::json!({ "pattern": "**/*.zzz" }),
+                30_000,
+            )
+            .await
+        });
+        // With one worker, the probe can only be polled during the Glob while
+        // the Glob task is parked at an await. An inline synchronous traversal
+        // never yields, so the probe cannot complete until the traversal ends.
+        let probe = tokio::spawn(async {
+            tokio::task::yield_now().await;
+        });
+        probe.await.unwrap();
+        assert!(
+            !glob.is_finished(),
+            "probe could only run after Glob finished: the Glob body blocked the only async worker (#1071)"
+        );
+
+        let result = glob.await.unwrap();
+        assert!(result.ok, "glob failed: {:?}", result.content);
+        assert_eq!(result.content["count"].as_u64(), Some(0));
     }
 
     #[cfg(unix)]
@@ -3517,7 +3601,13 @@ mod tests {
         .await;
         assert!(edit.ok, "UTF-16LE edit failed: {:?}", edit.content);
         let written = std::fs::read(path).unwrap();
-        assert!(written.starts_with(&[0xff, 0xfe]));
+        let mut expected = vec![0xff, 0xfe];
+        expected.extend(
+            "build passed\r\nfinal line\r\n"
+                .encode_utf16()
+                .flat_map(u16::to_le_bytes),
+        );
+        assert_eq!(written, expected);
         assert_eq!(
             hashline::normalize_file(&written).text,
             "build passed\nfinal line\n"
@@ -3559,7 +3649,9 @@ mod tests {
         .await;
         assert!(edit.ok, "UTF-16BE Edit failed: {:?}", edit.content);
         let written = std::fs::read(path).unwrap();
-        assert!(written.starts_with(&[0xfe, 0xff]));
+        let mut expected = vec![0xfe, 0xff];
+        expected.extend("开始\n已完成\n".encode_utf16().flat_map(u16::to_be_bytes));
+        assert_eq!(written, expected);
         assert_eq!(hashline::normalize_file(&written).text, "开始\n已完成\n");
     }
 
@@ -4609,6 +4701,85 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn bash_timeout_error_names_the_budget() {
+        let dir = tempfile::tempdir().unwrap();
+        let shell_id = shell::catalog(None)
+            .effective
+            .expect("test platform must have a command shell")
+            .id;
+        let dialect = shell::dialect_for_id(&shell_id).unwrap_or("posix");
+        let command = match dialect {
+            "powershell" => "Start-Sleep -Seconds 5",
+            "cmd" => "ping -n 6 127.0.0.1 >NUL",
+            _ => "sleep 5",
+        };
+        let result = execute_tool_with_options(
+            Some(dir.path()),
+            None,
+            "Bash",
+            &serde_json::json!({ "command": command }),
+            Some(1_000),
+            Some(BashExecutionOptions {
+                session_id: "timeout-session".into(),
+                tool_call_id: "timeout-call".into(),
+                command_shell_id: shell_id,
+                timeout_ms: Some(1_000),
+                cancellation: None,
+                output_tx: None,
+            }),
+        )
+        .await;
+        assert!(!result.ok, "expected a timeout, got: {:?}", result.content);
+        assert_eq!(result.is_error, Some(true));
+        assert_eq!(result.error_code.as_deref(), Some("TOOL_TIMEOUT"));
+        let message = result.content["error"].as_str().unwrap_or_default();
+        assert!(
+            message.contains("1000ms"),
+            "timeout message names the budget: {message:?}"
+        );
+        assert!(
+            message.contains("timeoutMs"),
+            "timeout message says how to extend the budget: {message:?}"
+        );
+    }
+
+    #[cfg(windows)]
+    #[tokio::test]
+    async fn bash_scratch_dir_env_is_posix_formatted_for_git_bash() {
+        if shell::resolve_shell(shell::GIT_BASH_ID).is_err() {
+            eprintln!("git-bash is not installed; skipping the posix scratch env test");
+            return;
+        }
+        let ws = tempfile::tempdir().unwrap();
+        let data = tempfile::tempdir().unwrap();
+        let scratch = data.path().join("scratch").join("session-dialect");
+        std::fs::create_dir_all(&scratch).unwrap();
+        let result = execute_tool_with_options(
+            Some(ws.path()),
+            Some(&scratch),
+            "Bash",
+            &serde_json::json!({ "command": "printf %s \"$PI_SCRATCH_DIR\"" }),
+            Some(15_000),
+            Some(BashExecutionOptions {
+                session_id: "dialect-session".into(),
+                tool_call_id: "dialect-call".into(),
+                command_shell_id: shell::GIT_BASH_ID.into(),
+                timeout_ms: Some(15_000),
+                cancellation: None,
+                output_tx: None,
+            }),
+        )
+        .await;
+        assert!(result.ok, "bash failed: {:?}", result.content);
+        let stdout = result.content["stdout"].as_str().unwrap_or_default();
+        let expected = scratch.to_str().unwrap().replace('\\', "/");
+        assert_eq!(
+            stdout, expected,
+            "PI_SCRATCH_DIR must be a path the posix shell can use directly"
+        );
+    }
+
+    #[tokio::test]
     async fn bash_output_accumulator_is_bounded_and_reports_omissions() {
         let dir = tempfile::tempdir().unwrap();
         #[cfg(windows)]
@@ -4803,6 +4974,143 @@ mod tests {
         .await;
         assert_eq!(native.content["exitCode"], 7);
     }
+    #[tokio::test]
+    async fn edit_move_to_self_preserves_source_bytes() {
+        let dir = tempfile::tempdir().unwrap();
+        // macOS temp roots may spell /private/var as /var. Use the same
+        // canonical spelling for the workspace and its absolute destination.
+        let root = crate::workspace::simple_canonicalize(dir.path()).unwrap();
+        let target = root.join("source.txt");
+        let input = b"original\r\n";
+        std::fs::write(&target, input).unwrap();
+        let mut destinations = vec![
+            "source.txt".to_string(),
+            "./source.txt".to_string(),
+            "sub/../source.txt".to_string(),
+            target.to_string_lossy().into_owned(),
+        ];
+        // Probe this directory rather than assuming case sensitivity by OS.
+        if root.join("SOURCE.TXT").try_exists().unwrap() {
+            destinations.push("SOURCE.TXT".to_string());
+        }
+        let mut failures = Vec::new();
+        for dest in destinations {
+            std::fs::write(&target, input).unwrap();
+            let read = execute_tool(
+                Some(&root),
+                None,
+                "Read",
+                &json!({"path": "source.txt"}),
+                5_000,
+            )
+            .await;
+            assert!(read.ok, "Read failed: {:?}", read.content);
+            // A mixed call must reject the move before even the PUT bytes land.
+            let result = execute_tool(
+                Some(&root),
+                None,
+                "Edit",
+                &json!({"path": "source.txt", "tag": read.content["tag"],
+                    "ops": format!("PUT 1.=1:\n+changed\nMV \"{dest}\"\n")}),
+                5_000,
+            )
+            .await;
+            if result.ok || result.error_code.as_deref() != Some("EDIT_NO_CHANGE") {
+                failures.push(format!("{dest}: expected EDIT_NO_CHANGE, got {result:?}"));
+            }
+            if std::fs::read(&target).ok().as_deref() != Some(input.as_slice()) {
+                failures.push(format!("{dest}: source bytes changed or file disappeared"));
+            }
+        }
+        assert!(failures.is_empty(), "{}", failures.join("\n"));
+    }
+
+    #[tokio::test]
+    async fn edit_move_through_directory_link_preserves_source_bytes() {
+        let dir = tempfile::tempdir().unwrap();
+        let real = dir.path().join("real");
+        let alias = dir.path().join("alias");
+        std::fs::create_dir(&real).unwrap();
+        #[cfg(unix)]
+        std::os::unix::fs::symlink(&real, &alias).unwrap();
+        #[cfg(windows)]
+        {
+            // Junctions exercise real filesystem aliases without symlink privilege.
+            let output = std::process::Command::new("cmd.exe")
+                .args(["/d", "/c", "mklink", "/J"])
+                .arg(&alias)
+                .arg(&real)
+                .output()
+                .unwrap();
+            assert!(
+                output.status.success(),
+                "junction creation failed: {output:?}"
+            );
+        }
+        let target = real.join("source.txt");
+        std::fs::write(&target, b"original\n").unwrap();
+        let read = execute_tool(
+            Some(dir.path()),
+            None,
+            "Read",
+            &json!({"path": "real/source.txt"}),
+            5_000,
+        )
+        .await;
+        assert!(read.ok, "Read failed: {:?}", read.content);
+        let result = execute_tool(
+            Some(dir.path()),
+            None,
+            "Edit",
+            &json!({"path": "real/source.txt", "tag": read.content["tag"],
+                "ops": "MV alias/source.txt\n"}),
+            5_000,
+        )
+        .await;
+        assert!(
+            !result.ok,
+            "Move through alias succeeded: {:?}",
+            result.content
+        );
+        assert_eq!(result.error_code.as_deref(), Some("EDIT_NO_CHANGE"));
+        assert_eq!(std::fs::read(&target).unwrap(), b"original\n");
+        #[cfg(windows)]
+        std::fs::remove_dir(&alias).unwrap();
+    }
+
+    #[tokio::test]
+    async fn edit_move_to_different_path_applies_edits_and_removes_source() {
+        let dir = tempfile::tempdir().unwrap();
+        let target = dir.path().join("source.txt");
+        std::fs::write(&target, b"original\r\n").unwrap();
+        let read = execute_tool(
+            Some(dir.path()),
+            None,
+            "Read",
+            &json!({"path": "source.txt"}),
+            5_000,
+        )
+        .await;
+        assert!(read.ok, "Read failed: {:?}", read.content);
+        let result = execute_tool(
+            Some(dir.path()),
+            None,
+            "Edit",
+            &json!({"path": "source.txt", "tag": read.content["tag"],
+                "ops": "PUT 1.=1:\n+changed\nMV nested/destination.txt\n"}),
+            5_000,
+        )
+        .await;
+        assert!(result.ok, "Move failed: {:?}", result.content);
+        assert!(!target.exists());
+        assert_eq!(
+            std::fs::read(dir.path().join("nested/destination.txt")).unwrap(),
+            b"changed\r\n"
+        );
+        assert_eq!(result.content["movedFrom"], "source.txt");
+        assert_eq!(result.content["tag"].as_str().unwrap().len(), 4);
+    }
+
     #[tokio::test]
     async fn edit_preserves_crlf_line_endings() {
         let dir = tempfile::tempdir().unwrap();

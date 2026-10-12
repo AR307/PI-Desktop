@@ -11,7 +11,7 @@ function deferred() {
   return { promise, resolve };
 }
 function harness() {
-  const roots = [], loads = [], panes = [], published = [];
+  const roots = [], loads = [], panes = [], published = [], reveals = [];
   const createPane = (onState) => {
     let state = null;
     const pane = {
@@ -40,6 +40,7 @@ function harness() {
       const done = deferred(); roots.push({ sessionId, ...done }); return done.promise;
     },
     onState: (state) => published.push(state),
+    onRevealView: (sessionId, tabId) => reveals.push({ sessionId, tabId }),
   });
   const surface = (visible = true) => host.setChromeSurface({
     pluginId: "pi.browser", viewId: "browser", visible,
@@ -47,7 +48,7 @@ function harness() {
   });
   surface();
   host.setGuestHole("pi.browser", { x: 0, y: 30, width: 400, height: 570 });
-  return { host, roots, loads, panes, published, surface };
+  return { host, roots, loads, panes, published, reveals, surface };
 }
 async function open(h, sessionId, tabId, url) {
   h.host.setChromeSession(sessionId, tabId, url);
@@ -157,6 +158,88 @@ test("closing the panel keeps a pending page hidden until the panel returns", as
   h.loads.at(-1).finish(); await settled();
   assert.equal(h.panes[0].visible, false);
   h.surface(); assert.equal(h.panes[0].visible, true);
+});
+
+test("Browser reveal opens the calling session and waits for its visible view", async () => {
+  const h = harness();
+  await open(h, "A", "a", "https://fixture.invalid/current");
+  h.surface(false);
+
+  let resolved = false;
+  const reveal = h.host.reveal("A").then(() => { resolved = true; });
+  assert.deepEqual(h.reveals, [{ sessionId: "A", tabId: "a" }]);
+  h.surface(false);
+  assert.equal(resolved, false, "a hidden view must not release the operation");
+  h.surface(true);
+  await reveal;
+  assert.equal(resolved, true);
+});
+
+test("switching sessions reveals an isolated Browser page and preserves the previous session", async () => {
+  const h = harness();
+  await open(h, "A", "a", "https://fixture.invalid/a");
+  h.surface(false);
+
+  const reveal = h.host.reveal("B");
+  assert.deepEqual(h.reveals, [{ sessionId: "B", tabId: undefined }]);
+  h.host.setChromeSession("B", "plugin:pi.browser/browser");
+  h.surface(true);
+  await reveal;
+  assert.equal(h.host.getContext().sessionId, "B");
+
+  const navigation = h.host.navigate({ url: "https://fixture.invalid/b" }, "B");
+  h.roots.at(-1).resolve("/projects/B");
+  await settled();
+  h.loads.at(-1).finish();
+  assert.equal((await navigation).url, "https://fixture.invalid/b");
+
+  h.host.setChromeSession("A", "a");
+  assert.equal(h.host.getState().url, "https://fixture.invalid/a");
+});
+
+test("Browser reveal returns UNAVAILABLE when the session view never appears", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  const h = harness();
+  const timedOut = assert.rejects(h.host.reveal("B"), { code: "UNAVAILABLE" });
+  t.mock.timers.tick(5_000);
+  await timedOut;
+  assert.deepEqual(h.reveals, [{ sessionId: "B", tabId: undefined }]);
+});
+
+test("Browser reveal never steals focus from a different session", async () => {
+  const h = harness();
+  await open(h, "A", "a", "https://fixture.invalid/current");
+  h.surface(false);
+  const reveal = h.host.reveal("B");
+  assert.deepEqual(h.reveals, [{ sessionId: "B", tabId: undefined }]);
+  assert.equal(h.host.getContext().sessionId, "A");
+  h.host.disposeGuest();
+  await assert.rejects(reveal, (error) => error?.code === "UNAVAILABLE");
+});
+
+test("plugin browser operations remain unavailable until the Browser view is visible", async () => {
+  const h = harness(); await open(h, "A", "a", "A.html");
+  assert.equal(h.host.getStateForPlugin().url, "A.html");
+  const pendingNavigation = h.host.navigate({ url: "https://fixture.invalid/hidden" });
+  h.surface(false);
+  h.roots.at(-1).resolve("/projects/A");
+  await assert.rejects(pendingNavigation, (error) => error?.code === "UNAVAILABLE");
+  h.surface(false);
+  const unavailable = (error) => error?.code === "UNAVAILABLE";
+
+  assert.equal(h.host.getState().url, "A.html", "host UI state remains readable");
+  assert.throws(() => h.host.getStateForPlugin(), unavailable);
+  assert.throws(() => h.host.action("reload"), unavailable);
+  assert.throws(() => h.host.openExternal(), unavailable);
+  assert.throws(() => h.host.console(), unavailable);
+  await assert.rejects(h.host.navigate({ url: "https://fixture.invalid/hidden" }), unavailable);
+  await assert.rejects(h.host.snapshot(), unavailable);
+  await assert.rejects(h.host.screenshot(), unavailable);
+  await assert.rejects(h.host.click("uid"), unavailable);
+  await assert.rejects(h.host.fill("uid", "text"), unavailable);
+  await assert.rejects(h.host.evaluate("document.title"), unavailable);
+  await assert.rejects(h.host.cdpCommand("Page.enable"), unavailable);
+  assert.equal(h.loads.length, 1, "hidden navigation must not reach the page");
 });
 
 test("closing a tab and disposing the host cancel pending ownership and release pages", async () => {

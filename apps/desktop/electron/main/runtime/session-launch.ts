@@ -5,6 +5,7 @@ import {
   ErrorCodes as SharedErrorCodes,
   isActiveInProject,
   isCommandShellCatalog,
+  JEV_API_KEY_SECRET_REF,
   imageGenerationBindings,
   isImageGenerationModel,
   normalizeMode,
@@ -264,6 +265,7 @@ export function createSessionLaunchRuntime({
     session: any,
     settings: any,
     overrides: {
+      turnId?: string;
       mode?: Mode;
       fast?: boolean;
       ultra?: boolean;
@@ -649,9 +651,27 @@ export function createSessionLaunchRuntime({
     if (ultra && (!subagentCatalog.definitions.length || modelConfig?.toolCall === false)) {
       throw new Error("PI_ULTRA_UNAVAILABLE: Enable subagents and select a tool-capable chat model.");
     }
-    const mode = normalizeMode(overrides.mode ?? session.mode ?? settings.defaultMode ?? "agent");
     // Only user/approved-plan launches opt in. Auxiliary calls never inherit Fast.
     const fast = isMirrorCodingAccount && overrides.fast === true;
+    const mode = normalizeMode(
+      overrides.mode ?? session.mode ?? settings.defaultMode ?? "agent",
+    );
+    let jevApiKey: string | undefined;
+    if (mode === "agent" && settings.jevEnabled === true) {
+      try {
+        const saved = await runtimeState.host!.call<{ value?: string | null }>(
+          "secrets.getForRuntime",
+          { secretRef: JEV_API_KEY_SECRET_REF },
+        );
+        if (typeof saved.value === "string" && saved.value.trim().length > 0) {
+          jevApiKey = saved.value;
+        }
+      } catch {
+        logger.app("session", "warn", "Jev API key could not be loaded", {
+          sessionId,
+        });
+      }
+    }
     return {
       providerId: provider.id,
       modelId,
@@ -659,9 +679,11 @@ export function createSessionLaunchRuntime({
       sidecarParams: {
         sessionId,
         mode,
+        ...(overrides.turnId ? { turnId: overrides.turnId } : {}),
         thinkingLevel,
         ultra,
         infiniteProviderRetry: settings.infiniteProviderRetry === true,
+        ...(jevApiKey ? { jevApiKey } : {}),
         commandShell,
         scratchDir: join(dataDir, "scratch", sessionId),
         attachmentsDir: join(dataDir, "attachments"),

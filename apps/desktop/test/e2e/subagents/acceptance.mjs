@@ -83,7 +83,7 @@ try {
   assert((await tasks()).every(message => message.toolResult.details.status === "running"));
   check("stopping the parent leaves both actual worker streams and cards running");
   await screenshot("running-after-parent-stop");
-  const stopOne = page.getByRole("button", { name: "Stop subagent", exact: true }).first();
+  const stopOne = page.locator(".subagent-topology-node-actions").getByRole("button", { name: /^Stop / }).first();
   await stopOne.focus(); await stopOne.press("Enter");
   await until(async () => (await tasks()).filter(message => message.toolResult.details.status === "stopped").length === 1, "individual cancellation settled");
   assert.equal(children.filter(call => !call.closed).length, 1);

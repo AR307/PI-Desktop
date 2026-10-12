@@ -259,7 +259,7 @@ test("every Task row renders as one accessible delegation topology", () => {
   assert.doesNotMatch(topologyNode, /tool-row-caret/);
   assert.match(
     topologyNode,
-    /onClick=\{\(\) => \{\s*if \(!hasDetails\) return;\s*onUserInteraction\?\.\(\);\s*openSubagentTab\(panelSelectionId, agentName \|\| undefined\);\s*\}\}/,
+    /onClick=\{\s*\(\) => \{\s*if \(!hasDetails\) return;\s*onUserInteraction\?\.\(\);\s*localToolsAllowed && openSubagentTab\(panelSelectionId, agentName \|\| undefined\);\s*\}\}/,
   );
   assert.match(
     transcriptSource,

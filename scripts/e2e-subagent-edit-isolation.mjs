@@ -7,6 +7,22 @@ import { DesktopAgentRuntime } from "../packages/agent-runtime/dist/runtime.js";
 // Real Runtime -> pi Agent -> SubagentRun. Only the provider and host tool
 // boundary are deterministic fixtures; no production model or Desktop state.
 let sequence = 0;
+const labels = process.argv.includes("--single") ? ["A"] : ["A", "B"];
+const patchCommand = process.argv.includes("--patch");
+const toolName = patchCommand ? "Bash" : "Edit";
+const aStopped = Promise.withResolvers();
+const completed = new Map([...labels.map((label) => `task_${label}`), "resume_A"]
+  .map((id) => [id, Promise.withResolvers()]));
+async function bounded(promise, label) {
+  let timer;
+  try {
+    return await Promise.race([promise, new Promise((_, reject) => {
+      timer = setTimeout(() => reject(new Error(`Timed out: ${label}`)), 15_000);
+    })]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
 const state = { editCalls: new Map(), parentErrors: [], taskResults: new Map(), taskIds: new Map(), errors: [] };
 const reply = (res, model, calls, text = "Finished") => {
   res.writeHead(200, { "content-type": "text/event-stream" });
@@ -35,17 +51,14 @@ const server = createServer(async (req, res) => {
       const label = labelFor(body);
       const count = state.editCalls.get(label) ?? 0;
       if (label === "B" && count >= 2) {
-        const deadline = Date.now() + 15_000;
-        while (!state.aTerminated) {
-          assert.ok(Date.now() < deadline, "delegate A did not terminate on its third Edit");
-          await new Promise((resolve) => setTimeout(resolve, 10));
-        }
+        await bounded(aStopped.promise, "delegate A's third Edit");
         reply(res, body.model, null, "Delegate B continued after A stopped.");
       } else {
         state.editCalls.set(label, count + 1);
         reply(res, body.model, [{
-          id: `edit_${label}_${count + 1}`, name: "Edit",
-          args: { path: "fixture.go", tag: "ABCD", ops: "PUT 1.=1:" },
+          id: `edit_${label}_${count + 1}`, name: toolName,
+          args: patchCommand ? { command: "git apply fixture.patch" }
+            : { path: "fixture.go", tag: "ABCD", ops: "PUT 1.=1:" },
         }], count === 0 ? "Preparing to edit the shared file." : "");
       }
       return;
@@ -57,7 +70,7 @@ const server = createServer(async (req, res) => {
         args: { agent: "writer", task: "Continue after the stopped edit", resume: state.taskIds.get("task_A") } }]);
     } else if (!state.started) {
       state.started = true;
-      reply(res, body.model, ["A", "B"].map((label) => ({
+      reply(res, body.model, labels.map((label) => ({
         id: `task_${label}`, name: "Task", args: { agent: "writer", task: `Task ${label}` },
       })));
     } else reply(res, body.model, null, "Both delegates finished.");
@@ -79,19 +92,22 @@ const runtime = new DesktopAgentRuntime({
   sessionId: "fixture-edit-isolation", mode: "agent", provider: provider("parent"), thinkingLevel: "off", projectPath,
   commandShell: { id: "bash", label: "Bash", dialect: "posix", available: true, isDefault: true },
   subagents: [{ name: "writer", description: "Fixture writer", prompt: "Edit the task's file",
-    tools: ["Edit"], source: "user", permission: "accept-edits", model: { providerId: "fixture", modelId: "worker" } }],
+    tools: [toolName], source: "user", permission: "accept-edits", model: { providerId: "fixture", modelId: "worker" } }],
   subagentProviders: { "fixture/worker": provider("worker") },
   host: { onNotification: () => () => {}, call: async (method, params) => {
     if (method === "project.instructions.resolve") return { entries: [] };
     if (method === "tools.execute") {
-      assert.equal(params.toolName, "Edit");
-      return { ok: false, isError: true, errorCode: "EDIT_PARSE_FAILED", content: { error: "bad ops" } };
+      assert.equal(params.toolName, toolName);
+      return { ok: false, isError: true, errorCode: patchCommand ? "TOOL_FAILED" : "EDIT_PARSE_FAILED", content: { error: "malformed mutation" } };
     }
     return {};
   } },
   onEvent: ({ event, parentToolCallId }) => {
     if (parentToolCallId) {
-      if (event.type === "tool_end" && event.toolCallId === "edit_A_3" && event.result?.terminate) state.aTerminated = true;
+      if (event.type === "tool_end" && event.toolCallId === "edit_A_3" && event.result?.terminate) {
+        state.aTerminated = true;
+        aStopped.resolve();
+      }
       return;
     }
     if (event.type === "error") state.parentErrors.push(event.error);
@@ -100,30 +116,28 @@ const runtime = new DesktopAgentRuntime({
     }
     if (event.type === "message_end" && event.message?.toolName === "Task" && event.message.toolResult?.details?.status !== "running") {
       state.taskResults.set(event.message.toolCallId, event.message.toolResult.details);
+      completed.get(event.message.toolCallId)?.resolve();
     }
   },
 });
 try {
-  await runtime.prompt("Start Task A and Task B");
-  const deadline = Date.now() + 15_000;
-  while (state.taskResults.size < 2) {
-    assert.ok(Date.now() < deadline, "delegate results timed out");
-    await new Promise((resolve) => setTimeout(resolve, 10));
-  }
+  await bounded(runtime.prompt(`Start ${labels.map((label) => `Task ${label}`).join(" and ")}`), "parent turn");
+  await bounded(Promise.all(labels.map((label) => completed.get(`task_${label}`).promise)), "delegate results");
+  console.log(JSON.stringify({ phase: "initial", editCalls: Object.fromEntries(state.editCalls),
+    results: Object.fromEntries([...state.taskResults].map(([id, result]) => [id, { status: result.status, error: result.error }])),
+    parentErrors: state.parentErrors.map((error) => error.code) }));
   assert.equal(state.editCalls.get("A"), 3, "delegate A reaches its own third failure");
   assert.equal(state.aTerminated, true);
   assert.equal(state.taskResults.get("task_A")?.status, "failed", "delegate A reports its exhausted budget as a failure");
   assert.equal(state.taskResults.get("task_A")?.error?.code, "MUTATION_RETRY_BUDGET_EXHAUSTED");
-  assert.equal(state.editCalls.get("B"), 2, "delegate B remains below its own limit");
-  assert.equal(state.taskResults.get("task_B")?.status, "completed", "delegate B completes after A stops");
+  if (labels.includes("B")) {
+    assert.equal(state.editCalls.get("B"), 2, "delegate B remains below its own limit");
+    assert.equal(state.taskResults.get("task_B")?.status, "completed", "delegate B completes after A stops");
+  }
   assert.equal(state.parentErrors.some((error) => error.code === "MUTATION_RETRY_BUDGET_EXHAUSTED"), false);
   assert.equal(state.taskIds.has("task_A"), true);
-  await runtime.prompt("Resume Task A");
-  const resumeDeadline = Date.now() + 15_000;
-  while (!state.taskResults.has("resume_A")) {
-    assert.ok(Date.now() < resumeDeadline, "resumed delegate result timed out");
-    await new Promise((resolve) => setTimeout(resolve, 10));
-  }
+  await bounded(runtime.prompt("Resume Task A"), "parent resume turn");
+  await bounded(completed.get("resume_A").promise, "resumed delegate result");
   assert.equal(state.taskResults.get("resume_A")?.status, "completed");
   assert.deepEqual(state.errors, []);
   console.log(JSON.stringify({ ok: true, editCalls: Object.fromEntries(state.editCalls), parentMutationErrors: 0, resumed: "completed" }));

@@ -13,7 +13,7 @@ disagrees, so a green `check:release-docs` is a precondition, not a substitute.
 | Script | Alias | Purpose |
 |---|---|---|
 | `release.mjs` | `node scripts/release.mjs <version> [--tag]` | Bump every workspace version surface, commit, and optionally create the `vX.Y.Z` tag the Release workflow builds from |
-| `check-release-docs.mjs` | `pnpm check:release-docs` | Verify the changelog, its test list, `APP_VERSION`, workspace versions, Cargo versions, and both README release lines agree |
+| `check-release-docs.mjs` | `pnpm check:release-docs` | Verify the models.dev catalog, changelog and test list, `APP_VERSION`, workspace versions, Cargo versions, and both README release lines agree |
 | `check-agent-policy-sync.mjs` | `pnpm check:agent-policy` | Verify `AGENTS.md` and `CLAUDE.md` share the same `Policy-Sync` token, cross-references, and non-negotiable policy anchors |
 | `check-marketplace-catalog.mjs` | `pnpm check:marketplace -- --url <url> --plugin <id>` | Marketplace catalog preflight; rejects a version record missing a checksum, package URL, size, or permissions, and a catalog `author` that is not a string |
 | `check-style-tokens.mjs` | run by the desktop `lint` script | Fail renderer styles that hardcode values instead of design-system tokens |
@@ -60,10 +60,34 @@ The scenarios are specified in
 | `e2e-settings-scroll.mjs` | `pnpm test:e2e:settings-scroll` | Production Settings component navigation, search anchoring, focus-on-mount, and scroll behavior |
 | `e2e-transcript-render.mjs` | `pnpm test:e2e:transcript` | Production transcript render boundaries, runtime status geometry, and deterministic smooth-text cadence |
 | `e2e-renderer-responsiveness.mjs` | `pnpm test:e2e:renderer-responsiveness` | Native Electron click, typing, session switching, disclosure, and scroll while an isolated child process streams large transcript deltas |
-| `e2e-config-sync-multidevice.mjs` | `pnpm test:e2e:config-sync` | Two isolated host-core devices against an ephemeral local WebDAV fixture; covers encrypted sync, new-device approval, cross-device edits, conditional requests, and ciphertext-only remote storage |
+| `e2e-config-sync-multidevice.mjs` | `pnpm test:e2e:config-sync` | Four isolated host-core processes against a SigV4-validating local S3 fixture; covers credential opt-out, approvals, concurrent edits/conflict resolution, mapped skill resources, deletion, sync/backup restore, restart, password rewrap, encrypted storage and cleanup |
 | `e2e-supervision.mjs` | `pnpm test:e2e:supervision` | Process supervision and restart behavior |
 | `e2e-subagents.mjs` | `pnpm test:e2e:subagents` | Subagent registry over RPC, then through the real loader (D202) |
 | `e2e-agent-live.mjs` | `node scripts/e2e-agent-live.mjs` | Live streaming chat through agent-runtime + host-core. Requires `PI_DESKTOP_TEST_API_KEY`, `PI_DESKTOP_TEST_BASE_URL`, and `PI_DESKTOP_TEST_MODEL` (no defaults), so it has no `pnpm` alias |
+
+### Configuration-sync live S3 opt-in
+
+Build the task's Host binary and shared package first, reusing the existing
+development toolchain. Set `PI_DESKTOP_HOST_BIN` if the binary is outside the
+worktree. The default command uses only local S3 and temporary Host profiles.
+With explicit authorization, run:
+
+```bash
+node scripts/e2e-config-sync-multidevice.mjs --live-s3 --env-file /authorized/path/.env
+```
+
+Live administration needs an existing Python 3 + boto3 environment. The file
+must provide `S3_HOST`, `S3_REGION`, `S3_BUCKET`, `S3_ACCESS_KEY`,
+`S3_SECRET_KEY`, `S3_DOMAIN_MODE` (`false` = path-style), and optionally
+`S3_SESSION_TOKEN`. Credentials stay in memory/stdin, never arguments or logs.
+The harness creates its own UUID prefix under `pi-desktop-tests/`, checks
+initial emptiness, then runs the same actual Host journey. It needs scoped
+list/get/put/delete and bucket-versioning read permission; versioned buckets
+also need version listing/deletion. It stops every Host before deleting only
+the exact test-prefix inventory, including versions/delete markers, and checks
+final emptiness. Failed preflight never grants cleanup ownership. No production
+Desktop profile, model call or executable capability is used. Output records
+the candidate/base and Host binary hash; uncommitted task changes are explicit.
 
 ## Continuous integration
 

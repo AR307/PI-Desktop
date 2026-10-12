@@ -44,6 +44,16 @@ introduced.
 
 ## Consequences
 
+### Upstream 0.18 integration (2026-10-12)
+
+The fork and upstream independently allocated schema v22. The integrated host
+uses v24 rather than reusing either meaning. The existing v23 title-source
+migration is idempotent; v24 creates missing mobile index structures and the
+upstream session-list index without resetting mobile revisions or touching
+transcript bodies. Tests exercise fork v22, upstream v22/v23, and older v21
+databases with retained user history. This extends the existing Rust-owned
+persistence layer and introduces no parallel storage authority.
+
 Loaded history can grow with usage; it is read in pages and storage errors are
 visible. MC must implement the account-grant increment before real pairing can
 use it. The first updater APK needs manual installation. Native installation,

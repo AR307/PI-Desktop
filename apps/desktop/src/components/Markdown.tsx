@@ -1,3 +1,4 @@
+import { useChatSessionCapability } from "../hooks/use-chat-session-capability";
 import {
   createContext,
   Fragment,
@@ -75,6 +76,7 @@ import {
   type ChatFileMenuTarget,
 } from "../hooks/use-chat-file-menu";
 import {
+  handleMarkdownFileLinkClick,
   remarkChatFileLinks,
   resolvePreviewTarget,
   safeDecodeUri,
@@ -518,7 +520,8 @@ function InlineCode({
   children,
   ...rest
 }: ComponentProps<"code"> & { node?: unknown }) {
-  const root = useAppStore((s) => s.workspace?.path);
+  const localToolsAllowed = useChatSessionCapability("canUseLocalTools");
+  const root = useAppStore((s) => localToolsAllowed ? s.workspace?.path : undefined);
   const baseDir = useContext(MarkdownBaseDirContext);
   const openFileRef = useOpenChatFileRef();
   const openFileMenu = useContext(MarkdownFileMenuContext);
@@ -529,7 +532,7 @@ function InlineCode({
       : null;
   const fileTitle = usePreviewTitle("file");
   const urlTitle = usePreviewTitle("url");
-  if (!target) {
+  if (!target || !localToolsAllowed) {
     return (
       <code className={className} {...rest}>
         {children}
@@ -542,6 +545,7 @@ function InlineCode({
       className="chat-code-link"
       title={target.kind === "file" ? fileTitle : urlTitle}
       onClick={() => {
+        if (!localToolsAllowed) return;
         if (target.kind === "file") {
           openFileRef(text ?? target.path, baseDir);
           return;
@@ -573,7 +577,8 @@ function Anchor({
   ...rest
 }: ComponentProps<"a"> & { node?: unknown }) {
   const { t } = useTranslation();
-  const root = useAppStore((s) => s.workspace?.path);
+  const localToolsAllowed = useChatSessionCapability("canUseLocalTools");
+  const root = useAppStore((s) => localToolsAllowed ? s.workspace?.path : undefined);
   const baseDir = useContext(MarkdownBaseDirContext);
   const openFileRef = useOpenChatFileRef();
   const openFileMenu = useContext(MarkdownFileMenuContext);
@@ -611,6 +616,7 @@ function Anchor({
   const onContextMenu = (event: React.MouseEvent<HTMLAnchorElement>) => {
     if (!href) return;
     if (!/^https?:\/\//i.test(href)) {
+      if (!localToolsAllowed) return;
       /*
         A file link names the same reference a chip does, so it offers the same
         action on the file's folder. `./` and `../` resolve against the markdown
@@ -632,7 +638,8 @@ function Anchor({
             defaultValue: "Open in default browser",
           }),
           icon: <IconExternal size={14} />,
-          onSelect: () => void api.browserOpenExternal(target),
+          disabled: !localToolsAllowed,
+          onSelect: () => { if (localToolsAllowed) void api.browserOpenExternal(target); },
         },
         {
           id: "open-workpanel",
@@ -640,7 +647,8 @@ function Anchor({
             defaultValue: "Open in work panel",
           }),
           icon: <IconGlobe size={14} />,
-          onSelect: () => openUrl(target),
+          disabled: !localToolsAllowed,
+          onSelect: () => { if (localToolsAllowed) openUrl(target); },
         },
         {
           id: "copy-address",
@@ -659,6 +667,7 @@ function Anchor({
   // to _blank, which main routes to shell.openExternal.
 
   const onClick = (e: React.MouseEvent<HTMLAnchorElement>) => {
+    if (!localToolsAllowed) { e.preventDefault(); return; }
     if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
     if (!href) return;
     if (/^https?:\/\//i.test(href)) {
@@ -666,19 +675,13 @@ function Anchor({
       openHttpUrl(href);
       return;
     }
-    const decoded = safeDecodeUri(href);
-    const target = resolvePreviewTarget(decoded, root, baseDir);
-    const ref = target?.kind === "file" ? target.path : toWorkspaceRel(decoded, root, baseDir);
-    if (ref) {
-      e.preventDefault();
-      openFileRef(ref, baseDir);
-    }
+    handleMarkdownFileLinkClick(e, href, root, baseDir, openFileRef);
   };
   return (
     <>
       <a
         {...rest}
-        href={href}
+        href={localToolsAllowed ? href : undefined}
         onClick={onClick}
         onContextMenu={onContextMenu}
         target="_blank"
@@ -703,7 +706,8 @@ function MarkdownImage({
   alt,
   ...rest
 }: ComponentProps<"img"> & SourcePositionProps & { node?: unknown }) {
-  const root = useAppStore((s) => s.workspace?.path);
+  const localToolsAllowed = useChatSessionCapability("canUseLocalTools");
+  const root = useAppStore((s) => localToolsAllowed ? s.workspace?.path : undefined);
   const baseDir = useContext(MarkdownBaseDirContext);
   const openFileRef = useOpenChatFileRef();
   const openFileMenu = useContext(MarkdownFileMenuContext);
@@ -727,7 +731,7 @@ function MarkdownImage({
     may want, so a local image carries the same menu its chip fallback does.
   */
   const onLocalContextMenu =
-    localRef && openFileMenu
+    localToolsAllowed && localRef && openFileMenu
       ? (event: React.MouseEvent<HTMLElement>) =>
           openFileMenu(event, { path: localRef, baseDir })
       : undefined;
@@ -739,7 +743,7 @@ function MarkdownImage({
         alt={alt ?? ""}
         className="chat-image-remote"
         title={urlTitle}
-        onClick={() => openHttpUrl(source)}
+        onClick={localToolsAllowed ? () => openHttpUrl(source) : undefined}
       />
     );
   }

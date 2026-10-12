@@ -54,6 +54,7 @@ export type ShutdownDependencies = {
   confirmQuitDialog: () => Promise<boolean>;
   disposePowerSaveBlockers: () => void;
   liveCallService?: Pick<LiveCallService, "endForLifecycle">;
+  disposeSystemProxyRelay?: () => Promise<void>;
 };
 
 /** Register the last-window and before-quit resource lifecycle handlers. */
@@ -80,6 +81,7 @@ export function registerShutdownHandlers({
   confirmQuitDialog,
   disposePowerSaveBlockers,
   liveCallService,
+  disposeSystemProxyRelay,
 }: ShutdownDependencies): void {
   app.on("window-all-closed", () => {
     // The D216 tray is resident on every platform, so its presence says nothing
@@ -129,6 +131,9 @@ export function registerShutdownHandlers({
     }
 
     state.quitting = true;
+    // Persist the confirmed shutdown before any awaited cleanup so a forced
+    // process termination still leaves an observable lifecycle boundary.
+    logger.app("lifecycle", "info", "app shutdown");
     disposePowerSaveBlockers();
     state.tray?.destroy();
     state.tray = null;
@@ -170,7 +175,6 @@ export function registerShutdownHandlers({
         pluginPanels.closeAll(),
         pluginViews.dispose(),
       ]);
-      logger.app("lifecycle", "info", "app shutdown");
       await pluginSurfacesShutdown;
       // Stop event production before draining the terminal writes. A finished
       // turn can already have left activeTurns while its branch archive is
@@ -218,6 +222,7 @@ export function registerShutdownHandlers({
         mcpShutdown,
         remoteHostsShutdown,
       ]);
+      await disposeSystemProxyRelay?.();
     })();
 
     const releaseQuit = () => {

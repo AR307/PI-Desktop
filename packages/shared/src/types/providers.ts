@@ -167,7 +167,7 @@ export type OAuthLoginEvent = {
   /** The flow resolved a prompt on its own — e.g. the callback beat the paste box. */
   | { kind: "promptCancelled"; promptId: string }
   | { kind: "done"; providerId: string; accountLabel?: string }
-  | { kind: "error"; message: string }
+  | { kind: "error"; message: string; code?: "PLUGIN_OAUTH_FAILED" }
   | { kind: "cancelled" }
 );
 

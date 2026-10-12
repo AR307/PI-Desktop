@@ -222,6 +222,9 @@ Host Main (PI-Desktop)
 
 ### 6. 3 插件面板用户界面
 - 在专用的沙盒 `BrowserWindow` 中加载插件页面，并为每个插件使用隔离的会话分区
+- 新建面板的初始页面加载完成前保持窗口隐藏，等待上限为 15 秒；若仍未完成，
+  宿主销毁隐藏窗口，并以 `PANEL_LOAD_TIMEOUT` 拒绝打开请求。若页面加载自行失败，
+  则保留原始错误。
 - 关闭面板（胶囊关闭、禁用、卸载或崩溃拆除）不得读取已销毁的 `BrowserWindow` 或其 `webContents`。宿主必须在窗口仍存活时复制清理拖拽记录所需的 contents id，避免 `closed` 处理程序抛出 `Object has been destroyed`。
 - 在 macOS、Windows 和 Linux 上都使用无边框窗口。preload 精确保留透明的
   46px 拖拽带，并只在右上角渲染最简胶囊：最小化、最大化/还原和关闭。

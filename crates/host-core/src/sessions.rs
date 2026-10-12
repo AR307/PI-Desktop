@@ -23,6 +23,21 @@ pub const MODES: [&str; 3] = ["plan", "goal", "agent"];
 
 /// Maximum number of Unicode scalar values accepted for a user-defined title.
 pub const MAX_SESSION_TITLE_CHARS: usize = 80;
+const TITLE_SOURCE_DEFAULT: &str = "default";
+const TITLE_SOURCE_MANUAL: &str = "manual";
+const TITLE_SOURCE_GENERATED: &str = "generated";
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AutoTitleContext {
+    pub session_id: String,
+    pub expected_title: String,
+    pub user_prompt: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub assistant_reply: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub model_key: Option<String>,
+}
 
 /// Compatibility normalization for v7 callers and imported records. The
 /// persisted operating profile is now always `plan`, `goal` or `agent`.
@@ -166,6 +181,11 @@ pub struct MessageAttachment {
     /// link. Travels with the user message so the model keeps reading it.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub text: Option<String>,
+    /// The `@path` text this attachment occupies inside the message content when
+    /// the user placed it between words. The transcript renders the attachment
+    /// at that position instead of appending it after the body.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub inline_path: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -331,11 +351,33 @@ pub struct SearchHit {
     pub created_at: String,
 }
 
+/// Titles the app writes for a session the user has not named yet.
+///
+/// The renderer creates a session with its localized `chat.untitledTask` label
+/// and also recognizes `nav.newChat`, so host-core has to recognize the same
+/// values: it owns title eligibility and cannot read the renderer catalog when
+/// it decides whether a title may still be replaced. German, Spanish, and
+/// French fall back to the English label. Keep this in sync with the migration
+/// list in `db/session_title_source_migration.rs` and `LEGACY_DEFAULT_TITLES`
+/// in the renderer.
+const PLACEHOLDER_TITLES: [&str; 13] = [
+    "",
+    "New task",
+    "New chat",
+    "新建任务",
+    "新对话",
+    "新建任務",
+    "新對話",
+    "새 작업",
+    "새 채팅",
+    "Tarefa sem título",
+    "Nova conversa",
+    "Yeni görev",
+    "Yeni sohbet",
+];
+
 fn is_default_title(title: &str) -> bool {
-    matches!(
-        title.trim(),
-        "" | "New task" | "New chat" | "新建任务" | "新对话"
-    )
+    PLACEHOLDER_TITLES.contains(&title.trim())
 }
 
 // ---- UiMessage ⇄ transcript record mapping -----------------------------------
@@ -481,6 +523,9 @@ pub(crate) fn ui_to_record(message: &UiMessage) -> (MessageRecord, Option<String
                 }
                 if let Some(text) = &attachment.text {
                     block.insert("text".into(), json!(text));
+                }
+                if let Some(inline_path) = &attachment.inline_path {
+                    block.insert("inlinePath".into(), json!(inline_path));
                 }
                 blocks.push(Value::Object(block));
             }
@@ -628,6 +673,10 @@ pub(crate) fn record_to_ui(record: MessageRecord) -> UiMessage {
                 size: block.get("size").and_then(|v| v.as_i64()),
                 text: block
                     .get("text")
+                    .and_then(|v| v.as_str())
+                    .map(str::to_string),
+                inline_path: block
+                    .get("inlinePath")
                     .and_then(|v| v.as_str())
                     .map(str::to_string),
             })
@@ -1315,50 +1364,13 @@ pub fn get_session_summary(db: &Database, id: &str) -> Result<Option<SessionSumm
 
 // ---- sessions ---------------------------------------------------------------
 
-fn first_user_title(db: &Database, session_id: &str) -> Result<Option<String>> {
-    let mut stmt = db.conn().prepare_cached(
-        "SELECT text FROM messages
-         WHERE session_id = ?1 AND role = 'user' AND text IS NOT NULL
-         ORDER BY seq ASC LIMIT 1",
-    )?;
-    let content: Option<String> = stmt
-        .query_row(params![session_id], |row| row.get(0))
-        .optional()?;
-    Ok(content.and_then(|c| {
-        let t = c.trim().replace('\n', " ");
-        let t = t.split_whitespace().collect::<Vec<_>>().join(" ");
-        if t.is_empty() {
-            None
-        } else {
-            let mut out = t.chars().take(48).collect::<String>();
-            if t.chars().count() > 48 {
-                out.push('…');
-            }
-            Some(out)
-        }
-    }))
-}
-
 pub fn list_sessions(db: &Database) -> Result<Vec<SessionSummary>> {
     let sql = format!("{SUMMARY_SELECT} ORDER BY s.updated_at DESC");
     let mut stmt = db.conn().prepare_cached(&sql)?;
     let rows = stmt.query_map([], summary_from_row)?;
     let mut out = Vec::new();
     for row in rows {
-        let mut session = row?;
-        if is_default_title(&session.title) {
-            if let Some(title) = first_user_title(db, &session.id)? {
-                // Persist so Recents stays stable across restarts. Each write is
-                // its own commit, which looks like an obvious batching win —
-                // batching them into one transaction measured 0.114 ms -> 0.022 ms
-                // for forty sessions, and was left out anyway: a
-                // session stops having a default title the first time this runs,
-                // so the extra commits happen once per session, not per read.
-                let _ = rename_session(db, &session.id, &title);
-                session.title = title;
-            }
-        }
-        out.push(session);
+        out.push(row?);
     }
     Ok(out)
 }
@@ -1434,6 +1446,11 @@ pub fn create_session_with_options(
     let now = now_ms();
     let id = Uuid::new_v4().to_string();
     let title = title.unwrap_or_else(|| "New task".into());
+    let title_source = if is_default_title(&title) {
+        TITLE_SOURCE_DEFAULT
+    } else {
+        TITLE_SOURCE_MANUAL
+    };
     let mode = normalize_mode(mode.as_deref());
     let thinking_level = thinking_level.unwrap_or_else(default_thinking_level);
     validate_thinking_level(&thinking_level)?;
@@ -1454,8 +1471,8 @@ pub fn create_session_with_options(
         .prepare_cached(
             "INSERT INTO sessions (
                 id, title, project_id, provider_id, model_id, mode, thinking_level,
-                permission_mode, created_at, updated_at
-             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?9)",
+                permission_mode, title_source, created_at, updated_at
+             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?10)",
         )?
         .execute(params![
             id,
@@ -1466,6 +1483,7 @@ pub fn create_session_with_options(
             mode,
             thinking_level,
             permission_mode,
+            title_source,
             now
         ])?;
     Ok(SessionSummary {
@@ -2020,8 +2038,134 @@ pub fn rename_session(db: &Database, id: &str, title: &str) -> Result<bool> {
     let title = normalize_session_title(title)?;
     let n = db
         .conn()
-        .prepare_cached("UPDATE sessions SET title = ?1 WHERE id = ?2")?
-        .execute(params![title, id])?;
+        .prepare_cached("UPDATE sessions SET title = ?1, title_source = ?2 WHERE id = ?3")?
+        .execute(params![title, TITLE_SOURCE_MANUAL, id])?;
+    Ok(n > 0)
+}
+
+/// Replace a still-untitled session's placeholder with text derived from its
+/// first prompt.
+///
+/// This is the deterministic local fallback that keeps a new session readable
+/// without any plugin. It deliberately keeps the `default` title source: the
+/// derived text was not chosen by the user, so an installed title plugin may
+/// still upgrade it through `set_automatic_session_title`. The write only
+/// applies while host-core still sees a recognized placeholder, so a manual
+/// rename, a plugin-generated title, or an earlier derivation all win.
+pub fn derive_session_title(db: &Database, id: &str, title: &str) -> Result<bool> {
+    let title = normalize_session_title(title)?;
+    let current: Option<(String, String)> = db
+        .conn()
+        .query_row(
+            "SELECT title, title_source FROM sessions
+             WHERE id = ?1 AND deleted_at IS NULL",
+            params![id],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .optional()?;
+    let Some((current_title, title_source)) = current else {
+        return Ok(false);
+    };
+    if title_source != TITLE_SOURCE_DEFAULT || !is_default_title(&current_title) {
+        return Ok(false);
+    }
+    let n = db
+        .conn()
+        .prepare_cached(
+            "UPDATE sessions SET title = ?1
+             WHERE id = ?2 AND title = ?3 AND title_source = ?4 AND deleted_at IS NULL",
+        )?
+        .execute(params![title, id, current_title, TITLE_SOURCE_DEFAULT])?;
+    Ok(n > 0)
+}
+
+/// Return only the first-turn text needed to name an untouched session.
+/// The dedicated plugin API must not become a transcript-reading shortcut.
+pub fn auto_title_context(db: &Database, id: &str) -> Result<Option<AutoTitleContext>> {
+    let row: Option<(String, String, Option<String>, Option<String>)> = db
+        .conn()
+        .query_row(
+            "SELECT title, title_source, provider_id, model_id
+             FROM sessions WHERE id = ?1 AND deleted_at IS NULL",
+            params![id],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+        )
+        .optional()?;
+    let Some((title, title_source, provider_id, model_id)) = row else {
+        return Ok(None);
+    };
+    if title_source != TITLE_SOURCE_DEFAULT {
+        return Ok(None);
+    }
+
+    let first_user: Option<(i64, Option<String>, String)> = db
+        .conn()
+        .query_row(
+            "SELECT seq, turn_id, text FROM messages
+             WHERE session_id = ?1 AND role = 'user' AND text IS NOT NULL
+             ORDER BY seq ASC LIMIT 1",
+            params![id],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+        )
+        .optional()?;
+    let Some((user_seq, turn_id, user_prompt)) = first_user else {
+        return Ok(None);
+    };
+    if user_prompt.trim().is_empty() {
+        return Ok(None);
+    }
+    let assistant_reply: Option<String> = db
+        .conn()
+        .query_row(
+            "SELECT text FROM messages
+             WHERE session_id = ?1 AND role = 'assistant' AND text IS NOT NULL AND seq > ?2
+               AND (?3 IS NULL OR turn_id = ?3)
+             ORDER BY seq ASC LIMIT 1",
+            params![id, user_seq, turn_id],
+            |row| row.get(0),
+        )
+        .optional()?;
+    let user_prompt = truncate_title_context(&user_prompt, 1_000);
+    let assistant_reply = assistant_reply
+        .map(|reply| truncate_title_context(&reply, 500))
+        .filter(|reply| !reply.trim().is_empty());
+    Ok(Some(AutoTitleContext {
+        session_id: id.to_string(),
+        expected_title: title,
+        user_prompt,
+        assistant_reply,
+        model_key: provider_id
+            .zip(model_id)
+            .map(|(provider, model)| format!("{provider}/{model}")),
+    }))
+}
+
+fn truncate_title_context(value: &str, limit: usize) -> String {
+    value.chars().take(limit).collect()
+}
+
+/// Apply a plugin-generated title only if the exact default title read by the
+/// plugin is still current and no manual or generated title has won the race.
+pub fn set_automatic_session_title(
+    db: &Database,
+    id: &str,
+    expected_title: &str,
+    title: &str,
+) -> Result<bool> {
+    let title = normalize_session_title(title)?;
+    let n = db
+        .conn()
+        .prepare_cached(
+            "UPDATE sessions SET title = ?1, title_source = ?2
+             WHERE id = ?3 AND title = ?4 AND title_source = ?5 AND deleted_at IS NULL",
+        )?
+        .execute(params![
+            title,
+            TITLE_SOURCE_GENERATED,
+            id,
+            expected_title,
+            TITLE_SOURCE_DEFAULT
+        ])?;
     Ok(n > 0)
 }
 
@@ -2114,7 +2258,7 @@ pub fn append_message(
             sync::record_upsert(&tx, session_id, &record.id)?;
             tx.commit()?;
         } else {
-            delegation_updates::refresh_task(db, session_id, &message, &record, text.as_deref())?;
+            delegation_updates::refresh_task(db, session_id, &record)?;
             return Ok(());
         }
     } else {
@@ -2123,6 +2267,7 @@ pub fn append_message(
                 let original_id = record.id.clone();
                 record.id = namespaced_message_id(session_id, &record.id);
                 if message_indexed(db, session_id, &record.id)? {
+                    delegation_updates::refresh_task(db, session_id, &record)?;
                     return Ok(());
                 }
                 // Old hosts wrote JSONL then failed UNIQUE. Replaying that
@@ -2355,15 +2500,20 @@ fn streaming_assistant_indexed(db: &Database, session_id: &str, message_id: &str
     }
 }
 
-/// The same question answered from the transcript: walk backwards from the tail
-/// 64 message lines at a time and stop at the last copy of the id. This is the
-/// fallback for a message the index cannot answer for, which is a row written
-/// before the cached column existed.
 fn streaming_assistant_in_transcript(
     db: &Database,
     session_id: &str,
     message_id: &str,
 ) -> Result<bool> {
+    Ok(indexed_message_record(db, session_id, message_id)?
+        .is_some_and(|record| record_is_streaming(&record)))
+}
+
+fn indexed_message_record(
+    db: &Database,
+    session_id: &str,
+    message_id: &str,
+) -> Result<Option<MessageRecord>> {
     let layout = session_layout(db, session_id)?;
     let mut end = layout.message_count();
     while end > 0 {
@@ -2377,15 +2527,15 @@ fn streaming_assistant_in_transcript(
         )?;
         if let Some(record) = window
             .messages
-            .iter()
+            .into_iter()
             .rev()
             .find(|record| record.id == message_id)
         {
-            return Ok(record_is_streaming(record));
+            return Ok(Some(record));
         }
         end = start;
     }
-    Ok(false)
+    Ok(None)
 }
 
 /// Append one canonical record: transcript line first, then the index row.
@@ -4724,6 +4874,179 @@ mod tests {
     }
 
     #[test]
+    fn derived_prompt_title_stays_eligible_for_the_title_plugin() {
+        let db = test_db();
+        let session = create_session(&db, None, None, None, None, None).unwrap();
+        append_message(
+            &db,
+            &session.id,
+            &user_msg("user-1", "Fix the login button", "2026-01-01T00:00:01Z"),
+            None,
+        )
+        .unwrap();
+        let before: i64 = db
+            .conn()
+            .query_row(
+                "SELECT updated_at FROM sessions WHERE id = ?1",
+                params![session.id],
+                |row| row.get(0),
+            )
+            .unwrap();
+
+        assert!(derive_session_title(&db, &session.id, "Fix login bug").unwrap());
+        let derived = get_session(&db, &session.id).unwrap().unwrap();
+        assert_eq!(derived.summary.title, "Fix login bug");
+        let after: i64 = db
+            .conn()
+            .query_row(
+                "SELECT updated_at FROM sessions WHERE id = ?1",
+                params![session.id],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(after, before);
+
+        // The derived text is still an automatic title: the plugin reads it as
+        // the expected title and may replace it.
+        let context = auto_title_context(&db, &session.id).unwrap().unwrap();
+        assert_eq!(context.expected_title, "Fix login bug");
+        assert_eq!(context.user_prompt, "Fix the login button");
+        assert!(
+            set_automatic_session_title(&db, &session.id, "Fix login bug", "Login fix").unwrap()
+        );
+        assert_eq!(
+            get_session(&db, &session.id)
+                .unwrap()
+                .unwrap()
+                .summary
+                .title,
+            "Login fix"
+        );
+        assert!(auto_title_context(&db, &session.id).unwrap().is_none());
+    }
+
+    #[test]
+    fn derived_prompt_title_never_overrides_named_sessions() {
+        let db = test_db();
+        let manual = create_session(&db, None, None, None, None, None).unwrap();
+        assert!(rename_session(&db, &manual.id, "Picked by user").unwrap());
+        assert!(!derive_session_title(&db, &manual.id, "First prompt").unwrap());
+        assert_eq!(
+            get_session(&db, &manual.id).unwrap().unwrap().summary.title,
+            "Picked by user"
+        );
+
+        let generated = create_session(&db, None, None, None, None, None).unwrap();
+        assert!(set_automatic_session_title(&db, &generated.id, "New task", "Generated").unwrap());
+        assert!(!derive_session_title(&db, &generated.id, "First prompt").unwrap());
+
+        let named =
+            create_session(&db, Some("Named up front".into()), None, None, None, None).unwrap();
+        assert!(!derive_session_title(&db, &named.id, "First prompt").unwrap());
+
+        let returned = create_session(&db, None, None, None, None, None).unwrap();
+        assert!(derive_session_title(&db, &returned.id, "First prompt").unwrap());
+        assert!(!derive_session_title(&db, &returned.id, "Second prompt").unwrap());
+        assert_eq!(
+            get_session(&db, &returned.id)
+                .unwrap()
+                .unwrap()
+                .summary
+                .title,
+            "First prompt"
+        );
+
+        assert!(!derive_session_title(&db, "missing", "First prompt").unwrap());
+        assert!(derive_session_title(&db, &returned.id, "  ").is_err());
+    }
+
+    #[test]
+    fn localized_placeholder_titles_accept_the_first_prompt_fallback() {
+        let db = test_db();
+        for placeholder in [
+            "새 작업",
+            "新建任務",
+            "Tarefa sem título",
+            "Yeni görev",
+            "New chat",
+        ] {
+            let session =
+                create_session(&db, Some(placeholder.into()), None, None, None, None).unwrap();
+            assert!(
+                derive_session_title(&db, &session.id, "Derived label").unwrap(),
+                "{placeholder} must accept the first-prompt fallback"
+            );
+            assert_eq!(
+                get_session(&db, &session.id)
+                    .unwrap()
+                    .unwrap()
+                    .summary
+                    .title,
+                "Derived label"
+            );
+        }
+    }
+
+    #[test]
+    fn auto_title_context_is_limited_to_the_first_turn_and_bounded() {
+        let db = test_db();
+        let session = create_session_with_options(
+            &db,
+            SessionCreateOptions {
+                provider_id: Some("provider".into()),
+                model_id: Some("model".into()),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        let first_prompt = "p".repeat(1_100);
+        append_message(
+            &db,
+            &session.id,
+            &user_msg("user-1", &first_prompt, "2026-01-01T00:00:01Z"),
+            None,
+        )
+        .unwrap();
+        let mut first_reply = user_msg("assistant-1", &"r".repeat(600), "2026-01-01T00:00:02Z");
+        first_reply.role = "assistant".into();
+        append_message(&db, &session.id, &first_reply, None).unwrap();
+        append_message(
+            &db,
+            &session.id,
+            &user_msg("user-2", "later prompt", "2026-01-01T00:00:03Z"),
+            None,
+        )
+        .unwrap();
+        let mut later_reply = user_msg("assistant-2", "later reply", "2026-01-01T00:00:04Z");
+        later_reply.role = "assistant".into();
+        append_message(&db, &session.id, &later_reply, None).unwrap();
+
+        let context = auto_title_context(&db, &session.id).unwrap().unwrap();
+        assert_eq!(context.session_id, session.id);
+        assert_eq!(context.expected_title, "New task");
+        assert_eq!(context.user_prompt, "p".repeat(1_000));
+        assert_eq!(context.assistant_reply, Some("r".repeat(500)));
+        assert_eq!(context.model_key.as_deref(), Some("provider/model"));
+    }
+
+    #[test]
+    fn automatic_title_compare_and_set_respects_manual_and_stale_titles() {
+        let db = test_db();
+        let session = create_session(&db, None, None, None, None, None).unwrap();
+        assert!(set_automatic_session_title(&db, &session.id, "New task", "Generated").unwrap());
+        assert!(auto_title_context(&db, &session.id).unwrap().is_none());
+        assert!(!set_automatic_session_title(&db, &session.id, "New task", "Stale").unwrap());
+
+        let manual = create_session(&db, None, None, None, None, None).unwrap();
+        assert!(rename_session(&db, &manual.id, "Picked by user").unwrap());
+        assert!(!set_automatic_session_title(&db, &manual.id, "New task", "Generated").unwrap());
+        assert_eq!(
+            get_session(&db, &manual.id).unwrap().unwrap().summary.title,
+            "Picked by user"
+        );
+    }
+
+    #[test]
     fn create_session_returns_canonical_project_path() {
         let dir = tempfile::tempdir().unwrap();
         let project = dir.path().join("project");
@@ -5019,6 +5342,42 @@ mod tests {
     }
 
     #[test]
+    fn delegation_settlement_updates_only_its_running_snapshot() {
+        let db = test_db();
+        let first = create_session(&db, None, None, None, None, None).unwrap();
+        let second = create_session(&db, None, None, None, None, None).unwrap();
+        let mut task = user_msg("task-shared-id", "partial", "2026-10-05T00:00:00Z");
+        task.role = "tool".into();
+        task.tool_name = Some("Task".into());
+        task.tool_call_id = Some(task.id.clone());
+        task.tool_args = Some(json!({"agent": "explorer"}));
+        task.tool_result =
+            Some(json!({"details": {"delegationId": "delegate-A", "status": "running"}}));
+        append_message(&db, &first.id, &task, None).unwrap();
+        append_message(&db, &second.id, &task, None).unwrap();
+        let mut stopped = task.clone();
+        stopped.tool_result =
+            Some(json!({"details": {"delegationId": "delegate-A", "status": "stopped"}}));
+        stopped.tool_args = Some(json!({"agent": "changed"}));
+        append_message(&db, &second.id, &stopped, None).unwrap();
+        // Late replay cannot reopen a settled delegation, including namespaced IDs.
+        append_message(&db, &second.id, &task, None).unwrap();
+        let read = |id: &str| get_session(&db, id).unwrap().unwrap().messages;
+        assert_eq!(read(&second.id).len(), 1);
+        assert_eq!(read(&second.id)[0].tool_result, stopped.tool_result);
+        assert_eq!(read(&second.id)[0].tool_args, task.tool_args);
+        assert_eq!(read(&first.id)[0].tool_result, task.tool_result);
+        let mut foreign = stopped.clone();
+        foreign.tool_result =
+            Some(json!({"details": {"delegationId": "different", "status": "stopped"}}));
+        append_message(&db, &first.id, &foreign, None).unwrap();
+        assert_eq!(read(&first.id)[0].tool_result, task.tool_result);
+        append_message(&db, &first.id, &stopped, None).unwrap();
+        append_message(&db, &first.id, &task, None).unwrap();
+        assert_eq!(read(&first.id)[0].tool_result, stopped.tool_result);
+    }
+
+    #[test]
     fn append_message_remaps_ids_owned_by_another_session() {
         let db = test_db();
         let first = create_session(&db, None, None, None, None, None).unwrap();
@@ -5118,6 +5477,7 @@ mod tests {
             mime_type: Some("image/png".into()),
             size: Some(42),
             text: None,
+            inline_path: Some("@/scratch/pasted/image.png".into()),
         }]);
 
         append_message(&db, &session.id, &user, None).unwrap();
@@ -5134,6 +5494,7 @@ mod tests {
         let blocks = record.blocks;
         assert_eq!(blocks[1]["type"], "attachment");
         assert_eq!(blocks[1]["ref"], "attachments/abc123");
+        assert_eq!(blocks[1]["inlinePath"], "@/scratch/pasted/image.png");
         assert!(blocks[1].get("data").is_none());
     }
 

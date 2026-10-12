@@ -87,7 +87,7 @@ consume a report silently; its genuine answer and worker details remain visible.
 User Stop (`abort()`) and a terminal parent error end only the parent turn.
 Delegates keep running in the background. The Task card has an individual
 stop control, and the Subagent group has a stop-all control. Both use
-`pi-desktop/agent/stop-delegations`, which delegates to the same runtime cancellation
+`pi-desktop/agent/stop-subagents`, which delegates to the same runtime cancellation
 method as `TaskStop`. A cancellation request that has not settled stays
 running/pending; neither parent status nor clicking Stop fabricates completion. Only `dispose()` still aborts delegates —
 process exit cannot be survived — and a dispose-aborted run settles as

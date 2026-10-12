@@ -26,6 +26,7 @@ import type { RuntimeState } from "./context";
 import type { FinishTurn } from "./plans";
 import type { MirrorCodingRuntime } from "../mirrorcoding/runtime";
 import { formatSkillToolContent, type LoadedSkillDocument } from "../skill-document";
+import { currentSystemProxyRelayUrl } from "../network-proxy";
 
 export type SidecarRuntimeDependencies = {
   runtimeState: RuntimeState;
@@ -690,6 +691,7 @@ export function createSidecarRuntime({
     hostBinary: runtimeState.host?.binaryPath,
     dataDir,
     networkProxy: currentNetworkProxy(),
+    systemProxyRelayUrl: currentSystemProxyRelayUrl(),
   });
   logger.app("runtime", "info", "agent sidecar configured");
   };

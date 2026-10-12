@@ -1,4 +1,4 @@
-# 04. Data Storage (Schema v17)
+# 04. Data Storage (Schema v24)
 
 ## 0. Ownership decision
 
@@ -46,6 +46,17 @@ their path-scoped memory and filesystem instructions remain readable.
 5. **Plan/Goal checkpoints are immutable host artifacts** with recorded path,
    hash, and size; the existing approval row also carries execution fields.
    Startup interruption is the process-epoch fence and no work is replayed.
+
+### Delegation settlement snapshots
+
+A completed `Task` tool call may still describe a running delegate. A later
+terminal snapshot with the same session, message/call ID and delegation ID
+replaces only that tool result and its display text. Existing metadata, message
+order and index identity are preserved, including namespaced IDs after a
+cross-session tool-call collision. A stale running replay, another delegation's
+result or a later terminal replay cannot overwrite the settled snapshot. Other
+duplicate appends retain their existing idempotent behavior. No schema migration
+or transcript format change is required.
 
 ## 2. File layout
 
@@ -152,12 +163,15 @@ by path/hash.
 
 ### 1.3 Portable configuration sync
 
-Host-core stores sync configuration in the `configSync` key-value namespace.
-The vault key reference and WebDAV password use the existing encrypted secret
-store. `config-sync/base.bin` and `config-sync/pending.bin` are authenticated
-encrypted bundles replaced with temp-file rename; they are not renderer- or
-sidecar-readable files. Sync revisions and resources remain remote immutable
-objects and do not change the SQLite schema or transcript retention.
+Host Core stores S3 configuration at `configSyncS3/config` in the key-value
+store. Credentials and the vault key use existing encrypted secret storage.
+`config-sync/s3/<state-id>/base.bin` stores shared and observed baselines;
+`pending.bin` and local recovery points are also authenticated encrypted
+bundles replaced through temp-file rename. Connection or mode changes create
+a fresh state ID. The legacy `configSync` namespace, old credentials and old
+files are preserved, not migrated or deleted. Remote immutable objects remain
+indefinitely; only the mode-specific history index is capped at 30 revisions.
+This does not change the SQLite schema or transcript retention.
 
 ### 2.0 Message-owned review snapshots (ADR 0043)
 
@@ -356,16 +370,13 @@ The app settings JSON optionally stores `thinkingDisplayMode` (`detailed` or
 `compact`). Missing values retain detailed presentation. This additive display
 preference neither rewrites stored reasoning nor changes the database schema.
 
-The same blob optionally stores the prompt-enhancement overrides
-`promptEnhancementCustomTemplate` (the switch that decides whether a stored
-template applies), `promptEnhancementUserTemplate`,
-`promptEnhancementProviderId`, `promptEnhancementModelId`, and
-`promptEnhancementThinkingLevel` (ADR 0121). An absent or blank user template means the
-built-in default applies, so clearing the field stores no key rather than an
-empty string. A non-blank user template must contain the draft variable and stay
-within `PROMPT_ENHANCEMENT_TEMPLATE_MAX_LENGTH`; host-core rejects a write that
-breaks either rule and drops any stored `promptEnhancementSystemPrompt`, which is
-no longer read. No schema version bump is required.
+The settings blob may still contain legacy prompt-enhancement keys from an
+earlier release. They are retained for rollback and downgrade compatibility,
+but the host no longer reads or writes them as active preferences. When the
+user installs and grants the standalone `pi.prompt-enhancement` plugin, Electron
+copies valid legacy values into that plugin's private settings once (see
+`04-ux/12-prompt-enhancement.md`). The migration marker is also stored in the
+plugin's private data directory; the host settings schema does not change.
 
 New config domains (e.g. MCP servers) start as a namespace; they graduate to
 tables only when they need relations or indexes.
@@ -519,6 +530,8 @@ CREATE TABLE sessions (
   provider_id TEXT,                            -- loose ref, see below
   model_id    TEXT,
   mode        TEXT NOT NULL DEFAULT 'agent',   -- plan | agent
+  title_source TEXT NOT NULL DEFAULT 'legacy'  -- legacy | default | manual | generated
+               CHECK (title_source IN ('legacy', 'default', 'manual', 'generated')),
   thinking_level TEXT NOT NULL DEFAULT 'off'
                 CHECK (thinking_level IN ('off', 'minimal', 'low', 'medium',
                                           'high', 'xhigh', 'max', 'omit')),
@@ -531,7 +544,7 @@ CREATE TABLE sessions (
   created_at  INTEGER NOT NULL,
   updated_at  INTEGER NOT NULL
 );
-CREATE INDEX idx_sessions_updated ON sessions(updated_at DESC);
+CREATE INDEX idx_sessions_updated_id ON sessions(updated_at DESC, id DESC);
 CREATE INDEX idx_sessions_project ON sessions(project_id) WHERE project_id IS NOT NULL;
 CREATE INDEX idx_sessions_deleted ON sessions(deleted_at) WHERE deleted_at IS NOT NULL;
 ```
@@ -574,6 +587,16 @@ CREATE INDEX idx_session_import_origins_plugin
   rename does not update `updated_at`, so changing a label cannot reorder
   recent activity; transcript rows, message count, and session state remain
   unchanged.
+- `title_source` records `legacy`, `default`, `manual`, or `generated`. Schema
+  v23 classifies pre-existing known placeholder titles as `default` and all
+  other titles as `manual`; new session creation and manual rename write the
+  corresponding source. `default` means "not chosen by the user and still
+  replaceable": it covers a new session's placeholder and the deterministic
+  first-prompt fallback, which host-core writes only while the stored title is
+  still a recognized placeholder. A placeholder is recognized in every shipped
+  locale, because the renderer writes its localized `chat.untitledTask` label
+  when it creates a session. The standalone title plugin can read
+  exact-title compare-and-set, so a manual rename wins a race.
 - Import binds every non-empty normalized `projectPath` to `project_id`;
   path-less imports remain `NULL`. Re-importing a deterministic session id
   creates neither another session nor another project row.
@@ -1436,7 +1459,7 @@ truncating at a guessed position.
     cross the host/Electron/renderer boundary
   - full transcript consumers → one sequential read of
     `sessions/<id>.jsonl` (no DB), retained for sidecar context and mutations
-  - session list → `idx_sessions_updated`
+  - session list → `idx_sessions_updated_id(updated_at DESC, id DESC)`
   - group-by-project → `idx_sessions_project`
   - badges/cost rollup → `idx_turns_session` (latest turn per session)
   - global token history → `idx_turns_ended_at` (completed turns by end time)
@@ -1451,7 +1474,7 @@ truncating at a guessed position.
 - JSON columns are read blind on hot paths (shipped to the renderer as-is);
   anything filtered or summed is a promoted column by rule.
 
-## 7. Versioning, v7 reset, and v8-to-v15 migration
+## 7. Versioning, v7 reset, and v8-to-v24 migration
 
 - `PRAGMA user_version` stays the schema authority; future structural changes
   add ordered Rust migration fns again, each in one transaction, with a
@@ -1462,7 +1485,15 @@ truncating at a guessed position.
   Sessions, providers, and settings from the old file are not carried over;
   the archive remains for manual recovery. All pre-v7 migration code
   (v1 `settings.sqlite` import, v2→v6 chain) is deleted.
-- Fresh installs run the full v15 DDL directly.
+- Fresh installs run the full v24 DDL directly.
+- **Fork schema v24 unifies the two v22 histories.** Upstream v22 added the
+  session-list index; MirrorCoding v22 added the durable mobile change index.
+  Existing fork v22 databases first receive the idempotent v23 title-source
+  migration. The v23-to-v24 migration ensures the upstream composite index and
+  mobile `session_sync_state` / `session_sync_changes` tables exist. Existing
+  mobile revisions and tombstones survive unchanged; canonical JSONL history
+  is neither rewritten nor downloaded again. Upstream v22/v23 databases start
+  with an empty mobile change index. Migration backups remain available.
 - **Schema v7 first reaches v8, then uses the guarded path.** The v7→v8
   migration is followed by the same guarded v8→v15 migration; schema-v9 and
   schema-v10 databases take the same guarded path and receive an exact readable
@@ -1520,6 +1551,12 @@ truncating at a guessed position.
   and `turn_queue.voice_origin_json`; existing queue rows remain valid and
   unset. The migration keeps a v19 backup, and queue entries remain held until
   the existing Agent Host controller attaches.
+- **Schema v22 is additive.** It replaces `idx_sessions_updated` with
+  `idx_sessions_updated_id(updated_at DESC, id DESC)` for session-list ordering.
+  It changes no rows or persisted fields; a v21 backup precedes the migration.
+- **Schema v23 is additive.** It adds `sessions.title_source` and classifies
+  existing placeholder titles as `default`; every other existing title is
+  preserved and classified as `manual`. The migration keeps a v22 backup.
 - **Schema v14 is additive.** It adds nullable `sessions.deleted_at`, the
   partial deletion index, and `session_import_origins`. Existing sessions stay
   active and have no origin rows. The migration runs in the same guarded
@@ -1686,7 +1723,16 @@ no-op against that remapped row. The outbox treats
 `UNIQUE constraint failed: messages.id` as an ack and keeps draining (D444).
 A permanently rejected append whose host error carries a `PERMISSION_DENIED:`
 prefix is likewise dropped so the FIFO can continue; `PLUGIN_PERMISSION_DENIED`
-and other host failures still pause (D597). When the 1024-entry cap remains
+and other host failures still pause while their retry budget lasts (D597). A
+failure the outbox cannot classify is retried within the same host generation
+on a bounded backoff (5s doubling to 60s) and quarantined after five
+consecutive failures into `session-message-outbox.dead-letter.json` (newest 256
+appends, oldest discarded first), carrying its payload, session id, timestamp,
+and host error, so one unclassifiable head cannot starve every session's writes
+(D656). A restarted host is a new generation and retries the head at once.
+Quarantined appends are never replayed automatically, and `session.delete`
+drops that session's quarantined appends too.
+When the 1024-entry cap remains
 full after a flush attempt, enqueue logs the rejected key/session and rejects;
 it does not report that entry as queued. Generic foreign-key errors are not
 treated as acknowledgements. Steering into a claimed collaboration delivery

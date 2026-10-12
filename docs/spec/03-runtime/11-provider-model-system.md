@@ -217,6 +217,13 @@ PI-Desktop must not permanently restrict users to a short fixed model list.
 5. Chat, image and classifier models are selected by operation type even when
    they share a model ID. pi-ai remains responsible for OAuth, wire identity,
    transport and typed non-chat operations that models.dev does not describe.
+   PI-Desktop's optional Jev integration uses pi-ai's built-in
+   `typesafe/jev-latest` classifier directly; it is never listed or selectable
+   as a chat provider/model, and it owns no provider row even though it is
+   added from the same service chooser. The key is checked against TypeSafe
+   over that same System One address before settings keeps it, so a saved key
+   and an explicit Jev setting together mean Agent mode receives the on-demand
+   `JevClassify` tool.
 6. Free-form IDs remain configurable. Conservative generic metadata applies
    when no published model matches; explicit user overrides remain supported.
    Unknown relay metadata uses exact final-segment matching and an unambiguous
@@ -476,7 +483,7 @@ same vendor key.
 
 ### Anthropic token endpoint rate limits
 
-The pinned pi-ai 1.0.1 patch gives Anthropic authorization-code exchange and
+The pinned pi-ai 1.1.0 patch gives Anthropic authorization-code exchange and
 refresh a shared, bounded token-request policy: retry only an explicit HTTP
 429, at most three total requests. Wait at least 1 s then 2 s, or longer when
 `Retry-After` gives delta seconds or an HTTP date. A server delay beyond the

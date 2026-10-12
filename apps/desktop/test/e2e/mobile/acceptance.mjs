@@ -167,7 +167,7 @@ try {
   }, "replacement after expired pairing");
   await phone.getByLabel("8-digit pairing code").fill(code);
   await phone.getByRole("button", { name: "Pair and sync", exact: true }).click();
-  await phone.locator(".grant-open").filter({ hasText: "Mobile shared session" }).waitFor();
+  await phone.locator(".grant-open").waitFor();
   await page.getByText("Device paired. Your phone can now view and continue this work.", { exact: true }).waitFor();
   await page.locator('[data-action="close-mobile-pairing"]').click();
   check("same account pairs through both visible interfaces");
@@ -176,7 +176,7 @@ try {
   await until(() => fixture.control.mobileRefreshes === 1, "mobile expired access renewed");
   await until(async () => !(await view()).busy, "renewed work list loaded");
   check("concurrent work-list requests refresh mobile access once", !(await view()).error && (await view()).grants.length === 1);
-  await phone.locator(".grant-open").filter({ hasText: "Mobile shared session" }).click();
+  await phone.locator(".grant-open").click();
   await phone.getByText("History created on the desktop before pairing", { exact: true }).waitFor();
   check("phone loads existing desktop history", (await view()).sessions.length === 1);
   check("conversation header identifies the shared session and online desktop", await phone.locator(".app-heading strong").textContent() === "Mobile shared session" && (await phone.locator(".app-heading small").textContent()).includes("Online"));
@@ -282,6 +282,7 @@ try {
   await screenshot("desktop-fast-lightning-dark", page);
   await page.locator(".composer-model-thinking-chip").click();
   await page.locator(".composer-menu-entry").filter({ has: page.getByText("Model", { exact: true }) }).click();
+  await page.getByRole("menuitem", { name: "Other models", exact: true }).click();
   await page.locator('.composer-model-option[title="gpt-5.1"]').click();
   await page.locator(".mirrorcoding-group-option").filter({ hasText: provider.mirrorCoding.groupName }).click();
   await until(async () => await page.getByRole("switch", { name: "Fast", exact: true }).getAttribute("aria-checked") === "false", "desktop model switch resets Fast");
@@ -464,7 +465,7 @@ try {
   await page.locator('[data-action="sync-project-mobile"]').click();
   await page.locator('[data-testid="mobile-pairing-code"]').waitFor();
   const projectCode = (await page.locator('[data-testid="mobile-pairing-code"]').textContent()).trim();
-  await pairPhone(projectCode); await phone.locator(".grant-open").filter({ hasText: "Mobile project" }).click();
+  await pairPhone(projectCode); await phone.locator(".grant-open").click();
   await phone.getByRole("button").filter({ hasText: "Existing project session" }).waitFor();
   check("project share includes existing sessions with stable project identity", (await view()).grant.scope.id === project.id && (await view()).sessions.some((session) => session.id === projectSession.id));
   await invoke("session/create", { title: "Future project session", projectPath, providerId: provider.id, modelId: "gpt-5", mode: "agent" });

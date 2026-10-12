@@ -60,7 +60,6 @@ export type EventsSliceDependencies = StoreAccess & {
     kind: "ask" | "permission" | "plan",
     payload?: { question?: string; toolName?: string },
   ) => void;
-  triggerAutoTitleSummarization: (sessionId: string) => Promise<void>;
   assistantErrorMessage: (error: {
     code: string;
     message: string;
@@ -103,7 +102,6 @@ export function createEventsSlice({
   sessionModeForPlanningState,
   openPlanArtifact,
   notifyInteractivePrompt,
-  triggerAutoTitleSummarization,
   assistantErrorMessage,
   withCompactionMark,
 }: EventsSliceDependencies): Pick<
@@ -508,7 +506,6 @@ export function createEventsSlice({
           });
         } else if (event.type === "agent_end") {
           void get().refreshSessions();
-          void triggerAutoTitleSummarization(envelope.sessionId);
         } else if (event.type === "planning_state") {
           void get().refreshSessions();
         }
@@ -550,7 +547,6 @@ export function createEventsSlice({
         case "agent_end":
           set({ isRunning: false });
           void get().refreshSessions();
-          void triggerAutoTitleSummarization(envelope.sessionId);
           break;
         case "turn_end":
           break;

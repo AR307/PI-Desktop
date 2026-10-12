@@ -166,9 +166,13 @@
      field box (9px + 9px padding around one `--leading-body` line at
      `--text-base`) so it follows the Appearance font scale instead of pinning
      a px value that drifts once type is resized. Dense nested surfaces — the
-     subagent sheet's row body, a compact menu search — and the import toolbar,
-     whose row holds small buttons and no field, declare their own metric. */
+     subagent sheet's row body, compact Appearance pickers, and a compact menu
+     search — and the import toolbar, whose row holds small buttons and no
+     field, declare their own metric. */
   --ds-field-height: calc(18px + var(--text-base) * var(--leading-body));
+  /* Compact closed Appearance picker triggers. SettingsMenuSelect keeps the
+     field metric unless a dense surface overrides it. */
+  --ds-settings-picker-height: calc(14px + var(--text-sm-plus) * var(--leading-body));
   /* Work-panel controls share these geometry tokens so the header's safe lane
      cannot drift away from the viewport-fixed toggle. */
   --ds-work-panel-toggle-size: 28px;
@@ -282,6 +286,7 @@
   --ds-info: #5d5d5d;
   --ds-purple: #7c3aed;
   --ds-shadow-dialog: 0 16px 48px rgba(0, 0, 0, 0.12);
+  /* Preserve the opaque light model menu's existing stroke and lift. */
   --ds-shadow-model-menu:
     0 0 0 0.5px color-mix(in oklab, #1a1c1f 10%, transparent),
     0 8px 32px rgba(0, 0, 0, 0.1),

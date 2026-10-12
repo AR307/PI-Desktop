@@ -108,6 +108,8 @@ type RuntimeParams = {
   thinkingLevel?: SessionThinkingLevel;
   ultra?: boolean;
   infiniteProviderRetry?: boolean;
+  /** Opt-in TypeSafe classifier credential resolved by Electron main. */
+  jevApiKey?: string;
   provider: RuntimeProviderConfig;
   commandShell: CommandShellOption;
   pluginTools?: PluginToolDef[];
@@ -231,6 +233,7 @@ async function runtimeFor(
     subagents,
     subagentProviders,
     subagentModelKeys,
+    jevApiKey: params.jevApiKey,
     projectInstructions: params.projectInstructions,
     customSystemPrompt: params.customSystemPrompt,
     projectMemory: params.projectMemory,
@@ -298,6 +301,7 @@ async function runtimeFor(
     thinkingLevel,
     ultra: params.ultra === true,
     infiniteProviderRetry: params.infiniteProviderRetry === true,
+    jevApiKey: params.jevApiKey,
     history,
     compaction,
     compactionSettings: params.compactionSettings,
@@ -376,7 +380,13 @@ async function handle(method: string, params: any): Promise<unknown> {
     case "sidecar.configure": {
       // Main owns host-core; sidecar only keeps config metadata.
       if (params && typeof params === "object" && "networkProxy" in params) {
-        applyNodeNetworkProxy(normalizeNetworkProxy(params.networkProxy));
+        applyNodeNetworkProxy(
+          normalizeNetworkProxy(params.networkProxy),
+          process.env,
+          typeof params.systemProxyRelayUrl === "string"
+            ? params.systemProxyRelayUrl
+            : undefined,
+        );
       }
       return { ok: true, mode: "host-proxy" };
     }
@@ -535,15 +545,15 @@ async function handle(method: string, params: any): Promise<unknown> {
       }
       return { ok: true };
     }
-    case "agent.stopDelegations": {
+    case "agent.stopSubagents": {
       const runtime = runtimes.get(String(params.sessionId));
-      if (!runtime) return { stopped: [], pending: [] };
-      const ids = Array.isArray(params.delegationIds) ? params.delegationIds.map(String) : [];
-      const result = await runtime.stopDelegations(ids);
-      return {
-        stopped: result.details.stopped.map((entry) => entry.delegationId),
-        pending: result.details.stopPending.map((entry) => entry.delegationId),
-      };
+      if (!runtime) throw new Error("No active runtime for this session");
+      const ids = params.delegationIds;
+      if (ids !== undefined && (!Array.isArray(ids) || ids.length === 0 || ids.length > 100 || ids.some(id => typeof id !== "string" || !id.trim()))) {
+        throw new Error("Invalid delegation IDs");
+      }
+      const result = await runtime.stopSubagents(ids as string[] | undefined);
+      return { pending: result.details.stopPending?.flatMap(record => typeof record.delegationId === "string" ? [record.delegationId] : []) ?? [] };
     }
     case "agent.stop": {
       const sessionId = String(params.sessionId);

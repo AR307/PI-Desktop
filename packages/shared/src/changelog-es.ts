@@ -2,6 +2,42 @@ import type { ChangelogEntry } from "./changelog.js";
 
 export const esEntries: ChangelogEntry[] = [
   {
+    "version": "0.18.0",
+    "date": "2026-10-09",
+    "highlights": [
+      "Configura el clasificador Jev de TypeSafe desde Añadir servicio y verifica la clave API antes de guardarla.",
+      "La sincronización en la nube ya está disponible en los ajustes de la versión empaquetada y se marca como experimental. Las listas de proyectos permanecen en cada dispositivo.",
+      "Añade desde Añadir servicio proveedores de plugins con clave API, descripciones localizadas y detección de modelos tras configurarlos.",
+      "Las acciones autorizadas de plugins pueden transformar el borrador del Composer y deshacer el cambio; la mejora de prompts ahora es un plugin opcional.",
+      "Los detalles de las herramientas permanecen contraídos hasta que los abras, para mantener visible la respuesta completa.",
+      "Consulta preguntas y respuestas anteriores de AskTool en una tarjeta clara de preguntas y respuestas.",
+      "Genera títulos de sesión con un plugin opcional; el primer mensaje sigue como alternativa y los cambios manuales tienen prioridad.",
+      "Abre enlaces locales a archivos Markdown desde el chat en el Administrador de archivos integrado, incluidos enlaces relativos y referencias a líneas.",
+      "La lista de modelos del Composer ahora muestra los límites de contexto configurados.",
+      "Los plugins pueden inspeccionar o rechazar redirecciones de red; las llamadas fetch existentes siguen las redirecciones de forma predeterminada.",
+      "Detén un subagente en ejecución desde su tarjeta o panel de detalles, o todos los de la sesión actual, sin detener al coordinador.",
+      "Consulta la duración total de la sesión, el tiempo acumulado de respuesta del modelo y su proporción en el panel de uso del contexto.",
+    ],
+  },
+  {
+    "version": "0.17.0",
+    "date": "2026-10-07",
+    "highlights": [
+      "Adjunta imágenes en línea mientras escribes y previsualiza las imágenes enviadas dentro de la conversación.",
+      "Las referencias a conversaciones se muestran como etiquetas legibles y abren directamente la sesión enlazada.",
+      "Elige qué servidores MCP y herramientas puede usar cada mensaje.",
+      "Vuelve rápidamente a los modelos recientes desde el selector.",
+      "Genera y edita imágenes con tu cuenta de ChatGPT iniciada.",
+      "Los proveedores de plugins ahora pueden autenticar cuentas mediante OAuth.",
+      "Usa comandos de barra con espacio de nombres para encontrar el Skill que necesitas.",
+      "Expande la lista de tareas Todo para revisar todos los elementos de una lista.",
+      "Importa modelos, Skills y servidores MCP desde sus páginas de Ajustes correspondientes.",
+      "Las solicitudes a proveedores y mercados respetan el proxy del sistema.",
+      "El contenido extenso de las herramientas se muestra por páginas y las transcripciones se actualizan más rápido para mantener la fluidez.",
+      "Si un panel de plugin nunca termina de cargar, ahora muestra un error claro.",
+    ],
+  },
+  {
     "version": "0.16.2",
     "date": "2026-10-07",
     "highlights": [

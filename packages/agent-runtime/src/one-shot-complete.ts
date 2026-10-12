@@ -1,9 +1,9 @@
 import { responseOutcome, responseOutcomeError, responseDiagnostics } from "./response-outcome.js";
 import { upstreamRequestDiagnostics, type RequestDiagnostics } from "./request-diagnostics.js";
 /**
- * Host-owned one-shot completion used by prompt enhancement and plugin
- * `agent.complete`. No session history is implied: the caller supplies the
- * full Context. tools stay empty.
+ * Host-owned one-shot completion behind the plugin `agent.complete` API. No
+ * session history is implied: the caller supplies the full Context and tools
+ * stay empty.
  */
 
 import type {

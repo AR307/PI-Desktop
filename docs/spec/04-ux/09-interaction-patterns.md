@@ -271,7 +271,8 @@ may be retained while exactly one workspace supplies the visible shell context.
   permanent delete, and the folder on disk is never touched. A project whose
   turn is still live still opens the confirmation dialog that names those
   sessions and stops them first; an idle project is removed on that second
-  click.
+  click. Sidebar overflow menus stay inside the window; a tall menu scrolls
+  within the available viewport so its last action remains reachable.
 - **Create branch** snapshots an idle conversation's complete active
   transcript into an independent session in the same project/Temporary scope.
   The command is disabled while the source runs. Success selects the child and
@@ -856,6 +857,12 @@ may be retained while exactly one workspace supplies the visible shell context.
 - The context usage inspector keeps one muted line for the newest checkpoint,
   shown while its panel is open — the count and summary cost sit below the
   compact model/tool usage summaries without adding explanatory copy.
+- The open context usage inspector also shows the session's elapsed wall time
+  and the cumulative duration of its top-level model responses. The response
+  percentage compares those recorded request-to-completion durations with the
+  session span; nested delegate responses are excluded because they may overlap.
+  Long transcripts load earlier response timings in bounded pages only while
+  the inspector is open.
 
 ## 4. Long content collapse / expand
 
@@ -885,11 +892,12 @@ may be retained while exactly one workspace supplies the visible shell context.
   groups otherwise start closed. Compact starts the process and groups closed,
   except an untouched active process with any recorded failed/denied tool remains
   open through recovery and closes on completion.
-- In Detailed, leaf auto-open applies only when the literal final item of the last
-  activity group is an eligible tool-call or hosted-search row. Failed/denied
-  items stay closed, and a final thinking item never causes a backward scan.
-  Compact keeps every item payload closed and hides reasoning text/excerpts while
-  retaining its active thinking indicator.
+- No item payload opens itself in either mode: a tool, hosted-search or plan call
+  stays a header row until the user opens it, including the literal final item of
+  the last activity group. Group and whole-process defaults are unchanged, so a
+  final thinking item never causes a backward scan. Compact keeps every item
+  payload closed and hides reasoning text/excerpts while retaining its active
+  thinking indicator.
 - Activating a process, group or item header toggles only that level. Closing a
   parent preserves child state, reopening restores it, and sibling groups remain
   independent. Opening a parent is never an expand-all action.

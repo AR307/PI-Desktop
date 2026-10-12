@@ -30,9 +30,11 @@ Main risks:
 ### Must
 1. Plugin UI is isolated from the host UI DOM
 2. Plugins cannot directly require host modules
-3. The secret store is not open to plugins. Host-owned completions
+3. The secret store is not open to general plugin APIs. Host-owned completions
    (`agent.complete`) resolve credentials in Electron main and never pass keys,
-   refresh tokens, or `ModelAuth` to the plugin process
+   refresh tokens, or `ModelAuth` to the plugin process. The high-risk
+   `provider.oauth` callback is the narrow exception: it can read only the
+   encrypted OAuth credential for its own declared provider contribution
 4. The plugin-private data directory is separate from the host core library
 5. Session transcripts from `session.getLlmContext` are a bounded projection of
    the in-flight tool session only (D336 / D019)
@@ -117,7 +119,12 @@ before it is ever sent to the UI:
   the selected one; leaving the theme restores the host background, because the
   appearance is derived from the live catalog rather than remembered. macOS
   keeps `vibrancy` and its native corner behavior; Linux retains native corner
-  behavior; Windows defaults to 4 DIP
+  behavior. Windows defaults to a 12 DIP corner request. On Windows 11 (build
+  22000+), radius 0 requests square corners and positive values use the same
+  system-rounded preference, while the OS chooses the actual radius; alpha
+  backgrounds are composited over the resolved built-in theme color to keep the
+  top-level window opaque. Earlier Windows builds retain the requested DIP
+  radius
 - The CSS is read from disk at load time and delivered whole over IPC; the
   renderer injects it into a single dedicated `<style>` element appended after
   the app's own stylesheets, so it can override tokens but never inject markup.
@@ -153,7 +160,8 @@ Plugins can access:
 
 Plugins cannot access:
 - Other plugins' data
-- Host secrets
+- Host secrets through a general-purpose API; `provider.oauth` grants access
+  only to the callback's own declared provider credential
 - The host's full session database (unless a controlled API exists in the future)
 
 ## 5.1 Inter-plugin message bus
@@ -174,6 +182,31 @@ The bus is the only channel between two plugins, and it is deliberately narrow:
 
 Treat a topic as public within the app: any plugin that can declare a matching
 pattern and hold `bus.subscribe` will see it. Do not put secrets on the bus.
+
+### Provider OAuth credential boundary
+
+`provider.oauth` is a separate high-risk grant from `provider.register` and
+`net.fetch`. It lets `onProviderOAuth` handle login and refresh for a provider
+declared by the same plugin. The host encrypts each credential in its secret
+store and never sends the refresh token to the renderer or Agent Runtime. The
+plugin callback can read that credential because it implements the provider's
+OAuth protocol; it cannot read another provider's secret or call a general
+secret API. Requests made through the host network API still require
+`net.fetch` and `manifest.net.domains`. Plugin entry code is not an OS sandbox
+and can use raw Node APIs, so a plugin with this grant must be code the user
+trusts. The callback receives an abort signal when login is cancelled, the
+plugin unloads, or the host call times out. Sign out clears the credential and
+leaves the manifest-owned provider row in place.
+
+The Add Service provider catalog is also Host-rendered. It reads only the
+manifest metadata of loaded plugins with `provider.register`, includes only
+unconfigured API-key providers with an endpoint, and renders the category and
+provider name as text. An optional description is plain tooltip text on hover
+or keyboard focus. The chooser does not execute plugin code or return
+credentials. Saving a key stores it through the Host's existing provider
+secret path; the Host discovers endpoint models after that explicit save, and
+the provider service receives the key when the user sends a request through
+the provider.
 
 ## 6. Path safety
 
@@ -316,9 +349,11 @@ outbound path the host owns answers to it.
   `window.open`, which would otherwise mint a window outside the filtered session
 - **`pi.net.fetch`.** Checks the allowlist and follows redirects by hand, because
   an allowed host that 30x-es to an undeclared one would carry the request out.
-  The runtime's hop loop is the only fetch path: Electron main supplies no
-  alternative `fetch` service, so nothing can follow a redirect without the
-  per-hop re-check
+  The host's shared hop loop owns both default and injected single-hop
+  transports. `redirect: "error"` rejects 3xx without visiting the target;
+  `manual` returns the original response. The default remains `follow`, with
+  the per-hop re-check. See the [API contract](03-plugin-api.md#net) for
+  capability detection and error codes.
 - **Remote MCP endpoints.** Answer to the same list, not to their permission alone.
   HTTP endpoints may be on a trusted LAN, but plain HTTP is unencrypted and is
   called out during configuration or plugin permission review. The MCP client
@@ -382,7 +417,8 @@ manifest did not name:
   disabled.
   Stopping the calling session cancels that session's in-flight MCP request and
   sends `notifications/cancelled` to the server. A shared server connection and
-  calls owned by other sessions remain active.
+  calls owned by other sessions remain active. A request that times out is
+  cancelled the same way; `initialize` is never cancelled.
 
 ## 8.2 Desktop control and device access
 

@@ -65,3 +65,13 @@ question text：
 This format is deterministic, preserves question order, and makes multi-select
 answers distinguishable without exposing a renderer-only state object to the
 model.
+
+## 5. Transcript summary
+
+The completed asktool row in conversation history presents persisted
+`details.questions` and `details.answers` as an ordered question-and-answer
+summary. Multi-select answers remain separate labels, and skipped questions
+have an explicit localized state. This is a read-only projection: the
+model-facing text and stored tool result are unchanged. If structured details
+are unavailable or invalid, the transcript keeps its generic result rendering
+so imported or malformed history remains inspectable.

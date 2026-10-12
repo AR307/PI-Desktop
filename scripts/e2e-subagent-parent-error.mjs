@@ -103,7 +103,7 @@ const provider = (modelId) => ({ id: "fixture", name: "Fixture", modelId, baseUr
 const projectPath = mkdtempSync(join(tmpdir(), "pi-subagent-parent-error-"));
 const results = [];
 try {
-  for (const mode of ["error", "abort", "stop"]) {
+  for (const mode of ["error", "abort", "stop", "direct"]) {
     const s = scenario = { mode, ids: new Map(), settled: new Map(), waiting: new Set(),
       errors: [], replayed: [], rejected: [], parentErrors: [] };
     const runtime = new DesktopAgentRuntime({
@@ -139,26 +139,37 @@ try {
         await until(() => s.parentWaiting);
         await runtime.abort();
       }
+      if (mode === "direct") {
+        await until(() => s.parentWaiting);
+        const first = await runtime.stopSubagents([s.ids.get("task_A")]);
+        assert.equal(first.details.stopped.length, 1);
+        await until(() => s.settled.has("task_A") && s.waiting.size === 1);
+        assert.equal(s.settled.has("task_B"), false, "the sibling must remain running");
+        assert.equal(runtime.getStatus().isRunning, true, "direct stop must not abort the parent");
+        assert.equal((await runtime.stopSubagents()).details.stopped.length, 1);
+        await until(() => s.settled.has("task_B"));
+        assert.equal(runtime.getStatus().isRunning, true, "stop-all only targets delegates");
+        await runtime.abort();
+      }
       await running;
+      if (mode === "error" || mode === "abort") {
+        assert.equal(s.settled.size, 0, "ending the parent must not stop detached workers");
+        assert.equal(s.waiting.size, 2, "both worker streams remain live");
+        assert.equal((await runtime.stopSubagents()).details.stopped.length, 2);
+      }
       await until(() => ["task_A", "task_B"].every((id) => s.settled.has(id)));
       assert.equal(runtime.getStatus().isRunning, false);
       assert.equal(s.ids.size, 2);
       for (const id of ["task_A", "task_B"]) {
-        assert.equal(s.settled.get(id).status, mode === "error" ? "failed" : mode === "stop" ? "stopped" : "aborted");
-        if (mode === "error") assert.equal(s.settled.get(id).error.code, "SUBAGENT_PARENT_FAILED");
+        assert.equal(s.settled.get(id).status, "stopped");
       }
       if (mode === "error") assert.equal(s.parentErrors.length, 1);
       await bounded(runtime.prompt("Resume both delegates"));
-      if (mode === "error") {
-        assert.equal(s.replayed.length, 2);
-        assert.equal(s.rejected.length, 0);
-        const histories = s.replayed.map((body) => JSON.stringify(body.messages));
-        assert.ok(histories.some((body) => body.includes("fixture-A.txt") && !body.includes("fixture-B.txt")));
-        assert.ok(histories.some((body) => body.includes("fixture-B.txt") && !body.includes("fixture-A.txt")));
-      } else {
-        assert.equal(s.replayed.length, 0);
-        assert.equal(s.rejected.length, 2);
-      }
+      assert.equal(s.replayed.length, 2);
+      assert.equal(s.rejected.length, 0);
+      const histories = s.replayed.map((body) => JSON.stringify(body.messages));
+      assert.ok(histories.some((body) => body.includes("fixture-A.txt") && !body.includes("fixture-B.txt")));
+      assert.ok(histories.some((body) => body.includes("fixture-B.txt") && !body.includes("fixture-A.txt")));
       assert.deepEqual(s.errors, []);
       results.push({ mode, resumed: s.replayed.length, rejected: s.rejected.length });
     } finally {

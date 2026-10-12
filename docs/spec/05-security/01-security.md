@@ -113,11 +113,13 @@ request will actually take. Before each hop the client asks the session that
 carries `net.fetch` for its own proxy decision (`Session.resolveProxy`): on a
 proxied route the hop is judged on its route rather than on a local address the
 app would never dial, so only the resolver-artifact class (`benchmark`, a TUN
-fake-IP) is tolerated there, while a direct or unreadable route keeps the full
-local classification and rejects loopback, RFC1918, ULA, link-local, mapped
-IPv6, and every other non-public class by default. The explicit `allowFakeIp`
-setting may additionally permit only the `benchmark` placeholder for a
-transparent router/TUN deployment. Install writes markdown only through
+fake-IP) is tolerated there. A direct route rejects non-public answers when
+none of the DNS results is acceptable; if a mixed answer contains an acceptable
+public address, Main pins the request to that address and never connects to the
+rejected result (ADR 0321). The explicit `allowFakeIp` setting may additionally
+permit only the `benchmark` placeholder for a transparent router/TUN deployment,
+and only an accepted address is pinned. ULA-only answers and every other
+non-public-only result remain blocked. Install writes markdown only through
 `skills.create`. The host document cap remains 128 KiB after sibling markdown
 is inlined.
 
@@ -156,33 +158,34 @@ policy above.
 
 ## 4.3 Portable configuration sync
 
-WebDAV sync is a host-core network boundary. The renderer and Agent Runtime
-cannot access the endpoint, WebDAV password, backup password, vault key, or
-portable secret values. Host-core validates the selected HTTPS endpoint,
-rejects userinfo and redirects, constrains relative paths, bounds remote object
-size and KDF parameters, and requires strong conditional-write behavior before
-publishing a shared head in strict mode. An explicitly confirmed append-only
-compatibility mode may be used after a bounded `PROPFIND` directory-listing
-probe succeeds; it publishes per-device encrypted pointers and retains
-immutable history rather than pretending an unconditional `PUT` is CAS.
+S3 configuration backup/sync is a Host Core network boundary. The renderer
+supplies connection secrets and the vault password only as transient IPC
+inputs, receives redacted status, and never owns the transport or vault key.
+Agent Runtime has no sync implementation. Host validates origin-only endpoints,
+rejects redirects and public plaintext HTTP, constrains paths, bounds streamed
+objects and KDF parameters, and requires strong conditional writes. LAN HTTP
+follows the shared relaxed network policy. There is no WebDAV or append-only
+fallback; only GET 404 is absence, never 403 or 502.
 
-Every remote payload is authenticated ciphertext. The WebDAV server receives
-neither the vault password nor the local machine encryption key. Credentials
-are exported only after explicit category opt-in and are never included in
-status, preview, conflict labels, or logs. Restored provider/MCP secrets are
-written through the host secret store; OAuth sessions and cookies are never
-portable.
+Vault contents are authenticated ciphertext. S3 never receives the backup
+password or machine key. SigV4 uses scoped S3 credentials; bucket identity,
+request timing and object sizes remain visible. Credential export and import
+require opt-in. Raw exported secrets are absent from status, preview, conflict
+labels and logs. Provider/MCP secrets use the Host secret store; OAuth sessions
+and cookies are not portable. The local secret store uses encrypted files plus
+a colocated `.machine-key`, not an OS Keychain backend.
 
 Imported commands, endpoints, scripts, skills, plugins, and automations are
 staged behind a digest-bound local approval. Local paths and approvals are
 overlays, not shared entities. A new device therefore cannot execute a
 synchronized capability merely because its desired enabled flag was imported.
-The compatibility-mode warning states that all devices sharing a vault must
-use the same mode and that concurrent changes can still require review. It
-does not weaken approval, secret export, redirect, path, object-size, or
-freshness protections. The server can still deny availability or replay a
-valid old head to a fresh device that has no trusted history; sync does not
-claim availability or freshness against a malicious server.
+Both operating modes preserve approval and mapping requirements. A backup run
+does not apply remote configuration. Password rewrapping does not revoke
+previously unlocked devices. Immutable objects are retained indefinitely; a
+30-entry history index is not a cloud storage limit. A server can still deny
+service or replay an old valid head to a fresh device with no trusted history.
+Per-file atomic replacement and import journaling do not constitute a
+whole-filesystem transaction.
 
 ## 5. Command execution
 

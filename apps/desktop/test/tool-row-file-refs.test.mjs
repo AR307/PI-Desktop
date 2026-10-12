@@ -4,6 +4,7 @@ import test from "node:test";
 import * as React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import ts from "typescript";
+import { isRemoteSession, safeSessionSummary, sessionAllows } from "../src/lib/remote-session-safety.ts";
 
 /*
  * The opener a tool row's summary and a tool result's file/match list call.
@@ -41,35 +42,68 @@ function loadModule(relative, imports) {
   return module.exports;
 }
 
-const calls = { tabs: [], files: [], urls: [], toasts: [], resolved: [] };
+const calls = { tabs: [], files: [], urls: [], toasts: [], resolved: [], enabled: [], reloaded: [] };
 
 /** The store the hook reads: mutable state plus recorded actions. */
 const state = {
   workspace: { path: "C:/project" },
   activeSessionId: "session-1",
   pluginViews: [],
+  sessions: [],
   openFileInWorkPanel: (...args) => calls.files.push(args),
   openUrlInWorkPanel: (...args) => calls.urls.push(args),
   openWorkPanelTab: (tab) => calls.tabs.push(tab),
   showToast: (...args) => calls.toasts.push(args),
 };
+const useAppStore = Object.assign((selector) => selector(state), {
+  getState: () => state,
+  setState: (patch) => Object.assign(state, patch),
+});
+
+let pluginSummary = {
+  id: "pi.file-manager",
+  bundled: true,
+  enabled: true,
+  status: "ready",
+  permissions: ["ui.view"],
+  scope: { mode: "global", projects: [] },
+};
+let listedPluginViews = [];
 
 /** What the next `fs.resolveRef` reply is; each case sets it. */
 let nextMatch = null;
 let nextReason = null;
 let resolveFails = false;
+let pluginOperationFails = false;
 
 const workPanelTabs = loadModule("../src/lib/work-panel-tabs.ts", {});
+const shared = await import("@pi-desktop/shared");
 const { useOpenPreviewTarget } = loadModule("../src/hooks/use-preview-target.ts", {
   react: React,
   "react-i18next": { useTranslation: () => ({ t: (key, values) => `${key}:${values?.name ?? ""}` }) },
-  "../stores/app-store": { useAppStore: (selector) => selector(state) },
+  "@pi-desktop/shared": shared,
+  "../stores/app-store": { useAppStore },
   "../lib/api": {
     api: {
       fsResolveRef: async (ref) => {
         calls.resolved.push(ref);
         if (resolveFails) throw new Error("host unavailable");
         return { match: nextMatch, ...(nextReason ? { reason: nextReason } : {}) };
+      },
+      listPlugins: async () => ({ plugins: [pluginSummary] }),
+      listPluginViews: async () => listedPluginViews,
+      enablePlugin: async (id) => {
+        calls.enabled.push(id);
+        if (pluginOperationFails) throw new Error("plugin start failed");
+        pluginSummary = { ...pluginSummary, enabled: true, status: "ready" };
+        listedPluginViews = [{ pluginId: id, viewId: "manager" }];
+      },
+      reloadPlugin: async (id) => {
+        calls.reloaded.push(id);
+        if (pluginOperationFails) throw new Error("plugin reload failed");
+        pluginSummary = { ...pluginSummary, status: "ready" };
+        listedPluginViews = [{ pluginId: id, viewId: "manager" }];
+        return {};
       },
     },
   },
@@ -82,6 +116,9 @@ const { useOpenPreviewTarget } = loadModule("../src/hooks/use-preview-target.ts"
   }),
   "../lib/open-http-url": { openHttpUrl: (...args) => calls.urls.push(args) },
   "../lib/work-panel-tabs": workPanelTabs,
+  "./use-chat-session-capability": { useChatSessionCapability: () => true },
+  "../lib/remote-session-safety": { isRemoteSession, safeSessionSummary, sessionAllows },
+  "../plugins/renderer-slots/use-slots": { useSlotSessionId: () => "" },
 });
 
 const flush = () => new Promise((resolve) => setImmediate(resolve));
@@ -94,6 +131,18 @@ function reset({ pluginView = false } = {}) {
   nextMatch = null;
   nextReason = null;
   resolveFails = false;
+  pluginOperationFails = false;
+  pluginSummary = {
+    id: "pi.file-manager",
+    bundled: true,
+    enabled: true,
+    status: "ready",
+    permissions: ["ui.view"],
+    scope: { mode: "global", projects: [] },
+  };
+  listedPluginViews = pluginView
+    ? [{ pluginId: "pi.file-manager", viewId: "manager" }]
+    : [];
 }
 
 /**
@@ -109,6 +158,19 @@ async function click(target) {
   }
   renderToStaticMarkup(React.createElement(Harness));
   assert.equal(typeof open, "function", "the hook returned a click handler");
+  open(target);
+  await flush();
+}
+
+async function clickTwice(target) {
+  let open = null;
+  function Harness() {
+    open = useOpenPreviewTarget();
+    return null;
+  }
+  renderToStaticMarkup(React.createElement(Harness));
+  assert.equal(typeof open, "function", "the hook returned a click handler");
+  open(target);
   open(target);
   await flush();
 }
@@ -153,12 +215,85 @@ test("a Windows tool path reaches resolution intact and opens its exact project 
   assert.deepEqual(calls.toasts, []);
 });
 
-test("without the file view a project file keeps falling back to the host file tab", async () => {
+test("a project file still falls back when the bundled manager is absent", async () => {
   reset();
+  pluginSummary = { ...pluginSummary, bundled: false };
   nextMatch = projectMatch();
   await click({ kind: "file", path: "src/dir/a.ts" });
   assert.deepEqual(calls.tabs, []);
   assert.equal(calls.files.length, 1);
+  assert.equal(calls.files[0][0], "src/dir/a.ts");
+  assert.equal(calls.toasts[0][0], "chat.fileManagerUnavailable:");
+});
+
+test("a project file click enables the bundled file manager before opening it", async () => {
+  reset();
+  pluginSummary = { ...pluginSummary, enabled: false, status: "disabled" };
+  nextMatch = projectMatch();
+  await click({ kind: "file", path: "src/dir/a.ts" });
+  assert.deepEqual(calls.enabled, ["pi.file-manager"]);
+  assert.deepEqual(calls.tabs, [
+    {
+      id: "plugin:pi.file-manager/manager",
+      kind: "plugin",
+      resource: "pi.file-manager/manager",
+      location: "src/dir/a.ts",
+    },
+  ]);
+  assert.deepEqual(calls.files, []);
+});
+
+test("a project file click retries a bundled view missing during startup", async () => {
+  reset();
+  nextMatch = projectMatch();
+  await click({ kind: "file", path: "src/dir/a.ts" });
+  assert.deepEqual(calls.reloaded, ["pi.file-manager"]);
+  assert.equal(calls.tabs[0].resource, "pi.file-manager/manager");
+  assert.deepEqual(calls.files, []);
+});
+
+test("simultaneous file clicks share one bundled view startup", async () => {
+  reset();
+  nextMatch = projectMatch();
+  await clickTwice({ kind: "file", path: "src/dir/a.ts" });
+  assert.deepEqual(calls.reloaded, ["pi.file-manager"]);
+  assert.equal(calls.tabs.length, 2);
+});
+
+test("a project-scoped file manager is not enabled outside its selected projects", async () => {
+  reset();
+  pluginSummary = {
+    ...pluginSummary,
+    enabled: false,
+    status: "disabled",
+    scope: { mode: "projects", projects: ["C:/another-project"] },
+  };
+  nextMatch = projectMatch();
+  await click({ kind: "file", path: "src/dir/a.ts" });
+  assert.deepEqual(calls.enabled, []);
+  assert.equal(calls.files[0][0], "src/dir/a.ts");
+  assert.equal(calls.toasts[0][0], "chat.fileManagerUnavailable:");
+});
+
+test("a missing ui.view grant is not restored by a file click", async () => {
+  reset();
+  pluginSummary = { ...pluginSummary, enabled: false, status: "disabled", permissions: [] };
+  nextMatch = projectMatch();
+  await click({ kind: "file", path: "src/dir/a.ts" });
+  assert.deepEqual(calls.enabled, []);
+  assert.deepEqual(calls.reloaded, []);
+  assert.equal(calls.files[0][0], "src/dir/a.ts");
+  assert.equal(calls.toasts[0][0], "chat.fileManagerUnavailable:");
+});
+
+test("a failed file-manager start reports the fallback and opens the host viewer", async () => {
+  reset();
+  pluginSummary = { ...pluginSummary, enabled: false, status: "disabled" };
+  pluginOperationFails = true;
+  nextMatch = projectMatch();
+  await click({ kind: "file", path: "src/dir/a.ts" });
+  assert.deepEqual(calls.enabled, ["pi.file-manager"]);
+  assert.equal(calls.toasts[0][0], "chat.fileManagerUnavailable:");
   assert.equal(calls.files[0][0], "src/dir/a.ts");
 });
 

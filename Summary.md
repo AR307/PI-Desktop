@@ -1201,3 +1201,42 @@ Final release builds and typechecks passed, along with five changelog and 22
 mobile tests. The three Windows distributions started as 0.16.2; the signed
 Android release APK covered versionCode 5 with versionCode 6 on PiMobileQA.
 Captured native windows and the Android login screen were visually checked.
+
+## 2026-10-12 - Upstream 0.18 integration candidate
+
+- Integrate upstream through eec988c0f into the committed MirrorCoding 0.16.2
+  release and approved drag-region fix, on codex/fork-upstream-sync-0180.
+  Keep the main checkout and unrelated worktrees unchanged. Workspace version
+  is 0.18.0 and Android versionCode is 7; this is not a published release.
+- Adopt upstream pi 1.1.0, plugin-owned title/prompt enhancement, Jev provider,
+  remote-project workflows and browser presentation-view lifecycle changes.
+  Preserve MC catalog/authentication, Fast, Ultra, mobile account discovery,
+  offline history, updates and runtime-owned ReturnToParent receipts.
+- Use the upstream stop-subagents command end to end while retaining the
+  fork's independent parent/worker lifetime and resumable stopped workers.
+  Reasoning changes at the idle boundary must not dispose detached workers.
+- Unify the upstream and fork v22 database histories in schema v24. Retain
+  existing transcripts, mobile change revisions and tombstones while adding
+  upstream title-source and composite session-index changes.
+- Thirteen obsolete source/test files were removed only after authorized
+  recoverable recycling of their copies. No user data was removed.
+- Validation: package/desktop TypeScript, sidecar and full Electron JS builds,
+  mobile web build, Rust host build, fmt, clippy, policy/dependency/patch/version
+  checks and configured lint pass. Shared tests: 1256; runtime: 1395 passed,
+  1 skipped; i18n: 39; mobile: 22; targeted desktop merge tests: 396.
+- Controlled actual Electron acceptance covers browser capture during resize
+  and maximize/fullscreen transitions, worker stop controls, cross-model
+  delegation, Ultra handoff, ReturnToParent and reload. Fork subagent checks: 15;
+  mobile account/offline/delta checks: 46, including 610 cached messages and
+  desktop restart. Full desktop/mobile model, Fast, Ultra, approval and image
+  journey: 89 checks, no renderer exceptions. No production MC or paid model
+  request was used.
+- Full suites are not entirely green: Rust reports 825 passed, 2 failed,
+  1 ignored; both config-sync failures also reproduce on unchanged upstream.
+  Initial full desktop run reports 3789 passed, 49 failed, 8 skipped. Integration
+  regressions were corrected and targeted checks rerun; remaining Windows
+  fixture/path assumptions are not all independently baseline-confirmed. The
+  hidden S3 settings fixture times out on Windows, while the same fixture in a
+  visible isolated Electron window passes. Do not claim full-suite success.
+- Android native installation, macOS packaging, production MC, push, Release
+  publication and restart of the user's desktop are outside this sync.

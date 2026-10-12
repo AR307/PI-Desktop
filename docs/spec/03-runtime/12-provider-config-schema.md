@@ -196,6 +196,15 @@ non-secret `accountLabel`, and a `connected` flag. The custom-provider dialog
 does not edit or delete OAuth rows; the Vendor accounts card calls
 `providers.delete` for the selected row.
 
+Plugin-owned OAuth rows use the same `authKind` and encrypted secret reference,
+but keep the manifest-owned row id `plugin:<pluginId>:<declaredId>`. The
+`provider.oauth` callback handles login and refresh for that row, and one
+credential is stored per declared provider contribution. Signing out deletes
+only its OAuth secret; the provider row remains until the plugin is disabled,
+uninstalled, or removes the declaration. Plugin-owned rows and their secrets
+are excluded from portable configuration capture because the plugin manifest
+recreates the row on the destination host.
+
 `models` is the provider's selected model binding array. Each binding owns its
 context/output limits and explicit thinking configuration. Published catalog
 levels seed a newly selected known model, but the binding may enable any
@@ -257,7 +266,8 @@ normal secret-store path.
 OpenCode Go (and any `opencode.ai` host) requires a stable
 `x-opencode-session` header on LLM requests. Agent-runtime sends that header
 plus `x-opencode-client: pi-desktop` and `User-Agent: pi-desktop/<APP_VERSION>`
-on session turns, subagent turns, prompt enhancement, and plugin one-shots.
+on session turns, subagent turns, plugin-owned prompt enhancement, and other
+plugin one-shots.
 Caller-supplied headers override the client and User-Agent values; a missing
 or empty session header is always restored from the conversation id.
 
@@ -265,7 +275,8 @@ or empty session header is always restored from the conversation id.
 omitted, or update `{}` keeps the adapter default (pi-ai's `pi (…)` string,
 Anthropic OAuth's `claude-cli/<version>`, or OpenCode's
 `pi-desktop/<APP_VERSION>`). A non-empty map is last-writer on that row's
-outbound HTTP — session turns, subagents, prompt enhancement, plugin one-shots,
+outbound HTTP — session turns, subagents, plugin one-shots (including
+plugin-owned prompt enhancement),
 `/models` discovery (including unsaved form values), connection tests, and
 OAuth token refresh. A fetch wrapper is the last writer so Codex and the
 Anthropic SDK cannot overwrite it; pi-ai's Google adapters receive the same

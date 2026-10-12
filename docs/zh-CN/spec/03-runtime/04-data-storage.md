@@ -1,4 +1,4 @@
-# 04. 数据存储（架构 v17）
+# 04. 数据存储（架构 v24）
 
 > **翻译说明：** 本页是与 [英文源规格](/spec/03-runtime/04-data-storage) 一一对应的机器辅助翻译。代码、协议字段和标识符保持原文；如翻译与英文源事实有歧义，以英文版本为准。
 
@@ -355,6 +355,8 @@ CREATE TABLE sessions (
   provider_id TEXT,                            -- loose ref, see below
   model_id    TEXT,
   mode        TEXT NOT NULL DEFAULT 'agent',   -- plan | agent
+  title_source TEXT NOT NULL DEFAULT 'legacy'  -- legacy | default | manual | generated
+               CHECK (title_source IN ('legacy', 'default', 'manual', 'generated')),
   thinking_level TEXT NOT NULL DEFAULT 'off'
                 CHECK (thinking_level IN ('off', 'minimal', 'low', 'medium',
                                           'high', 'xhigh', 'max', 'omit')),
@@ -367,10 +369,19 @@ CREATE TABLE sessions (
   created_at  INTEGER NOT NULL,
   updated_at  INTEGER NOT NULL
 );
-CREATE INDEX idx_sessions_updated ON sessions(updated_at DESC);
+CREATE INDEX idx_sessions_updated_id ON sessions(updated_at DESC, id DESC);
 CREATE INDEX idx_sessions_project ON sessions(project_id) WHERE project_id IS NOT NULL;
 CREATE INDEX idx_sessions_deleted ON sessions(deleted_at) WHERE deleted_at IS NOT NULL;
 ```
+
+`title_source` 记录 `legacy`、`default`、`manual` 或 `generated`。架构 v23 会将已有的
+已知占位标题归类为 `default`，其余标题归类为 `manual`，不改写标题。新建会话和手动重命名
+会写入相应来源。`default` 表示“非用户选择、仍可替换”：它既覆盖新会话的占位标题，也覆盖
+确定性的首条提示兜底标题（host-core 只在存储标题仍是可识别占位标题时才写入）。占位标题在
+所有已发布的语言下都会被识别，因为渲染器创建会话时会写入本地化的 `chat.untitledTask` 文案。
+独立标题插件只能读取 `default` 会话的首轮文本，并且只能用精确标题比较并设置，因此并发手动
+重命名会胜出。
+会胜出。
 
 插件导入增加一个由主机拥有的来源 sidecar。它与核心会话身份分离，
 每次插件读写都必须匹配创建该行的 `plugin_id`：
@@ -1146,7 +1157,7 @@ outbox 排空。渲染器侧的停止绝不重写已有已开始回复的转录
 - JSON 列在热路径上盲读（按原样发送到渲染器）；
   任何过滤或求和的内容都是按规则提升的列。
 
-## 7. 版本控制、v7 重置和 v8 到 v16 迁移
+## 7. 版本控制、v7 重置和 v8 到 v24 迁移
 
 - `PRAGMA user_version` 保留模式权限；未来的结构性变化
   再次添加有序的 Rust 迁移 fns，每个都在一个事务中，并带有一个
@@ -1157,7 +1168,12 @@ outbox 排空。渲染器侧的停止绝不重写已有已开始回复的转录
   旧文件中的会话、提供程序和设置不会保留；
   存档仍保留以供手动恢复。所有 v7 之前的迁移代码
   （v1 `settings.sqlite` 导入，v2→v6 链）被删除。
-- 全新安装直接运行完整的 v16 DDL。
+- 全新安装直接运行完整的 v24 DDL。
+- **二开架构 v24 统一两条 v22 历史。** 上游 v22 增加会话列表索引，MirrorCoding v22
+  增加持久化手机差量索引。现有二开 v22 数据库先执行幂等的 v23 标题来源迁移，
+  再由 v23→v24 确保上游组合索引及 `session_sync_state` / `session_sync_changes`
+  表存在。已有差量修订号和删除标记保持不变，不重写 JSONL 历史，也不重新下载历史。
+  上游 v22/v23 数据库从空的手机差量索引开始；迁移备份继续保留。
 - **架构 v15 是增量的。** 它增加 `turn_queue` 表及其两个索引（D386 / ADR 0213），使 Host
   拥有的回合队列在重启后存活；不改动任何已有行，迁移前保留 `pi.sqlite.v14.bak`。
 - **架构 v16 是增量的。** 它增加会话协作 link 和投递表、生命周期索引，以及可为空的
@@ -1166,6 +1182,8 @@ outbox 排空。渲染器侧的停止绝不重写已有已开始回复的转录
 - **架构 v17 是增量的。** 它增加可为空的 `providers.owner_plugin_id` 归属列及其部分索引
   （ADR 0259），从而把插件在 `contributes.providers` 中声明的 provider 行与用户创建的行区分开
   —— 所有 v17 之前的行保持 NULL 归属。该步骤之前保留 `pi.sqlite.v16.bak` 副本。
+- **架构 v23 是增量的。** 它增加 `sessions.title_source`，并将现有占位标题归类为
+  `default`；其余现有标题保持原样并归类为 `manual`。迁移前保留 v22 备份。
   v15→v16 会话协作步骤现在写入 `16`（它自己的版本）而不是最新的架构常量，
   因此 v15 文件可以在一次启动中走完两个步骤。
 - **架构 v7 首先到达 v8，然后使用受保护的路径。** v7→v8
@@ -1213,13 +1231,10 @@ outbox 排空。渲染器侧的停止绝不重写已有已开始回复的转录
 1–1,000,000 的整数范围。因此现有数据库会在读取时延迟获得默认值，不需要破坏性
 迁移或第二个设置存储。
 
-同一个应用设置 JSON 还可选存储提示词增强的覆盖值
-`promptEnhancementCustomTemplate`（决定已存模板是否生效的开关）、
-`promptEnhancementUserTemplate`、`promptEnhancementProviderId`、
-`promptEnhancementModelId` 与 `promptEnhancementThinkingLevel`（ADR 0121）。用户模板缺失或为空表示使用内置默认值，
-因此清空字段不会写入空字符串而是不写该键。非空的用户模板必须包含草稿变量，且
-不得超过 `PROMPT_ENHANCEMENT_TEMPLATE_MAX_LENGTH`；host-core 会拒绝违反任一规则的
-写入，并丢弃已不再读取的 `promptEnhancementSystemPrompt`。无需提升 schema 版本。
+应用设置 JSON 可能仍包含旧版本写入的提示词增强键。为支持回退和降级，宿主保留这些值，
+但不会再把它们作为有效偏好读取或写入。用户安装并授权独立的
+`pi.prompt-enhancement` 插件时，Electron 会将有效旧值一次性复制到插件私有设置中
+（见 `04-ux/12-prompt-enhancement.md`）。迁移标记也位于插件私有数据目录；宿主设置 schema 不变。
 - Plan 和 Goal 工件永远不会根据转录内容重建。开
   启动,
   一笔交易标志着每笔 `pending` 批准和每笔 `queued` 或
@@ -1353,7 +1368,12 @@ UI投影损失
 `{sessionId}:{id}`；重放原始 id 对该改写行无操作。outbox 将
 `UNIQUE constraint failed: messages.id` 当作确认并继续排空（D444）。带
 `PERMISSION_DENIED:` 前缀的永久拒绝同样丢弃该行以便 FIFO 继续；
-`PLUGIN_PERMISSION_DENIED` 和其他宿主失败仍暂停（D597）。1024 条上限在尝试 flush 后仍满时，
+`PLUGIN_PERMISSION_DENIED` 和其他宿主失败在其重试额度内仍暂停（D597）。无法归类的失败在同
+一 Host 代内按有界退避重试（5 秒起、翻倍、上限 60 秒），连续五次失败后写入
+`session-message-outbox.dead-letter.json`（保留载荷、sessionId、隔离时间与宿主错误，最多
+保留最新 256 条，超出丢最旧），随后继续排空，因此单个无法归类的队头不会饿死所有会话的
+写入（D656）；Host 重启属于新代，会立即重试该队头。隔离条目不会自动重放，
+`session.delete` 会连同该会话的隔离条目一起删除。1024 条上限在尝试 flush 后仍满时，
 enqueue 会记录被拒 key/session 并 reject，不会谎报已入队；通用外键错误不会被当作确认。
 向已认领的协作投递回合做 steering 是额外的人类输入：必须指向该投递的会话，
 不受投递内容/附件契约约束，不继承投递来源，并清掉客户端带来的

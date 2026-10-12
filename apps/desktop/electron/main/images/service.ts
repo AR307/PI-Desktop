@@ -125,7 +125,7 @@ export class ImageService {
       const { provider } = await this.host().call<{ provider: ProviderPublic }>("providers.get", { id: request.providerId });
       const { session } = await this.host().call<{ session: SessionDetail }>("session.get", { id: request.sessionId, messageLimit: 1 });
       if (!session) throw new Error("session_not_found");
-      const prepared = await preparePromptAttachments(this.deps.dataDir, request.sessionId, session.projectPath, request.references ?? [], true);
+      const prepared = await preparePromptAttachments(this.deps.dataDir, request.sessionId, session.projectPath, request.references ?? [], true, request.prompt);
       if (prepared.some((ref) => ref.message.kind !== "image" || !ref.inlineData)) throw new Error("images_reference_too_large");
       const options = validateImageOptions(model.capability, request.options, prepared.length);
       result = { kind: "image-generation", model, prompt: request.prompt, options, images: [] };

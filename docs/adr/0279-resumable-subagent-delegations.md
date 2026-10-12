@@ -15,6 +15,16 @@
 
 ## Context
 
+### Current fork integration note (2026-10-12)
+
+The historical lifecycle restrictions below are superseded by
+`detached-delegation-and-wake.md` and runtime spec section 5f. Parent failure or
+Stop leaves detached workers active; explicit worker Stop remains independent.
+Settled stopped/aborted chains are resumable using their persisted actual
+provider/model/group binding and their own tool history. No automatic retry
+or model change is introduced. The integrated `agent.stopSubagents` interface
+replaces the older fork-only cancellation IPC.
+
 Delegation as built by ADR 0062 and ADR 0089 spawns one `SubagentRun` per `Task`
 call. Each run starts with `messages: []` (`packages/agent-runtime/src/subagent.ts`)
 and is single-use. A delegate's transcript rows are persisted — they carry
@@ -70,7 +80,12 @@ A new module (`packages/agent-runtime/src/delegation-history.ts`) owns:
 - synthesizing the original `task` as the first user message from the first
   `Task` tool row's persisted arguments,
 - converting to `AgentMessage[]` with the delegate's own provider/model binding
-  (a pinned delegation model is not the session model),
+  (a pinned delegation model is not the session model). Assistant transport
+  identity is `model.provider` / `model.id` — the same values live requests
+  use — not the account row id. When `vendorKey` is set, `model.provider`
+  differs from `provider.id`; tagging restored history with the account id
+  makes pi-ai treat same-model reasoning as foreign and empty
+  `reasoning_content` on resume,
 - a read-file / line-count budget gate.
 
 `SubagentRun` gains `initialMessages?: AgentMessage[]`; when present it seeds

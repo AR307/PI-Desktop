@@ -29,14 +29,16 @@ pub struct NormalizedFile {
     /// LF-normalized text, BOM stripped, original trailing whitespace kept.
     pub text: String,
     pub ending: LineEnding,
+    /// Whether a UTF-8 BOM was present.
     pub bom: bool,
+    /// Byte order for BOM-marked UTF-16: true for little endian, false for big endian.
     pub utf16: Option<bool>,
 }
 
 pub fn decode_bytes(bytes: &[u8]) -> (bool, String) {
     if bytes.starts_with(UTF16LE_BOM) || bytes.starts_with(UTF16BE_BOM) {
         let little_endian = bytes.starts_with(UTF16LE_BOM);
-        let body = &bytes[2..bytes.len() - (bytes[2..].len() % 2)];
+        let body = &bytes[2..];
         let units = body.chunks_exact(2).map(|pair| {
             if little_endian {
                 u16::from_le_bytes([pair[0], pair[1]])

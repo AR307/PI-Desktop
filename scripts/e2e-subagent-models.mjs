@@ -167,6 +167,11 @@ async function run(id, args, expectedModel, keys = ["fixture/allowed"], sessionI
     subagentProviders: { ...bindings, ...options.bindings }, subagentModelKeys: keys,
   });
   await until(() => events.some((e) => e.sessionId === sessionId && e.turnId === id && e.event.type === "agent_end" && !e.parentToolCallId));
+  if (expectedModel) {
+    await until(() => events.some((e) => e.sessionId === sessionId && e.turnId === id
+      && e.event.type === "message_end" && e.event.message?.toolName === "Task"
+      && e.event.message.toolResult?.details?.status !== "running"));
+  }
   const captured = requests.slice(before);
   const parent = captured.find((p) => p.tools?.some((t) => t.function?.name === "Task"));
   assert.ok(parent, "parent provider request reached local transport");

@@ -4,6 +4,7 @@ import type { HostProcess } from "../host-process";
 import type { IpcRegistrar } from "./types";
 import type { LiveCallService } from "../live-voice/call-service";
 import type { AppSettings } from "@pi-desktop/shared";
+import { currentSystemProxyRelayUrl } from "../network-proxy";
 
 export type SettingsIpcDependencies = {
   registrar: IpcRegistrar;
@@ -103,6 +104,7 @@ export function registerSettingsIpc({
           hostBinary: host.binaryPath,
           dataDir,
           networkProxy: currentNetworkProxy(),
+          systemProxyRelayUrl: currentSystemProxyRelayUrl(),
         });
       } catch {
         // Sidecar will pick up PI_DESKTOP_PROXY_JSON on the next spawn.

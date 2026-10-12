@@ -41,6 +41,7 @@ export type HostRuntimeDependencies = {
   importLegacyScheduled: () => Promise<unknown>;
   superviseRestart: (kind: "host" | "sidecar") => Promise<void>;
   isQuitting: () => boolean;
+  ensureSystemProxyRelay: () => Promise<string>;
 };
 
 export function createHostRuntime({
@@ -66,6 +67,7 @@ export function createHostRuntime({
   importLegacyScheduled,
   superviseRestart,
   isQuitting,
+  ensureSystemProxyRelay,
 }: HostRuntimeDependencies): {
   wireHost: (host: HostProcess) => void;
   startHost: () => Promise<void>;
@@ -362,11 +364,15 @@ export function createHostRuntime({
   const startHost = async (): Promise<void> => {
 
   assertLinuxGlibcSupported();
+  const systemProxyRelayUrl = await ensureSystemProxyRelay();
   const h = new HostProcess(dataDir, (text) => logger.child("host", text));
   wireHost(h);
   runtimeState.host = h;
   try {
     await h.handshake();
+    await h.call("network.configureSystemProxyRelay", {
+      url: systemProxyRelayUrl,
+    });
     logger.app("runtime", "info", "host-core handshake ok", {
       data: { generation: h.generation },
     });

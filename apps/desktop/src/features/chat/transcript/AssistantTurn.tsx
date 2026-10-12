@@ -23,6 +23,8 @@ import {
   resolveThinkingDisplayMode,
   shouldGroupTurnProcess,
 } from "../../../lib/turn-process";
+import { sessionAllows } from "../../../lib/remote-session-safety";
+import { useSlotSessionId } from "../../../plugins/renderer-slots/use-slots";
 import { useAppStore } from "../../../stores/app-store";
 import { IconBranch, IconReview } from "../../../components/icons";
 import { TooltipButton } from "../../../components/ui";
@@ -233,6 +235,9 @@ export const AssistantTurn = memo(function AssistantTurn({
   const { copyText, selectText } = useChatTextActions();
   const retryAssistantMessage = useAppStore((s) => s.retryAssistantMessage);
   const forkAssistantMessage = useAppStore((s) => s.forkAssistantMessage);
+  const paneSessionId = useSlotSessionId();
+  const session = useAppStore((s) => s.sessions.find((item) => item.id === paneSessionId));
+  const canEditMessages = sessionAllows(session ?? (paneSessionId.startsWith("remote:") ? { id: paneSessionId } : undefined), "canEditMessages");
   const summary = getAssistantTurnSummary(entry);
   const { actionMessage, metaMessage, latestUsageMessage, usage, responseDurationMs, responseOutputTokens } = summary;
   const modelId = metaMessage?.modelId ?? latestUsageMessage?.modelId;
@@ -264,7 +269,7 @@ export const AssistantTurn = memo(function AssistantTurn({
               ".message-bubble",
             ),
           ].at(-1) ?? null,
-        complete: complete && Boolean(actionMessage),
+        complete: complete && Boolean(actionMessage) && canEditMessages,
         actions: { copyText, selectText },
         onRegenerate: () => {
           if (actionMessage) void retryAssistantMessage(actionMessage.id);
@@ -314,9 +319,9 @@ export const AssistantTurn = memo(function AssistantTurn({
       resolveThinkingDisplayMode(state.settings?.thinkingDisplayMode),
     ),
   );
-  const { process, responses, lastActivityPart } = summary;
+  const { process, responses } = summary;
   const activePart = isActive ? entry.parts.at(-1) : undefined;
-  const partContext = { isActive, activePart, lastActivityPart, runtimeActivity, turnDelegationStatuses, turnDelegationTimings };
+  const partContext = { isActive, activePart, runtimeActivity, turnDelegationStatuses, turnDelegationTimings };
 
   return (
     <div
@@ -352,22 +357,22 @@ export const AssistantTurn = memo(function AssistantTurn({
             <MessageTimestamp createdAt={actionMessage.createdAt} />
             <ActionSlotSide slot="assistantAction" side="left" message={slotReply} />
             <CopyButton text={content} label={t("chat.copy")} />
-            <TooltipButton
+            {canEditMessages ? <TooltipButton
               className="copy-btn icon"
               tooltip={t("chat.forkResponse")}
               ariaLabel={t("chat.forkResponse")}
               onClick={() => void forkAssistantMessage(actionMessage.id)}
             >
               <IconBranch size={13} />
-            </TooltipButton>
-            <TooltipButton
+            </TooltipButton> : null}
+            {canEditMessages ? <TooltipButton
               className="copy-btn icon"
               tooltip={t("chat.retry")}
               ariaLabel={t("chat.retry")}
               onClick={() => void retryAssistantMessage(actionMessage.id)}
             >
               <IconReview size={13} />
-            </TooltipButton>
+            </TooltipButton> : null}
             <ActionSlotSide slot="assistantAction" side="right" message={slotReply} />
           </div>
         ) : null}

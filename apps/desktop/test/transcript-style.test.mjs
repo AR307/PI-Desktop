@@ -60,10 +60,16 @@ test("tool rows render structured blocks instead of dumping JSON", async () => {
   assert.match(transcriptSource, /if \(variant !== "topology" && open && hasDetails && disclosure\.parentVisible/);
   assert.match(transcriptSource, /const blocks = variant !== "topology" && open && hasDetails \? presentation\.current\?\.blocks : null/);
   assert.match(transcriptSource, /<ToolChips chips=\{chips\} \/>/);
-  assert.match(transcriptSource, /<ToolDetailBlocks blocks=\{blocks\} plain=\{runHead\} \/>/);
+  assert.match(
+    transcriptSource,
+    /<ToolDetailBlocks blocks=\{blocks\} plain=\{runHead\} streaming=\{status === "running"\} \/>/,
+  );
   assert.match(permissionSource, /<ToolDetailBlocks blocks=\{argBlocks\} \/>/);
   // Code bodies share the transcript highlighter rather than a second cache.
-  assert.match(detailsSource, /<HighlightedCode code=\{block\.text\} lang=\{block\.lang\} \/>/);
+  assert.match(
+    detailsSource,
+    /block\.highlight \? <HighlightedCode code=\{page\} lang=\{block\.lang\} \/> : page/,
+  );
   // Diffs reuse the review card rails; hits and paths open in the work panel.
   assert.match(detailsSource, /className="diff-hunk"/);
   assert.match(detailsSource, /openTarget\(\{ kind: "file", path: rel \}\)/);
@@ -356,7 +362,10 @@ test("delete remains on user turns and is removed from assistant toolbar", async
   assert.match(storeSource, /replaceSessionMessages\(sessionId,\s*next\)/);
   assert.match(transcriptSource, /deleteMessage\(message\.id\)/);
   assert.match(transcriptSource, /chat\.deleteMessage/);
-  assert.match(transcriptSource, /const editableUserMessage = isUser && !isSessionMessage;/);
+  assert.match(
+    transcriptSource,
+    /const editableUserMessage = isUser && !isSessionMessage && canEditMessages;/,
+  );
   assert.match(transcriptSource, /\{editableUserMessage \? \(/);
   assert.match(stylesSource, /\.copy-btn\.danger:hover/);
 });
@@ -466,6 +475,10 @@ test("assistant context inspector keeps a compact summary and retry action wired
   assert.match(inspectorSource, /context-inspector-summary-row/);
   assert.match(inspectorSource, /chat\.usageToolsSummary/);
   assert.match(inspectorSource, /context-inspector-kpis/);
+  assert.match(inspectorSource, /useSessionTiming/);
+  assert.match(inspectorSource, /chat\.usageSessionTime/);
+  assert.match(inspectorSource, /chat\.usageModelResponse/);
+  assert.match(inspectorSource, /modelResponsePercent/);
   assert.match(inspectorSource, /context-inspector-window-percent/);
   assert.match(inspectorSource, /chat\.usageContextLeft/);
   assert.match(inspectorSource, /chat\.usageThroughput/);

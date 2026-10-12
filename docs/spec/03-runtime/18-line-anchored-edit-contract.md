@@ -43,9 +43,10 @@ Three properties are enforced, in this order, before any byte is written:
 
 Before hashing, and before any line is addressed, file text is normalized:
 
-1. A leading UTF-8 or UTF-16 (LE/BE) BOM is stripped and retained with its
-   encoding for restoration on write. BOM-marked UTF-16 text is readable by
-   `Read`; malformed UTF-16 and NUL-bearing binary content remain rejected.
+1. A leading UTF-8 or UTF-16LE/BE BOM is decoded and retained for restoration
+   on write. BOM-marked UTF-16 text is checked after decoding, so the zero bytes
+   in ordinary PowerShell logs do not cause a binary-file rejection. Edit
+   preserves the original byte order, BOM, and line endings.
 2. Line endings are detected and normalized to `LF`; the dominant original
    ending is retained for restoration on write.
 3. Trailing `[ \t\r]` is removed from every line, including the last.
@@ -263,6 +264,18 @@ dest       := path | quoted_path
 | `REM` | none | Delete the file named by `path`. |
 | `MV DEST` | none | Move/rename to `DEST` after applying every other op to the source. |
 
+Before writing the destination or removing the source, `MV` compares the paths
+returned by the host's permission-aware canonical resolver. If both resolve to
+the same path, the entire call fails with `EDIT_NO_CHANGE` and the source bytes
+stay untouched, including when the payload also contains content edits. This
+covers relative/absolute aliases, `.` and `..`, symlinks, and case-only spellings
+on case-insensitive filesystems. `MV` does not support case-only renaming there;
+use a distinct destination instead. Case-sensitive filesystems retain their
+normal distinction between different files whose names differ only in case.
+This rejection applies after path resolution and permission checks succeed;
+an alias rejected by those checks keeps their error (for example,
+`PATH_OUTSIDE_WORKSPACE`) and does not reach the self-move comparison.
+
 ### 7.3 Anchoring rules
 
 1. All line numbers refer to the **tagged snapshot**. They are never shifted by
@@ -478,6 +491,25 @@ failed Task result with the same recovery code, even after earlier report text;
 the chain remains available to `Task(resume)`. A new parent
 prompt resets the parent's budget without resetting a still-running delegate.
 
+The runtime identifies an existing target by its filesystem canonical path,
+resolved against the session project (or scratch root for a temporary session)
+before the mutation runs. Relative and
+absolute spellings, lexical `.`/`..`, directory links, and filesystem-supported
+case aliases therefore share the failure count, per-code grace, and successful
+mutation reset. Case-distinct files retain separate budgets. If canonicalization
+is unavailable (for example, a missing target), the normalized absolute path is
+the bookkeeping fallback. This identity never changes the submitted tool path
+or replaces Host permission and workspace checks; delegate budgets remain
+isolated from the parent and from other delegate runs.
+If a target later becomes canonicalizable (for example, after creation under a
+symlinked root), its identity may change from the lexical fallback; counts are
+not guaranteed to carry across that transition.
+
+Counts and per-code graces belong to the executing parent turn or delegate
+run. Parallel delegates working on the same path do not share failures or
+successful-write resets. A new parent prompt resets only the parent's recovery
+state; still-running delegates retain theirs until they settle.
+
 When the count does reach the limit the tool result carries `terminate: true`
 and that agent loop stops after that batch. For a parent run, stopping there must not leave a turn
 that merely ends: the runtime finalizes the assistant row with
@@ -490,6 +522,11 @@ body rows must end its header with `:`, for example `PUT 48.=48:`. Stale-tag and
 unseen-line failures continue to direct the model to re-read or use the complete
 reveal. A terminated turn with no message is indistinguishable from a model that
 chose to say nothing.
+
+For delegates, exhaustion is reported on the Task result as `failed` with
+`MUTATION_RETRY_BUDGET_EXHAUSTED`. Earlier report text is preserved but cannot
+turn the failed run into `completed`. The parent and sibling delegates keep
+running, and the failed chain remains available through `Task(resume)`.
 
 ## 10. Drift recovery
 
@@ -535,7 +572,7 @@ Recovery warnings distinguish cause, because the corrective action differs:
 | `EDIT_REGISTER_EMPTY` | no | paste from an unset register |
 | `EDIT_REGISTER_AMBIGUOUS` | no | anonymous paste with more than one pending anonymous capture |
 | `EDIT_REPAIR_AMBIGUOUS` | no | boundary repair candidates tied at minimum cost |
-| `EDIT_NO_CHANGE` | no | apply produced identical text |
+| `EDIT_NO_CHANGE` | no | apply produced identical text, or `MV` resolved to the source path |
 | `EDIT_AMPLIFICATION_LIMIT` | no | lowering exceeded the expansion cap |
 
 All of these are `Edit`-scoped and additive to

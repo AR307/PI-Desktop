@@ -21,7 +21,7 @@
 | `app` | 应用程序信息、健康检查 |
 | `agent` | 对话、中止、状态和交互式 Asktool 解决方案 |
 | `plan` | Plan 提案列出、决议和变更事件 |
-| `session` | 会话 CRUD/历史记录 |
+| `session` | 会话 CRUD/历史记录/标题元数据 |
 | `session collaboration` | 侧边栏投影使用的有界只读协作状态；变更仍通过已审查的插件网关完成 |
 | `settings` | 配置 read/write |
 | `secrets` | 秘密 write/delete/exists（绝不将明文返回到 UI 日志） |
@@ -186,6 +186,8 @@ Root 用户轮次可能包括 `revisionRootId`、`revisionCount` 和
  输入框
 附件可供性保持隐藏，直到 main、sidecar、pi 模型
 功能和持久性都会消耗有效负载。
+草稿内联命名过位置的图片会带上 `inlinePath`，运行时按它把图片块放回原位置，
+而不是统一追加在提示文本之后。
 
 ### 5.1a 向当前回合补充指令
 
@@ -866,8 +868,16 @@ ID、或会话无法解析出默认目标时，得到 `supportsReasoning: false`
 - `session/get`
 - `session/delete`
 - `session/rename`
+- `session/deriveTitle({ id, title }) -> { updated: boolean }` 应用确定性的首条提示兜底标题。
+  只有当存储标题仍是可识别的占位标题且标题来源为 `default` 时，host-core 才接受它；该写入
+  只改元数据，`updated_at`、转录内容与消息数都不变。派生标题会保留该来源，因此已安装的
+  标题插件仍可替换它；`session/rename` 仍是用户拥有的路径。
 - `session/importScan`
 - `session/importRun(candidates) -> { imported, skipped, failed }`
+
+`session/rename({ id, title })` 会裁剪标题并接受 1–80 个 Unicode 码点；空标题或
+超长标题返回 `INVALID_PARAMS`。成功重命名只更新会话元数据、不改活动时间，并将标题来源
+标为 `manual`，因此标题插件不能覆盖它。
 
 导入候选者携带 `projectPath: string | null` 与
 `messageCount: number | null`。扫描对每个源文件全量读取的上限为导入器的
@@ -925,8 +935,9 @@ Electron拥有本地化并提供面向用户的分支名称；主机
 转录本，但被排除在恢复的模型上下文之外。
 
 上下文检查器消耗两个附加使用信号。 `MessageUsage` 是
-提供商报告的助理使用情况，`responseDurationMs` 是已用时间
-sidecar 用于显示每秒输出令牌的流时间。 `ToolTokenUsage`
+提供商报告的助理使用情况，`responseDurationMs` 是用于显示每秒输出令牌的
+请求耗时。完整响应优先使用 pi-ai 1.1.0 的单调时钟
+`AssistantMessage.durationMs`；没有该值时仍使用 sidecar 秒表。 `ToolTokenUsage`
 是根据工具调用参数和结果估计的运行时间；提供商不
 报告每个工具的分配，因此渲染器将这些行标记为估计值并
 永远不会将它们合并到确切的提供商总数中。年长的同行可能会忽略所有
@@ -1213,7 +1224,7 @@ type PluginSummary = {
 遮蔽全局项。仅桌面的 `mcp/test` IPC 操作用于强制连接测试，并把状态返回
 MCP 编辑器。设置页的 `mcp.list` 在返回状态前会探测此前就绪的远程连接；服务器失联时，列表显示 `failed`，而不是保留过时的 `ready`。服务器恢复后，“测试连接”会重试。探测失败不会中断正在执行的工具调用；“测试连接”会先关闭旧客户端再重试。
 MCP 编辑器。
-停止会话会中止该会话正在执行的用户 MCP 工具调用，并向服务器发送 `notifications/cancelled`。其他会话共用的连接保持可用；已取消的调用不会重放。取消会结束本地等待，但服务器可能忽略通知并完成已经开始的副作用。
+停止会话会中止该会话正在执行的用户 MCP 工具调用，并向服务器发送 `notifications/cancelled`。其他会话共用的连接保持可用；已取消的调用不会重放。取消会结束本地等待，但服务器可能忽略通知并完成已经开始的副作用。请求超时后同样发送 `notifications/cancelled`（reason 为 `timeout`）；`initialize` 请求从不取消。
 
 ```ts
 type McpServerStatus = {
@@ -1860,26 +1871,29 @@ unchanged. See [provider configuration](12-provider-config-schema.md).
 
 ## 15. 云配置同步
 
-设置 → 云同步页面使用以下 Renderer-to-Main 通道；所有通道都会转发到 Host 所有的 `configSync.*` RPC 方法：
+The page is available in all builds and carries an Experimental badge. Channel
+names stay stable. Inputs and results use the S3-only contract in
+`types/config-sync.ts` and the current source spec.
 
 | IPC 通道 | Host 方法 | 契约 |
 |---|---|---|
 | `pi-desktop/configSync/getState` | `configSync.getState` | 脱敏状态、类别选择、预览计数和待审批摘要 |
-| `pi-desktop/configSync/test` | `configSync.test` | 使用临时对象进行 WebDAV 能力探测；不持久化配置 |
+| `pi-desktop/configSync/test` | `configSync.test` | S3 conditional-write probe with verified cleanup; returns `{ ok: true, conditionalWrites: true }` without persisting configuration |
 | `pi-desktop/configSync/configure` | `configSync.configure` | 校验 endpoint、保存加密的本地同步元数据并启用 vault |
-| `pi-desktop/configSync/syncNow` | `configSync.syncNow` | 执行一次由 Host 所有的协调周期 |
+| `pi-desktop/configSync/syncNow` | `configSync.syncNow` | runs the saved sync or backup mode |
 | `pi-desktop/configSync/pause` | `configSync.pause` | 仅暂停或恢复本设备 |
 | `pi-desktop/configSync/unlock` | `configSync.unlock` | 为当前进程/设备解锁本地 vault |
 | `pi-desktop/configSync/approve` / `reject` | `configSync.approve` / `configSync.reject` | 记录绑定 digest 的本地激活决定 |
 | `pi-desktop/configSync/mapProject` | `configSync.mapProject` | 将一个不透明项目/组身份绑定到一个或多个明确选择的本地文件夹，并保留 primary-root 顺序 |
-| `pi-desktop/configSync/listHistory` | `configSync.listHistory` | 只列出脱敏的可达 revision 元数据 |
-| `pi-desktop/configSync/restore` | `configSync.restore` | 根据明确确认的历史 revision 创建新的传播 revision，并暂存本地审批/恢复信息 |
+| `pi-desktop/configSync/listHistory` | `configSync.listHistory` | latest 30 indexed revisions for the saved mode; never broadcast as state |
+| `pi-desktop/configSync/restore` | `configSync.restore` | sync publishes with propagation acknowledgment; backup restores locally; both retain recovery and approvals |
 | `pi-desktop/configSync/changePassword` | `configSync.changePassword` | CAS 重新包裹 vault key header，不返回 key 或秘密值 |
 | `pi-desktop/configSync/disconnect` | `configSync.disconnect` | 移除本地同步元数据和 key；不会删除远端 vault 数据 |
 
 输入密码只会被传给需要它的操作。原始秘密、vault key、解密资源或远端 archive 不会返回到 Renderer。`configSync.changed` 事件携带相同的脱敏状态，并由 Host 发起的变更（包括 Host scheduler）触发。Main 只是传输/生命周期协调器，不负责调度、合并、加密或应用配置。
 
-手动同步会在运行期间报告 `configSync.progress`：当前阶段（`capture`、`download`、`merge`、`upload`、`apply` 或 `cleanup`）、该阶段已完成与总量，以及已知时的字节数。因此上传大量资源对象时，界面不会无内容可显示。后台轮询不报告进度，因为只有手动路径有调用方在等待。
+Manual progress uses `capture`, `download`, `merge`, `upload`, and `apply` with
+unit and byte counts. There is no cleanup phase. Background polls stay silent.
 
 ## 16. 实时语音 API
 

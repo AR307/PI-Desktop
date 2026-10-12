@@ -11,6 +11,13 @@ import { pathToFileURL } from "node:url";
 const electron = `data:text/javascript,${encodeURIComponent(`
   import { EventEmitter } from "node:events";
   export const shell = {};
+  export class View {
+    children = [];
+    addChildView(view) { this.children.push(view); }
+    removeChildView(view) { this.children.splice(this.children.indexOf(view), 1); }
+    setVisible() {}
+    setBounds() {}
+  }
   export class WebContentsView {
     static instances = [];
     constructor() {
@@ -292,15 +299,15 @@ test("a panel resize during screenshot is applied after Chromium restores the vi
   const initial = { x: 20, y: 30, width: 400, height: 300 };
   const resized = { x: 20, y: 30, width: 560, height: 420 };
   pane.setBounds(initial);
-  assert.deepEqual(wc.bounds, initial);
+  assert.deepEqual(wc.bounds, { ...initial, x: 0, y: 0 });
 
   let release;
   const capture = pane.captureScreenshot(async () => {
     pane.setBounds(resized);
     assert.deepEqual(
       wc.bounds,
-      initial,
-      "native bounds stay stable while capturing",
+      { ...initial, x: 0, y: 0 },
+      "native viewport size stays stable while capturing",
     );
     await new Promise((resolve) => {
       release = resolve;
@@ -309,13 +316,13 @@ test("a panel resize during screenshot is applied after Chromium restores the vi
   });
 
   await new Promise(setImmediate);
-  assert.deepEqual(wc.bounds, initial);
+  assert.deepEqual(wc.bounds, { ...initial, x: 0, y: 0 });
   release();
 
   assert.equal(await capture, "captured");
   assert.deepEqual(
     wc.bounds,
-    resized,
+    { ...resized, x: 0, y: 0 },
     "the latest panel size is restored after capture",
   );
 });

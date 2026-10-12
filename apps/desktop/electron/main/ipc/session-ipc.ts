@@ -29,6 +29,7 @@ import { readSessionCollaboration } from "../services/session-collaboration";
 import { configureSession } from "../services/session-configuration";
 import { searchSessionsAcrossSources } from "../services/session-search";
 import type { IpcRegistrar } from "./types";
+import { getActiveRemoteHostsBoot } from "../bootstrap/remote-hosts.js";
 
 type RuntimeSession = {
   id?: string;
@@ -161,6 +162,7 @@ export function registerSessionIpc({
           source: "desktop",
         })),
         ...native.sessions,
+        ...(getActiveRemoteHostsBoot()?.sessionSummaries() ?? []),
       ].sort((a, b) => String(b.updatedAt).localeCompare(String(a.updatedAt))),
     };
   });
@@ -356,6 +358,15 @@ export function registerSessionIpc({
     }
     if (!host) throw new Error("host unavailable");
     return host.call("session.rename", { id, title });
+  });
+  handle(IPC.invoke.sessionDeriveTitle, async (id: string, title: string) => {
+    if (id.startsWith("native-pi:")) {
+      throw Object.assign(new Error("Native Pi session title derivation is not supported"), {
+        errorCode: ErrorCodes.INVALID_ARGUMENT,
+      });
+    }
+    if (!host) throw new Error("host unavailable");
+    return host.call("session.deriveTitle", { id, title });
   });
   handle(
     IPC.invoke.sessionMoveProject,

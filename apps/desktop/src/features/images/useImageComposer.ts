@@ -6,7 +6,7 @@ import { materializeDraftSession, useAppStore } from "../../stores/app-store";
 import type { ComposerDraftController } from "../chat/composer/hooks/useComposerDraft";
 import type { ComposerMode } from "../chat/composer/ComposerModePicker";
 import { EMPTY_IMAGE_CONFIG, IMAGE_DRAFT_KEY, saveImageConfig, useImageJobs } from "./state";
-import { isDefaultSessionTitle, promptFallbackSessionTitle, untitledTaskTitle } from "../../stores/runtime/session-title-runtime";
+import { isDefaultSessionTitle, promptFallbackSessionTitle, untitledTaskTitle } from "../../lib/session-title-utils";
 
 export function useImageComposer(sessionId: string | undefined, mode: Mode, thinkingLevel: SessionThinkingLevel, draft: ComposerDraftController) {
   const { t } = useTranslation();
@@ -74,7 +74,7 @@ export function useImageComposer(sessionId: string | undefined, mode: Mode, thin
       if (useAppStore.getState().runningSessions[targetId]) return;
       const current = useAppStore.getState().sessions.find((item) => item.id === targetId);
       if (isDefaultSessionTitle(current?.title)) {
-        await api.renameSession(targetId, promptFallbackSessionTitle(prompt, untitledTaskTitle()));
+        await api.deriveSessionTitle(targetId, promptFallbackSessionTitle(prompt, untitledTaskTitle()));
         await useAppStore.getState().refreshSessions();
       }
       // A failed or cancelled job leaves its draft untouched for explicit retry.

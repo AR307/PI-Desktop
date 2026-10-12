@@ -16,6 +16,9 @@ import { loadStyles } from "./helpers/styles.mjs";
 register(new URL("./helpers/ts-import-hooks.mjs", import.meta.url));
 const { normalizeApiStyle } = await import("@pi-desktop/shared");
 const { normalizeBaseUrlInput } = await import("../src/components/settings/provider-endpoint-guidance.ts");
+const { isPluginCatalogSetupForProvider } = await import(
+  "../src/components/settings/provider-setup-mode.ts"
+);
 
 const read = (rel) => readFile(new URL(rel, import.meta.url), "utf8");
 
@@ -31,6 +34,18 @@ const mirrorCodingConfigSource = await read("../src/components/settings/MirrorCo
 const apiSource = await read("../src/lib/api.ts");
 const catalogContractSource = await read("../../../packages/shared/src/model-catalog.ts");
 const styles = await loadStyles();
+
+test("model configuration places AI services before Jev and image generation", () => {
+  const services = pageSource.indexOf('className="model-config-section-head"');
+  const catalogStatus = pageSource.indexOf('className="model-catalog-status"');
+  const jev = pageSource.indexOf("<JevSettingsCard");
+  const image = pageSource.indexOf("<ImageGenerationModelRow");
+
+  assert.ok(services >= 0, "the AI services section is present");
+  assert.ok(catalogStatus > services, "catalog actions stay with AI services");
+  assert.ok(jev > catalogStatus, "Jev follows AI services");
+  assert.ok(image > jev, "image generation follows Jev");
+});
 
 test("the model list comes from the AI service, not from a browsable catalog", () => {
   assert.match(hookSource, /api\.listProviderModels\(/);
@@ -55,6 +70,29 @@ test("adding an AI service is a single form, not a staged wizard", () => {
   assert.match(fieldsSource, /settings\.baseUrl/);
   assert.match(fieldsSource, /settings\.apiKey/);
   assert.match(setupSource, /settings\.saveProvider/);
+});
+
+test("the add flow only enters plugin setup for a resolved selected provider", () => {
+  assert.equal(isPluginCatalogSetupForProvider(null, null), false);
+  assert.equal(isPluginCatalogSetupForProvider({ providerId: "plugin:demo:first" }, null), false);
+  assert.equal(
+    isPluginCatalogSetupForProvider(
+      { providerId: "plugin:demo:first" },
+      { id: "plugin:demo:first" },
+    ),
+    true,
+  );
+  assert.equal(
+    isPluginCatalogSetupForProvider(
+      { providerId: "plugin:demo:first" },
+      { id: "plugin:demo:second" },
+    ),
+    false,
+  );
+  assert.match(
+    pageSource,
+    /pluginCatalogSetup=\{isPluginCatalogSetupForProvider\([\s\S]*?pluginCatalogSetup,[\s\S]*?editingProvider,[\s\S]*?\)\}/,
+  );
 });
 
 test("discovery is debounced, race-guarded and survives a bad URL", () => {
@@ -372,7 +410,9 @@ test("settings match complete case-normalized wire ids, not proxy suffixes", () 
   const sameWireId = new Function("left", "right", `return ${identity[1]}`);
   assert.equal(sameWireId("PROXY/model", "proxy/MODEL"), true);
   assert.equal(sameWireId("proxy/model", "model"), false);
-  assert.match(pageSource, /isImageCandidate\(imageModels, provider\.id, id\)/);
+  // Image candidates are excluded by the same complete-id membership rule the
+  // picker row and the page's own selection check share.
+  assert.ok(pageSource.includes("isImageGenerationPickerCandidate(imageModels, provider.id, id)"));
   assert.match(pageSource, /!models\.some\(\(model\) => sameWireId\(model\.id, settings\.defaultModelId/);
   assert.doesNotMatch(pageSource, /modelIdsMatch|isImageGenerationModel/);
   assert.doesNotMatch(setupSource, /modelIdsMatch/);

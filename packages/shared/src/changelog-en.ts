@@ -2,6 +2,42 @@ import type { ChangelogEntry } from "./changelog.js";
 
 export const enEntries: ChangelogEntry[] = [
   {
+    version: "0.18.0",
+    date: "2026-10-09",
+    highlights: [
+      "Set up TypeSafe's Jev classifier from Add Service and verify its API key before saving.",
+      "Find Cloud sync in packaged Settings with its Experimental badge. Project lists stay on each device.",
+      "Add plugin-owned API-key services from Add Service, with localized descriptions and model discovery after setup.",
+      "Authorized plugin actions can transform a Composer draft with undo; prompt enhancement now runs as an optional plugin.",
+      "Tool details stay collapsed until opened, keeping the completed answer in view.",
+      "Review past AskTool questions and answers in a clear Q&A card.",
+      "Generate session titles with an optional plugin while keeping first-prompt fallback and manual renames.",
+      "Open local Markdown links from chat in the bundled File Manager, including relative links and line references.",
+      "Show configured context-window limits in the Composer's model list.",
+      "Plugins can inspect or refuse network redirects; existing fetch calls still follow redirects by default.",
+      "Stop a running subagent directly from its card or detail panel, or stop all subagents in the current session without stopping the coordinator.",
+      "See total session time beside cumulative model response time and its share of the session.",
+    ],
+  },
+  {
+    version: "0.17.0",
+    date: "2026-10-07",
+    highlights: [
+      "Attach images inline as you compose, then preview sent images in their place in the conversation.",
+      "See conversation references as readable chips and open the linked session directly.",
+      "Choose the MCP servers and tools each prompt can use.",
+      "Return to recently used models from the model picker.",
+      "Generate and edit images with your signed-in ChatGPT account.",
+      "Add plugin providers that authenticate through OAuth.",
+      "Use namespaced slash commands to find the Skill you want.",
+      "Expand the Todo list to review every item in a checklist.",
+      "Import models, Skills, and MCP servers from their matching Settings pages.",
+      "Respect the system proxy for provider and marketplace requests.",
+      "Keep chat responsive with paged large tool output and faster transcript updates.",
+      "Show a clear failure when a plugin panel never finishes loading.",
+    ],
+  },
+  {
     "version": "0.16.2",
     "date": "2026-10-07",
     "highlights": [
