@@ -1240,3 +1240,12 @@ Captured native windows and the Android login screen were visually checked.
   visible isolated Electron window passes. Do not claim full-suite success.
 - Android native installation, macOS packaging, production MC, push, Release
   publication and restart of the user's desktop are outside this sync.
+
+### Latest upstream increment
+
+- Include upstream 1c1faccb23f465820f692d95330dd5482835a2a4 (PR #1570),
+  which strips inline image/blob bytes from model-visible JSON tool-result
+  text while retaining native image blocks and attachment metadata.
+- This increment changes only the runtime, its regression tests and the runtime
+  specification. Runtime rebuild and controlled worker/mobile acceptance are
+  rerun against this merged candidate; results are recorded after completion.
