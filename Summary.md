@@ -1330,3 +1330,31 @@ Captured native windows and the Android login screen were visually checked.
   No new macOS/Linux binaries, production MC changes, paid requests, user
   profile operations or unrelated full-suite repairs are part of this fix.
   The upstream integration's previously recorded test failures remain open.
+
+### Final package acceptance
+
+- Executable candidate: 9dbd681498ebf45ed443a89f5705119ea1a388bb. Remote
+  origin/main 920b12b8e053165d343a421b3cb8ee93c50a436a is an ancestor; the
+  base check passes. Final actual PiMobileQA plus isolated Electron acceptance
+  passes 55 checks with zero renderer or cleanup errors. Browser acceptance
+  passed 53 checks before commit with the same executable source.
+- Final Android error/recovery and Chinese/light offline-history screenshots
+  were inspected. Release APK 0.18.0 (7) is non-debuggable, contains the
+  production MC origin and no acceptance hooks, and retains the previous
+  certificate. Android accepted an in-place upgrade from 0.16.2 (6), keeping
+  the first installation time and application data directory; the updated
+  login UI renders correctly. No production login was performed.
+- All three Windows payloads (NSIS, ZIP and Portable EXE) were extracted and
+  launched independently with isolated profiles. Each reports 0.18.0, has
+  the correct distribution metadata, starts its bundled host and sidecar,
+  renders the main window, reads settings through IPC and opens the seeded
+  history. The large-history rewrite/delta reproduction passes using each
+  packaged host. Screenshots were inspected; no renderer errors occurred.
+  The installer wizard and Portable self-extractor were not themselves run.
+- The first package smoke harness selected the hidden plugin launcher instead
+  of the main window. Selecting the actual app shell fixed the test harness,
+  without changing application code. A reused synthetic profile caused a
+  duplicate fixture message ID; each run now uses a fresh isolated profile.
+- Rust formatting check passes. This documentation-only release completion
+  does not change the executable source validated above. No private profiles,
+  signing keys or local artifact files are staged.
