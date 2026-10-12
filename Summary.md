@@ -1279,3 +1279,27 @@ Captured native windows and the Android login screen were visually checked.
 - The final upstream increments receive a rebuilt sidecar/Electron app and
   affected-model/download/AskTool/drag checks, followed by the same controlled
   fork user journeys. Those final results are recorded after candidate testing.
+
+### Final candidate acceptance
+
+- Tested executable commit: 384f43543f3a282831641f08bd3c2d55773c925d.
+  Upstream base: 93a9a828f896edc468ff15f74b9c2a93fedefd5b. Both upstream/main
+  and origin/main are ancestors, with both base checks passing.
+- Rebuilt package JS, sidecar and full Electron JS application; desktop
+  typecheck, policy, pi dependency/patch, release-version and style checks pass.
+  The final increment passes 209 targeted desktop checks and 51 voice tests.
+- Actual Electron AskTool scroll/select/skip/submit checks pass. The Windows
+  native hit-test suite passes overflow, session switch-back, keyboard reorder,
+  one-tab and no-tab states, retaining clickable controls and draggable blank
+  headers. This is native hit-test evidence, not a claimed manual mouse drag.
+- Browser capture passes 12 screenshot/raw-CDP resize cases, 4 native window
+  transitions and 6 lifecycle cases on the final candidate. The serial final
+  run completes without the earlier concurrent-window timeout.
+- Final fork subagent 15, desktop/mobile interaction 89 and mobile account-sync
+  46 checks pass with no renderer or cleanup errors. Dark/English and
+  light/Chinese screenshots were inspected. All network/model boundaries are
+  controlled local fixtures. Android native installation remains untested.
+- The previously recorded full-suite failures remain disclosed; the final
+  increment did not rerun unrelated Rust or the entire desktop suite. No
+  artifacts, profiles or credentials are committed. This documentation-only
+  completion commit leaves the tested executable source tree unchanged.
