@@ -1247,5 +1247,10 @@ Captured native windows and the Android login screen were visually checked.
   which strips inline image/blob bytes from model-visible JSON tool-result
   text while retaining native image blocks and attachment metadata.
 - This increment changes only the runtime, its regression tests and the runtime
-  specification. Runtime rebuild and controlled worker/mobile acceptance are
-  rerun against this merged candidate; results are recorded after completion.
+  specification. The complete runtime suite now passes 1399 tests, with 1
+  skipped. Rebuilt controlled worker/mobile acceptance follows this candidate.
+- A final upstream refresh at 2026-10-12 09:34 +08:00 also includes
+  d5fa57d167675cf08a614f1a6be3611cbb7d26bd (PR #1575). Remote-host registry
+  mutations are serialized, and unreadable/newer files cannot be overwritten
+  by a pairing operation. All 12 real-filesystem registry tests pass, including
+  concurrent pairing and recovery from a corrupt file.
