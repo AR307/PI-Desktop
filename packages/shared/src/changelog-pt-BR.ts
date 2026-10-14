@@ -2,6 +2,15 @@ import type { ChangelogEntry } from "./changelog.js";
 
 export const ptBREntries: ChangelogEntry[] = [
   {
+    "version": "0.18.1",
+    "date": "2026-10-14",
+    "highlights": [
+      "Altere o local de armazenamento logo após a instalação, mesmo que a pasta de destino ou o diretório de dados original ainda não exista.",
+      "Mova os dados existentes para outra pasta ou unidade preservando o backup original.",
+      "Mantenha o acesso à memória e às instruções do projeto após mover os dados no Windows."
+    ]
+  },
+  {
     "version": "0.18.0",
     "date": "2026-10-09",
     "highlights": [

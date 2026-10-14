@@ -2,6 +2,15 @@ import type { ChangelogEntry } from "./changelog.js";
 
 export const frEntries: ChangelogEntry[] = [
   {
+    "version": "0.18.1",
+    "date": "2026-10-14",
+    "highlights": [
+      "Changez le dossier de stockage dès l’installation, même si le dossier cible ou le dossier de données d’origine n’existe pas encore.",
+      "Déplacez les données existantes vers un autre dossier ou disque en conservant la sauvegarde d’origine.",
+      "Retrouvez la mémoire et les instructions du projet après un déplacement des données sous Windows."
+    ]
+  },
+  {
     "version": "0.18.0",
     "date": "2026-10-09",
     "highlights": [

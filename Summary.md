@@ -1366,3 +1366,13 @@ Captured native windows and the Android login screen were visually checked.
 - Added focused filesystem regressions and a native Electron Settings/preload/IPC/cold-bootstrap/reopened-Host scenario for first install and existing data. E2E retains screenshots and synthetic profiles and supports cross-drive source roots; it does not use user profiles or live providers.
 - Implementation is isolated on fix/storage-directory-migration. Validation results are recorded in the task artifacts; no release or remote publication is included.
 - Validation: 8 new filesystem regressions, 6 existing storage regressions and 1 Rust project-memory regression pass. Real Windows Electron cross-drive first-install/existing-profile runs restore conversation attachments, settings, browser state and project memory; richer Host migration also restores queued attachments, plugin locations and fixture credentials. Desktop build/typecheck, Host build, fmt, clippy, style and policy checks pass. Existing Windows POSIX-mode test and unrelated docs baseline checks remain failing; no full-suite pass is claimed.
+
+
+## 2026-10-14 - Windows storage patch release 0.18.1
+
+- Prepare a Windows-only update from published 0.18.0 with the storage migration fix, retaining newer desktop and mobile-history changes.
+- Synchronize workspace versions and nine in-app changelog catalogs; Android delivery stays at 0.18.0.
+- Reuse installed dependencies by link, build release-owned outputs, and isolate synthetic acceptance data. Final package evidence is recorded in docs/releases/0.18.1.md.
+
+
+- Release acceptance: 8 filesystem, 5 changelog and 1 Rust regression passed; workspace TypeScript builds, Desktop typecheck, sidecar/Electron and optimized Host builds passed. Real D:-to-C: migration and all three generated Windows package payloads passed. Installer wrappers, user profiles and production provider calls were not exercised.

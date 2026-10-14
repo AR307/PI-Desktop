@@ -2,6 +2,15 @@ import type { ChangelogEntry } from "./changelog.js";
 
 export const zhCNEntries: ChangelogEntry[] = [
   {
+    "version": "0.18.1",
+    "date": "2026-10-14",
+    "highlights": [
+      "首次安装后即可更改数据保存路径，无需预先创建目标目录或初始化旧数据目录。",
+      "支持将已有数据迁移到新文件夹或其他磁盘，并保留原始备份。",
+      "修复 Windows 迁移数据后项目记忆和指令无法读取的问题。"
+    ]
+  },
+  {
     version: "0.18.0",
     date: "2026-10-09",
     highlights: [
