@@ -1376,3 +1376,31 @@ Captured native windows and the Android login screen were visually checked.
 
 
 - Release acceptance: 8 filesystem, 5 changelog and 1 Rust regression passed; workspace TypeScript builds, Desktop typecheck, sidecar/Electron and optimized Host builds passed. Real D:-to-C: migration and all three generated Windows package payloads passed. Installer wrappers, user profiles and production provider calls were not exercised.
+
+## 2026-10-14 - Physical-file storage migration follow-up
+
+- A real 0.18.1 migration stopped during copying at a scratch-contained
+  `resources/app.asar`; read-only inspection found a zero-byte destination for
+  the intact archive. Electron's archive-aware filesystem interpreted it as a
+  virtual directory. The same profile also contained a dangling dependency
+  junction that the old target-following link classification could not copy.
+- Use Electron `original-fs` throughout the storage filesystem service and
+  externalize that builtin in the production bundle. User archives remain
+  physical files. Read Windows link attributes in one PowerShell batch through
+  JSON stdin, preserving dangling file/directory links without dereferencing
+  targets. Copy errors now retain both paths and the underlying error.
+- Add real-Electron archive/link/error regressions and extend the Settings to
+  cold-restart to reopened-Host journey with archives and a dangling junction.
+  Node-only harnesses explicitly map the Electron filesystem boundary to Node fs.
+- Validation: 8 first-install/destination regressions pass; 5 real-Electron
+  filesystem scenarios pass; the cross-drive Settings journey passes for first
+  install and existing conversations, attachments, project memory and browser
+  state. Desktop typecheck, production Main build, style/policy checks, targeted
+  Biome lint and diff whitespace checks pass.
+- Of 13 selected existing maintenance tests, 12 pass; the preferences test
+  still asserts POSIX mode 0600 on Windows, which reports 0666. Synthetic test
+  teardown was disabled locally to retain fixtures; cleanup/retry deletion
+  suites were not run. No full-suite or installed-update acceptance is claimed.
+- Source and failed destination of the user migration remain untouched. This
+  is a local fix on `fix/storage-copy-enotdir`, based on released 0.18.1; no
+  release version bump, push, user-profile retry, or new release is included.

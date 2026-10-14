@@ -1,11 +1,15 @@
 import { createHash } from "node:crypto";
-import { createReadStream, createWriteStream } from "node:fs";
-import { chmod, lstat, mkdir, open, readdir, readlink, realpath, rm, statfs, symlink, writeFile, readFile, stat } from "node:fs/promises";
+import { createReadStream, createWriteStream, promises as fs } from "original-fs";
 import { Transform } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import type { StorageProgress } from "@pi-desktop/shared";
 import { STORAGE_PREFERENCE_FILE, type StorageRoots } from "./preferences";
+import { storageLinkTypes } from "./link-types";
+
+// Profile contents are physical files, including user-owned .asar archives.
+// Do not let Electron's virtual archive filesystem reinterpret these paths.
+const { chmod, lstat, mkdir, open, readdir, readlink, realpath, rm, statfs, symlink, writeFile, readFile } = fs;
 
 const OWNER_FILE = ".pi-storage-owner.json";
 export const DATA_CACHE_PATHS = ["cache", "plugins/cache/download", "plugins/cache/backup", "openable-attachments"];
@@ -117,6 +121,9 @@ export async function migrateFiles(input: {
   await inventory(await realpath(source.browser), next.browser, entries, true);
   state.totalBytes = entries.reduce((sum, entry) => sum + entry.bytes, 0);
   state.totalFiles = entries.filter((entry) => entry.kind !== "directory").length;
+  const links = entries.filter((entry) => entry.kind === "link");
+  const types = await storageLinkTypes(links.map((entry) => entry.from));
+  const linkTypes = new Map(links.map((entry, index) => [entry.from, types[index]]));
   const space = await statfs(target);
   if (space.bavail * space.bsize < state.totalBytes + 16 * 1024 * 1024) throw new Error("Not enough free space in the destination directory.");
   const mappings: Array<[string, string]> = [[source.data, next.data], [source.browser, next.browser],
@@ -124,26 +131,30 @@ export async function migrateFiles(input: {
   const hashes = new Map<string, string>();
   state.stage = "copying";
   for (const entry of entries) {
-    if (entry.kind === "directory") await mkdir(entry.to, { recursive: false, mode: 0o700 });
-    else if (entry.kind === "link") {
-      const kind = process.platform === "win32" && (await stat(entry.from)).isDirectory() ? "junction" : undefined;
-      await symlink(relocatedLink(entry, mappings), entry.to, kind);
-      state.completedFiles++;
-    } else {
-      const hash = createHash("sha256");
-      await pipeline(createReadStream(entry.from), new Transform({
-        transform(chunk: Buffer, _encoding, callback) {
-          hash.update(chunk);
-          state.completedBytes += chunk.length;
-          progress({ ...state });
-          callback(null, chunk);
-        },
-      }), createWriteStream(entry.to, { flags: "wx", mode: 0o600 }));
-      hashes.set(entry.from, hash.digest("hex"));
-      const file = await open(entry.to, "r+");
-      try { await file.sync(); } finally { await file.close(); }
-      await chmod(entry.to, entry.mode & 0o777);
-      state.completedFiles++;
+    try {
+      if (entry.kind === "directory") await mkdir(entry.to, { recursive: false, mode: 0o700 });
+      else if (entry.kind === "link") {
+        await symlink(relocatedLink(entry, mappings), entry.to, linkTypes.get(entry.from));
+        state.completedFiles++;
+      } else {
+        const hash = createHash("sha256");
+        await pipeline(createReadStream(entry.from), new Transform({
+          transform(chunk: Buffer, _encoding, callback) {
+            hash.update(chunk);
+            state.completedBytes += chunk.length;
+            progress({ ...state });
+            callback(null, chunk);
+          },
+        }), createWriteStream(entry.to, { flags: "wx", mode: 0o600 }));
+        hashes.set(entry.from, hash.digest("hex"));
+        const file = await open(entry.to, "r+");
+        try { await file.sync(); } finally { await file.close(); }
+        await chmod(entry.to, entry.mode & 0o777);
+        state.completedFiles++;
+      }
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : String(error);
+      throw new Error(`Storage copy failed: ${entry.from} -> ${entry.to}\n${detail}`, { cause: error });
     }
     progress({ ...state });
   }

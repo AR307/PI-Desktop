@@ -89,6 +89,15 @@ both source and copied files. An interrupted copy may be retried only with its
 matching ownership marker; nonempty/unrelated destinations and overlapping roots
 are rejected. The stable installation lock prevents competing managed launches.
 
+Filesystem maintenance uses Electron's `original-fs`: archives such as `app.asar`
+inside session scratch or downloaded applications remain physical files, not
+virtual directories. Their bytes and adjacent `.asar.unpacked` directories migrate
+unchanged. Windows link types are read from the link's own filesystem attributes
+in one batch, not by following its target; dangling directory/file links remain
+links, and internal targets are relocated without requiring them to exist. Copy
+failures include the source and destination paths in the existing local error
+detail. They never skip an entry or publish the destination as the active profile.
+
 Confirming a directory selected in Settings creates it when it does not exist,
 including missing parent directories. Overlap checks run before creating anything.
 A first-install data root may be absent together with its parents; validation

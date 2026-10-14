@@ -12,7 +12,7 @@ await mkdir(artifacts, { recursive: true });
 const scratch = await realpath(await mkdtemp(join(artifacts, "storage-directory-tests-")));
 const { build } = createRequire(new URL("../../../packages/agent-runtime/package.json", import.meta.url))("esbuild");
 const bundle = join(scratch, "storage.mjs");
-await build({ entryPoints: [join(root, "apps/desktop/electron/main/storage/files.ts")], outfile: bundle, bundle: true, platform: "node", format: "esm" });
+await build({ entryPoints: [join(root, "apps/desktop/electron/main/storage/files.ts")], outfile: bundle, bundle: true, platform: "node", format: "esm", alias: { "original-fs": "node:fs" } });
 const storage = await import(pathToFileURL(bundle).href);
 
 async function fixture() {

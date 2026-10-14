@@ -3,7 +3,7 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { createRequire } from "node:module";
-import { mkdir, mkdtemp, readFile, realpath, stat, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, readlink, realpath, stat, symlink, writeFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import { Host, resolveHostBinary } from "./e2e/host.mjs";
 import { repositoryRoot, resolveElectronBinary } from "./e2e/boot.mjs";
@@ -41,7 +41,7 @@ await writeFile(join(artifacts, "index.html"), '<!doctype html><html data-platfo
 
 const main = join(artifacts, "main.mjs");
 await build({ entryPoints: [join(root, "scripts/e2e/storage-directory-main.mjs")], outfile: main,
-  bundle: true, platform: "node", format: "esm", external: ["electron"],
+  bundle: true, platform: "node", format: "esm", external: ["electron", "original-fs"],
   alias: { "@pi-desktop/i18n": join(root, "packages/i18n/src/index.ts"), "@pi-desktop/shared": join(root, "packages/shared/src/protocol.ts") },
   plugins: [{ name: "fixture-host-location", setup(builder) {
     builder.onResolve({ filter: /host-process$/ }, () => ({ path: "host-location", namespace: "fixture" }));
@@ -94,6 +94,10 @@ for (const name of ["first-install", "existing-profile"]) {
       await mkdir(dirname(attachment), { recursive: true }); await writeFile(attachment, "retained attachment");
       await host.call("session.appendMessage", { sessionId, message: { id: "storage-fixture-message", role: "user", content: "Keep my conversation", createdAt: new Date().toISOString(), attachments: [{ kind: "file", name: "migration.txt", ref: attachment, mimeType: "text/plain" }] } });
       await stopHost(host);
+      const resources = join(config.data, "scratch", "packaged-app", "resources");
+      await mkdir(resources, { recursive: true });
+      await writeFile(join(resources, "app.asar"), "opaque archive fixture");
+      await symlink(join(source, "missing dependency"), join(resources, "node_modules"), process.platform === "win32" ? "junction" : "dir");
     }
     assert.equal((await launch(config, "choose")).scheduled, true);
     const migrated = await launch(config, "maintenance");
@@ -101,6 +105,11 @@ for (const name of ["first-install", "existing-profile"]) {
     const pointer = JSON.parse(await readFile(join(config.anchor, "storage-location.json"), "utf8"));
     assert.equal(pointer.roots.data, join(config.target, "data"));
     assert.equal(pointer.pending, undefined);
+    if (sessionId) {
+      const resources = join(pointer.roots.data, "scratch", "packaged-app", "resources");
+      assert.equal(await readFile(join(resources, "app.asar"), "utf8"), "opaque archive fixture");
+      assert.equal(await readlink(join(resources, "node_modules")), join(source, "missing dependency"));
+    }
     const reopened = await launch(config, "inspect");
     assert.equal(reopened.sessionData, join(config.target, "browser"));
     assert.equal(reopened.browserState, "browser state survives restart");
