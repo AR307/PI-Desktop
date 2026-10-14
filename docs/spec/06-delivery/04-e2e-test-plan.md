@@ -99,6 +99,14 @@ production deployment evidence. See the suite README for prerequisites.
 
 ### E2E-STORAGE-custom-location-and-maintenance
 
+- **Windows backup-lock regression:** `node scripts/e2e-storage-backup-lock.mjs`
+  acquires a real Electron installation lock under an isolated anchor, then runs
+  production backup cleanup with an already-absent old payload. Expect no EBUSY,
+  retain the pointer and lock, and keep current history readable. The directory
+  Settings suite also clicks the production backup confirmation, cold-restarts
+  with that lock held, reopens the new profile, verifies the backup action is
+  gone, and reads the active conversation, attachment and browser state. Retain
+  all synthetic files; never use a real user backup for acceptance.
 - **Preconditions:** Dedicated request worktree, current remote-main base, shared
   compatible host toolchain, built host-core and desktop, isolated temporary data
   and Chromium profiles. No user's running desktop, provider, or network is used.

@@ -14,7 +14,9 @@ const { chmod, lstat, mkdir, open, readdir, readlink, realpath, rm, statfs, syml
 const OWNER_FILE = ".pi-storage-owner.json";
 export const DATA_CACHE_PATHS = ["cache", "plugins/cache/download", "plugins/cache/backup", "openable-attachments"];
 const BROWSER_CACHE_PATHS = ["Cache", "Code Cache", "GPUCache", "DawnCache", "ShaderCache", "GrShaderCache", "GraphiteDawnCache"];
-const excluded = (name: string) => name === STORAGE_PREFERENCE_FILE || name.startsWith("Singleton") || /^\.storage-.*\.tmp$/.test(name);
+// The stable userData anchor owns Chromium's Windows lockfile as well as the
+// Singleton* files used on other platforms. Never copy or remove either lock.
+const excluded = (name: string) => name === STORAGE_PREFERENCE_FILE || name === "lockfile" || name.startsWith("Singleton") || /^\.storage-.*\.tmp$/.test(name);
 export function contains(parent: string, child: string): boolean {
   const part = relative(parent, child);
   return !part || (!part.startsWith(`..${sep}`) && part !== ".." && !isAbsolute(part));
@@ -53,7 +55,9 @@ async function inventory(from: string, to: string, entries: Entry[], browser = f
     entries.push({ from, to, kind: "directory", bytes: 0, mode: info.mode });
     for (const name of await readdir(from)) {
       if (browser && excluded(name)) continue;
-      await inventory(join(from, name), join(to, name), entries, browser);
+      // Only the browser root contains installation metadata; nested user files
+      // with the same names still belong to the copied profile.
+      await inventory(join(from, name), join(to, name), entries);
     }
   } else if (info.isFile()) {
     entries.push({ from, to, kind: "file", bytes: info.size, mode: info.mode });

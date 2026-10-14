@@ -134,5 +134,49 @@ for (const name of ["first-install", "existing-profile"]) {
     checks.push({ name, passed: true, directory });
   } finally { await host.stop(); }
 }
+// Retry the reported partially completed cleanup: the old payload is absent,
+// while userData still owns the bootstrap pointer and native installation lock.
+// Preserve every synthetic profile; no disposable backup payload is created.
+{
+  const directory = await mkdtemp(join(artifacts, "backup-cleanup-"));
+  const config = { directory, anchor: join(directory, "installation"), data: join(directory, "already-removed-data") };
+  const active = { data: join(directory, "active-data"), browser: join(directory, "active-browser") };
+  await mkdir(config.anchor); await mkdir(active.browser);
+  const host = new Host(hostBinary, active.data);
+  let sessionId;
+  try {
+    await host.start();
+    const { session } = await host.call("session.create", { title: "History survives backup cleanup" });
+    sessionId = session.id;
+    await mkdir(join(active.data, "attachments"));
+    const attachment = join(active.data, "attachments", "retained.txt");
+    await writeFile(attachment, "current attachment");
+    await host.call("session.appendMessage", { sessionId, message: { id: "backup-cleanup-fixture", role: "user", content: "Current history stays available", createdAt: new Date().toISOString(), attachments: [{ kind: "file", name: "retained.txt", ref: attachment, mimeType: "text/plain" }] } });
+    await stopHost(host);
+  } finally { await host.stop(); }
+  const preferenceFile = join(config.anchor, "storage-location.json");
+  await writeFile(preferenceFile, JSON.stringify({ version: 1, roots: active, backups: [{ data: config.data, browser: config.anchor }] }));
+  assert.equal((await launch(config, "backup")).scheduled, true);
+  assert.equal(JSON.parse(await readFile(preferenceFile, "utf8")).pending.kind, "backup");
+  assert.equal((await launch(config, "maintenance")).relaunched, true);
+  const pointer = JSON.parse(await readFile(preferenceFile, "utf8"));
+  assert.deepEqual(pointer.roots, active);
+  assert.deepEqual(pointer.backups, []);
+  assert.equal(pointer.pending, undefined);
+  assert.equal(pointer.lastError, undefined);
+  const reopened = await launch(config, "inspect-backup");
+  assert.equal(reopened.backupControlRemoved, true);
+  assert.equal(reopened.sessionData, active.browser);
+  assert.equal(reopened.browserState, "browser state survives restart");
+  const nextHost = new Host(hostBinary, active.data);
+  try {
+    await nextHost.start();
+    const { session } = await nextHost.call("session.get", { id: sessionId });
+    assert.equal(session.messages[0].content, "Current history stays available");
+    assert.equal(await readFile(session.messages[0].attachments[0].ref, "utf8"), "current attachment");
+    await stopHost(nextHost);
+  } finally { await nextHost.stop(); }
+  checks.push({ name: "backup-cleanup-with-installation-lock", passed: true, directory });
+}
 await writeFile(join(artifacts, "result.json"), JSON.stringify({ checks, hostBinary, artifacts }, null, 2));
 console.log(JSON.stringify({ checks, hostBinary, artifacts }, null, 2));

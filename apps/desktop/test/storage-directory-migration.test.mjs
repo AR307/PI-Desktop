@@ -60,6 +60,31 @@ test("existing conversations migrate to a newly selected destination without cha
   assert.equal(await readFile(join(next.browser, "Preferences"), "utf8"), '{"fixture":true}');
 });
 
+test("migration excludes only the browser installation lock, not user files named lockfile", async () => {
+  const { source, target } = await fixture();
+  await mkdir(source.data);
+  await mkdir(join(source.browser, "user-files"));
+  await writeFile(join(source.browser, "lockfile"), "installation lock");
+  await writeFile(join(source.data, "lockfile"), "user data");
+  await writeFile(join(source.browser, "user-files/lockfile"), "nested user data");
+  const selected = await storage.validateTarget(target, source, source.browser);
+  const next = await storage.migrateFiles({ source, target: selected, anchor: source.browser, id: randomUUID(), progress: () => {}, relocate: async () => {} });
+  await assert.rejects(stat(join(next.browser, "lockfile")), { code: "ENOENT" });
+  assert.equal(await readFile(join(source.browser, "lockfile"), "utf8"), "installation lock");
+  assert.equal(await readFile(join(next.data, "lockfile"), "utf8"), "user data");
+  assert.equal(await readFile(join(next.browser, "user-files/lockfile"), "utf8"), "nested user data");
+});
+
+test("backup cleanup preflights active-root overlap before touching another old root", async () => {
+  const { directory, source } = await fixture();
+  await mkdir(source.data);
+  const oldData = join(directory, "old-data");
+  await mkdir(oldData);
+  await writeFile(join(oldData, "history.txt"), "retained backup");
+  await assert.rejects(storage.removeBackups([{ data: oldData, browser: source.browser }], source, source.browser), /overlaps active storage/);
+  assert.equal(await readFile(join(oldData, "history.txt"), "utf8"), "retained backup");
+});
+
 test("overlapping destinations are rejected before creating folders", async () => {
   const { source } = await fixture();
   const target = join(source.browser, "new", "destination");

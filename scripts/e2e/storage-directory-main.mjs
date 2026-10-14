@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { app, BrowserWindow, dialog, ipcMain, session } from "electron";
-import { writeFileSync } from "node:fs";
+import { existsSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { prepareStorage } from "../../apps/desktop/electron/main/storage/bootstrap.ts";
 import { registerStorageIpc } from "../../apps/desktop/electron/main/storage/ipc.ts";
@@ -58,13 +58,24 @@ void (async () => {
   }, getMainWindow: () => window, restart: () => finish() });
   await window.loadFile(join(config.artifacts, "index.html"));
   await window.webContents.executeJavaScript('window.storageDirectoryWait("ready")');
-  if (config.mode === "inspect") {
+  if (config.mode === "inspect" || config.mode === "inspect-backup") {
     result.browserState = await window.webContents.executeJavaScript('localStorage.getItem("migration-fixture")');
     result.sessionData = app.getPath("sessionData");
+    if (config.mode === "inspect-backup") {
+      assert.equal(storage.preferences.backups.length, 0);
+      assert.equal(storage.preferences.lastError, undefined);
+      assert.equal(await window.webContents.executeJavaScript('document.querySelectorAll(".settings-storage .settings-row-control button").length'), 2);
+      result.backupControlRemoved = true;
+    }
     app.exit(0); return;
   }
   await window.webContents.executeJavaScript('localStorage.setItem("migration-fixture","browser state survives restart")');
-  await pointer(".settings-storage .settings-row-control button");
+  if (config.mode === "backup") {
+    assert.equal(storage.preferences.backups.length, 1);
+    assert.equal(app.hasSingleInstanceLock(), true);
+    if (process.platform === "win32") assert(existsSync(join(config.anchor, "lockfile")));
+  }
+  await pointer(".settings-storage .settings-row-control button", config.mode === "backup");
   await window.webContents.executeJavaScript('window.storageDirectoryWait("confirmation")');
   writeFileSync(join(config.directory, "confirmation.png"), (await window.webContents.capturePage()).toPNG());
   await pointer(".settings-storage-actions button", true);

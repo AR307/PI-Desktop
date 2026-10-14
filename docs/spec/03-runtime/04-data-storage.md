@@ -129,6 +129,13 @@ Original directories remain explicit backups. Deleting these requires a separate
 settings confirmation after checking new-location functionality, including plugins
 that may own absolute references the host cannot safely rewrite. Backup cleanup
 preflights every root and protects active storage and bootstrap/lock files.
+The stable anchor retains Chromium's Windows `lockfile` alongside `Singleton*`
+and `storage-location.json`; these installation files are also excluded from
+browser-profile copies. Cleanup never releases the live single-instance lock.
+The exclusion applies only to the browser root, not same-named nested user files
+or files inside the host data root.
+Retry after a partially completed cleanup tolerates already-absent old roots,
+then clears the backup list only after the remaining cleanup succeeds.
 
 Cache cleanup is a separate confirmed cold-restart operation. Its filesystem
 allowlist is `cache/`, `plugins/cache/download/`, `plugins/cache/backup/`,
