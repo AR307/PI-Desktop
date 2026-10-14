@@ -1404,3 +1404,9 @@ Captured native windows and the Android login screen were visually checked.
 - Source and failed destination of the user migration remain untouched. This
   is a local fix on `fix/storage-copy-enotdir`, based on released 0.18.1; no
   release version bump, push, user-profile retry, or new release is included.
+
+## 2026-10-14 - Windows storage patch release 0.18.2
+
+- Prepare the physical archive and dangling-link migration repair as a Windows-only update from published 0.18.1.
+- Synchronize release versions and nine localized changelog catalogs; Android delivery remains at 0.18.0.
+- Reuse provisioned dependencies and retain isolated synthetic acceptance profiles. Validation and publication scope are recorded in docs/releases/0.18.2.md.

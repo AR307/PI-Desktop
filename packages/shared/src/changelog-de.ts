@@ -2,6 +2,15 @@ import type { ChangelogEntry } from "./changelog.js";
 
 export const deEntries: ChangelogEntry[] = [
   {
+    "version": "0.18.2",
+    "date": "2026-10-14",
+    "highlights": [
+      "Speicher mit app.asar-Archiven ohne ENOTDIR-Fehler migrieren.",
+      "Windows-Verknüpfungen mit nicht mehr vorhandenen Zielen bleiben bei der Migration erhalten.",
+      "Bei Kopierfehlern werden Quell- und Zielpfad angezeigt."
+    ]
+  },
+  {
     "version": "0.18.1",
     "date": "2026-10-14",
     "highlights": [

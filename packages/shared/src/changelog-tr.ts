@@ -2,6 +2,15 @@ import type { ChangelogEntry } from "./changelog.js";
 
 export const trEntries: ChangelogEntry[] = [
   {
+    "version": "0.18.2",
+    "date": "2026-10-14",
+    "highlights": [
+      "app.asar arşivleri içeren verileri ENOTDIR hatası olmadan taşıyın.",
+      "Hedefi artık bulunmayan Windows bağlantılarını koruyarak taşımaya devam edin.",
+      "Dosya kopyalanamadığında kaynak ve hedef yollarını gösterin."
+    ]
+  },
+  {
     "version": "0.18.1",
     "date": "2026-10-14",
     "highlights": [

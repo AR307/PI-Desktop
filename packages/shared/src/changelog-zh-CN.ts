@@ -2,6 +2,15 @@ import type { ChangelogEntry } from "./changelog.js";
 
 export const zhCNEntries: ChangelogEntry[] = [
   {
+    "version": "0.18.2",
+    "date": "2026-10-14",
+    "highlights": [
+      "修复数据目录包含 app.asar 安装包时迁移报 ENOTDIR 错误的问题。",
+      "迁移时保留目标已不存在的 Windows 链接，不再因此中断。",
+      "文件复制失败时显示源路径和目标路径，便于定位问题。"
+    ]
+  },
+  {
     "version": "0.18.1",
     "date": "2026-10-14",
     "highlights": [

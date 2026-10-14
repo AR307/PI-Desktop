@@ -2,6 +2,15 @@ import type { ChangelogEntry } from "./changelog.js";
 
 export const enEntries: ChangelogEntry[] = [
   {
+    "version": "0.18.2",
+    "date": "2026-10-14",
+    "highlights": [
+      "Migrate storage containing app.asar archives without ENOTDIR errors.",
+      "Preserve Windows links whose targets no longer exist instead of stopping migration.",
+      "Show source and destination paths when a file cannot be copied."
+    ]
+  },
+  {
     "version": "0.18.1",
     "date": "2026-10-14",
     "highlights": [

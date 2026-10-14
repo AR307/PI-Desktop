@@ -2,6 +2,15 @@ import type { ChangelogEntry } from "./changelog.js";
 
 export const frEntries: ChangelogEntry[] = [
   {
+    "version": "0.18.2",
+    "date": "2026-10-14",
+    "highlights": [
+      "Migrez les données contenant des archives app.asar sans erreur ENOTDIR.",
+      "Conservez les liens Windows dont la cible a disparu sans interrompre la migration.",
+      "Affichez les chemins source et destination en cas d’échec de copie."
+    ]
+  },
+  {
     "version": "0.18.1",
     "date": "2026-10-14",
     "highlights": [

@@ -2,6 +2,15 @@ import type { ChangelogEntry } from "./changelog.js";
 
 export const koEntries: ChangelogEntry[] = [
   {
+    "version": "0.18.2",
+    "date": "2026-10-14",
+    "highlights": [
+      "app.asar 파일이 포함된 데이터를 ENOTDIR 오류 없이 이전합니다.",
+      "대상이 사라진 Windows 링크를 유지하고 데이터 이전을 계속합니다.",
+      "파일 복사 실패 시 원본 및 대상 경로를 표시합니다."
+    ]
+  },
+  {
     "version": "0.18.1",
     "date": "2026-10-14",
     "highlights": [
