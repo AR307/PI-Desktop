@@ -2,7 +2,7 @@
 /** Real Electron filesystem migration; synthetic files only, retained for diagnosis. */
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
-import { mkdir, mkdtemp, readFile, realpath, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, realpath, symlink, writeFile } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { join } from "node:path";
 import { repositoryRoot, resolveElectronBinary } from "./e2e/boot.mjs";
@@ -10,6 +10,10 @@ import { repositoryRoot, resolveElectronBinary } from "./e2e/boot.mjs";
 const root = repositoryRoot();
 await mkdir(join(root, ".artifacts"), { recursive: true });
 const artifacts = await realpath(await mkdtemp(join(root, ".artifacts/storage-files-e2e-")));
+const junctionFixture = join(artifacts, "node-created-junction");
+await mkdir(join(junctionFixture, "data"), { recursive: true });
+await mkdir(join(junctionFixture, "browser"));
+await symlink(join(junctionFixture, "missing-dependency"), join(junctionFixture, "data", "node_modules"), process.platform === "win32" ? "junction" : "dir");
 const { build } = createRequire(join(root, "packages/agent-runtime/package.json"))("esbuild");
 const desktopRequire = createRequire(join(root, "apps/desktop/package.json"));
 const builderRequire = createRequire(desktopRequire.resolve("electron-builder"));

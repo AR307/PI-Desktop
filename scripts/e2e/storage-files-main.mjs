@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { app } from "electron";
 import { promises as fs, writeFileSync } from "original-fs";
-import { join, relative } from "node:path";
+import { join, relative, resolve } from "node:path";
 import { migrateFiles, validateTarget } from "../../apps/desktop/electron/main/storage/files.ts";
 import { storageLinkTypes } from "../../apps/desktop/electron/main/storage/link-types.ts";
 
@@ -10,10 +10,10 @@ const artifacts = process.env.PI_STORAGE_FILES_ARTIFACTS;
 app.setPath("userData", join(artifacts, "electron-profile"));
 const cases = [];
 void (async () => {
-  for (const name of ["valid-asar", "opaque-asar", "dangling-directory-link", "mixed-links", "copy-error-context"]) {
-    const directory = await fs.mkdtemp(join(artifacts, name + "-"));
+  for (const name of ["valid-asar", "opaque-asar", "dangling-directory-link", "trailing-directory-link", "mixed-links", "copy-error-context"]) {
+    const directory = name === "trailing-directory-link" ? join(artifacts, "node-created-junction") : await fs.mkdtemp(join(artifacts, name + "-"));
     const source = { data: join(directory, "data"), browser: join(directory, "browser") };
-    await fs.mkdir(source.data); await fs.mkdir(source.browser);
+    await fs.mkdir(source.data, { recursive: true }); await fs.mkdir(source.browser, { recursive: true });
     const file = name.endsWith("asar") ? "app.asar" : "session.jsonl";
     const content = name === "valid-asar" ? await fs.readFile(join(artifacts, "fixture.asar"))
       : Buffer.from("Retain opaque user bytes, not an Electron virtual directory.\n");
@@ -61,6 +61,12 @@ void (async () => {
         assert((await fs.lstat(join(next.data, "node_modules"))).isSymbolicLink());
         assert.equal(await fs.readlink(join(next.data, "node_modules")), await fs.readlink(join(source.data, "node_modules")));
         await assert.rejects(fs.stat(join(next.data, "node_modules")), { code: "ENOENT" });
+      }
+      if (name === "trailing-directory-link") {
+        const link = join(next.data, "node_modules");
+        assert((await fs.lstat(link)).isSymbolicLink());
+        assert.equal(resolve(await fs.readlink(link)), resolve(missing));
+        await assert.rejects(fs.stat(link), { code: "ENOENT" });
       }
       if (name === "mixed-links") {
         const destinationLinks = linkNames.map(link => join(next.data, link));

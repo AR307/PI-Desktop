@@ -94,7 +94,9 @@ inside session scratch or downloaded applications remain physical files, not
 virtual directories. Their bytes and adjacent `.asar.unpacked` directories migrate
 unchanged. Windows link types are read from the link's own filesystem attributes
 in one batch, not by following its target; dangling directory/file links remain
-links, and internal targets are relocated without requiring them to exist. Copy
+links, and internal targets are relocated without requiring them to exist.
+Windows absolute link targets are lexically normalized before creation and
+verification, so trailing separators from junctions do not cause false failures. Copy
 failures include the source and destination paths in the existing local error
 detail. They never skip an entry or publish the destination as the active profile.
 

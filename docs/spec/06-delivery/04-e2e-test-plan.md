@@ -1,5 +1,13 @@
 # 04. E2E Test Plan
 
+## Storage junction normalization
+
+Create a dangling Windows junction with standalone Node, then migrate its
+containing profile through real Electron. Migration must complete even when
+the source target has a trailing separator, preserving the same unresolved
+target and the original profile. Exercise this with the cross-drive Settings
+to cold-restart journey as well as the focused filesystem regression.
+
 ## Delegate mutation recovery
 
 | ID | User sequence and expected result |

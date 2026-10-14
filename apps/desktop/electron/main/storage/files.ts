@@ -87,7 +87,9 @@ function relocatedLink(entry: Entry, mappings: Array<[string, string]>): string 
     return isAbsolute(link) ? next : relative(dirname(entry.to), next);
   }
   // A relative external link also needs adjustment because its parent moved.
-  return isAbsolute(link) ? link : relative(dirname(entry.to), absolute);
+  // Windows junction targets can include a trailing separator that symlink()
+  // removes. Use the same lexical absolute path for creation and verification.
+  return isAbsolute(link) ? (process.platform === "win32" ? absolute : link) : relative(dirname(entry.to), absolute);
 }
 
 /** Cold copy only: no database, browser, plugin, or log writer may be running. */

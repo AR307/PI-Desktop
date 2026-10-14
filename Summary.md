@@ -1410,3 +1410,5 @@ Captured native windows and the Android login screen were visually checked.
 - Prepare the physical archive and dangling-link migration repair as a Windows-only update from published 0.18.1.
 - Synchronize release versions and nine localized changelog catalogs; Android delivery remains at 0.18.0.
 - Reuse provisioned dependencies and retain isolated synthetic acceptance profiles. Validation and publication scope are recorded in docs/releases/0.18.2.md.
+
+- Release-candidate cross-drive acceptance exposed Windows junction targets with trailing separators created outside Electron. Recreated links drop that separator, causing a false verification failure. Normalize Windows absolute link targets before both creation and verification; a Node-created junction fixture reproduces the failure on the old code.
