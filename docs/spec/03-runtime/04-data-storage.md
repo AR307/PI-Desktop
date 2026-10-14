@@ -89,6 +89,12 @@ both source and copied files. An interrupted copy may be retried only with its
 matching ownership marker; nonempty/unrelated destinations and overlapping roots
 are rejected. The stable installation lock prevents competing managed launches.
 
+Confirming a directory selected in Settings creates it when it does not exist,
+including missing parent directories. Overlap checks run before creating anything.
+A first-install data root may be absent together with its parents; validation
+resolves the nearest existing ancestor without creating an unused old profile.
+This does not recreate an unavailable custom storage volume during startup.
+
 Rust's offline `--relocate-data <old-root> <copied-root>` mode owns structured
 path relocation in the copied SQLite index, transcripts/revisions/checkpoints,
 outbox, installed plugin registry and agent capability metadata. It does not boot
@@ -97,6 +103,11 @@ path-bearing fields under the old root. External projects, dev/builtin plugins,
 narrative text, commands, source code, secrets, and arbitrary plugin-private formats
 are preserved. Credentials and their machine key migrate as bytes with their
 permissions. SQLite ownership stays exclusively in Rust.
+
+Relocated project database paths and project-memory/instruction keys retain the
+repository's normalized project-path spelling. In particular, Windows migration
+must not turn slash-normalized lookup keys into mixed-separator keys that make
+existing project memory appear empty after reopening the Host.
 
 Only after validation/relocation succeeds is the flushed bootstrap pointer
 atomically replaced. Errors keep the old profile active and visible in settings;

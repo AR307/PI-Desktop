@@ -1358,3 +1358,11 @@ Captured native windows and the Android login screen were visually checked.
 - Rust formatting check passes. This documentation-only release completion
   does not change the executable source validated above. No private profiles,
   signing keys or local artifact files are staged.
+
+## 2026-10-14 - Storage directory migration repair
+
+- Settings migration now creates a confirmed missing destination after checking separation from active storage. Missing first-install source ancestors are resolved without creating an unused source profile.
+- Rust offline relocation preserves normalized project paths and project memory/instruction keys on Windows, so saved memory remains reachable after moving drives. Existing cold-copy, backup retention and unavailable-volume behavior remain unchanged.
+- Added focused filesystem regressions and a native Electron Settings/preload/IPC/cold-bootstrap/reopened-Host scenario for first install and existing data. E2E retains screenshots and synthetic profiles and supports cross-drive source roots; it does not use user profiles or live providers.
+- Implementation is isolated on fix/storage-directory-migration. Validation results are recorded in the task artifacts; no release or remote publication is included.
+- Validation: 8 new filesystem regressions, 6 existing storage regressions and 1 Rust project-memory regression pass. Real Windows Electron cross-drive first-install/existing-profile runs restore conversation attachments, settings, browser state and project memory; richer Host migration also restores queued attachments, plugin locations and fixture credentials. Desktop build/typecheck, Host build, fmt, clippy, style and policy checks pass. Existing Windows POSIX-mode test and unrelated docs baseline checks remain failing; no full-suite pass is claimed.

@@ -94,6 +94,19 @@ production deployment evidence. See the suite README for prerequisites.
 - **Preconditions:** Dedicated request worktree, current remote-main base, shared
   compatible host toolchain, built host-core and desktop, isolated temporary data
   and Chromium profiles. No user's running desktop, provider, or network is used.
+- **First-install / new-directory regression:** Run
+  `node scripts/e2e-storage-directory.mjs` with `PI_DESKTOP_HOST_BIN` pointing
+  to the candidate Host. The production storage controls and preload invoke real
+  Main handlers through native mouse clicks, schedule cold maintenance, and reopen
+  the migrated Electron profile and Host. Cover an absent data root with missing
+  parents and an existing conversation with attachments, settings and project
+  memory. The chosen destination initially does not exist. Set
+  `PI_STORAGE_E2E_SOURCE_ROOT` to a temporary folder on a different drive for
+  cross-volume coverage. Verify browser localStorage, conversation/attachment
+  reads, project-memory lookup, original backups and the displayed new path.
+  Only native picker selection and relaunch dispatch are scripted; each startup
+  phase is a separate real Electron process. Keep screenshots and synthetic
+  profiles under `.artifacts/` for inspection rather than deleting them.
 - **Steps:** Through the production Settings page, choose/cancel a destination,
   confirm/retry migration, and confirm cache/backup cleanup. Seed a real host with
   sessions, queued attachments, project metadata, credentials and a local installed

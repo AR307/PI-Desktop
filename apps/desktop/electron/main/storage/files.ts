@@ -22,12 +22,16 @@ async function optionalStat(path: string) {
 
 export async function validateTarget(path: string, source: StorageRoots, anchor: string, retryId?: string): Promise<string> {
   if (!isAbsolute(path) || path.includes("\0")) throw new Error("Select an absolute directory.");
-  const target = await realpath(path);
-  if (!(await lstat(path)).isDirectory() || (await lstat(path)).isSymbolicLink()) throw new Error("Select a real directory, not a symbolic link.");
+  const target = await canonicalPath(path);
+  const existing = await optionalStat(path);
+  if (existing && (!existing.isDirectory() || existing.isSymbolicLink())) throw new Error("Select a real directory, not a symbolic link.");
   for (const sourcePath of [source.data, source.browser, anchor]) {
     const canonical = await canonicalPath(sourcePath);
     if (contains(canonical, target) || contains(target, canonical)) throw new Error("The destination must be separate from the current storage directories.");
   }
+  // First-run profiles and destinations chosen in the native picker may not
+  // exist yet. Check separation before creating only the selected destination.
+  if (!existing) await mkdir(path, { recursive: true, mode: 0o700 });
   const names = await readdir(target);
   if (names.length) {
     if (!retryId) throw new Error("Select an empty destination directory.");
@@ -60,7 +64,9 @@ async function digest(path: string): Promise<string> {
 }
 async function canonicalPath(path: string): Promise<string> {
   if (await optionalStat(path)) return realpath(path);
-  return join(await realpath(dirname(path)), relative(dirname(path), path));
+  const parent = dirname(path);
+  if (parent === path) return realpath(path);
+  return join(await canonicalPath(parent), relative(parent, path));
 }
 async function assertClaimed(target: string, id: string, names: string[]): Promise<void> {
   const owner = join(target, OWNER_FILE);
