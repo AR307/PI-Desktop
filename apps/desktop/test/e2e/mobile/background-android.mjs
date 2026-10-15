@@ -85,10 +85,11 @@ async function backgroundDelivery() {
   const released = Date.now();
   const delivered = await until(async () => (await sample("after release")).completion, "completion notification while the app stays in the background", 90_000).catch((error) => { errors.push({ message: error.message }); return false; });
   if (delivered) console.log(`DELIVERED after ${Math.round((Date.now() - released) / 1000)}s`);
-  const after = timeline.at(-1);
-  check("keep-alive kept running in the background", Boolean(after.keepAlive));
+  check("keep-alive kept running in the background", Boolean(timeline.at(-1).keepAlive));
   check("completion reaches the phone as a system notification without reopening it", delivered);
-  check("keep-alive text followed the finished task in the background", after.keepAlive !== "Tasks in progress: 1");
+  // The ongoing text follows the refreshed row just after the completion is posted.
+  const followed = await until(async () => { const entry = await sample("keep-alive after completion"); return entry.keepAlive && entry.keepAlive !== "Tasks in progress: 1"; }, "keep-alive text after the task", 30_000).catch(() => false);
+  check("keep-alive text followed the finished task in the background", Boolean(followed));
 }
 /**
  * Vendor freezers (ColorOS, OriginOS, ...) stop the app and its WebView renderer
