@@ -1,3 +1,16 @@
+## Unreleased - Android in-app update fixes
+
+- An APK downloaded for an earlier update was offered for installation again
+  once a newer release appeared, so the newer version could not be downloaded.
+  Each download now belongs to the update it was started for. It is discarded
+  after that version is installed or when another release is offered.
+  Installation opens only the APK for the offered update.
+- Updates can again be checked, downloaded and installed from the login
+  screen before sign-in.
+- Phones that kept such an APK from 0.20.3 or earlier need one manual install
+  of the fixed release. From that release on, the stale record is cleared on
+  start.
+
 ## v0.20.3 (Android) - Background notifications on vendor Android ROMs
 
 - ColorOS, OriginOS, HyperOS and EMUI/MagicOS can freeze PI Mobile in the

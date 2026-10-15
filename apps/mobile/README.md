@@ -115,21 +115,27 @@ published APK and use the existing signing identity for covering upgrades.
 The app never installs silently and GitHub or download failures do not block
 normal account and transcript use.
 
-For controlled native acceptance, build two debug APKs with the same isolated
-`piMobileAcceptanceApplicationId` and version codes 6 and 5, using Gradle's
-`-PpiMobileAcceptanceApplicationId=...` and
-`-PpiMobileAcceptanceVersionCode=...` properties. Build code 6 first and place
-it at `.artifacts/mobile-update-qa/update.apk`, then install code 5. Build the
-web assets with Vite `--mode acceptance` and
-`VITE_MOBILE_UPDATE_MANIFEST_URL=http://127.0.0.1:38479/mobile-update.json`.
-After `cap sync android`, run `node apps/mobile/test/android-update-e2e.mjs`
-with `ANDROID_HOME`, `PI_ANDROID_SERIAL` and `PI_ANDROID_UPDATE_APP_ID` set.
-The harness serves the manifest/APK only on localhost, uses `adb reverse`, and
-captures screenshots under `.artifacts/mobile-update-qa`. Use a fresh isolated
-application ID for each full run; no production account or GitHub call is made.
-For another version pair, set `PI_ANDROID_UPDATE_VERSION_CODE` to the target code
-and install the preceding code first. `PI_ANDROID_UPDATE_OUTPUT` chooses a separate
-artifact directory containing that run's `update.apk`. The acceptance-only storage
+For controlled native acceptance, run
+`node apps/mobile/test/android-update-e2e.mjs` with `JAVA_HOME`,
+`ANDROID_HOME` and `PI_ANDROID_SERIAL` set. The script first builds
+acceptance web assets pointed at a local manifest
+(`http://127.0.0.1:38479/mobile-update.json`). It then builds three debug
+APKs for the isolated `PI_ANDROID_UPDATE_APP_ID` (default
+`xyz.mirrorcoding.pi.mobile.updateqa`) with consecutive version codes
+starting at `PI_ANDROID_UPDATE_VERSION_CODE` (default 100), and reinstalls
+that package fresh. `PI_ANDROID_SKIP_BUILD=1` reuses the APKs in
+`PI_ANDROID_UPDATE_OUTPUT` (default `.artifacts/mobile-update-qa`).
+
+The run covers:
+- an update offered before sign-in;
+- download progress, cancel, retry and restart;
+- a newer release published while the previous APK waits;
+- installer cancellation and the covering upgrade;
+- the next release after an installed update.
+
+In both release cases the app must offer a new download, never the old APK.
+The harness serves the manifest and APKs only on localhost through
+`adb reverse`; it makes no production or GitHub call. The acceptance-only storage
 fixture uses the real native secure store and cache services to verify credentials,
 pairing, directory and history survive installer cancellation and covering upgrade.
 

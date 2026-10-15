@@ -278,11 +278,18 @@ versions exhibiting JSON errors after transcript rewrites must also be updated.
 ## Android application updates
 
 The Me tab shows the installed Android version, manual update check,
-release notes and native download/install actions, including while signed out.
+release notes and native download/install actions. Before sign-in, the login
+screen shows the same update section.
 Startup/foreground checks run at most daily; failures affect only updates.
 `AR307/Mirrorcoding-APP` is the sole release source. Build metadata generates
 `mobile-update.json` alongside the APK. DownloadManager keeps tasks across
 process restarts; explicit installation uses FileProvider and Android's system
-installer with the unknown-source permission flow. Application ID/signing stay
+installer with the unknown-source permission flow. A download belongs to the
+update it was started for: its APK URL and versionCode are stored with the job.
+The app discards the job and its file, without offering installation, in
+three cases: once that version or a later one is installed, when the offered
+update names another APK, or when the job predates this record. Starting a
+download replaces any earlier one, and installation opens only the APK
+downloaded for the offered update. Application ID/signing stay
 the same and `versionCode` increases. No silent installation or web-resource hot
 update is supported. The first updater APK is installed manually.
