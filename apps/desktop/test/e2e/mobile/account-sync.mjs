@@ -5,7 +5,7 @@ import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { execFileSync } from "node:child_process";
 import { mobileFixture } from "./fixture.mjs";
-import { openTab } from "./phone-ui.mjs";
+import { closeConversation, openTab } from "./phone-ui.mjs";
 import { accountAndroid } from "./account-android.mjs";
 import { syncFailureAcceptance } from "./sync-failure.mjs";
 
@@ -334,9 +334,15 @@ try {
     await phone.locator(`[data-message-id="${longMessageId}"] button.load-full`).count() === 0);
   await screenshot("mobile-offline-cached-history");
   if (android) {
+    // Appearance lives in the Me tab: leave the conversation, then reopen it for
+    // the capture and for the restart checks that follow.
+    await closeConversation(phone);
     await appearance("zh-CN", "Light");
+    await openSession(first);
     await screenshot("android-offline-history-light-zh");
+    await closeConversation(phone);
     await appearance("en", "Dark");
+    await openSession(first);
   }
   await close(first);
   await withHost(first, async host => {
