@@ -148,7 +148,7 @@ export function App({ controller }: { controller: MobileController }) {
     title={t(error, { defaultValue: error })} body={view.retryAt ? t("retryAt", { time: new Date(view.retryAt).toLocaleTimeString() }) : undefined} onDismiss={() => controller.clearError()}/> : null;
 
   if (view.loading && !view.signedIn) return <div className="mobile-shell"><main className="login-page"><div className="login-hero"><div className="brand-mark" aria-hidden="true"><img src="/logo.svg" alt=""/></div></div></main></div>;
-  if (!view.signedIn) return <div className="mobile-shell"><LoginScreen controller={controller} view={view}/><div className="toast-layer">{errorToast}</div></div>;
+  if (!view.signedIn) return <div className="mobile-shell"><LoginScreen controller={controller} view={view} update={mobileUpdate}/><div className="toast-layer">{errorToast}</div></div>;
 
   const inConversation = route.kind === "conversation";
   const conversationRow = inConversation ? view.directories.find((row) => row.desktopDeviceId === route.desktopId) : undefined;

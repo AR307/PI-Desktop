@@ -1,9 +1,12 @@
 import { useState, type FormEvent } from "react";
 import { useTranslation } from "react-i18next";
 import { ArrowRight, LoaderCircle, LockKeyhole } from "lucide-react";
+import { Capacitor } from "@capacitor/core";
 import type { MobileController, MobileView } from "../state/controller";
+import { UpdateSection } from "../features/updates/UpdateSection";
+import type { MobileUpdateView } from "../features/updates/useMobileUpdate";
 
-export function LoginScreen({ controller, view }: { controller: MobileController; view: MobileView }) {
+export function LoginScreen({ controller, view, update }: { controller: MobileController; view: MobileView; update: MobileUpdateView }) {
   const { t } = useTranslation("translation", { keyPrefix: "mobile" });
   const [username, setUsername] = useState(""); const [password, setPassword] = useState(""); const [code, setCode] = useState("");
   const submit = (event: FormEvent) => {
@@ -35,5 +38,7 @@ export function LoginScreen({ controller, view }: { controller: MobileController
       {view.challenge && <button type="button" className="button-quiet" disabled={view.busy} onClick={() => controller.cancelChallenge()}>{t("cancel")}</button>}
       <p className="login-note"><LockKeyhole size={13}/>MirrorCoding</p>
     </form>
+    {/* Updates stay reachable before sign-in, e.g. when an old release can no longer sign in. */}
+    {Capacitor.isNativePlatform() && <div className="login-update"><UpdateSection update={update}/></div>}
   </main>;
 }
