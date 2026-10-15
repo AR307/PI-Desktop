@@ -45,7 +45,9 @@ export async function syncFailureAcceptance({ fixture, device, phone, view, unti
     await until(async () => Boolean((await view()).syncError), "history failure is visible");
     const state = await view();
     check("failed delta page keeps earlier committed changes visible", state.messages.find(message => message.id === device.name + "-0")?.content === "First changed row retained after second page fails");
-    check("failed cached attach still restores live controls and model catalog", Boolean(state.snapshot && state.catalog) && !state.loading);
+    // The catalog loads after history reconciliation settles, so it follows the visible error.
+    await until(async () => { const current = await view(); return Boolean(current.snapshot && current.catalog) && !current.loading; }, "live controls and model catalog after failed history sync");
+    check("failed cached attach still restores live controls and model catalog");
     assert(cursor, "cached attach returned its live event cursor");
     await until(async () => (await view()).messages.some(message => message.content === "Live progress received while history sync failed"), "buffered live event survives failed history sync");
     check("buffered live event survives failed history sync");
