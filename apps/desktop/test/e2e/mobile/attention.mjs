@@ -205,6 +205,8 @@ try {
   process.exitCode = 1;
 } finally {
   closing = true;
+  // Like the other suites: an automated quit skips the desktop's quit confirmation dialog.
+  await desktop?.evaluate(() => { process.env.PI_DESKTOP_BOOT_PROBE = "1"; }).catch((error) => cleanupErrors.push(error.message));
   await desktop?.close().catch((error) => cleanupErrors.push(error.message));
   await browser?.close().catch((error) => cleanupErrors.push(error.message));
   await vite.close().catch((error) => cleanupErrors.push(error.message)); fixture.close();
