@@ -271,6 +271,7 @@ export function registerApplicationStartup(deps: StartupDependencies): void {
         sendToRenderer(IPC.event.agentQueueChanged, event);
         deps.onSessionQueueChange?.();
       },
+      onEvent: (envelope) => deps.mobileSync?.agentEvent(envelope),
       log: (level, message, data) => logger.app("runtime", level, message, { data }),
     });
     const control = createMcpControlController({

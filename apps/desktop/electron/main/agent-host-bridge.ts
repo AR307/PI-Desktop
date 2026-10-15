@@ -64,6 +64,8 @@ export type AgentHostBridgeOptions = {
   isSessionBusy?: (sessionId: string) => boolean;
   /** Renderer fan-out for queue changes (`agent/event/queueChanged`). */
   onQueueChange?: (event: AgentQueueChangedEvent) => void;
+  /** Every envelope the Agent Host publishes (mobile session activity). */
+  onEvent?: (envelope: RacpEventEnvelope) => void;
   log: (level: "info" | "warn", message: string, data?: Record<string, unknown>) => void;
 };
 
@@ -279,6 +281,7 @@ export function createAgentHostBridge(options: AgentHostBridgeOptions) {
     onQueueChange: (sessionId, entries) => {
       options.onQueueChange?.({ sessionId, entries: entries.filter((entry) => entry.principalSubject !== SUBAGENT_REPORT_SUBJECT).map(toQueueSummary) });
     },
+    ...(options.onEvent ? { onEvent: options.onEvent } : {}),
   });
 
   /** The desktop's queue operations, all under the owner principal. */

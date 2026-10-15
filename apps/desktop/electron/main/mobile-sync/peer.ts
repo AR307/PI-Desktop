@@ -1,14 +1,14 @@
 import { randomUUID } from "node:crypto";
 import { RacpError, type AgentHost, type Principal } from "@pi-desktop/agent-host";
-import { toRacpItem, toSessionSummary, type HostRpc } from "@pi-desktop/host-runtime";
+import { toRacpItem, type HostRpc } from "@pi-desktop/host-runtime";
 import { encodeFrame, errorObjectFrom, isRequest, parseFrame } from "@pi-desktop/racp/framing";
 import {
-  APP_VERSION, MOBILE_ATTACHMENT_CHUNK_BYTES, MOBILE_ITEM_CONTENT_LIMIT,
+  APP_VERSION, MOBILE_ATTACHMENT_CHUNK_BYTES, MOBILE_ITEM_CONTENT_LIMIT, MOBILE_SESSION_ACTIVITY_NOTIFICATION,
   RACP_DEFAULT_LIMITS, RACP_DEFAULT_POLICY, RACP_EVENT_NOTIFICATION, RACP_PROTOCOL_VERSION, RACP_SUBSCRIPTION_CLOSED_NOTIFICATION,
   SESSION_THINKING_LEVELS, validateImageOptions,
-  protocolVersionsCompatible, type AppSettings, type MobileDirectoryPage, type MobileGrant, type MobileProject, type MobileSession, type MobileSessionChangesPage, type MobileSessionConfiguration, type MobileSessionConfigureInput, type MobileSessionHistoryPage, type MobileSessionSnapshot, type MobileSessionState, type ProjectGroupRecord, type UiMessage,
+  protocolVersionsCompatible, type MobileAttention, type MobileDirectoryPage, type MobileGrant, type MobileProject, type MobileSession, type MobileSessionActivity, type MobileSessionChangesPage, type MobileSessionConfigureInput, type MobileSessionHistoryPage, type MobileSessionSnapshot, type MobileSessionState, type ProjectGroupRecord, type UiMessage,
   type RacpApprovalResponse, type RacpCursor, type RacpEventEnvelope, type RacpInitializeResult, type RacpInputResponse,
-  type ProviderPublic, type SessionSummary, type SessionDetail, type PlanProposal, type ThinkingLevel,
+  type SessionSummary, type SessionDetail, type PlanProposal, type ThinkingLevel,
 } from "@pi-desktop/shared";
 import type { ImageService } from "../images/service";
 import type { MirrorCodingAccount } from "../mirrorcoding/account";
@@ -17,7 +17,8 @@ import { buildMobileModelCatalog } from "./catalog";
 import { fitMobileHistory, fitMobileItem, MOBILE_TRANSCRIPT_PAGE_BYTES } from "./projection";
 import type { MobileScopeAccess } from "./scope";
 import { integer, object, string } from "./validation";
-import { configureSession, currentTurnConfiguration } from "../services/session-configuration";
+import { configureSession } from "../services/session-configuration";
+import { canPrompt, describeMobileSession, projectionContext, type ProjectionContext } from "./session-projection";
 
 export type MobilePeerDependencies = {
   peerId: string; deviceId: string; desktopDeviceId: string; dataDir: string;
@@ -31,6 +32,8 @@ export class MobilePeer {
   private closed = false;
   private subscriptions = new Map<string, string>();
   private directorySubscriptions = new Set<string>();
+  /** Directory subscriptions that also asked for `mobile.sessionActivity` pushes. */
+  private activitySubscriptions = new Set<string>();
   private delivery: Promise<void> = Promise.resolve();
   private pendingEvents = 0;
   private attachments: MobileAttachments;
@@ -53,7 +56,20 @@ export class MobilePeer {
     this.closed = true;
     for (const [id, sessionId] of this.subscriptions) this.deps.agent().unsubscribe(id, sessionId);
     this.subscriptions.clear(); this.attachments.dispose(); this.stopImages(); this.stopConfiguration();
-    this.directorySubscriptions.clear();
+    this.directorySubscriptions.clear(); this.activitySubscriptions.clear();
+  }
+  get wantsActivity() { return !this.closed && this.activitySubscriptions.size > 0; }
+  /**
+   * Push one session's refreshed row, and the attention it carries, to a phone
+   * that opted in. Sessions outside this phone's share are skipped silently:
+   * every push rechecks current membership like transcript events do.
+   */
+  async activity(sessionId: string, session: MobileSession, attention?: MobileAttention) {
+    if (!this.wantsActivity || !this.deps.grants().length) return;
+    try { await this.require(sessionId); } catch { return; }
+    if (!this.wantsActivity) return;
+    const params: MobileSessionActivity = { desktopDeviceId: this.deps.desktopDeviceId, session, ...(attention ? { attention } : {}) };
+    this.deps.send(encodeFrame({ jsonrpc: "2.0", method: MOBILE_SESSION_ACTIVITY_NOTIFICATION, params }));
   }
   desktopChanged() {
     this.directoryChanged();
@@ -89,19 +105,20 @@ export class MobilePeer {
     if (method === "directory/subscribe") {
       const subscriptionId = randomUUID();
       this.directorySubscriptions.add(subscriptionId);
-      return { subscriptionId };
+      if (params.activity === true) this.activitySubscriptions.add(subscriptionId);
+      return { subscriptionId, ...(params.activity === true ? { activity: true } : {}) };
     }
     if (method === "session/list") {
       const grants = this.deps.grants().filter((grant) => params.grantId === undefined || grant.id === params.grantId);
       if (!grants.length) throw new RacpError("FORBIDDEN", "share_not_authorized");
-      const records = await this.deps.scope.sessions(grants);
-      return { sessions: await Promise.all(records.map((session) => this.describe(session))) };
+      const [records, context] = await Promise.all([this.deps.scope.sessions(grants), projectionContext(this.deps.host())]);
+      return { sessions: await Promise.all(records.map((session) => this.describe(session, context))) };
     }
     if (method === "events/unsubscribe" || method === "events/ack") {
       const id = string(params.subscriptionId, "subscription_id");
       if (this.directorySubscriptions.has(id)) {
         if (method === "events/ack") return { acknowledged: true };
-        this.directorySubscriptions.delete(id);
+        this.directorySubscriptions.delete(id); this.activitySubscriptions.delete(id);
         return { removed: true };
       }
       const sessionId = this.subscriptions.get(id);
@@ -208,7 +225,7 @@ export class MobilePeer {
     this.initialized = true;
     return { protocolVersion: RACP_PROTOCOL_VERSION, server: { name: "PI Desktop Mobile", version: APP_VERSION, hostId: this.deps.desktopDeviceId }, connectionId: this.deps.peerId,
       principal: { subject: this.principal.subject, roles: [...this.principal.roles] }, limits: RACP_DEFAULT_LIMITS, policy: RACP_DEFAULT_POLICY,
-      capabilities: { eventReplay: true, snapshot: true, approvals: true, inputRequests: true, attachments: true, serverRequests: false, turnQueue: true, hostEvents: false, history: true, remoteHostProfile: false, toolRelay: false, terminal: false, notifications: false, sessionState: true, itemContent: true, bindings: ["RACP-WS"] } };
+      capabilities: { eventReplay: true, snapshot: true, approvals: true, inputRequests: true, attachments: true, serverRequests: false, turnQueue: true, hostEvents: false, history: true, remoteHostProfile: false, toolRelay: false, terminal: false, notifications: false, sessionState: true, itemContent: true, sessionActivity: true, bindings: ["RACP-WS"] } };
   }
   private async require(sessionId: string) {
     if (this.closed) throw new RacpError("HOST_DISCONNECTED", "connection_closed");
@@ -217,7 +234,7 @@ export class MobilePeer {
   private async directory(params: Record<string, unknown>): Promise<MobileDirectoryPage> {
     const grants = this.deps.grants();
     const grantIds = grants.map((grant) => grant.id).sort().join("\u0000");
-    const [groups, records] = await Promise.all([this.deps.scope.groups(), this.deps.scope.sessions(grants)]);
+    const [groups, records, context] = await Promise.all([this.deps.scope.groups(), this.deps.scope.sessions(grants), projectionContext(this.deps.host())]);
     const accountWide = grants.some((grant) => grant.scope.kind === "account");
     const projectIds = new Set(grants.filter((grant) => grant.scope.kind === "project").map((grant) => grant.scope.id));
     const visibleGroups = groups.filter((group) => accountWide || projectIds.has(group.id));
@@ -230,7 +247,7 @@ export class MobilePeer {
     const page = sorted.slice(start, start + limit);
     const sessions = await Promise.all(page.map(async (record) => {
       const group = groupForSession(record.projectPath, visibleGroups);
-      const description = await this.describe(record);
+      const description = await this.describe(record, context);
       return group ? { ...description, projectId: group.id } : { ...description, projectId: undefined };
     }));
     if (grantIds !== this.deps.grants().map((grant) => grant.id).sort().join("\u0000")) throw new RacpError("FORBIDDEN", "share_changed");
@@ -264,9 +281,8 @@ export class MobilePeer {
   }
   private async configure(record: SessionSummary, params: Record<string, unknown>): Promise<MobileSession> {
     if (!canPrompt(record)) throw new RacpError("FORBIDDEN", "session_read_only");
-    const settings = await this.deps.host().call<AppSettings>("settings.get");
     const previousRecord = record;
-    const current = await this.describe(record, settings);
+    const current = await this.describe(record);
     const input = parseConfiguration(params);
     const requestedMode = input.mode ?? current.taskMode;
     const currentMode = current.taskMode;
@@ -338,49 +354,8 @@ export class MobilePeer {
     };
     return this.describe(updatedRecord);
   }
-  private async describe(record: SessionSummary, providedSettings?: AppSettings): Promise<MobileSession> {
-    const settings = providedSettings ?? await this.deps.host().call<AppSettings>("settings.get");
-    const config = settings.imageSessions?.[record.id];
-    const image = config?.active === true;
-    const providerId = image ? config.providerId : record.providerId;
-    const modelId = image ? config?.modelId : record.modelId;
-    let groupName: string | undefined;
-    if (providerId) {
-      const { provider } = await this.deps.host().call<{ provider?: ProviderPublic }>("providers.get", { id: providerId });
-      groupName = provider?.mirrorCoding?.groupName;
-    }
-    const described = this.deps.agent().describeSession(toSessionSummary(record));
-    const taskMode = image ? "image" : record.mode;
-    const busy = Boolean(described.activeTurnId || described.queuedTurnIds.length || this.deps.images.states().some((job) => job.sessionId === record.id && job.status === "running"));
-    const approvalPending = described.planningState === "awaiting_approval";
-    const next = {
-      mode: taskMode,
-      ...(providerId ? { providerId } : {}),
-      ...(modelId ? { modelId } : {}),
-      ...(image ? { ultra: false, fast: false } : { thinkingLevel: record.thinkingLevel, ultra: record.ultra === true, fast: record.fast === true }),
-      ...(config ? { imageConfig: config } : {}),
-    } satisfies MobileSessionConfiguration["next"];
-    const chat = {
-      mode: record.mode,
-      ultra: record.ultra === true, fast: record.fast === true,
-      ...(record.providerId ? { providerId: record.providerId } : {}),
-      ...(record.modelId ? { modelId: record.modelId } : {}),
-      ...(record.thinkingLevel ? { thinkingLevel: record.thinkingLevel } : {}),
-    } satisfies NonNullable<MobileSessionConfiguration["chat"]>;
-    const configuration: MobileSessionConfiguration = {
-      mode: taskMode,
-      ...(described.activeTurnId ? { current: currentTurnConfiguration(this.deps.host(), record.id) }
-        : image && busy ? { current: next } : {}),
-      next,
-      chat,
-      ...(config ? { image: { mode: "image", ...(config.providerId ? { providerId: config.providerId } : {}), ...(config.modelId ? { modelId: config.modelId } : {}), imageConfig: config } } : {}),
-      canConfigure: canPrompt(record),
-      pendingTurn: busy,
-      ...(!canPrompt(record) ? { blockedReason: "read_only" as const } : busy ? { blockedReason: "running" as const } : approvalPending ? { blockedReason: "approval_pending" as const } : {}),
-    };
-    return { ...described, providerId, modelId, thinkingLevel: record.thinkingLevel, ultra: !image && record.ultra === true, fast: !image && record.fast === true,
-      groupName, taskMode, ...(config ? { imageConfig: config } : {}), configuration,
-      capabilities: { canPrompt: canPrompt(record), canStop: record.capabilities?.canStop ?? record.source !== "pi-native" } };
+  private describe(record: SessionSummary, context?: ProjectionContext): Promise<MobileSession> {
+    return describeMobileSession(this.deps, record, context);
   }
   private async snapshot(record: SessionSummary): Promise<MobileSessionSnapshot> {
     // The per-field cap keeps one oversized message from bursting the relay
@@ -499,10 +474,6 @@ function groupForSession(path: string | undefined, groups: ProjectGroupRecord[])
     const rootPath = root.path.replace(/\\/g, "/").replace(/\/+$/, "");
     return (process.platform === "win32" ? rootPath.toLowerCase() : rootPath) === key;
   }));
-}
-
-function canPrompt(record: SessionSummary): boolean {
-  return record.capabilities?.canPrompt ?? record.source !== "pi-native";
 }
 
 function cursor(value: unknown): RacpCursor { const item = object(value); return { epoch: string(item.epoch, "epoch"), sequence: integer(item.sequence, "sequence") }; }

@@ -1,11 +1,12 @@
 import { hostname } from "node:os";
 import WebSocket from "ws";
-import { IPC, type AppSettings, type MobileGrant, type MobilePairing, type MobileRelayEnvelope, type MobileRelayTicket, type MobileSyncScope, type MobileSyncScopeInput, type MobileSyncSettings, type MobileSyncStatus } from "@pi-desktop/shared";
+import { IPC, type AppSettings, type MobileGrant, type MobilePairing, type MobileRelayEnvelope, type RacpEventEnvelope, type MobileRelayTicket, type MobileSyncScope, type MobileSyncScopeInput, type MobileSyncSettings, type MobileSyncStatus } from "@pi-desktop/shared";
 import type { AgentHost } from "@pi-desktop/agent-host";
 import type { HostRpc } from "@pi-desktop/host-runtime";
 import type { MirrorCodingAccount } from "../mirrorcoding/account";
 import type { ImageService } from "../images/service";
 import { onSessionConfigured } from "../services/session-configuration";
+import { MobileActivityBroadcaster } from "./activity-broadcaster";
 import { MobilePeer } from "./peer";
 import { MobileScopeAccess } from "./scope";
 import { openMobileRelay } from "./transport";
@@ -41,13 +42,20 @@ export class MobileSyncService {
   private receivedAt = Date.now();
   private stopConfiguration: () => void;
   private readonly cooldown = new MobileRequestCooldown();
+  private readonly activity: MobileActivityBroadcaster;
   constructor(private deps: Dependencies) {
     this.scope = new MobileScopeAccess(deps.host);
+    this.activity = new MobileActivityBroadcaster({
+      host: deps.host, agent: deps.agent, images: deps.images, log: deps.log,
+      targets: () => [...this.peers.values()].map(({ peer }) => peer).filter((peer) => peer.wantsActivity),
+    });
     this.stopConfiguration = onSessionConfigured(() => {
       deps.send(IPC.event.sessionsChanged, { reason: "session.configure" });
       for (const { peer } of this.peers.values()) peer.desktopChanged();
     });
   }
+  /** Every Agent Host envelope, observed in publish order; phones receive only their shared sessions. */
+  agentEvent(envelope: RacpEventEnvelope) { if (!this.disposed) this.activity.agentEvent(envelope); }
   status(): MobileSyncStatus { return structuredClone({ ...this.state, pairings: this.state.pairings.filter((pairing) => Date.parse(pairing.expiresAt) > Date.now()) }); }
   observeInvoke(channel: string) {
     if ([IPC.invoke.sessionCreate, IPC.invoke.sessionDelete, IPC.invoke.sessionRename, IPC.invoke.sessionMoveProject,
@@ -287,7 +295,7 @@ export class MobileSyncService {
     await this.deps.host().call("settings.set", { mobileSync: null });
     this.publish({ status: "signed_out", deviceId: undefined, grants: [], pairings: [], accountSyncEnabled: false, accountSharingPending: false, error: undefined, retryAt: undefined });
   }
-  dispose() { this.stopConfiguration(); this.disposed = true; this.epoch += 1; this.disconnect(); }
+  dispose() { this.stopConfiguration(); this.activity.dispose(); this.disposed = true; this.epoch += 1; this.disconnect(); }
 }
 
 const sameScope = (left: MobileSyncScope, right: MobileSyncScope) => left.kind === right.kind && left.id === right.id;

@@ -54,6 +54,7 @@ function buildPeer({ bigMessage = "big ".repeat(80_000), oversizedMessage, grant
     prioritizeTurn: async (_principal, turnId) => { calls.agent.push(["prioritizeTurn", turnId]); return { id: turnId, sessionId: "s1", status: "queued", admission: "queue", effectivePermissionMode: "ask" }; },
     cancelTurn: async (_principal, turnId) => ({ id: turnId, sessionId: "s1", status: "canceled", admission: "queue", effectivePermissionMode: "ask" }),
     pendingApprovals: () => [],
+    pendingInputRequests: () => [],
   };
   const host = {
     call: async (method, params) => {
@@ -145,6 +146,44 @@ test("account directory includes empty projects and ungrouped sessions without s
   peer.directoryChanged();
   assert.ok(sent.some((frame) => frame.method === "mobile.directoryChanged"));
   assert.equal((await request("events/unsubscribe", { subscriptionId })).removed, true);
+});
+
+test("a directory page reads settings once and each provider group once", async () => {
+  const sessions = Array.from({ length: 6 }, (_, index) => ({ ...SESSION, id: `s${index}`, providerId: index === 5 ? "prov-2" : "prov" }));
+  const { request, calls } = buildPeer({ sessions, grants: [{ id: "account-grant", scope: { kind: "account", id: "account-1", label: "Account" } }] });
+  await initialize(request);
+  const before = calls.host.length;
+  const directory = await request("directory/list", { limit: 10 });
+  assert.equal(directory.sessions.length, 6);
+  const page = calls.host.slice(before).map(([method]) => method);
+  assert.equal(page.filter((method) => method === "settings.get").length, 1);
+  assert.equal(page.filter((method) => method === "providers.get").length, 2);
+  const listed = calls.host.length;
+  const { sessions: shared } = await request("session/list", {});
+  assert.equal(shared.length, 6);
+  assert.equal(calls.host.slice(listed).filter(([method]) => method === "settings.get").length, 1);
+});
+
+test("session activity reaches only opted-in phones and only for shared sessions", async () => {
+  const shared = new Set(["s1"]);
+  const { request, sent, peer } = buildPeer();
+  peer.deps.scope.require = async (sessionId) => { if (!shared.has(sessionId)) throw new Error("session_not_shared"); return { ...SESSION, id: sessionId }; };
+  const result = await initialize(request);
+  assert.equal(result.capabilities.sessionActivity, true);
+  const row = { id: "s1", title: "Session", status: "idle" };
+  await request("directory/subscribe", {});
+  assert.equal(peer.wantsActivity, false, "an older phone never opted in");
+  await peer.activity("s1", row, { id: "turn:t1:completed", kind: "completed", occurredAt: SESSION.createdAt });
+  assert.ok(!sent.some((frame) => frame.method === "mobile.sessionActivity"));
+  const subscribed = await request("directory/subscribe", { activity: true });
+  assert.equal(subscribed.activity, true);
+  await peer.activity("s1", row, { id: "turn:t1:completed", kind: "completed", occurredAt: SESSION.createdAt });
+  await peer.activity("s2", { ...row, id: "s2" }, { id: "approval:a1", kind: "approval", occurredAt: SESSION.createdAt });
+  const pushed = sent.filter((frame) => frame.method === "mobile.sessionActivity");
+  assert.equal(pushed.length, 1);
+  assert.deepEqual([pushed[0].params.desktopDeviceId, pushed[0].params.session.id, pushed[0].params.attention.kind], ["desk-1", "s1", "completed"]);
+  await request("events/unsubscribe", { subscriptionId: subscribed.subscriptionId });
+  assert.equal(peer.wantsActivity, false);
 });
 
 test("durable session changes map host messages to RACP items", async () => {
