@@ -3040,6 +3040,9 @@
           "itemContent": {
             "type": "boolean"
           },
+          "sessionActivity": {
+            "type": "boolean"
+          },
           "directory": {
             "type": "boolean"
           },

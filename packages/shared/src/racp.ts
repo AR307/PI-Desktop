@@ -476,6 +476,8 @@ export const RacpServerCapabilitiesSchema = Type.Object({
   sessionState: Type.Optional(Type.Boolean()),
   /** `session/item` chunked full-content reads are served (mobile profile addition). */
   itemContent: Type.Optional(Type.Boolean()),
+  /** `mobile.sessionActivity` live session status and attention pushes (mobile profile addition). */
+  sessionActivity: Type.Optional(Type.Boolean()),
   directory: Type.Optional(Type.Boolean()),
   incrementalSync: Type.Optional(Type.Boolean()),
   bindings: Type.Array(Type.Union([Type.Literal("RACP-WS"), Type.Literal("RACP-HTTP"), Type.Literal("RACP-GRPC")])),

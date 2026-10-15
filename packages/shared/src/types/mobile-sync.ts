@@ -105,6 +105,8 @@ export type MobileSession = RacpSession & {
   imageConfig?: MobileImageSessionConfig;
   configuration?: MobileSessionConfiguration;
   capabilities: { canPrompt: boolean; canStop: boolean };
+  /** Requests waiting for the user; absent from desktops that predate session activity. */
+  attentionCounts?: { approvals: number; inputs: number };
 };
 
 /** One queued prompt with a bounded text preview, so the phone can manage the queue. */
@@ -248,3 +250,43 @@ export const MOBILE_ITEM_CONTENT_LIMIT = 64 * 1024;
  */
 export const TRANSCRIPT_DISPLAY_TRUNCATION_MARKER =
   "\n\n[truncated for display; the full content remains in the transcript]";
+
+/**
+ * Server notification carrying one session's refreshed directory row, sent to
+ * peers that opted in with `directory/subscribe { activity: true }`.
+ */
+export const MOBILE_SESSION_ACTIVITY_NOTIFICATION = "mobile.sessionActivity";
+
+/** Bound for attention titles and previews; the transcript stays the authority. */
+export const MOBILE_ATTENTION_TEXT_LIMIT = 160;
+
+/**
+ * Why a shared session needs the user: a pending approval or question, a
+ * finished or failed task, or `resolved` once nothing is pending anymore.
+ */
+export type MobileAttentionKind = "approval" | "input" | "completed" | "failed" | "resolved";
+
+export type MobileAttention = {
+  /** Stable across redelivery so the phone shows each occurrence once. */
+  id: string;
+  kind: MobileAttentionKind;
+  turnId?: string;
+  /** The approval or input request this attention refers to. */
+  requestId?: string;
+  /** For approvals: a tool permission, or a Plan/Goal proposal awaiting the user. */
+  requestKind?: "tool" | "plan" | "goal";
+  /** Approval title or question text, bounded by `MOBILE_ATTENTION_TEXT_LIMIT`. */
+  title?: string;
+  /** Final reply or error preview, bounded by `MOBILE_ATTENTION_TEXT_LIMIT`. */
+  preview?: string;
+  errorCode?: string;
+  /** The outcome belongs to a direct image generation job. */
+  image?: boolean;
+  occurredAt: string;
+};
+
+export type MobileSessionActivity = {
+  desktopDeviceId: string;
+  session: MobileSession;
+  attention?: MobileAttention;
+};
