@@ -2,6 +2,24 @@ import type { ChangelogEntry } from "./changelog.js";
 
 export const deEntries: ChangelogEntry[] = [
   {
+    "version": "0.18.2",
+    "date": "2026-10-14",
+    "highlights": [
+      "Speicher mit app.asar-Archiven ohne ENOTDIR-Fehler migrieren.",
+      "Windows-Verknüpfungen mit nicht mehr vorhandenen Zielen bleiben bei der Migration erhalten.",
+      "Bei Kopierfehlern werden Quell- und Zielpfad angezeigt."
+    ]
+  },
+  {
+    "version": "0.18.1",
+    "date": "2026-10-14",
+    "highlights": [
+      "Den Speicherort direkt nach der Installation ändern, auch wenn der Zielordner oder das ursprüngliche Datenverzeichnis noch nicht existiert.",
+      "Vorhandene Daten in einen neuen Ordner oder auf ein anderes Laufwerk verschieben und die ursprüngliche Sicherung behalten.",
+      "Projektwissen und Anweisungen bleiben nach dem Verschieben der Daten unter Windows verfügbar."
+    ]
+  },
+  {
     "version": "0.18.0",
     "date": "2026-10-09",
     "highlights": [

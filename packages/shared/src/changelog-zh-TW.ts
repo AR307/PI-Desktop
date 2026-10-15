@@ -2,6 +2,24 @@ import type { ChangelogEntry } from "./changelog.js";
 
 export const zhTWEntries: ChangelogEntry[] = [
   {
+    "version": "0.18.2",
+    "date": "2026-10-14",
+    "highlights": [
+      "修正資料目錄包含 app.asar 安裝套件時移轉出現 ENOTDIR 錯誤的問題。",
+      "移轉時保留目標已不存在的 Windows 連結，不再因此中斷。",
+      "檔案複製失敗時顯示來源與目的地路徑，方便定位問題。"
+    ]
+  },
+  {
+    "version": "0.18.1",
+    "date": "2026-10-14",
+    "highlights": [
+      "首次安裝後即可變更資料儲存路徑，無須預先建立目標目錄或初始化舊資料目錄。",
+      "支援將現有資料移至新資料夾或其他磁碟，並保留原始備份。",
+      "修正 Windows 移轉資料後無法讀取專案記憶與指令的問題。"
+    ]
+  },
+  {
     version: "0.18.0",
     date: "2026-10-09",
     highlights: [

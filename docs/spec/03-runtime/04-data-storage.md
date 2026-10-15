@@ -89,6 +89,23 @@ both source and copied files. An interrupted copy may be retried only with its
 matching ownership marker; nonempty/unrelated destinations and overlapping roots
 are rejected. The stable installation lock prevents competing managed launches.
 
+Filesystem maintenance uses Electron's `original-fs`: archives such as `app.asar`
+inside session scratch or downloaded applications remain physical files, not
+virtual directories. Their bytes and adjacent `.asar.unpacked` directories migrate
+unchanged. Windows link types are read from the link's own filesystem attributes
+in one batch, not by following its target; dangling directory/file links remain
+links, and internal targets are relocated without requiring them to exist.
+Windows absolute link targets are lexically normalized before creation and
+verification, so trailing separators from junctions do not cause false failures. Copy
+failures include the source and destination paths in the existing local error
+detail. They never skip an entry or publish the destination as the active profile.
+
+Confirming a directory selected in Settings creates it when it does not exist,
+including missing parent directories. Overlap checks run before creating anything.
+A first-install data root may be absent together with its parents; validation
+resolves the nearest existing ancestor without creating an unused old profile.
+This does not recreate an unavailable custom storage volume during startup.
+
 Rust's offline `--relocate-data <old-root> <copied-root>` mode owns structured
 path relocation in the copied SQLite index, transcripts/revisions/checkpoints,
 outbox, installed plugin registry and agent capability metadata. It does not boot
@@ -97,6 +114,11 @@ path-bearing fields under the old root. External projects, dev/builtin plugins,
 narrative text, commands, source code, secrets, and arbitrary plugin-private formats
 are preserved. Credentials and their machine key migrate as bytes with their
 permissions. SQLite ownership stays exclusively in Rust.
+
+Relocated project database paths and project-memory/instruction keys retain the
+repository's normalized project-path spelling. In particular, Windows migration
+must not turn slash-normalized lookup keys into mixed-separator keys that make
+existing project memory appear empty after reopening the Host.
 
 Only after validation/relocation succeeds is the flushed bootstrap pointer
 atomically replaced. Errors keep the old profile active and visible in settings;
@@ -107,6 +129,13 @@ Original directories remain explicit backups. Deleting these requires a separate
 settings confirmation after checking new-location functionality, including plugins
 that may own absolute references the host cannot safely rewrite. Backup cleanup
 preflights every root and protects active storage and bootstrap/lock files.
+The stable anchor retains Chromium's Windows `lockfile` alongside `Singleton*`
+and `storage-location.json`; these installation files are also excluded from
+browser-profile copies. Cleanup never releases the live single-instance lock.
+The exclusion applies only to the browser root, not same-named nested user files
+or files inside the host data root.
+Retry after a partially completed cleanup tolerates already-absent old roots,
+then clears the backup list only after the remaining cleanup succeeds.
 
 Cache cleanup is a separate confirmed cold-restart operation. Its filesystem
 allowlist is `cache/`, `plugins/cache/download/`, `plugins/cache/backup/`,

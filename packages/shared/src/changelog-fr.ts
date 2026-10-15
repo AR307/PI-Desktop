@@ -2,6 +2,24 @@ import type { ChangelogEntry } from "./changelog.js";
 
 export const frEntries: ChangelogEntry[] = [
   {
+    "version": "0.18.2",
+    "date": "2026-10-14",
+    "highlights": [
+      "Migrez les données contenant des archives app.asar sans erreur ENOTDIR.",
+      "Conservez les liens Windows dont la cible a disparu sans interrompre la migration.",
+      "Affichez les chemins source et destination en cas d’échec de copie."
+    ]
+  },
+  {
+    "version": "0.18.1",
+    "date": "2026-10-14",
+    "highlights": [
+      "Changez le dossier de stockage dès l’installation, même si le dossier cible ou le dossier de données d’origine n’existe pas encore.",
+      "Déplacez les données existantes vers un autre dossier ou disque en conservant la sauvegarde d’origine.",
+      "Retrouvez la mémoire et les instructions du projet après un déplacement des données sous Windows."
+    ]
+  },
+  {
     "version": "0.18.0",
     "date": "2026-10-09",
     "highlights": [

@@ -1358,3 +1358,68 @@ Captured native windows and the Android login screen were visually checked.
 - Rust formatting check passes. This documentation-only release completion
   does not change the executable source validated above. No private profiles,
   signing keys or local artifact files are staged.
+
+## 2026-10-14 - Storage directory migration repair
+
+- Settings migration now creates a confirmed missing destination after checking separation from active storage. Missing first-install source ancestors are resolved without creating an unused source profile.
+- Rust offline relocation preserves normalized project paths and project memory/instruction keys on Windows, so saved memory remains reachable after moving drives. Existing cold-copy, backup retention and unavailable-volume behavior remain unchanged.
+- Added focused filesystem regressions and a native Electron Settings/preload/IPC/cold-bootstrap/reopened-Host scenario for first install and existing data. E2E retains screenshots and synthetic profiles and supports cross-drive source roots; it does not use user profiles or live providers.
+- Implementation is isolated on fix/storage-directory-migration. Validation results are recorded in the task artifacts; no release or remote publication is included.
+- Validation: 8 new filesystem regressions, 6 existing storage regressions and 1 Rust project-memory regression pass. Real Windows Electron cross-drive first-install/existing-profile runs restore conversation attachments, settings, browser state and project memory; richer Host migration also restores queued attachments, plugin locations and fixture credentials. Desktop build/typecheck, Host build, fmt, clippy, style and policy checks pass. Existing Windows POSIX-mode test and unrelated docs baseline checks remain failing; no full-suite pass is claimed.
+
+
+## 2026-10-14 - Windows storage patch release 0.18.1
+
+- Prepare a Windows-only update from published 0.18.0 with the storage migration fix, retaining newer desktop and mobile-history changes.
+- Synchronize workspace versions and nine in-app changelog catalogs; Android delivery stays at 0.18.0.
+- Reuse installed dependencies by link, build release-owned outputs, and isolate synthetic acceptance data. Final package evidence is recorded in docs/releases/0.18.1.md.
+
+
+- Release acceptance: 8 filesystem, 5 changelog and 1 Rust regression passed; workspace TypeScript builds, Desktop typecheck, sidecar/Electron and optimized Host builds passed. Real D:-to-C: migration and all three generated Windows package payloads passed. Installer wrappers, user profiles and production provider calls were not exercised.
+
+## 2026-10-14 - Physical-file storage migration follow-up
+
+- A real 0.18.1 migration stopped during copying at a scratch-contained
+  `resources/app.asar`; read-only inspection found a zero-byte destination for
+  the intact archive. Electron's archive-aware filesystem interpreted it as a
+  virtual directory. The same profile also contained a dangling dependency
+  junction that the old target-following link classification could not copy.
+- Use Electron `original-fs` throughout the storage filesystem service and
+  externalize that builtin in the production bundle. User archives remain
+  physical files. Read Windows link attributes in one PowerShell batch through
+  JSON stdin, preserving dangling file/directory links without dereferencing
+  targets. Copy errors now retain both paths and the underlying error.
+- Add real-Electron archive/link/error regressions and extend the Settings to
+  cold-restart to reopened-Host journey with archives and a dangling junction.
+  Node-only harnesses explicitly map the Electron filesystem boundary to Node fs.
+- Validation: 8 first-install/destination regressions pass; 5 real-Electron
+  filesystem scenarios pass; the cross-drive Settings journey passes for first
+  install and existing conversations, attachments, project memory and browser
+  state. Desktop typecheck, production Main build, style/policy checks, targeted
+  Biome lint and diff whitespace checks pass.
+- Of 13 selected existing maintenance tests, 12 pass; the preferences test
+  still asserts POSIX mode 0600 on Windows, which reports 0666. Synthetic test
+  teardown was disabled locally to retain fixtures; cleanup/retry deletion
+  suites were not run. No full-suite or installed-update acceptance is claimed.
+- Source and failed destination of the user migration remain untouched. This
+  is a local fix on `fix/storage-copy-enotdir`, based on released 0.18.1; no
+  release version bump, push, user-profile retry, or new release is included.
+
+## 2026-10-14 - Windows storage patch release 0.18.2
+
+- Prepare the physical archive and dangling-link migration repair as a Windows-only update from published 0.18.1.
+- Synchronize release versions and nine localized changelog catalogs; Android delivery remains at 0.18.0.
+- Reuse provisioned dependencies and retain isolated synthetic acceptance profiles. Validation and publication scope are recorded in docs/releases/0.18.2.md.
+
+- Release-candidate cross-drive acceptance exposed Windows junction targets with trailing separators created outside Electron. Recreated links drop that separator, causing a false verification failure. Normalize Windows absolute link targets before both creation and verification; a Node-created junction fixture reproduces the failure on the old code.
+- Final executable candidate f0002104eb85cec75ac60652d6f3f2f04d336774 passed eight directory regressions, five changelog tests, six real-Electron filesystem scenarios and both cross-drive Settings migration journeys. Workspace TypeScript, Desktop typecheck, sidecar/Electron and optimized Host builds passed.
+- All three final Windows package payloads launch as 0.18.2, serve Settings IPC and reopen seeded history without renderer errors. An additional packaged-entry D:-to-C: migration preserves history, attachments, archives, dangling junctions and original backups. Screenshots were inspected; the native picker and relaunch dispatch are scripted and the cold wrapper explicitly selects the packaged Host. Installer wrappers, real user profiles and production accounts were not tested or modified.
+- Release evidence and remaining validation limits are documented in docs/releases/0.18.2.md. Final documentation does not change the executable source used to build the published packages.
+
+## 2026-10-14 - Preserve the Windows installation lock during backup cleanup
+
+- Reproduced the reported EBUSY unlink failure with a real Electron 43.6.0 single-instance lock in an isolated profile. The stable-anchor exclusion list retained Singleton files but omitted Windows lockfile.
+- Exclude that root-level installation lock from backup cleanup and browser migration, without releasing the lock or suppressing other filesystem errors. Active roots, pointer persistence and cleanup confirmation behavior remain unchanged.
+- Keep installation exclusions at the browser root so same-named nested user files and host data files are still copied. A regression caught the previously recursive exclusion and now verifies these files remain intact.
+- Add a native lock regression and extend the real Settings/preload/IPC/cold-restart journey for retry after a partially completed backup cleanup. Verify the backup control disappears and current history, attachments and browser state remain readable. Synthetic profiles are retained; no real user data or backup is touched.
+- Validation: ten focused filesystem tests, the real Windows lock regression, three native Settings journeys and six archive/link scenarios passed. Desktop typecheck, targeted lint, style and policy checks passed. The unchanged 0.18.2 Host and renderer assets are reused; relaunch dispatch is scripted and each startup phase is a separate Electron process. No installer build, real backup deletion, publication or full-suite pass is claimed.

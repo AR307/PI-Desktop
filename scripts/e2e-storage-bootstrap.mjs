@@ -82,7 +82,7 @@ if (process.env.STORAGE_E2E_MODE === 'seed') {
 }
 })().catch((error) => { console.error(error); originalExit(1); });
 `, resolveDir: root, sourcefile: "storage-bootstrap-e2e.mjs", loader: "js" },
-    outfile: main, bundle: true, platform: "node", format: "esm", target: "node24", external: ["electron"],
+    outfile: main, bundle: true, platform: "node", format: "esm", target: "node24", external: ["electron", "original-fs"],
     alias: { "@pi-desktop/i18n": join(root, "packages/i18n/src/index.ts") },
     plugins: [{ name: "host-binary-location", setup(builder) {
       builder.onResolve({ filter: /host-process$/ }, () => ({ path: "host-binary", namespace: "host-binary" }));

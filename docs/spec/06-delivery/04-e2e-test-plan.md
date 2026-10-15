@@ -1,5 +1,13 @@
 # 04. E2E Test Plan
 
+## Storage junction normalization
+
+Create a dangling Windows junction with standalone Node, then migrate its
+containing profile through real Electron. Migration must complete even when
+the source target has a trailing separator, preserving the same unresolved
+target and the original profile. Exercise this with the cross-drive Settings
+to cold-restart journey as well as the focused filesystem regression.
+
 ## Delegate mutation recovery
 
 | ID | User sequence and expected result |
@@ -95,9 +103,37 @@ production deployment evidence. See the suite README for prerequisites.
 
 ### E2E-STORAGE-custom-location-and-maintenance
 
+- **Windows backup-lock regression:** `node scripts/e2e-storage-backup-lock.mjs`
+  acquires a real Electron installation lock under an isolated anchor, then runs
+  production backup cleanup with an already-absent old payload. Expect no EBUSY,
+  retain the pointer and lock, and keep current history readable. The directory
+  Settings suite also clicks the production backup confirmation, cold-restarts
+  with that lock held, reopens the new profile, verifies the backup action is
+  gone, and reads the active conversation, attachment and browser state. Retain
+  all synthetic files; never use a real user backup for acceptance.
 - **Preconditions:** Dedicated request worktree, current remote-main base, shared
   compatible host toolchain, built host-core and desktop, isolated temporary data
   and Chromium profiles. No user's running desktop, provider, or network is used.
+- **First-install / new-directory regression:** Run
+  `node scripts/e2e-storage-directory.mjs` with `PI_DESKTOP_HOST_BIN` pointing
+  to the candidate Host. The production storage controls and preload invoke real
+  Main handlers through native mouse clicks, schedule cold maintenance, and reopen
+  the migrated Electron profile and Host. Cover an absent data root with missing
+  parents and an existing conversation with attachments, settings and project
+  memory. The chosen destination initially does not exist. Set
+  `PI_STORAGE_E2E_SOURCE_ROOT` to a temporary folder on a different drive for
+  cross-volume coverage. Verify browser localStorage, conversation/attachment
+  reads, project-memory lookup, original backups and the displayed new path.
+  Only native picker selection and relaunch dispatch are scripted; each startup
+  phase is a separate real Electron process. Keep screenshots and synthetic
+  profiles under `.artifacts/` for inspection rather than deleting them.
+- **Electron filesystem regression:** Run `node scripts/e2e-storage-files.mjs`
+  in real Electron, not `ELECTRON_RUN_AS_NODE`. Seed valid and opaque `.asar`
+  files, live and dangling file/directory links, Unicode paths, and a destination
+  collision. Expect byte-preserving copies, relocated internal links, unchanged
+  external targets, and path-specific errors without mutating originals. The
+  existing-profile Settings journey also includes an archive and a dangling
+  dependency junction, then verifies history and browser state after reopening.
 - **Steps:** Through the production Settings page, choose/cancel a destination,
   confirm/retry migration, and confirm cache/backup cleanup. Seed a real host with
   sessions, queued attachments, project metadata, credentials and a local installed
