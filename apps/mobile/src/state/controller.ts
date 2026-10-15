@@ -83,7 +83,7 @@ export class MobileController {
         this.notifications.attention.forget((item) => item.desktopDeviceId === id && (!sessionIds || sessionIds.includes(item.sessionId)));
         if (id === this.value.desktopId && (!sessionIds || sessionIds.includes(this.value.selectedId ?? ""))) await this.disconnect();
       },
-      attention: (id, session, attention) => { void this.notifications.attention.receive(id, session, attention, this.directories.row(id)?.device.name); },
+      attention: (id, session, attention, clockOffsetMs) => { void this.notifications.receive(id, session, attention, this.directories.row(id)?.device.name, clockOffsetMs); },
       error: (error) => this.report(error, true),
     });
   }
@@ -269,6 +269,8 @@ export class MobileController {
   setKeepAliveMode(mode: KeepAliveMode) { this.notifications.setKeepAliveMode(mode); }
   async requestNotificationPermission() { await this.action(() => this.notifications.requestPermission()); }
   async openSystemSettings(target: SettingsTarget) { await this.action(() => this.notifications.openSettings(target)); }
+  async requestBackgroundExemption() { await this.action(() => this.notifications.requestBackgroundExemption()); }
+  dismissBackgroundNotice() { this.notifications.dismissBackgroundNotice(); }
   /** The app became visible or moved to the background. */
   setForeground(visible: boolean) { this.notifications.setVisible(visible); }
 

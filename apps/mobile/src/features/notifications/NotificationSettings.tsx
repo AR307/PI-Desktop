@@ -3,11 +3,12 @@ import { BatteryWarning, Bell, BellOff, BellRing, CircleAlert, CircleCheck, Mess
 import type { MobileController, MobileView } from "../../state/controller";
 import type { KeepAliveMode } from "../../state/keep-alive";
 import { Row, Section, Segmented, Switch } from "../../ui/controls";
+import { BACKGROUND_STEPS } from "./BackgroundDeliveryNotice";
 
 /** Notification categories, OS permission and the background connection policy. */
 export function NotificationSettings({ controller, view, native }: { controller: MobileController; view: MobileView; native: boolean }) {
   const { t } = useTranslation("translation", { keyPrefix: "mobile" });
-  const { preferences, permission, keepAliveMode, batteryRestricted } = view.notifications;
+  const { preferences, permission, keepAliveMode, batteryRestricted, vendor } = view.notifications;
   const set = (patch: Partial<typeof preferences>) => controller.setNotificationPreferences({ ...preferences, ...patch });
   const blocked = permission === "denied";
   const prompt = permission === "prompt";
@@ -27,8 +28,8 @@ export function NotificationSettings({ controller, view, native }: { controller:
           options={[{ value: "auto", label: t("keepAliveAuto") }, { value: "always", label: t("keepAliveAlways") }, { value: "off", label: t("keepAliveOff") }]}/>
         <p>{t(hint)}</p>
       </div>
-      {keepAliveMode !== "off" && batteryRestricted && <Row leading={<BatteryWarning size={18}/>} title={t("batterySettings")} subtitle={t("batteryRestricted")} chevron onClick={() => void controller.openSystemSettings("battery")}/>}
-      {keepAliveMode !== "off" && <Row leading={<Settings2 size={18}/>} title={t("appSettings")} subtitle={t("backgroundGuide")} chevron onClick={() => void controller.openSystemSettings("app")}/>}
+      {keepAliveMode !== "off" && batteryRestricted && <Row leading={<BatteryWarning size={18}/>} title={t("allowBackground")} subtitle={t("batteryRestricted")} chevron onClick={() => void controller.requestBackgroundExemption()}/>}
+      {keepAliveMode !== "off" && <Row leading={<Settings2 size={18}/>} title={t("appSettings")} subtitle={t(BACKGROUND_STEPS[vendor])} chevron onClick={() => void controller.openSystemSettings("app")}/>}
     </Section>}
   </>;
 }

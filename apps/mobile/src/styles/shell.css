@@ -64,7 +64,7 @@
 .banner-body { flex: 1; min-width: 0; display: grid; gap: 2px; }
 .banner-body strong { font-size: var(--m-text-callout); }
 .banner-body span { color: var(--m-text-3); }
-.banner-actions { display: flex; gap: var(--m-space-2); margin-top: var(--m-space-2); }
+.banner-actions { display: flex; flex-wrap: wrap; gap: var(--m-space-2); margin-top: var(--m-space-2); }
 .banner-actions button { min-height: 34px; padding: 0 var(--m-space-3); font-size: var(--m-text-footnote); }
 .banner.warning { background: var(--m-warning-soft); }
 .banner.warning .banner-icon { color: var(--m-warning); }

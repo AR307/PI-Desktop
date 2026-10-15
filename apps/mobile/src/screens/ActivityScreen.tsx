@@ -5,6 +5,7 @@ import { attentionCategory, type AttentionItem } from "../state/attention";
 import { dayBucket, relativeTime } from "../state/labels";
 import { formatAttention } from "../services/attention-text";
 import { useAttention } from "../features/notifications/useAttention";
+import { BackgroundDeliveryNotice } from "../features/notifications/BackgroundDeliveryNotice";
 import { Screen } from "../ui/Screen";
 import { EmptyState } from "../ui/controls";
 
@@ -40,6 +41,7 @@ export function ActivityScreen({ controller, view, onOpen }: { controller: Mobil
   const buckets = (["today", "yesterday", "earlier"] as const).map((bucket) => ({ bucket, rows: items.filter((item) => dayBucket(item.receivedAt) === bucket) })).filter(({ rows }) => rows.length);
   return <Screen title={t("activityTitle")} actions={unread > 0 ? <button type="button" className="icon-button" aria-label={t("markAllRead")} onClick={() => void center.markAllRead()}><CheckCheck size={20}/></button> : undefined}>
     <NotificationPermissionBanner controller={controller} view={view}/>
+    <BackgroundDeliveryNotice controller={controller} view={view} variants={["delayed", "setup"]}/>
     {items.length === 0
       ? <EmptyState icon={<Bell size={28}/>} title={t("activityEmpty")}>{t("activityEmptyHint")}</EmptyState>
       : buckets.map(({ bucket, rows }) => <section key={bucket} className="section">

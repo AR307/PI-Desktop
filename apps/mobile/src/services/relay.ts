@@ -144,6 +144,15 @@ export class MobileRelay {
   }
   /** Directory metadata plus live session status/attention; older desktops ignore `activity`. */
   watchDirectory() { return this.request("directory/subscribe", { activity: true }); }
+  /** Desktop clock minus this phone's clock, from the last `connection/ping`; undefined until measured. */
+  clockOffsetMs?: number;
+  /** Place desktop event times on this phone's clock, so late deliveries are judged without clock skew. */
+  async measureClock(): Promise<void> {
+    const sent = Date.now();
+    const { serverTime } = await this.request<{ serverTime?: string }>("connection/ping", {});
+    const server = serverTime ? Date.parse(serverTime) : Number.NaN;
+    if (Number.isFinite(server)) this.clockOffsetMs = server - (sent + Date.now()) / 2;
+  }
   async detach(): Promise<void> {
     if (!this.subscriptionId) return;
     const subscriptionId = this.subscriptionId;

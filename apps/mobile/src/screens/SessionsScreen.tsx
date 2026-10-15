@@ -7,6 +7,7 @@ import type { DesktopDirectory } from "../state/directories";
 import { needsUser, relativeTime, sessionStatus, type SessionStatusKind } from "../state/labels";
 import { Screen } from "../ui/Screen";
 import { EmptyState, SkeletonRows, StatusBadge } from "../ui/controls";
+import { BackgroundDeliveryNotice } from "../features/notifications/BackgroundDeliveryNotice";
 
 type Entry = { directory: DesktopDirectory; session: MobileSession; status: SessionStatusKind };
 const modeIcon = { agent: Sparkles, plan: ListChecks, goal: Target, image: ImageIcon } as const;
@@ -80,6 +81,8 @@ export function SessionsScreen({ controller, view, onOpen, onPair }: { controlle
     {view.offline
       ? <div className="banner warning" role="status"><WifiOff size={17} className="banner-icon"/><span className="banner-body"><span>{t("offlineBanner")}</span></span></div>
       : computersOffline && <div className="banner" role="status"><Monitor size={17} className="banner-icon"/><span className="banner-body"><span>{t("DESKTOP_OFFLINE")}</span></span></div>}
+    {/* Only evidence of held-back deliveries interrupts the list; first-run guidance lives in Activity and Me. */}
+    <BackgroundDeliveryNotice controller={controller} view={view} variants={["delayed"]}/>
     {view.directories.length > 0 && <>
       <div className="search-field">
         <Search size={17}/>

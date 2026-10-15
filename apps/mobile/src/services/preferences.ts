@@ -28,3 +28,17 @@ export function readKeepAliveMode(): KeepAliveMode {
   return value === "auto" || value === "always" || value === "off" ? value : DEFAULT_KEEP_ALIVE_MODE;
 }
 export function writeKeepAliveMode(mode: KeepAliveMode) { write(KEEP_ALIVE_KEY, mode); }
+
+/** When the system last held deliveries back, and when the user last dismissed that notice. */
+export type BackgroundDeliveryRecord = { delayedAt?: string; dismissedAt?: string };
+const BACKGROUND_DELIVERY_KEY = "pi.mobile.backgroundDelivery";
+
+export function readBackgroundDelivery(): BackgroundDeliveryRecord {
+  const raw = read(BACKGROUND_DELIVERY_KEY);
+  if (!raw) return {};
+  try {
+    const value = JSON.parse(raw) as BackgroundDeliveryRecord;
+    return { ...(typeof value.delayedAt === "string" ? { delayedAt: value.delayedAt } : {}), ...(typeof value.dismissedAt === "string" ? { dismissedAt: value.dismissedAt } : {}) };
+  } catch { return {}; }
+}
+export function writeBackgroundDelivery(record: BackgroundDeliveryRecord) { write(BACKGROUND_DELIVERY_KEY, JSON.stringify(record)); }

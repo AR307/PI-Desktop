@@ -21,5 +21,5 @@ export type MobileView = {
 
 export const initialView = (): MobileView => ({
   signedIn: false, loading: true, directories: [], projects: [], grants: [], devices: [], sessions: [], messages: [], connection: "disconnected", busy: false, configuring: false,
-  notifications: { permission: "unsupported", preferences: { ...DEFAULT_NOTIFICATION_PREFERENCES }, keepAliveMode: DEFAULT_KEEP_ALIVE_MODE, batteryRestricted: false, activeTasks: 0 },
+  notifications: { permission: "unsupported", preferences: { ...DEFAULT_NOTIFICATION_PREFERENCES }, keepAliveMode: DEFAULT_KEEP_ALIVE_MODE, batteryRestricted: false, activeTasks: 0, vendor: "other" },
 });

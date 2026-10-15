@@ -22,6 +22,7 @@ import com.getcapacitor.PluginMethod;
 import com.getcapacitor.annotation.CapacitorPlugin;
 import com.getcapacitor.annotation.Permission;
 import com.getcapacitor.annotation.PermissionCallback;
+import java.util.Locale;
 
 /**
  * Attention notifications for shared desktop sessions and the background
@@ -116,13 +117,43 @@ public class MobileNotificationsPlugin extends Plugin {
         return state == PermissionState.DENIED ? "denied" : "prompt";
     }
 
+    private boolean batteryRestricted() {
+        PowerManager power = (PowerManager) getContext().getSystemService(Context.POWER_SERVICE);
+        return power != null && !power.isIgnoringBatteryOptimizations(getContext().getPackageName());
+    }
+
     private JSObject state() {
         JSObject result = new JSObject();
         result.put("permission", permission());
         result.put("keepAlive", RelayKeepAliveService.running);
-        PowerManager power = (PowerManager) getContext().getSystemService(Context.POWER_SERVICE);
-        result.put("batteryRestricted", power != null && !power.isIgnoringBatteryOptimizations(getContext().getPackageName()));
+        result.put("batteryRestricted", batteryRestricted());
+        // Several vendors pause background apps beyond stock Android; the WebView names their settings.
+        result.put("manufacturer", Build.MANUFACTURER == null ? "" : Build.MANUFACTURER.toLowerCase(Locale.ROOT));
         return result;
+    }
+
+    /**
+     * Ask Android to exempt the app from battery optimization with the system
+     * dialog, falling back to the exemption list where a ROM lacks the dialog.
+     * Vendor background freezers have their own switches; the WebView explains them.
+     */
+    @PluginMethod
+    public void requestBackgroundExemption(PluginCall call) {
+        if (batteryRestricted()) {
+            String packageName = getContext().getPackageName();
+            Intent request = new Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS, Uri.fromParts("package", packageName, null));
+            try {
+                getActivity().startActivity(request);
+            } catch (RuntimeException unavailable) {
+                try {
+                    getActivity().startActivity(new Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS));
+                } catch (RuntimeException error) {
+                    call.reject("settings_unavailable", error);
+                    return;
+                }
+            }
+        }
+        call.resolve(state());
     }
 
     @PluginMethod

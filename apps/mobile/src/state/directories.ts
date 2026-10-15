@@ -18,7 +18,8 @@ type DirectoryObserver = {
   accountChanged(): void;
   removing(desktopId: string, sessionIds?: string[]): Promise<void>;
   /** A shared session needs the user, finished, failed or stopped waiting. */
-  attention(desktopId: string, session: MobileSession, attention: MobileAttention): void;
+  /** `clockOffsetMs` is the desktop-minus-phone clock offset, when measured. */
+  attention(desktopId: string, session: MobileSession, attention: MobileAttention, clockOffsetMs?: number): void;
   error(error: unknown): void;
 };
 
@@ -126,7 +127,8 @@ export class MobileDirectories {
         },
         restored: async () => {
           if (this.relays.get(id) !== relay) return;
-          await relay!.watchDirectory(); await this.refresh(id); await this.observer.restored(id);
+          await relay!.watchDirectory(); void relay!.measureClock().catch(() => undefined);
+          await this.refresh(id); await this.observer.restored(id);
         },
         directoryChanged: () => { void this.refresh(id).catch((error: unknown) => { if (this.relays.get(id) === relay) this.observer.error(error); }); },
         accountChanged: this.observer.accountChanged,
@@ -152,7 +154,8 @@ export class MobileDirectories {
     try { await relay.connect(); }
     catch (error) { if (this.relays.get(id) !== relay) return; throw error; }
     if (this.relays.get(id) === relay) {
-      await relay.watchDirectory(); await this.refresh(id);
+      await relay.watchDirectory(); void relay.measureClock().catch(() => undefined);
+      await this.refresh(id);
       if (this.relays.get(id) === relay) await this.observer.restored(id);
     }
     return relay;
@@ -217,7 +220,7 @@ export class MobileDirectories {
       row.sessions = row.sessions.map((candidate, position) => position === index ? session : candidate);
       this.emit();
     }
-    if (activity.attention) this.observer.attention(id, session, activity.attention);
+    if (activity.attention) this.observer.attention(id, session, activity.attention, relay.clockOffsetMs);
     if (index >= 0) await saveDirectory(accountId, row, () => this.rows.get(id) === row && this.relays.get(id) === relay);
   }
 
