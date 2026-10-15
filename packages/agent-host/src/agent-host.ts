@@ -9,6 +9,7 @@ import type {
   RacpApprovalResponse,
   RacpApprovalResult,
   RacpCursor,
+  RacpEventEnvelope,
   RacpInputRequest,
   RacpInputResponse,
   RacpItemSummary,
@@ -77,6 +78,12 @@ export type AgentHostOptions = {
   snapshotItems?: number;
   /** Called after any change to a session's queue, with the new entries. */
   onQueueChange?: (sessionId: string, entries: QueueEntryView[]) => void;
+  /**
+   * Called with every envelope the Host publishes, session and host scope, in
+   * publish order. An in-process observer, not a subscription: it bypasses
+   * principals and replay, so callers enforce their own access rules.
+   */
+  onEvent?: (envelope: RacpEventEnvelope) => void;
 };
 
 /** A queued turn together with the prompt it will send. */
@@ -193,6 +200,7 @@ export class AgentHost {
   private readonly allowRemoteSessionGrants: boolean;
   private readonly snapshotItems: number;
   private readonly onQueueChange?: (sessionId: string, entries: QueueEntryView[]) => void;
+  private readonly onEvent?: (envelope: RacpEventEnvelope) => void;
   private readonly states = new Map<string, SessionState>();
   private readonly turnIndex = new Map<string, string>();
   private readonly runtimeAliases = new Map<string, string>();
@@ -215,6 +223,7 @@ export class AgentHost {
     this.allowRemoteSessionGrants = options.allowRemoteSessionGrants ?? false;
     this.snapshotItems = options.snapshotItems ?? 50;
     this.onQueueChange = options.onQueueChange;
+    this.onEvent = options.onEvent;
     this.hub = new EventHub({ clock: this.clock, ids: this.ids, limits: this.limits });
     this.queue = new TurnQueue(options.queueStore ?? new MemoryQueueStore(), this.limits.maxQueuedTurnsPerSession);
     this.approvals = new ApprovalBroker(options.approvals, this.clock);
@@ -399,7 +408,7 @@ export class AgentHost {
     state.permissionMode = summary.permissionMode;
     if (summary.planningState) state.planningState = summary.planningState;
     if (kind !== "session.created") this.emit(state, "session.changed", { session: summary }, {});
-    this.hub.publish({ scope: "host", sessionId: summary.id, revision: state.revision, kind, payload: { session: summary } });
+    this.publish({ scope: "host", sessionId: summary.id, revision: state.revision, kind, payload: { session: summary } });
   }
 
   // -------------------------------------------------------------------------
@@ -977,6 +986,18 @@ export class AgentHost {
     void this.drain(state.id);
   }
 
+  private publish(draft: Parameters<EventHub["publish"]>[0]): RacpEventEnvelope {
+    const envelope = this.hub.publish(draft);
+    if (this.onEvent) {
+      try {
+        this.onEvent(envelope);
+      } catch {
+        // An observer failure must not affect publication or the turn.
+      }
+    }
+    return envelope;
+  }
+
   private notifyQueue(sessionId: string): void {
     if (!this.onQueueChange) return;
     try {
@@ -1239,7 +1260,7 @@ export class AgentHost {
   ): void {
     const durable = racpDurable(kind);
     if (durable) state.revision += 1;
-    this.hub.publish({
+    this.publish({
       scope: "session",
       sessionId: state.id,
       ...(meta.turnId ? { turnId: meta.turnId } : {}),
@@ -1258,7 +1279,7 @@ export class AgentHost {
   }
 
   private emitHostSessionChanged(state: SessionState): void {
-    this.hub.publish({
+    this.publish({
       scope: "host",
       sessionId: state.id,
       revision: state.revision,

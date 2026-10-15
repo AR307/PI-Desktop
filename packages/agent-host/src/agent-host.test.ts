@@ -861,6 +861,38 @@ describe("AgentHost attach and subscribe", () => {
   });
 });
 
+describe("AgentHost event observer", () => {
+  function observed(onEvent: (envelope: RacpEventEnvelope) => void) {
+    const runtime = new FakeRuntime();
+    const sessions = new FakeSessions();
+    sessions.summaries.set("s1", summary("s1"));
+    const host = new AgentHost({ runtime, sessions, approvals: new FakeApprovals(), clock: new FixedClock(), ids: new SeqIds(), onEvent });
+    const received: RacpEventEnvelope[] = [];
+    host.subscribe(viewer, { scope: "session", sessionId: "s1" }, { deliver: (event) => received.push(event), close: () => {} });
+    return { host, received };
+  }
+
+  it("sees every published envelope in order, including terminal turns and host scope", async () => {
+    const seen: RacpEventEnvelope[] = [];
+    const { host, received } = observed((envelope) => seen.push(envelope));
+    const started = await host.startTurn(owner, { sessionId: "s1", input: { text: "hi" }, context: { requestId: "r1" } });
+    host.ingest(envelope("s1", started.turn.id, { type: "agent_start" }));
+    host.ingest(envelope("s1", started.turn.id, { type: "agent_end", messageIds: [] }));
+    expect(seen.filter((event) => event.scope === "session").map((event) => event.eventId)).toEqual(received.map((event) => event.eventId));
+    expect(seen.map((event) => event.kind)).toContain("turn.completed");
+    expect(seen.some((event) => event.scope === "host" && event.kind === "session.changed")).toBe(true);
+  });
+
+  it("keeps publishing when the observer throws", async () => {
+    const { host, received } = observed(() => { throw new Error("observer failed"); });
+    const started = await host.startTurn(owner, { sessionId: "s1", input: { text: "hi" }, context: { requestId: "r1" } });
+    host.ingest(envelope("s1", started.turn.id, { type: "agent_start" }));
+    host.ingest(envelope("s1", started.turn.id, { type: "agent_end", messageIds: [] }));
+    expect(received.map((event) => event.kind)).toContain("turn.completed");
+    expect(host.getTurn(started.turn.id).status).toBe("completed");
+  });
+});
+
 describe("AgentHost queue extras", () => {
   it("prioritizes a queued turn, reports queue changes, and respects runtime busy state", async () => {
     const changes: Array<{ sessionId: string; ids: string[] }> = [];
