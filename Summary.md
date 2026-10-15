@@ -7,7 +7,7 @@ agent execution. Shared packages define cross-process contracts.
 
 ## 2026-10-15 — Upstream storage migration draft
 
-- Prepare a storage-only candidate from upstream d6f7f8a7e; exclude fork releases,
+- Prepare a storage-only candidate from upstream 2eb333723b; exclude fork releases,
   mobile/account features and private operational artifacts.
 - Port first-run/new-directory handling, physical ASAR copying, dangling Windows
   links, junction normalization and normalized project-memory lookup.

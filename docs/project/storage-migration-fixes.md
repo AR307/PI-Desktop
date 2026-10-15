@@ -8,7 +8,7 @@ owns SQLite and structured-path relocation. The original Electron userData
 directory remains the installation lock and bootstrap-pointer anchor.
 
 This document scopes the October 15, 2026 upstream draft for storage migration.
-The preparation base is `d6f7f8a7e39db75abde7fbffda323f84c08d8d85`.
+The preparation base is `2eb333723bfdb92c3adf6c68cdf86d0ec995ce88`.
 
 ## Old behavior, defect, and new behavior
 
@@ -84,7 +84,10 @@ large-profile backup-deletion test. Fixtures are retained for diagnosis.
 
 Current candidate checks ran on October 15, 2026 with Windows, Electron 43.6.0,
 Node 24.19.0 and Rust 1.90.0. The implementation was prepared against the upstream
-base above; the local PR draft/evidence manifest identifies the committed head.
+base above. Executable candidate 5586c50bf900f7ba6b7e9b4f8d2385db21b15e31
+passed the refreshed Host, directory, native archive/lock and Settings workflows
+after incorporating that base. The later documentation-only commit does not
+change executable sources. The local PR draft records the final branch head.
 Earlier fork results are not counted in this table.
 
 | Check actually executed | Result |
@@ -93,7 +96,7 @@ Earlier fork results are not counted in this table.
 | Focused directory regression | 10 passed |
 | Native Electron ASAR/link/copy-error suite | 6 passed |
 | Native installation-lock cleanup retry | Passed; lock, pointer and active history retained |
-| Rust repository-level project-memory regression | 1 passed; 916 other tests filtered out |
+| Rust repository-level project-memory regression | 1 passed; 918 other tests filtered out |
 | Candidate Host development build | Passed with locked Cargo dependencies |
 | Settings, cold maintenance and reopened Host | 3 passed; first-install and existing-profile migration D: to C:, plus backup retry |
 | Workspace TypeScript builds / Desktop typecheck | 9 package builds and Desktop typecheck passed |
