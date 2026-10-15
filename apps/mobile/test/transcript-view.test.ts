@@ -5,6 +5,8 @@ import {
   buildTranscriptEntries,
   delegationFastRequested,
   extractToolDiff,
+  followAfterScroll,
+  FOLLOW_THRESHOLD_PX,
   isDisplayTruncated,
   messageHasTruncatedContent,
   toolPayloadPreview,
@@ -109,6 +111,17 @@ describe("transcript view projection", () => {
       { kind: "context", text: "c" },
       { kind: "context", text: "d" },
     ]);
+  });
+
+  it("stops following the live tail on any upward scroll and rejoins it at the bottom", () => {
+    // The first frame of a flick is still within the threshold; a message
+    // arriving then must not pull the reader back down.
+    expect(followAfterScroll(true, 12, 0)).toBe(false);
+    expect(followAfterScroll(false, FOLLOW_THRESHOLD_PX - 1, 400)).toBe(true);
+    expect(followAfterScroll(false, 300, 600)).toBe(false);
+    expect(followAfterScroll(true, 300, 600)).toBe(true);
+    // A shrinking transcript is clamped by the browser and stays at the bottom.
+    expect(followAfterScroll(true, 0, 0)).toBe(true);
   });
 
   it("previews large tool payloads without serializing them fully", () => {

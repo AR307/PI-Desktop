@@ -4,7 +4,7 @@ import { ArrowDown, ArrowLeft, ChevronDown, LoaderCircle, RotateCw, Settings2 } 
 import type { MobileController } from "../state/controller";
 import type { DesktopDirectory } from "../state/directories";
 import { useMobileStore } from "../state/store";
-import { buildTranscriptEntries } from "../state/transcript-view";
+import { buildTranscriptEntries, followAfterScroll } from "../state/transcript-view";
 import type { PickedAttachment } from "../services/attachments";
 import { CompactionDivider, DelegationCard, Message } from "../features/transcript/Transcript";
 import { HistorySyncNotice } from "../features/transcript/HistorySyncNotice";
@@ -12,8 +12,6 @@ import { PendingDock } from "../features/actions/PendingActions";
 import { Composer, QueueBar } from "../features/composer/Composer";
 import { SessionConfigSheet } from "../features/session-config/SessionConfigSheet";
 
-/** Distance from the bottom that still counts as following the live tail. */
-const FOLLOW_THRESHOLD_PX = 96;
 const NO_MESSAGES: never[] = [];
 
 function TranscriptSkeleton() {
@@ -48,6 +46,7 @@ export function ConversationScreen({ controller, desktopId, sessionId, directory
   const scroll = useRef<HTMLDivElement>(null);
   const topSentinel = useRef<HTMLDivElement>(null);
   const follow = useRef(true);
+  const distance = useRef(0);
   const anchor = useRef<{ height: number; top: number } | null>(null);
   const frame = useRef<number>(undefined);
 
@@ -79,15 +78,15 @@ export function ConversationScreen({ controller, desktopId, sessionId, directory
     anchor.current = null;
   }, [shown]);
   const onScroll = () => {
+    const element = scroll.current;
+    if (!element) return;
+    // Decide synchronously: a message committed before the next frame must not
+    // pull a reader who just started scrolling up back to the end.
+    const next = element.scrollHeight - element.scrollTop - element.clientHeight;
+    follow.current = followAfterScroll(follow.current, next, distance.current);
+    distance.current = next;
     if (frame.current !== undefined) return;
-    frame.current = requestAnimationFrame(() => {
-      frame.current = undefined;
-      const element = scroll.current;
-      if (!element) return;
-      const atEnd = element.scrollHeight - element.scrollTop - element.clientHeight < FOLLOW_THRESHOLD_PX;
-      follow.current = atEnd;
-      setFollowing(atEnd);
-    });
+    frame.current = requestAnimationFrame(() => { frame.current = undefined; setFollowing(follow.current); });
   };
   useEffect(() => () => { if (frame.current !== undefined) cancelAnimationFrame(frame.current); }, []);
   const loadOlder = useCallback(async () => {

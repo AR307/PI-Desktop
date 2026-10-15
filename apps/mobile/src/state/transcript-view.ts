@@ -49,6 +49,23 @@ export function buildTranscriptEntries(
   return entries;
 }
 
+/** Distance from the bottom that still counts as reading the live tail. */
+export const FOLLOW_THRESHOLD_PX = 96;
+
+/**
+ * Whether the transcript keeps following the live tail after a scroll event,
+ * given the distance from the bottom before and after it. Any upward move
+ * leaves the tail at once, even within the threshold, so a message arriving
+ * mid-flick never pulls the reader back down; reaching the bottom rejoins it.
+ * Distances rather than offsets keep a shrinking transcript, which the browser
+ * clamps, from looking like an upward scroll.
+ */
+export function followAfterScroll(following: boolean, distance: number, previousDistance: number): boolean {
+  if (distance > previousDistance + 1) return false;
+  if (distance < FOLLOW_THRESHOLD_PX) return true;
+  return following;
+}
+
 /**
  * A row with nothing to read: internal model instructions, or a completed
  * assistant row whose tool calls render as their own rows. Streaming, failed
