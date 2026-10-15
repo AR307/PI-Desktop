@@ -1,6 +1,7 @@
 # ADR 0179: Import model configuration from local agent stores
 
-- Status: Accepted
+- Status: Accepted for model import semantics; original Settings placement
+  superseded by ADR 0319 / D645
 - Date: 2026-09-08
 - Deciders: PI-Desktop core
 - Related: D007, D342, ADR 0012,
@@ -10,10 +11,10 @@
 
 ## Context
 
-Settings → Import already scans Claude Code, Codex, OpenCode, and Pi session
-stores. The same tools keep provider URLs, model ids, and often API keys in
-well-known files. Users who switch to PI-Desktop otherwise retype those
-endpoints on Settings → Models.
+At the time this decision was recorded, Settings → Import scanned Claude Code,
+Codex, OpenCode, and Pi session stores. The same tools keep provider URLs,
+model ids, and often API keys in well-known files. Users who switch to
+PI-Desktop otherwise retype those endpoints on Settings → Models.
 
 D007 forbids auto-import of `~/.pi` so PI-Desktop owns `~/.pi-desktop`. That
 must stay true for model configuration: a scan is an explicit action, and
@@ -28,8 +29,11 @@ credentials. Copying refresh tokens would be the wrong security boundary.
 
 ## Decision
 
-1. **Settings → Import** gains a second card, Model configuration, with its
-   own Scan / selection / Import selected. Session import is unchanged.
+1. The original placement was a Model configuration card under
+   **Settings → Import**, with its own Scan / selection / Import selected.
+   ADR 0319 / D645 supersedes that placement and retires the Settings
+   session-import UI. The model scan/import semantics below remain in force;
+   plugin session-import contracts remain unchanged.
 
 2. **Sources** (same family as session import):
    - Claude Code: `~/.claude/settings.json` plus `settings.local.json`
@@ -53,6 +57,8 @@ credentials. Copying refresh tokens would be the wrong security boundary.
 4. **Secrets.** A stored API key, `env:` / `env_key` resolution, or
    `Authorization: Bearer` header is copied into the host secret store.
    Placeholder values (`YOUR_API_KEY`, `${VAR}`) are treated as missing.
+   A pi `apiKey` or auth header written as a `!<shell command>` is never
+   executed or stored; that provider is imported without a secret.
    OAuth auth.json entries and Codex `requires_openai_auth` tables without
    a key are omitted or imported without a secret.
 

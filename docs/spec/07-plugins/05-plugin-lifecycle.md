@@ -43,6 +43,11 @@ discovered
 
 **Implemented today:** the runtime (`apps/desktop/electron/main/plugin-runtime.ts`) invokes `onLoad` (when a plugin is loaded on load/enable) and `onUnload` (dispatched into the plugin process on unload/disable/reload/app quit, 5s budget — 1.5s on quit — then the process is stopped); unloading tears down the plugin's registered commands and tools. The other hooks below are declared in the API but not yet fired.
 
+`onProviderOAuth` is a provider operation callback, not a lifecycle hook. The
+host invokes it only for an enabled plugin's declared OAuth provider during
+user sign-in or token refresh; it receives an abort signal for cancellation,
+unload, and timeout.
+
 **Planned:** once the full lifecycle lands, hooks fire in this order:
 
 1. `onInstall` (once, only after a successful install)
@@ -141,6 +146,8 @@ On app startup:
 2. Read the enabled state
 3. Load only enabled plugins
 4. Skip a single failed plugin without affecting other plugins or the main app
+5. Emit `pluginChanged` (`reason: "restore"`) once the pass is done, so the
+   renderer re-reads a plugin list it may have fetched before the restore
 
 ## 6. Developer mode
 

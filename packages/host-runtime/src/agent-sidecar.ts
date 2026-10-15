@@ -1,6 +1,6 @@
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { DEFAULT_RPC_TIMEOUT_MS, IMAGE_BATCH_TIMEOUT_MS, imageGenerationPrompts, readNdjsonLines, rpcTimeoutMs, rpcErrorFromWire, rpcErrorToWire } from "@pi-desktop/shared";
+import { imageGenerationPrompts, readNdjsonLines, rpcTimeoutMs, rpcErrorFromWire, rpcErrorToWire } from "@pi-desktop/shared";
 import type { ProcessExitHandler, StderrHandler } from "./host-process.js";
 
 // stderr lines kept per sidecar so an unexpected exit can be reported with the
@@ -145,7 +145,6 @@ export class AgentSidecar {
   // work panel's WebContentsView) — host-core never sees these.
   private localToolControllers = new Map<string, AbortController>();
   private localTools = new Map<string, LocalToolHandler>();
-  private localToolTimers = new Set<ReturnType<typeof setTimeout>>();
   private projectInstructionResolver: ProjectInstructionResolver | null = null;
   // The sidecar may request a path, but it never chooses the project root.
   // The embedding host registers this binding from the host-owned session
@@ -210,8 +209,6 @@ export class AgentSidecar {
       p.reject(error);
     }
     this.pending.clear();
-    for (const timer of this.localToolTimers) clearTimeout(timer);
-    this.localToolTimers.clear();
     for (const controller of this.localToolControllers.values()) controller.abort();
     this.localToolControllers.clear();
     this.handlers.clear();
@@ -270,31 +267,20 @@ export class AgentSidecar {
     const controller = new AbortController();
     this.localToolControllers.set(key, controller);
     const imageGeneration = params.toolName === "GenerateImages";
-    let timer: ReturnType<typeof setTimeout> | undefined;
     try {
-      return await Promise.race([
-        (async () => {
-          if (imageGeneration) {
-            imageGenerationPrompts(input.args);
-            if (!this.host) throw new Error("host unavailable");
-            const gate = await this.host.call<LocalToolResult>("tools.execute", params);
-            if (!gate.ok) return gate;
-            controller.signal.throwIfAborted();
-          }
-          return handler({ ...input, signal: controller.signal });
-        })(),
-        new Promise<LocalToolResult>((_, reject) => {
-          timer = setTimeout(() => {
-            controller.abort();
-            reject(new Error("host-local tool timeout"));
-          }, imageGeneration ? IMAGE_BATCH_TIMEOUT_MS + 130_000 : DEFAULT_RPC_TIMEOUT_MS);
-          this.localToolTimers.add(timer);
-        }),
-      ]);
+      if (imageGeneration) {
+        imageGenerationPrompts(input.args);
+        if (!this.host) throw new Error("host unavailable");
+        const gate = await this.host.call<LocalToolResult>("tools.execute", params);
+        if (!gate.ok) return gate;
+        controller.signal.throwIfAborted();
+      }
+      // Local tools share tools.execute lifetime: explicit cancellation, not
+      // a transport deadline. Their services retain execution-specific budgets.
+      return await handler({ ...input, signal: controller.signal });
     } finally {
       controller.abort();
       this.localToolControllers.delete(key);
-      if (timer) { clearTimeout(timer); this.localToolTimers.delete(timer); }
     }
   }
 
@@ -419,11 +405,11 @@ export class AgentSidecar {
    * `availableForSubagents` gate on each model binding.
    */
   private subagentModelResolver:
-    | ((key: string) => Promise<unknown>)
+    | ((key: string, sessionId: string) => Promise<unknown>)
     | null = null;
 
   setSubagentModelResolver(
-    resolver: (key: string) => Promise<unknown>,
+    resolver: (key: string, sessionId: string) => Promise<unknown>,
   ): void {
     this.subagentModelResolver = resolver;
   }
@@ -441,7 +427,9 @@ export class AgentSidecar {
         { code: -32602 },
       );
     }
-    return this.subagentModelResolver(key);
+    const sessionId = typeof params.sessionId === "string" ? params.sessionId.trim() : "";
+    if (!sessionId) throw new Error("subagent sessionId required");
+    return this.subagentModelResolver(key, sessionId);
   }
 
   private async onLine(line: string) {
@@ -484,9 +472,6 @@ export class AgentSidecar {
             new Error(`${requestedToolName} is unavailable in Plan mode`),
             { code: -32000, data: { errorCode: "TOOL_DISABLED_IN_PLAN" } },
           );
-        }
-        if (method === "tools.abort") {
-          this.localToolControllers.get(`${params.sessionId}:${params.toolCallId}`)?.abort();
         }
         if (method === "project.instructions.resolve") {
           if (!this.projectInstructionResolver) {
@@ -532,6 +517,17 @@ export class AgentSidecar {
           );
           return;
         }
+        if (method === "tools.abort") {
+          const controller = this.localToolControllers.get(`${params.sessionId}:${params.toolCallId}`);
+          if (controller) {
+            controller.abort();
+            if (this.host) {
+              await this.host.call("tools.abort", params).catch(() => undefined);
+            }
+            this.writeToChild(JSON.stringify({ jsonrpc: "2.0", id: msg.id, result: { aborted: true } }) + "\n");
+            return;
+          }
+        }
         // Host-local tools short-circuit before host-core (which doesn't
         // know them); everything else proxies through unchanged.
         const localTool =
@@ -540,12 +536,11 @@ export class AgentSidecar {
             : undefined;
         if (localTool) {
           const toolName = requestedToolName;
-          // Local tools can bypass host-core's permission boundary. Plan mode
-          // therefore permits only the read-only BrowserPreview bridge; every
-          // other host-local tool fails closed even if a stale runtime asks for
-          // it directly.
+          // Planning permits only the read-only BrowserPreview and image
+          // directory bridges. Other host-local tools are rejected even if
+          // a stale runtime asks for them directly.
           const result =
-            params.mode === "plan" && toolName !== "BrowserPreview"
+            (params.mode === "plan" || params.mode === "goal") && toolName !== "BrowserPreview" && toolName !== "ListImageModels"
               ? {
                   ok: false,
                   isError: true,

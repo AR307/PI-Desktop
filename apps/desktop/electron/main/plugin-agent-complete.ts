@@ -55,7 +55,7 @@ export function listReadyPluginModels(
   const models: PluginModelInfo[] = [];
   const enabled = providers.filter((provider) => provider.enabled !== false);
   const isReady = (provider: ListedProvider) =>
-    provider.hasSecret === true || provider.hasOauth === true || provider.authKind === "none";
+    provider.hasSecret === true || provider.hasOauth === true || provider.authKind === "none" || provider.authKind === "mirrorcoding";
   // Match session launch fallback order without advertising an unavailable default.
   const defaultProvider = enabled.find((provider) => provider.id === settings.defaultProviderId)
     ?? enabled.find(isReady)

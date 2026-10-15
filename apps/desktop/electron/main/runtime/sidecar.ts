@@ -1,16 +1,21 @@
+import { resolveSubagentModelSource } from "./subagent-model-sources";
+import { registerImageTools } from "../images/tools";
 import { IPC, type AgentEventEnvelope, type UiMessage } from "@pi-desktop/shared";
 import {
-  findSubagentProviderSource,
-  genericModelConfig,
-  loadInstructionChain,
   modelConfigWithBinding,
-  subagentProviderLookupError,
+  loadInstructionChain,
+  type RuntimeProviderConfig,
+  classifySidecarCrash,
+  sidecarCrashErrorCode,
 } from "@pi-desktop/agent-runtime";
-import { loadBuiltinSkillBody } from "../builtin-skills";
+import {
+  assertBuiltinSkillEnabled,
+  loadBuiltinSkillBody,
+} from "../builtin-skills";
 import { createImageGenerationTool } from "../services/image-generation-service";
 import { registerPluginDevTools } from "../plugin-dev-tools";
 import { resolveLocalFile } from "../browser-view";
-import { modelConfigFromModelsDev } from "../models-dev-catalog";
+import { catalogModelConfigFor } from "../models-dev-catalog";
 import { AgentSidecar } from "../agent-sidecar";
 import { relaxedNetworkPolicyEnabled } from "../endpoint-policy";
 import { OAUTH_AUTH_KIND, type VendorOAuth } from "../oauth";
@@ -20,9 +25,11 @@ import type { InflightCheckpointer } from "@pi-desktop/host-runtime";
 import { summarizeToolResult, type Logger } from "../logger";
 import type { ModelsDevCatalog } from "../models-dev-catalog";
 import type { PluginRuntime } from "../plugin-runtime";
-import type { UserMcpRuntime } from "../user-mcp";
 import type { RuntimeState } from "./context";
 import type { FinishTurn } from "./plans";
+import type { MirrorCodingRuntime } from "../mirrorcoding/runtime";
+import { formatSkillToolContent, type LoadedSkillDocument } from "../skill-document";
+import { currentSystemProxyRelayUrl } from "../network-proxy";
 
 export type SidecarRuntimeDependencies = {
   runtimeState: RuntimeState;
@@ -47,14 +54,19 @@ export type SidecarRuntimeDependencies = {
   dataDir: string;
   agentExtensions: AgentExtensionBridge;
   vendorOAuth: VendorOAuth;
+  mirrorCoding: MirrorCodingRuntime;
   listRuntimeProviders: (includeDisabled?: boolean) => Promise<any[]>;
   modelsDevCatalog: ModelsDevCatalog;
   effectiveSubagentModelConfig: (...args: any[]) => any;
   browserHost: BrowserHost;
   plugins: PluginRuntime;
   sessionProjects: Map<string, string | null>;
-  loadUserSkillBody: (id: string, projectPath: string | null) => Promise<any>;
+  loadUserSkillBody: (
+    id: string,
+    projectPath: string | null,
+  ) => Promise<LoadedSkillDocument | null>;
   activeUserSkills: (projectPath: string | undefined) => Promise<any[]>;
+  disabledBuiltinSkills: () => Promise<string[]>;
   pluginActiveInProject: (pluginId: string, projectPath: string | null | undefined) => boolean;
   currentNetworkProxy: () => any;
 };
@@ -77,6 +89,7 @@ export function createSidecarRuntime({
   dataDir,
   agentExtensions,
   vendorOAuth,
+  mirrorCoding,
   listRuntimeProviders,
   modelsDevCatalog,
   effectiveSubagentModelConfig,
@@ -85,6 +98,7 @@ export function createSidecarRuntime({
   sessionProjects,
   loadUserSkillBody,
   activeUserSkills,
+  disabledBuiltinSkills,
   pluginActiveInProject,
   currentNetworkProxy,
 }: SidecarRuntimeDependencies): {
@@ -109,6 +123,7 @@ export function createSidecarRuntime({
       startedAt: number;
       turnId?: string;
       parentToolCallId?: string;
+      nestedParentToolCallId?: string;
       agentName?: string;
     }
   >();
@@ -119,8 +134,10 @@ export function createSidecarRuntime({
    * not be left behind. The finalizer refuses the settlement for a turn that no
    * longer owns the session and drops exactly those records.
    */
-  const releaseCrashedTurn = (sessionId: string, crashedTurnId: string) =>
-    finishTurn(sessionId, "aborted", "PLAN_APPROVAL_INTERRUPTED", {
+  // The sidecar is dead, so this release path can never be reached while the
+  // crashed sidecar's tail is unknown: callers pass the classified code down.
+  const releaseCrashedTurn = (sessionId: string, crashedTurnId: string, errorCode: string) =>
+    finishTurn(sessionId, "aborted", errorCode, {
       turnId: crashedTurnId,
     });
 
@@ -132,6 +149,10 @@ export function createSidecarRuntime({
   const settleCrashedSession = async (
     sessionId: string,
     crashedTurnId: string,
+    // Classified by the caller from the dead sidecar's stderr tail: the
+    // durable turn row names the real failure instead of an unrelated
+    // plan-approval code (issue #1077).
+    errorCode: string,
   ): Promise<void> => {
     const executionId = approvedExecutionIdsBySession.get(sessionId);
     if (runtimeState.host) {
@@ -140,7 +161,7 @@ export function createSidecarRuntime({
     // A newer turn may own the session by now; this cleanup is the old one's.
     // It must still not leave the crashed turn's records behind.
     if (activeTurns.get(sessionId) !== crashedTurnId) {
-      await releaseCrashedTurn(sessionId, crashedTurnId);
+      await releaseCrashedTurn(sessionId, crashedTurnId, errorCode);
       return;
     }
     // No final row is coming from a dead sidecar: keep whatever the reply had
@@ -151,11 +172,11 @@ export function createSidecarRuntime({
     // so it is reached only for the turn that still owns the session, and it is
     // called synchronously right after this check: no await in between.
     if (activeTurns.get(sessionId) !== crashedTurnId) {
-      await releaseCrashedTurn(sessionId, crashedTurnId);
+      await releaseCrashedTurn(sessionId, crashedTurnId, errorCode);
       return;
     }
     inflightCheckpointer.settle(sessionId);
-    await finishTurn(sessionId, "aborted", "PLAN_APPROVAL_INTERRUPTED", {
+    await finishTurn(sessionId, "aborted", errorCode, {
       recoverInflight: true,
       turnId: crashedTurnId,
     });
@@ -187,6 +208,7 @@ export function createSidecarRuntime({
           startedAt: envelope.ts,
           turnId: envelope.turnId,
           parentToolCallId: envelope.parentToolCallId,
+          nestedParentToolCallId: envelope.nestedParentToolCallId,
           agentName: envelope.agentName,
         });
       } else if (event.type === "tool_end") {
@@ -209,6 +231,7 @@ export function createSidecarRuntime({
             turnId: envelope.turnId ?? started?.turnId,
             toolCallId: event.toolCallId,
             parentToolCallId: started?.parentToolCallId,
+            nestedParentToolCallId: started?.nestedParentToolCallId,
             agentName: started?.agentName,
             ...(resultCode ? { code: resultCode } : {}),
             data: {
@@ -235,6 +258,36 @@ export function createSidecarRuntime({
         } satisfies AgentEventEnvelope);
       }
     }
+    if (method === "agent.diagnostic") {
+      const diagnostic = params as {
+        kind?: unknown;
+        sessionId?: unknown;
+        turnId?: unknown;
+        requestId?: unknown;
+        data?: unknown;
+      };
+      if (
+        (diagnostic.kind === "compaction_failure" || diagnostic.kind === "compaction_shape") &&
+        typeof diagnostic.sessionId === "string" &&
+        typeof diagnostic.requestId === "string" &&
+        diagnostic.data && typeof diagnostic.data === "object"
+      ) {
+        const isFailure = diagnostic.kind === "compaction_failure";
+        logger.app(
+          "session",
+          isFailure ? "warn" : "info",
+          isFailure ? "context compaction failed" : "context compaction request shape",
+          {
+            sessionId: diagnostic.sessionId,
+            ...(typeof diagnostic.turnId === "string" ? { turnId: diagnostic.turnId } : {}),
+            requestId: diagnostic.requestId,
+            event: isFailure ? "session.compaction.failed" : "session.compaction.request_shape",
+            data: diagnostic.data,
+          },
+        );
+      }
+      return;
+    }
     // permissions.request reaches the renderer once, via wireHost; the
     // sidecar no longer relays it (agent-sidecar.setHost filters it out).
   });
@@ -252,6 +305,7 @@ export function createSidecarRuntime({
         turnId: tool.turnId,
         toolCallId: tool.toolCallId,
         parentToolCallId: tool.parentToolCallId,
+        nestedParentToolCallId: tool.nestedParentToolCallId,
         agentName: tool.agentName,
         data: {
           toolName: tool.toolName,
@@ -263,6 +317,11 @@ export function createSidecarRuntime({
         },
       });
     }
+    // Classify the exit once, from the child's own stderr tail, and carry the
+    // verdict into every settlement and log line below: a heap-exhaustion death
+    // must not read as an unrelated plan-approval interruption (issue #1077).
+    const crash = classifySidecarCrash(stderrTail);
+    const crashErrorCode = sidecarCrashErrorCode(crash.kind);
     // A sidecar crash closes live approval waiters before the replacement
     // sidecar starts. This prevents an old renderer response from waking a
     // dead runtime and records the durable turn as interrupted.
@@ -272,7 +331,7 @@ export function createSidecarRuntime({
       // late cleanup must not settle or abort that newer turn.
       const crashedTurnId = activeTurns.get(sessionId);
       if (!crashedTurnId) continue;
-      void settleCrashedSession(sessionId, crashedTurnId).catch((error: unknown) => {
+      void settleCrashedSession(sessionId, crashedTurnId, crashErrorCode).catch((error: unknown) => {
         // The crash handler cannot await this and the sidecar is already gone:
         // log the failure instead of leaving the rejection unhandled.
         logger.app("runtime", "warn", "crashed-turn settlement failed", {
@@ -289,7 +348,13 @@ export function createSidecarRuntime({
       );
     }
     logger.app("runtime", "error", "agent sidecar exited unexpectedly", {
-      data: { exitCode: code, signal, stderrTail },
+      data: {
+        exitCode: code,
+        signal,
+        stderrTail,
+        crashKind: crash.kind,
+        ...(crash.marker ? { crashMarker: crash.marker } : {}),
+      },
     });
     sendToRenderer(IPC.event.hostStatus, {
       ok: false,
@@ -303,20 +368,41 @@ export function createSidecarRuntime({
 
   const s = new AgentSidecar((text) => logger.child("agent", text));
   wireSidecar(s);
-  s.setProjectInstructionResolver(async ({ projectPath, path }) => {
+  registerImageTools(s, mirrorCoding.images, () => runtimeState.host);
+  // The directory a session's file tools work in: its isolated worktree
+  // (ADR 0329), resolved by host-core from its own registry, or its project.
+  const sessionFileRoot = async (sessionId: string): Promise<string | null> => {
+    const host = runtimeState.host;
+    if (!host) return null;
+    const res = await host.call<{
+      session: { projectPath?: string; worktree?: unknown } | null;
+    }>("session.get", { id: sessionId });
+    if (res?.session?.worktree) {
+      const location = await host.call<{ path?: string }>("worktree.location", { sessionId });
+      return location.path?.trim() || null;
+    }
+    return res?.session?.projectPath?.trim() || null;
+  };
+  s.setProjectInstructionResolver(async ({ sessionId, projectPath, path }) => {
     // The root is registered by Electron main from the host-owned session
     // record. The sidecar can provide a target path, never an arbitrary root.
-    const instructions = await loadInstructionChain(projectPath, path);
+    const instructions = projectPath?.startsWith("remote-project:")
+      ? await loadInstructionChain(undefined) : await loadInstructionChain(projectPath, path);
     if (!projectPath || !runtimeState.host) return instructions;
+    // An isolated session registers its worktree as the root (ADR 0329); the
+    // group context stays keyed by the session's project, and the group's
+    // other roots are not advertised inside the worktree.
+    const project = sessionProjects.get(sessionId) ?? projectPath;
+    const isolated = project !== projectPath;
     try {
       const result = await runtimeState.host.call<{
         context?: {
           roots?: Array<{ path?: string }>;
           instructions?: string;
         } | null;
-      }>("project.group.context", { path: projectPath });
+      }>("project.group.context", { path: project });
       const roots = result.context?.roots ?? [];
-      const rootGuide = roots.length > 1
+      const rootGuide = !isolated && roots.length > 1
         ? [
             `Primary root: ${roots[0]?.path ?? projectPath}`,
             ...roots.slice(1).map((root) => `Additional root: ${root.path ?? ""}`),
@@ -387,7 +473,7 @@ export function createSidecarRuntime({
         sessionId: String(params.sessionId ?? ""),
         content: String(params.content ?? ""),
         ...(typeof params.idempotencyKey === "string" ? { idempotencyKey: params.idempotencyKey } : {}),
-      });
+      }, params.notification === "subagent-report");
     },
     queuePrioritize: async (params) => {
       if (!runtimeState.agentHostBridge) throw new Error("agent host unavailable");
@@ -398,32 +484,21 @@ export function createSidecarRuntime({
   s.setVendorAuthResolver(async ({ providerId }) =>
     vendorOAuth.resolveAuth(providerId),
   );
-  s.setSubagentModelResolver(async (key: string) => {
+  s.setSubagentModelResolver(async (key: string, sessionId: string) => {
     const slash = key.indexOf("/");
     if (slash < 1) throw new Error("invalid model key");
     const providerPart = key.slice(0, slash);
     const modelId = key.slice(slash + 1);
     if (!modelId) throw new Error("empty model id");
 
-    const allProviders = await listRuntimeProviders(false);
-    const provider = findSubagentProviderSource(providerPart, allProviders);
-    if (!provider) {
-      throw new Error(subagentProviderLookupError(providerPart, allProviders));
-    }
-
-    // Check if the model has availableForSubagents enabled
-    const binding = provider.models?.find(
-      (m: any) => m.id === modelId || m.id.toLowerCase() === modelId.toLowerCase(),
+    const { provider } = resolveSubagentModelSource(
+      await listRuntimeProviders(false), providerPart, modelId,
     );
-    if (!binding?.availableForSubagents) {
-      throw new Error(
-        `model "${modelId}" on provider "${provider.name}" is not enabled for delegation`,
-      );
-    }
 
     const isVendorAccount = provider.authKind === OAUTH_AUTH_KIND;
+    const isMirrorCoding = provider.authKind === "mirrorcoding";
     let apiKey = "";
-    if (!isVendorAccount && provider.authKind !== "none") {
+    if (!isVendorAccount && !isMirrorCoding && provider.authKind !== "none") {
       const secret = await runtimeState.host!.call<{ value?: string }>(
         "providers.getSecret",
         { id: provider.id },
@@ -433,28 +508,49 @@ export function createSidecarRuntime({
     }
 
     await modelsDevCatalog.ensureLoaded();
+    modelsDevCatalog.configureAccount(provider);
     let catalogModelConfig: Parameters<typeof modelConfigWithBinding>[0];
-    if (isVendorAccount) {
+    let managedBinding: RuntimeProviderConfig | undefined;
+    if (isMirrorCoding) {
+      if (!mirrorCoding) throw new Error("MirrorCoding runtime unavailable");
+      managedBinding = await mirrorCoding.bindingFor(provider.id, modelId, sessionId);
+      apiKey = managedBinding.apiKey;
+      catalogModelConfig = managedBinding.modelConfig ??
+        catalogModelConfigFor(modelsDevCatalog, {
+          vendorKey: provider.vendorKey,
+          baseUrl: managedBinding.baseUrl ?? provider.baseUrl,
+          apiStyle: managedBinding.apiStyle ?? provider.apiStyle,
+          modelId,
+        });
+    } else if (isVendorAccount) {
       const vendorBinding = await vendorOAuth.bindingFor(provider.id, modelId);
       if (!vendorBinding) throw new Error(`vendor "${provider.name}" does not offer "${modelId}"`);
       catalogModelConfig =
-        vendorBinding.modelConfig ??
-        genericModelConfig(modelId, vendorBinding.baseUrl ?? provider.baseUrl ?? "");
+        vendorBinding.modelConfig ?? catalogModelConfigFor(modelsDevCatalog, {
+          providerId: provider.id,
+          vendorKey: provider.vendorKey,
+          baseUrl: vendorBinding.baseUrl ?? provider.baseUrl,
+          apiStyle: vendorBinding.apiStyle ?? provider.apiStyle,
+          modelId,
+        });
     } else {
-      const model = modelsDevCatalog.findModel({
+      catalogModelConfig = catalogModelConfigFor(modelsDevCatalog, {
+        providerId: provider.id,
         vendorKey: provider.vendorKey,
         baseUrl: provider.baseUrl,
+        apiStyle: provider.apiStyle,
         modelId,
       });
-      catalogModelConfig = model
-        ? modelConfigFromModelsDev(model, provider.baseUrl)
-        : genericModelConfig(modelId, provider.baseUrl ?? "");
     }
-    const { modelConfig, capabilities } = effectiveSubagentModelConfig(
-      provider,
-      modelId,
-      catalogModelConfig,
-    );
+    const { modelConfig, capabilities } = managedBinding
+      ? {
+          modelConfig: managedBinding.modelConfig ?? catalogModelConfig,
+          capabilities: {
+            supportsReasoning: managedBinding.supportsReasoning,
+            supportedThinkingLevels: managedBinding.supportedThinkingLevels,
+          },
+        }
+      : effectiveSubagentModelConfig(provider, modelId, catalogModelConfig);
 
     return {
       id: provider.id,
@@ -463,9 +559,14 @@ export function createSidecarRuntime({
       modelId,
       apiKey,
       ...(provider.authKind ? { authKind: provider.authKind } : {}),
-      ...(provider.apiStyle ? { apiStyle: provider.apiStyle } : {}),
+      ...(managedBinding ? { fastAvailable: managedBinding.fastAvailable === true } : {}),
+      ...(managedBinding?.mirrorCodingGroupId !== undefined ? { mirrorCodingGroupId: managedBinding.mirrorCodingGroupId } : {}),
+      ...(managedBinding?.baseUrl ?? provider.baseUrl ? { baseUrl: managedBinding?.baseUrl ?? provider.baseUrl } : {}),
+      ...(managedBinding?.apiStyle ?? provider.apiStyle ? { apiStyle: managedBinding?.apiStyle ?? provider.apiStyle } : {}),
+      ...(isMirrorCoding ? { headers: { ...(provider.headers ?? {}), ...(managedBinding?.headers ?? {}) } } : {}),
       supportsReasoning: capabilities.supportsReasoning,
       supportedThinkingLevels: [...capabilities.supportedThinkingLevels],
+      ...(managedBinding?.temperature !== undefined ? { temperature: managedBinding.temperature } : {}),
       ...(modelConfig ? { modelConfig } : {}),
     };
   });
@@ -474,6 +575,14 @@ export function createSidecarRuntime({
   s.setLocalTool("GenerateImages", createImageGenerationTool({
     dataDir,
     getHost: () => runtimeState.host,
+    mirrorCoding,
+    resolveAuth: providerId => vendorOAuth.resolveAuth(providerId),
+    resolveImageModel: async (provider, modelId) => {
+      await modelsDevCatalog.ensureLoaded();
+      return modelsDevCatalog.findModelOfType("image", {
+        providerId: provider.id, vendorKey: provider.vendorKey, baseUrl: provider.baseUrl, modelId,
+      });
+    },
     // Fake-IP tolerance belongs to the network policy, not to the proxy switch.
     allowFakeIp: () => relaxedNetworkPolicyEnabled(),
   }));
@@ -486,30 +595,25 @@ export function createSidecarRuntime({
         content: "BrowserPreview: `path` is required.",
       };
     }
-    let root: string | null = null;
+    let roots: readonly string[];
     try {
-      const res = (await runtimeState.host?.call("session.get", { id: sessionId })) as
-        | { session: { projectPath?: string } | null }
-        | undefined;
-      root = res?.session?.projectPath?.trim() || null;
-    } catch {
-      root = null;
-    }
-    if (!root) {
+      roots = await browserHost.getFileRoots(sessionId);
+    } catch (error) {
       return {
         ok: false,
         isError: true,
-        content: "BrowserPreview: no workspace is open.",
+        content: `BrowserPreview: ${error instanceof Error ? error.message : String(error)}`,
       };
     }
-    if (!resolveLocalFile(raw, root)) {
+    const file = roots.map((root) => resolveLocalFile(raw, root)).find((path) => path !== null);
+    if (!file) {
       return {
         ok: false,
         isError: true,
-        content: `BrowserPreview: "${raw}" does not resolve to an existing file inside the workspace.`,
+        content: `BrowserPreview: "${raw}" does not resolve to an existing file inside this session's project or scratch directory.`,
       };
     }
-    const preview = await browserHost.previewWorkspaceFile(sessionId, raw, root);
+    const preview = await browserHost.previewFile();
     if (!preview.ok) {
       return {
         ok: false,
@@ -519,11 +623,11 @@ export function createSidecarRuntime({
     }
     sendToRenderer(IPC.event.browserPreview, {
       sessionId,
-      path: raw,
+      path: file,
     });
     return {
       ok: true,
-      content: `Previewing ${raw} in the work-panel Browser plugin. Live reload is active — subsequent edits to the file or sibling assets re-render automatically.`,
+      content: `Requested a new Browser tab for ${raw}. Once loaded, live reload updates the page when the file or sibling assets change.`,
     };
   });
   // Plugin skills (D174): the model loads a declared skill document by id.
@@ -540,16 +644,17 @@ export function createSidecarRuntime({
     }
     const projectPath = sessionProjects.get(sessionId) ?? null;
     try {
+      await assertBuiltinSkillEnabled(id, disabledBuiltinSkills);
       // Bundled skills answer first; they are not owned by any plugin. A user
       // skill is looked up next, and only then a plugin's — the ids cannot
       // collide, since a plugin skill id always carries a `<pluginId>/` prefix.
-      const skill =
+      const skill: LoadedSkillDocument =
         loadBuiltinSkillBody(id) ??
         (await loadUserSkillBody(id, projectPath)) ??
         plugins.loadSkillBody(id);
       return {
         ok: true,
-        content: `# Skill: ${skill.name} (${skill.id})\n\n${skill.body}`,
+        content: formatSkillToolContent(skill),
       };
     } catch (error) {
       const userIds = (await activeUserSkills(projectPath ?? undefined)).map(
@@ -574,10 +679,7 @@ export function createSidecarRuntime({
   registerPluginDevTools(s, {
     resolveWorkspace: async (sessionId) => {
       try {
-        const res = (await runtimeState.host?.call("session.get", { id: sessionId })) as
-          | { session: { projectPath?: string } | null }
-          | undefined;
-        return res?.session?.projectPath?.trim() || null;
+        return await sessionFileRoot(sessionId);
       } catch {
         return null;
       }
@@ -607,6 +709,7 @@ export function createSidecarRuntime({
     hostBinary: runtimeState.host?.binaryPath,
     dataDir,
     networkProxy: currentNetworkProxy(),
+    systemProxyRelayUrl: currentSystemProxyRelayUrl(),
   });
   logger.app("runtime", "info", "agent sidecar configured");
   };

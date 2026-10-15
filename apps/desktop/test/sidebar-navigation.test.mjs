@@ -30,9 +30,8 @@ test("home sidebar exposes only the supported destination entries", () => {
   assert.match(sidebarSource, /data-nav="home"/);
   assert.match(sidebarSource, /data-nav="plugins"/);
   assert.doesNotMatch(sidebarSource, /data-nav="projects"/);
-  assert.doesNotMatch(sidebarSource, /data-nav="pulls"/);
   assert.match(sidebarSource, /data-nav="scheduled"/);
-  assert.doesNotMatch(sidebarSource, /t\("nav\.(?:pullRequests|scheduled)"\)/);
+  assert.doesNotMatch(sidebarSource, /t\("nav\.scheduled"\)/);
 });
 
 test("sidebar brand returns to the chat home", () => {
@@ -176,7 +175,7 @@ test("sidebar section toolbars open create actions from context menus", () => {
   assert.match(sidebarSource, /addEventListener\("pointerdown"/);
 });
 
-test("sidebar floating menus open to the anchor's right", () => {
+test("sidebar floating menus stay anchored to triggers and pointer positions", () => {
   const triggerPlacement = sidebarSource.match(
     /const placeMenu = useCallback\([\s\S]*?\n  }, \[\]\);/,
   )?.[0] ?? "";
@@ -184,14 +183,17 @@ test("sidebar floating menus open to the anchor's right", () => {
     /const placeMenuAtPoint = useCallback\([\s\S]*?\n  }, \[\]\);/,
   )?.[0] ?? "";
 
+  assert.match(triggerPlacement, /const anchor = \{ top: rect\.top, bottom: rect\.bottom \}/);
+  assert.match(triggerPlacement, /placeSidebarFloatingMenuTop\(/);
   assert.match(triggerPlacement, /left:\s*Math\.max\(/);
   assert.match(triggerPlacement, /rect\.right \+ 4/);
-  assert.doesNotMatch(triggerPlacement, /window\.innerWidth/);
-  assert.doesNotMatch(triggerPlacement, /right:\s*Math\.max/);
-  assert.match(pointPlacement, /left:\s*Math\.max\(/);
+  assert.match(pointPlacement, /const anchor = \{ top: y, bottom: y \}/);
+  assert.match(pointPlacement, /placeSidebarFloatingMenuTop\(/);
   assert.match(pointPlacement, /x \+ 4/);
-  assert.doesNotMatch(pointPlacement, /window\.innerWidth/);
   assert.match(sidebarSource, /placeMenuAtPoint\(event\.clientX, event\.clientY\)/);
+  assert.match(sidebarSource, /menu\.getBoundingClientRect\(\)\.height/);
+  assert.match(sidebarSource, /new ResizeObserver\(reposition\)/);
+  assert.equal((sidebarSource.match(/ref=\{floatingMenuRef\}/g) ?? []).length, 3);
   assert.match(sidebarSource, /left: menuPosition\.left/);
   assert.doesNotMatch(sidebarSource, /right: menuPosition\.right/);
 });
@@ -205,6 +207,8 @@ test("portaled sort menu does not stretch to the viewport edge", () => {
 
   assert.match(basePopoverRule, /position:\s*fixed;/);
   assert.doesNotMatch(basePopoverRule, /position:\s*absolute;/);
+  assert.match(basePopoverRule, /max-height:\s*min\(360px,\s*calc\(100vh - 16px\)\);/);
+  assert.match(basePopoverRule, /overflow-y:\s*auto;/);
   assert.match(floatingPopoverRule, /top:\s*auto;/);
   assert.match(floatingPopoverRule, /right:\s*auto;/);
   assert.match(globalStyles, /\.sidebar-floating-menu\s*\{[^}]*width:\s*max-content;/s);
@@ -249,12 +253,14 @@ test("project rows expose folder actions and full-path hover", () => {
   assert.doesNotMatch(sidebarSource, /api\.openSessionFolder\(/);
   assert.match(
     sidebarSource,
-    /className="sidebar-session-group-title project-toggle"[\s\S]*?tooltip=\{entry\.path\}[\s\S]*?tooltipDelayMs=\{500\}[\s\S]*?aria-describedby=\{`\$\{projectId\}-path-description`\}/,
+    /className="sidebar-session-group-title project-toggle"[\s\S]*?tooltip=\{entry\.displayPath \?\? entry\.path\}[\s\S]*?tooltipDelayMs=\{500\}[\s\S]*?aria-describedby=\{`\$\{projectId\}-path-description`\}/,
   );
   assert.match(sidebarSource, /<TooltipButton/);
   assert.match(globalStyles, /\.ui-tooltip-path\s*\{[^}]*width:\s*max-content/);
   assert.match(globalStyles, /\.ui-tooltip-path\s*\{[^}]*max-width:\s*min\(420px,\s*calc\(100vw - 16px\)\)/);
-  assert.match(sidebarSource, /className="sr-only">\s*\{entry\.path\}/);
+  // The hover text and its accessible description name the path the project
+  // really lives at: the remote workspace path for a remote project.
+  assert.match(sidebarSource, /className="sr-only">\s*\{entry\.displayPath \?\? entry\.path\}/);
 });
 
 test("sidebar row menus omit project reassignment and switching actions", () => {
@@ -267,15 +273,16 @@ test("sidebar row menus omit project reassignment and switching actions", () => 
   );
 });
 
-test("session rows use the hover card instead of a native title tooltip", () => {
-  const sessionMain = sidebarSource.match(
-    /className="thread-item-main"[\s\S]*?<\/button>/,
-  )?.[0] ?? "";
+test("session title buttons use hover cards without native title tooltips", () => {
+  const sessionMainStart = sidebarSource.indexOf('className="thread-item-main"');
+  const sessionMainEnd = sidebarSource.indexOf(">\n          {sessionPinned", sessionMainStart);
+  const sessionMain = sessionMainStart >= 0 && sessionMainEnd >= 0
+    ? sidebarSource.slice(sessionMainStart, sessionMainEnd)
+    : "";
 
   assert.match(sessionMain, /showSessionHoverCard\(/);
-  assert.doesNotMatch(sessionMain, /title=\{taskTitle\(session\.title\)\}/);
   assert.doesNotMatch(sessionMain, /\btitle=\{/);
-  assert.match(hoverSource, /className="sidebar-session-hover-card"/);
+  assert.match(hoverSource, /className="sidebar-session-hover-card selectable"/);
   assert.match(hoverSource, /className="sidebar-session-hover-card-title"/);
   assert.match(sessionMain, /onFocusCapture=/);
   assert.match(sessionMain, /aria-describedby=/);
@@ -297,7 +304,7 @@ test("session hover cards expose readable models and keyboard-navigable session 
   assert.match(hoverSource, /summary\.createdSessions\.slice\(0, 8\)/);
   assert.match(hoverSource, /type="button"/);
   assert.match(hoverSource, /onClick=\{\(\) => openSessionReference/);
-  assert.match(hoverSource, /onFocusCapture=\{keepVisible\}/);
+  assert.match(hoverSource, /useHoverCardSelection\(elementRef, keepVisible, scheduleHide, registerDismissGuard\)/);
   assert.match(hoverHookSource, /setTimeout\(\(\) => \{[\s\S]*?hide\(\);[\s\S]*?\}, 160\)/);
   assert.match(globalStyles, /\.sidebar-session-hover-card\s*\{[\s\S]*?pointer-events:\s*auto;/);
   assert.match(globalStyles, /\.sidebar-session-hover-card-session-link:focus-visible\s*\{[\s\S]*?outline:/);

@@ -101,6 +101,15 @@ test("the hard boundary is enforced by the host, with a model-side escape hatch"
     /checkpoint truncated: this message crossed the retained context budget/,
   );
   assert.match(runtime, /pendingOverflow/);
+  assert.match(runtime, /overflowRecoveryInProgress/);
+  assert.match(
+    runtime,
+    /const canRecoverOverflow =[\s\S]*?status: "streaming"[\s\S]*?message_update[\s\S]*?this\.pendingOverflow = true;/,
+  );
+  assert.match(
+    runtime,
+    /CONTEXT_COMPACTION_FAILED[\s\S]*?finalizeCurrentAssistant\("error", error\)/,
+  );
   assert.match(runtime, /runCompaction\(\s*"overflow",\s*true,\s*"active_turn",?\s*\)/);
   assert.match(runtime, /fallback: "retained_tail"/);
   // Codex's tool, verbatim and parameterless, plus its two-tier reminder.
@@ -114,12 +123,11 @@ test("the hard boundary is enforced by the host, with a model-side escape hatch"
   assert.match(runtime, /function contextFallbackReminder\(/);
   assert.match(runtime, /contextReminderClaimed/);
   assert.match(runtime, /contextFallbackReminderClaimed/);
-  // pi 0.86 carries the canonical system prompt in the transcript. The
-  // reminder is appended as a per-turn system message, not only as the legacy
-  // AgentContext.systemPrompt field.
+  // The reminder is appended as a replaceable system section so compaction
+  // can expire it without rewriting earlier instructions.
   assert.match(
     runtime,
-    /messages: \[\s*\.\.\.context\.messages,\s*\{\s*role: "system",\s*content: reminder,/,
+    /messages: \[\s*\.\.\.context\.messages,\s*\{\s*role: "system",\s*content: "",\s*sections: \{ \[CONTEXT_BUDGET_SECTION\]: reminder \}/,
   );
   assert.match(hostPermissions, /"new_context"/);
 });
@@ -154,11 +162,11 @@ test("a delegate gets the session's turn-boundary budget protection (ADR 0299)",
   assert.match(runtime, /budget: contextBudgetLimitsFor\(model\)/);
   assert.match(delegationHistory, /truncateSeededMessages/);
   assert.match(delegationHistory, /\.\.\.message, content, stopReason: "stop"/);
-  // The compaction itself uses pi-agent-core's primitives, the session's
+  // The compaction itself uses the runtime-owned preparation, the session's
   // retention rule, and the degradation ladder of decision 4.
   assert.match(subagentContext, /prepareCompaction\(/);
   assert.match(subagentContext, /generateSummaryWithUsage\(/);
-  assert.match(subagentContext, /contextBudgetFor\(input\.model/);
+  assert.match(subagentContext, /contextBudgetFor\(model,/);
   assert.match(subagentContext, /delegateRetentionMode/);
   assert.match(subagentContext, /\? "active_turn"\s*: "completed_turn"/);
   assert.match(subagentContext, /degradedDelegateMessages/);
@@ -356,7 +364,7 @@ test("the transcript shows one row per compaction, the inspector the newest", ()
   assert.match(runtime, /checkpointDetailsWithGeneration/);
   assert.match(runtime, /mark: contextCompactionMark\(checkpoint\)/);
   // Both the durable records and the live event feed the same per-session list.
-  assert.match(store, /sessionCompactions: Record<string, ContextCompactionMark\[\]>/);
+  assert.match(store, /sessionCompactions: Record<string, \(ContextCompactionMark & \{ summary\?: string \}\)\[\]>/);
   assert.match(store, /rememberSessionCompactions\(id, detail\.session\)/);
   assert.match(store, /event\.type === "compaction_end" && event\.ok && event\.mark/);
   assert.match(store, /withCompactionMark\(/);

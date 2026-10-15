@@ -16,10 +16,11 @@ import {
   type SubagentDefinition,
   type SubagentPreset,
   type SubagentThinkingLevel,
+  type ProviderPublic,
   type UserSubagentRecord,
 } from "@pi-desktop/shared";
 import { useAppStore } from "../../stores/app-store";
-import { Button, Field, HelpIcon, Input, Textarea, TooltipButton, cx, portalOverlay } from "../ui";
+import { Button, Field, HelpIcon, Input, SettingsToggle, Textarea, TooltipButton, cx, portalOverlay } from "../ui";
 import { IconChevronRight, IconFolderOpen, IconX } from "../icons";
 import {
   groupSubagentModelChoices,
@@ -374,16 +375,11 @@ function ManagementScope({
           <HelpIcon label={t("settings.subagentsOnlyGlobal")} />
         </span>
       </div>
-      <button
-        type="button"
-        className={cx("settings-toggle", draft.enabled && "on")}
-        role="switch"
-        aria-checked={draft.enabled}
-        aria-label={t("settings.enableCapability", { name: draft.name || draft.id })}
-        onClick={() => setDraft({ ...draft, enabled: !draft.enabled })}
-      >
-        <span className="settings-toggle-thumb" />
-      </button>
+      <SettingsToggle
+        checked={draft.enabled}
+        label={t("settings.enableCapability", { name: draft.name || draft.id })}
+        onChange={() => setDraft({ ...draft, enabled: !draft.enabled })}
+      />
     </div>
   );
 }
@@ -400,12 +396,14 @@ function ModelField({
   draft,
   setDraft,
   modelChoices,
+  providers,
   modelGroups,
   orphanModel,
 }: {
   draft: SubagentDraft;
   setDraft: (next: SubagentDraft) => void;
   modelChoices: ReturnType<typeof subagentModelChoices>;
+  providers: readonly ProviderPublic[];
   modelGroups: ReturnType<typeof groupSubagentModelChoices>;
   orphanModel: string | null;
 }) {
@@ -473,6 +471,7 @@ function ModelField({
         primary={draft.model}
         values={draft.fallbackModels}
         choices={modelChoices}
+        providers={providers}
         onChange={(fallbackModels) => setDraft({ ...draft, fallbackModels })}
       />
     </>
@@ -486,6 +485,7 @@ function AdvancedFields({
   draft,
   setDraft,
   modelChoices,
+  providers,
   modelGroups,
   orphanModel,
 }: {
@@ -494,6 +494,7 @@ function AdvancedFields({
   draft: SubagentDraft;
   setDraft: (next: SubagentDraft) => void;
   modelChoices: ReturnType<typeof subagentModelChoices>;
+  providers: readonly ProviderPublic[];
   modelGroups: ReturnType<typeof groupSubagentModelChoices>;
   orphanModel: string | null;
 }) {
@@ -515,6 +516,7 @@ function AdvancedFields({
           draft={draft}
           setDraft={setDraft}
           modelChoices={modelChoices}
+          providers={providers}
           modelGroups={modelGroups}
           orphanModel={orphanModel}
         />
@@ -786,6 +788,7 @@ export function SubagentEditorSheet({
             draft={draft}
             setDraft={setDraft}
             modelChoices={modelChoices}
+            providers={providers}
             modelGroups={modelGroups}
             orphanModel={orphanModel}
           />

@@ -1,8 +1,9 @@
 import i18n from "i18next";
+import { isRemoteSession, sessionAllows } from "../../lib/remote-session-safety";
 import type {
-  ReviewRollbackResult,
   UiMessage,
 } from "@pi-desktop/shared";
+import { isRenderableAttachment } from "@pi-desktop/shared";
 import { api } from "../../lib/api";
 import { resolveComposerSmartStop } from "../../lib/composer-smart-stop";
 import {
@@ -29,7 +30,6 @@ export type TranscriptSliceDependencies = StoreAccess & {
     state: Pick<AppState, "page" | "activeSessionId">,
     sessionId: string,
   ) => string | null;
-  flushPendingSessionConfiguration: (sessionId: string) => Promise<void>;
 };
 
 export function createTranscriptSlice({
@@ -38,7 +38,6 @@ export function createTranscriptSlice({
   runtime,
   promptAttachmentsFromMessage,
   viewingSessionIdForPrompt,
-  flushPendingSessionConfiguration,
 }: TranscriptSliceDependencies): Pick<
   AppState,
   | "compactContext"
@@ -52,6 +51,11 @@ export function createTranscriptSlice({
   | "rollbackWorkspaceChange"
   | "abort"
 > {
+  const canEdit = () => {
+    const state = get();
+    return sessionAllows(state.sessions.find((session) => session.id === state.activeSessionId)
+      ?? { id: state.activeSessionId ?? "" }, "canEditMessages");
+  };
   return {
     compactContext: async () => {
       const state = get();
@@ -87,6 +91,7 @@ export function createTranscriptSlice({
     },
 
     retryAssistantMessage: async (messageId) => {
+      if (!canEdit()) return;
       const prepared = await prepareTranscriptAction({ get, set }, runtime, messageId);
       const state = get();
       if (!prepared || state.activeSessionId !== prepared.activeSessionId || state.isRunning) return;
@@ -111,6 +116,7 @@ export function createTranscriptSlice({
     },
 
     prepareUserMessageEdit: async (messageId, signal) => {
+      if (!canEdit()) return null;
       const prepared = await prepareTranscriptAction({ get, set }, runtime, messageId, signal);
       const state = get();
       if (!prepared || state.activeSessionId !== prepared.activeSessionId || state.isRunning) return null;
@@ -119,6 +125,7 @@ export function createTranscriptSlice({
     },
 
     editUserMessage: async (messageId, content, attachments) => {
+      if (!canEdit()) return false;
       const prepared = await prepareTranscriptAction({ get, set }, runtime, messageId);
       const state = get();
       if (!prepared || state.activeSessionId !== prepared.activeSessionId || state.isRunning) return false;
@@ -144,14 +151,16 @@ export function createTranscriptSlice({
       const optimisticMessage = optimisticUserMessage(
         crypto.randomUUID(),
         prompt,
-        (attachments ?? state.messages[userIndex].attachments ?? []).map(
-          (attachment) => ({
+        (attachments ?? state.messages[userIndex].attachments ?? [])
+          // A session reference re-resolves from its link text on send; it is
+          // not an optimistic file reference.
+          .filter(isRenderableAttachment)
+          .map((attachment) => ({
             path: attachment.ref,
             name: attachment.name,
             kind: attachment.kind,
             mimeType: attachment.mimeType,
-          }),
-        ),
+          })),
       );
 
       set((current) => ({
@@ -223,6 +232,7 @@ export function createTranscriptSlice({
     },
 
     retryLastPrompt: async () => {
+      if (!canEdit()) return;
       const state = get();
       if (state.isRunning) return;
       const sessionId = state.activeSessionId;
@@ -289,6 +299,7 @@ export function createTranscriptSlice({
     clearError: () => set({ error: null, errorCode: null, errorRetriable: null }),
 
     activateMessageRevision: async (rootUserId, revisionIndex) => {
+      if (!canEdit()) return;
       let state = get();
       if (state.isRunning) return;
       const sessionId = state.activeSessionId;
@@ -345,14 +356,17 @@ export function createTranscriptSlice({
     },
 
     deleteMessage: async (messageId) => {
+      if (!canEdit()) return;
       const sessionId = get().activeSessionId;
       if (!sessionId || get().isRunning) return;
+      const liveMessages = get().messages;
       const fullMessages = await runtime.loadFullSessionMessages(sessionId);
       if (!fullMessages || get().activeSessionId !== sessionId) return;
+      const merged = mergeLiveSessionMessages(fullMessages, liveMessages);
       set((current) =>
         current.activeSessionId === sessionId
           ? {
-              messages: fullMessages,
+              messages: merged,
               sessionHistory: {
                 ...current.sessionHistory,
                 [sessionId]: { messageStart: 0, hasMoreBefore: false },
@@ -397,6 +411,7 @@ export function createTranscriptSlice({
     },
 
     rollbackWorkspaceChange: async (messageId, snapshotId) => {
+      if (!canEdit()) return null;
       const state = get();
       const sessionId = state.activeSessionId;
       if (!sessionId || state.isRunning) return null;
@@ -440,7 +455,9 @@ export function createTranscriptSlice({
       const stateBeforeAbort = get();
       const sessionId = stateBeforeAbort.activeSessionId;
       if (!sessionId) return;
-      if (stateBeforeAbort.sessions.find((session) => session.id === sessionId)?.source === "pi-native") {
+      const target = stateBeforeAbort.sessions.find((session) => session.id === sessionId);
+      if (!sessionAllows(target, "canStop")) return;
+      if (target?.source === "pi-native" || isRemoteSession(target)) {
         await api.abort(sessionId);
         runtime.submittedComposerDrafts.delete(sessionId);
         // Bypass in-flight pre-abort detail reads; request settled source state.
@@ -523,7 +540,6 @@ export function createTranscriptSlice({
               // Best effort — the local transcript already reflects the undo.
             }
           }
-          void flushPendingSessionConfiguration(sessionId);
           return;
         }
         set((current) =>
@@ -567,7 +583,6 @@ export function createTranscriptSlice({
         isRunning: false,
         runningSessions: { ...current.runningSessions, [sessionId]: false },
       }));
-      void flushPendingSessionConfiguration(sessionId);
     },
   };
 }

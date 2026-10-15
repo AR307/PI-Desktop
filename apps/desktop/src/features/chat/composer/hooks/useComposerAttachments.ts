@@ -5,11 +5,13 @@ import {
   type DragEvent as ReactDragEvent,
 } from "react";
 import type { TFunction } from "i18next";
+import { parseSessionLinks, sessionLinkSpans } from "@pi-desktop/shared";
 import { materializeDraftSession, useAppStore } from "../../../../stores/app-store";
 import { api } from "../../../../lib/api";
 import {
   HOME_DRAFT_KEY,
   deleteComposerDraft,
+  draftFileReference,
   writeComposerDraft,
 } from "../../../../lib/composer-draft-cache";
 import {
@@ -34,6 +36,7 @@ import type { ComposerDraftController } from "./useComposerDraft";
 
 type UseComposerAttachmentsOptions = {
   inputBlocked: boolean;
+  attachmentsAllowed?: boolean;
   activeSessionId: string | null | undefined;
   draftKey: string;
   largePasteThreshold: number;
@@ -73,6 +76,7 @@ export type ComposerAttachmentsController = {
  */
 export function useComposerAttachments({
   inputBlocked,
+  attachmentsAllowed = true,
   activeSessionId,
   draftKey,
   largePasteThreshold,
@@ -83,7 +87,7 @@ export function useComposerAttachments({
   const pickerInFlight = useRef(false);
   const [dropTargetActive, setDropTargetActive] = useState(false);
   const [droppedDirectories, setDroppedDirectories] = useState<ComposerDropItem[]>([]);
-  const isInputBlocked = inputBlocked || pasting;
+  const isInputBlocked = inputBlocked || pasting || !attachmentsAllowed;
 
   const snapshotReferences = (sourceSessionId: string) =>
     draft.snapshotReferences(sourceSessionId);
@@ -139,7 +143,7 @@ export function useComposerAttachments({
         text: nextText,
         fileReferences: [
           ...previousReferences,
-          ...chips.map((chip) => toDraftReference(chip.reference)),
+          ...chips.map((chip) => draftFileReference(chip.reference)),
         ],
       });
       const currentSessionId = useAppStore.getState().activeSessionId;
@@ -150,14 +154,76 @@ export function useComposerAttachments({
       }
       showToast(t, "chat.filesAttached", { count: chips.length }, "success");
     } catch (error) {
-      showErrorToast(t, error);
+      showErrorToast(error);
     } finally {
       pickerInFlight.current = false;
       setPasting(false);
     }
   };
 
+  /** The chip label for one referenced conversation. */
+  const sessionChipName = (id: string) => {
+    const title = (
+      useAppStore.getState().sessions.find((session) => session.id === id)?.title ?? ""
+    ).trim();
+    return `${t("chat.sessionReference")} · ${title || id.slice(0, 8)}`;
+  };
+
+  /**
+   * A pasted `pi-desktop://session/<id>` link becomes the same inline chip as
+   * any other attachment; the prompt still carries the link text.
+   */
+  const pasteSessionLinks = (text: string) => {
+    const editor = draft.ref.current;
+    const sourceValue = editor ? readEditorValue(editor) : draft.valueRef.current;
+    const { start: selectionStart, end: selectionEnd } = editor
+      ? editorSelectionRange(editor)
+      : { start: sourceValue.length, end: sourceValue.length };
+    const ownerSessionId = activeSessionId ?? "";
+    const previousReferences = snapshotReferences(ownerSessionId);
+    const sessionReferences: ComposerFileReference[] = [];
+    let pasted = text;
+    for (const span of [...sessionLinkSpans(text)].reverse()) {
+      const token = nextChipToken();
+      pasted = pasted.slice(0, span.start) + token + pasted.slice(span.end);
+      sessionReferences.unshift(
+        createFileReference(span.id, sessionChipName(span.id), ownerSessionId, {
+          kind: "session",
+          token,
+        }),
+      );
+    }
+    if (!sessionReferences.length) return;
+    const nextText = sourceValue.slice(0, selectionStart) + pasted + sourceValue.slice(selectionEnd);
+    const nextReferences = [
+      ...previousReferences.map((reference) =>
+        createFileReference(reference.path, reference.name, ownerSessionId, reference),
+      ),
+      ...sessionReferences,
+    ];
+    writeComposerDraft(ownerSessionId || draftKey, {
+      text: nextText,
+      fileReferences: [
+        ...previousReferences,
+        ...sessionReferences.map((reference) => draftFileReference(reference)),
+      ],
+    });
+    draft.applyEditorDraft(nextText, nextReferences, selectionStart + pasted.length);
+  };
+
   const pasteClipboardFiles = async (event: ClipboardEvent<HTMLDivElement>) => {
+    if (!attachmentsAllowed) {
+      event.preventDefault();
+      if (inputBlocked) return;
+      const text = event.clipboardData.getData("text/plain");
+      if (!text) return;
+      if (!insertClipboardText(event.currentTarget, text)) {
+        const current = draft.ref.current ? readEditorValue(draft.ref.current) : draft.valueRef.current;
+        const { start, end } = editorSelectionRange(event.currentTarget);
+        draft.applyEditorDraft(current.slice(0, start) + text + current.slice(end), [], start + text.length);
+      }
+      return;
+    }
     if (isInputBlocked) return;
     const text = event.clipboardData.getData("text/plain");
     const pastedFiles = clipboardFiles(event.clipboardData);
@@ -229,7 +295,7 @@ export function useComposerAttachments({
           text: nextText,
           fileReferences: [
             ...previousReferences,
-            ...chips.map((chip) => toDraftReference(chip.reference)),
+            ...chips.map((chip) => draftFileReference(chip.reference)),
           ],
         });
         const currentSessionId = useAppStore.getState().activeSessionId;
@@ -247,10 +313,18 @@ export function useComposerAttachments({
           "success",
         );
       } catch (error) {
-        showErrorToast(t, error);
+        showErrorToast(error);
       } finally {
         setPasting(false);
       }
+      return;
+    }
+
+    const sessionIds = parseSessionLinks(text);
+    if (sessionIds.length) {
+      event.preventDefault();
+      void api.recordClipboardPaste(text).catch(() => undefined);
+      pasteSessionLinks(text);
       return;
     }
 
@@ -343,7 +417,7 @@ export function useComposerAttachments({
         text: nextText,
         fileReferences: [
           ...previousReferences,
-          ...chips.map((chip) => toDraftReference(chip.reference)),
+          ...chips.map((chip) => draftFileReference(chip.reference)),
         ],
       });
       const currentSessionId = useAppStore.getState().activeSessionId;
@@ -354,7 +428,7 @@ export function useComposerAttachments({
       }
       if (chips.length) showToast(t, "chat.filesAttached", { count: chips.length }, "success");
     } catch (error) {
-      showErrorToast(t, error);
+      showErrorToast(error);
     } finally {
       setPasting(false);
     }
@@ -386,7 +460,7 @@ export function useComposerAttachments({
         if (directory.path) await useAppStore.getState().activateProject(directory.path);
       }
     } catch (error) {
-      showErrorToast(t, error);
+      showErrorToast(error);
     }
   };
 
@@ -427,15 +501,6 @@ export function useComposerAttachments({
   };
 }
 
-function toDraftReference(reference: ComposerFileReference): ComposerDraftSnapshot["fileReferences"][number] {
-  return {
-    path: reference.path,
-    name: reference.name,
-    kind: reference.kind,
-    ...(reference.mimeType ? { mimeType: reference.mimeType } : {}),
-    ...(reference.token ? { token: reference.token } : {}),
-  };
-}
 
 function showToast(
   t: TFunction,
@@ -446,7 +511,7 @@ function showToast(
   useAppStore.getState().showToast(t(key, options), { variant });
 }
 
-function showErrorToast(t: TFunction, error: unknown): void {
+function showErrorToast(error: unknown): void {
   useAppStore
     .getState()
     .showToast(error instanceof Error ? error.message : String(error), { variant: "error" });

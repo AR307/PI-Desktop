@@ -113,6 +113,8 @@ export type FsChatRefMatchKind =
 
 export type FsChatRefMatch = {
   root: FsChatRefRoot;
+  /** The match belongs to this session's scratch, not the wider read-only store. */
+  sessionScratch?: boolean;
   /** POSIX path relative to the matched root. */
   relativePath: string;
   /** Native absolute path of the matched regular file. */
@@ -128,4 +130,6 @@ export type FsChatRefMatch = {
 
 export type FsChatRefResolveResult = {
   match: FsChatRefMatch | null;
+  /** The supplied absolute path is not inside a project, scratch, or attachment root. */
+  reason?: "outside-allowed-roots";
 };

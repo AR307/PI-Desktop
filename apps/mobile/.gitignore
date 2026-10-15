@@ -1,0 +1,14 @@
+dist/
+node_modules/
+android/.gradle/
+android/local.properties
+android/capacitor-cordova-android-plugins/
+android/app/build/
+android/build/
+android/app/src/main/assets/public/
+android/app/src/main/assets/capacitor.config.json
+android/app/src/main/assets/capacitor.plugins.json
+# Capacitor starter examples are generated locally; real user-flow acceptance
+# lives in apps/desktop/test/e2e/mobile.
+android/app/src/test/java/com/getcapacitor/myapp/ExampleUnitTest.java
+android/app/src/androidTest/java/com/getcapacitor/myapp/ExampleInstrumentedTest.java

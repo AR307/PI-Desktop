@@ -36,6 +36,29 @@ Panel chrome contract:
   `top: var(--pi-plugin-titlebar-height, 46px)`. The plugin owns that UI and
   should add `-webkit-app-region: no-drag` to its interactive controls.
 
+## ui-slots-lab
+
+Test plugin for the renderer UI slots (`docs/plugin-plan/`). It puts one
+visible sample in every slot, each marked `data-lab="<slot>[:<side>]"`:
+
+- `userAction` / `assistantAction` items; the assistant bar's right side has
+  four items, so the fourth sits in the ⋯ menu
+- two stacked `entryExtra` blocks under a reply
+- the `toolCard` of its own `lab_probe` tool
+- the `blockRenderer` for `lab.ui-slots:chart` fences (`label,value` lines)
+- `composerControl` controls on both toolbar sides
+
+The samples exercise the contract a person should see working: `plugin.call`
+round trips (`Echo`, `Refuse` → `LAB_REFUSED`, `Stall` →
+`PLUGIN_CALL_TIMEOUT`), `composer.insertText`, a `Crash` control the host
+must contain, `Grow` past the entryExtra collapsed height, and deliberate
+contract failures that hand the block back to the host: `lab_probe`
+with `mode: "crash"`, and a chart whose first line is `crash` or `tall`
+(taller than the 4000px clamp).
+
+Covered by `apps/desktop/test/plugin-ui-slots-lab.test.mjs` and the Electron
+E2E.
+
 ## Planned examples
 
 - `panel-basic`
@@ -57,3 +80,8 @@ Prefer the official warehouse template:
 
 - https://github.com/vastsa/pi-desktop-plugins/tree/main/plugins/demo.workspace-summary
 - Contribution guide: https://github.com/vastsa/pi-desktop-plugins/blob/main/CONTRIBUTING.md
+
+## Fetch redirect probe
+
+[fetch-redirect](fetch-redirect/README.md) is a local-only fixture plugin for
+host-enforced follow/error/manual policies and capability detection.

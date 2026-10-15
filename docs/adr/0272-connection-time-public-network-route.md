@@ -55,8 +55,11 @@ boundary change. This ADR is that change.
    the resolved address itself there, so only `public` passes. An explicit
    `allowFakeIp` setting may additionally permit the `benchmark` placeholder
    class for transparent router/TUN deployments; it never permits any other
-   non-public class. `unknown` covers no route resolver wired at all, a resolver
-   that throws, an empty or unparsable answer, and a list that offers `DIRECT`
+   non-public class. For a direct request whose DNS answer mixes an acceptable
+   address with rejected addresses, the transport may select and pin one
+   acceptable address so the connection cannot use a rejected result (ADR
+   0321). `unknown` covers no route resolver wired at all, a resolver that
+   throws, an empty or unparsable answer, and a list that offers `DIRECT`
    anywhere. Fail closed unless that narrow opt-in is enabled.
 
 4. **The syntactic guard is untouched.** `isSafePublicHttpsUrl` still runs first
@@ -77,15 +80,16 @@ boundary change. This ADR is that change.
 What the guard stopped before this ADR:
 
 - Non-HTTPS, credential-bearing, and non-public-literal URLs — unchanged.
-- A hop whose **local** resolver answers with a private, loopback, link-local,
-  CGNAT, ULA, site-local, multicast, reserved, or documentation address. On a
-  direct route that is the address the app dials, so this was real protection and
-  stays exactly as it was.
+- A hop whose **local** resolver answers only with a private, loopback,
+  link-local, CGNAT, ULA, site-local, multicast, reserved, or documentation
+  address. On a direct route that is the address the app dials, so this was real
+  protection and stays exactly as it was.
 
 What changes:
 
-- **Still stopped:** everything above on `direct` / `unknown`, plus every address
-  class except `benchmark` on `proxied`.
+- **Still stopped:** every refused address when it is the only possible direct
+  target; everything above on `unknown`; plus every address class except
+  `benchmark` on `proxied`.
 - **Weakened, precisely:** on a `proxied` route, a public hostname whose *local*
   answer is inside `198.18.0.0/15` is no longer refused. Consequences:
   - **SSRF to an internal service through the proxy.** If the proxy — or the TUN

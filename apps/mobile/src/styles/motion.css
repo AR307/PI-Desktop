@@ -1,0 +1,44 @@
+/*
+  Motion. Navigation reads spatially: a conversation pushes in from the edge
+  and pops back out; switching tabs cross-fades in place. Durations stay short
+  and decelerate, and every animation collapses under reduced motion.
+*/
+::view-transition-group(root) { animation-duration: var(--m-dur-slow); }
+html[data-nav="push"]::view-transition-old(root) { animation: nav-out-left var(--m-dur-slow) var(--m-ease-spring) both; }
+html[data-nav="push"]::view-transition-new(root) { animation: nav-in-right var(--m-dur-slow) var(--m-ease-spring) both; }
+html[data-nav="pop"]::view-transition-old(root) { animation: nav-out-right var(--m-dur-slow) var(--m-ease-spring) both; z-index: 1; }
+html[data-nav="pop"]::view-transition-new(root) { animation: nav-in-left var(--m-dur-slow) var(--m-ease-spring) both; }
+html[data-nav="tab"]::view-transition-old(root) { animation: fade-out 140ms var(--m-ease-standard) both; }
+html[data-nav="tab"]::view-transition-new(root) { animation: fade-in 200ms var(--m-ease-out) both; }
+
+@keyframes nav-in-right { from { transform: translateX(32%); opacity: 0; } to { transform: none; opacity: 1; } }
+@keyframes nav-out-left { from { transform: none; opacity: 1; } to { transform: translateX(-12%); opacity: 0.4; } }
+@keyframes nav-out-right { from { transform: none; opacity: 1; } to { transform: translateX(32%); opacity: 0; } }
+@keyframes nav-in-left { from { transform: translateX(-12%); opacity: 0.4; } to { transform: none; opacity: 1; } }
+@keyframes fade-in { from { opacity: 0; } to { opacity: 1; } }
+@keyframes fade-out { from { opacity: 1; } to { opacity: 0; } }
+@keyframes rise-in { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+@keyframes drop-in { from { opacity: 0; transform: translateY(-14px) scale(0.98); } to { opacity: 1; transform: none; } }
+@keyframes scale-in { from { opacity: 0; transform: scale(0.92); } to { opacity: 1; transform: none; } }
+@keyframes rotate { to { transform: rotate(360deg); } }
+@keyframes shimmer { to { background-position-x: -200%; } }
+@keyframes pulse-ring { 0% { box-shadow: 0 0 0 0 color-mix(in oklab, var(--m-warning) 55%, transparent); } 70% { box-shadow: 0 0 0 7px transparent; } 100% { box-shadow: 0 0 0 0 transparent; } }
+@keyframes caret-blink { 50% { opacity: 0; } }
+
+/* Without View Transitions, screens still arrive with their direction. */
+.screen-enter-push { animation: nav-in-right var(--m-dur-slow) var(--m-ease-spring) both; }
+.screen-enter-pop { animation: nav-in-left var(--m-dur-slow) var(--m-ease-spring) both; }
+.screen-enter-tab { animation: fade-in var(--m-dur) var(--m-ease-out) both; }
+
+/* First paint of a list: a short, capped stagger. */
+.stagger > * { animation: rise-in var(--m-dur-slow) var(--m-ease-out) both; }
+.stagger > :nth-child(2) { animation-delay: 25ms; }
+.stagger > :nth-child(3) { animation-delay: 50ms; }
+.stagger > :nth-child(4) { animation-delay: 75ms; }
+.stagger > :nth-child(5) { animation-delay: 100ms; }
+.stagger > :nth-child(n + 6) { animation-delay: 120ms; }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { scroll-behavior: auto !important; animation-duration: 0.01ms !important; animation-delay: 0ms !important; animation-iteration-count: 1 !important; transition-duration: 0.01ms !important; }
+  ::view-transition-old(root), ::view-transition-new(root) { animation: none !important; }
+}

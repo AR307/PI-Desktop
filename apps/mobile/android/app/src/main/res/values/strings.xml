@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">PI Mobile</string>
+    <string name="title_activity_main">PI Mobile</string>
+    <string name="package_name">xyz.mirrorcoding.pi.mobile</string>
+    <string name="custom_url_scheme">xyz.mirrorcoding.pi.mobile</string>
+</resources>

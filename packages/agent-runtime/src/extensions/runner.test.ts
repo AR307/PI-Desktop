@@ -11,6 +11,11 @@ import type {
   TrustedExtensionUiRequest,
   TrustedExtensionUiResponse,
 } from "./index.js";
+import {
+  createVirtualModules,
+  setMissingCodingAgentApiReporter,
+} from "./loader.js";
+import { TRUSTED_EXTENSION_KERNEL_VERSION } from "@pi-desktop/shared";
 
 let root: string;
 
@@ -85,6 +90,149 @@ function fakeBridge(
 const flush = () => new Promise((r) => setTimeout(r, 0));
 
 describe("TrustedExtensionRunner", () => {
+  it("keeps the legacy extension version marker tied to its tested shim subset", async () => {
+    const missing: string[] = [];
+    const extensionId = "coding-agent-compat-check";
+    setMissingCodingAgentApiReporter(extensionId, (symbol) => missing.push(symbol));
+    const shim = createVirtualModules({ extensionId })["@earendil-works/pi-coding-agent"] as Record<string, unknown>;
+    const tool = { name: "example" };
+    expect(shim.VERSION).toBe(TRUSTED_EXTENSION_KERNEL_VERSION);
+    expect((shim.defineTool as (value: unknown) => unknown)(tool)).toBe(tool);
+    expect((shim.isBashToolResult as () => boolean)()).toBe(false);
+    expect((shim.isToolCallEventType as (value: unknown) => boolean)("tool_result")).toBe(true);
+    expect((shim.isToolCallEventType as (value: unknown) => boolean)("turn_start")).toBe(false);
+    expect(createVirtualModules({ extensionId: "compat-aliases" })["@mariozechner/pi-coding-agent"])
+      .toBeDefined();
+    expect(createVirtualModules({ extensionId: "compat-aliases" })["@mariozechner/pi-ai/compat"])
+      .toBeDefined();
+    expect(shim.newRuntimeApi).toBeUndefined();
+    expect(missing).toEqual(["newRuntimeApi"]);
+
+    const ext = spec("shim-version", `import { VERSION } from "@earendil-works/pi-coding-agent";
+export default function (pi: any) { pi.setSessionName(VERSION); }
+`);
+    const { bridge, log } = fakeBridge();
+    const runner = new TrustedExtensionRunner({ specs: [ext], bridge });
+    const [report] = await runner.load();
+    expect(report.state).toBe("loaded");
+    expect(log.sessionName).toBe(TRUSTED_EXTENSION_KERNEL_VERSION);
+  });
+
+  it("reports a missing coding-agent named export used through the Jiti loader", async () => {
+    const ext = spec(
+      "missing-coding-agent-export",
+      `import { newSessionApi } from "@earendil-works/pi-coding-agent";
+export default function (pi) { pi.setSessionName(String(newSessionApi)); }
+`,
+    );
+    const { bridge, log } = fakeBridge();
+    const runner = new TrustedExtensionRunner({ specs: [ext], bridge });
+    const [report] = await runner.load();
+
+    expect(report.state).toBe("loaded");
+    expect(log.sessionName).toBe("undefined");
+    expect(runner.getDiagnostics()).toContainEqual(
+      expect.objectContaining({
+        extensionId: ext.id,
+        kind: "unsupported_api",
+        member: "newSessionApi",
+      }),
+    );
+    await runner.dispose();
+  });
+
+  it("chains prompt returns in supplied extension order and handler registration order", async () => {
+    const first = spec("z-first", `export default function (pi) {
+      pi.on("before_agent_start", (e) => ({ systemPrompt: e.systemPrompt + " A" }));
+      pi.on("before_agent_start", (e) => ({ systemPrompt: e.systemPrompt + " B" }));
+    }`);
+    const second = spec("a-second", `export default function (pi) {
+      pi.on("before_agent_start", (e) => ({ systemPrompt: e.systemPrompt + " C" }));
+    }`);
+    const { bridge } = fakeBridge();
+    const runner = new TrustedExtensionRunner({ specs: [first, second], bridge });
+    await runner.load();
+    try {
+      expect(await runner.emitBeforeAgentStart("first", "base")).toBe("base A B C");
+      expect(await runner.emitBeforeAgentStart("second", "base")).toBe("base A B C");
+    } finally {
+      await runner.dispose();
+    }
+  });
+
+  it("keeps the last prompt after missing, malformed, or throwing results and isolated mutations", async () => {
+    const ext = spec("prompt-errors", `export default function (pi) {
+      pi.on("before_agent_start", (e) => ({ systemPrompt: e.systemPrompt + " A" }));
+      pi.on("before_agent_start", (e) => { e.systemPrompt = "unreturned"; });
+      pi.on("before_agent_start", () => ({ systemPrompt: 123 }));
+      pi.on("before_agent_start", () => ({ systemPrompt: undefined }));
+      pi.on("before_agent_start", () => ({}));
+      pi.on("before_agent_start", () => null);
+      pi.on("before_agent_start", () => { throw new Error("fixture failure"); });
+      pi.on("before_agent_start", (e) => ({ systemPrompt: e.systemPrompt + " B" }));
+    }`);
+    const { bridge } = fakeBridge();
+    const runner = new TrustedExtensionRunner({ specs: [ext], bridge });
+    await runner.load();
+    try {
+      expect(await runner.emitBeforeAgentStart("test", "base")).toBe("base A B");
+      expect(runner.getDiagnostics()).toEqual([
+        expect.objectContaining({ kind: "handler_error", member: "before_agent_start", message: "fixture failure" }),
+      ]);
+    } finally {
+      await runner.dispose();
+    }
+  });
+
+  it.each(["replacement", ""])("honors explicit prompt replacement %j before later additions", async (replacement) => {
+    const ext = spec("prompt-replace", `export default function (pi) {
+      pi.on("before_agent_start", (e) => ({ systemPrompt: e.systemPrompt + " A" }));
+      pi.on("before_agent_start", () => ({ systemPrompt: ${JSON.stringify(replacement)} }));
+      pi.on("before_agent_start", (e) => ({ systemPrompt: e.systemPrompt + " B" }));
+    }`);
+    const { bridge } = fakeBridge();
+    const runner = new TrustedExtensionRunner({ specs: [ext], bridge });
+    await runner.load();
+    try {
+      expect(await runner.emitBeforeAgentStart("test", "base")).toBe(`${replacement} B`);
+    } finally {
+      await runner.dispose();
+    }
+  });
+
+  it("discards a timed-out prompt return and its early and late input mutations", async () => {
+    const ext = spec("prompt-timeout", `export default function (pi) {
+      pi.on("before_agent_start", (e) => ({ systemPrompt: e.systemPrompt + " A" }));
+      pi.on("before_agent_start", async (e, ctx) => {
+        e.systemPrompt = "uncommitted";
+        await ctx.modelRegistry.wait;
+        e.systemPrompt = "late";
+        return { systemPrompt: "late" };
+      });
+      pi.on("before_agent_start", (e) => ({ systemPrompt: e.systemPrompt + " B" }));
+    }`);
+    const { bridge } = fakeBridge();
+    let release!: () => void;
+    bridge.modelRegistry = { wait: new Promise<void>((resolve) => { release = resolve; }) };
+    const runner = new TrustedExtensionRunner({ specs: [ext], bridge });
+    await runner.load();
+    vi.useFakeTimers();
+    try {
+      const pending = runner.emitBeforeAgentStart("test", "base");
+      await vi.advanceTimersByTimeAsync(30_000);
+      expect(await pending).toBe("base A B");
+      release();
+      await vi.advanceTimersByTimeAsync(0);
+      expect(await pending).toBe("base A B");
+      expect(runner.getDiagnostics()).toEqual([
+        expect.objectContaining({ kind: "handler_timeout", member: "before_agent_start" }),
+      ]);
+    } finally {
+      release();
+      await runner.dispose();
+    }
+  });
+
   it("retires the command when Main cancels a prompt before the runtime abort arrives", async () => {
     const ext = spec("main-cancel", `export default function (pi) {
       pi.registerCommand("cancel", { handler: async (_args, ctx) => {

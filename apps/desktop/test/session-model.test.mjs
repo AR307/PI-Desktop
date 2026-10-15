@@ -3,7 +3,9 @@ import test from "node:test";
 import {
   inheritedSessionModelBinding,
   lastUsedSessionModel,
+  newConversationModelBinding,
   pinnedSessionModelBinding,
+  recentConversationModel,
   sessionNeedsModelPin,
 } from "../src/lib/session-model.ts";
 
@@ -19,6 +21,63 @@ const providers = [
     models: [{ id: "claude-sonnet" }],
   },
 ];
+
+test("a new conversation prefers the last in-scope session model", () => {
+  assert.deepEqual(
+    newConversationModelBinding({
+      draft: null,
+      latestSession: { providerId: "anthropic", modelId: "claude-sonnet" },
+      settings: { defaultProviderId: "openai", defaultModelId: "gpt-4.1-mini" },
+      providers,
+    }),
+    { providerId: "anthropic", modelId: "claude-sonnet" },
+  );
+  assert.deepEqual(
+    newConversationModelBinding({
+      draft: { providerId: "openai", modelId: "gpt-4.1-mini" },
+      latestSession: { providerId: "anthropic", modelId: "claude-sonnet" },
+      settings: { defaultProviderId: "openai", defaultModelId: "gpt-4.1" },
+      providers,
+    }),
+    { providerId: "openai", modelId: "gpt-4.1-mini" },
+  );
+  assert.deepEqual(
+    newConversationModelBinding({
+      draft: null,
+      latestSession: null,
+      settings: { defaultProviderId: "openai", defaultModelId: "gpt-4.1-mini" },
+      providers,
+    }),
+    { providerId: "openai", modelId: "gpt-4.1-mini" },
+  );
+  assert.deepEqual(
+    recentConversationModel({
+      providerId: "anthropic",
+      modelId: "claude-sonnet",
+    }),
+    { providerId: "anthropic", modelId: "claude-sonnet" },
+  );
+  assert.deepEqual(recentConversationModel(null), {});
+  assert.deepEqual(
+    inheritedSessionModelBinding({
+      draft: recentConversationModel({
+        providerId: "anthropic",
+        modelId: "claude-sonnet",
+      }),
+      settings: { defaultProviderId: "openai", defaultModelId: "gpt-4.1-mini" },
+      providers,
+    }),
+    { providerId: "anthropic", modelId: "claude-sonnet" },
+  );
+  assert.deepEqual(
+    inheritedSessionModelBinding({
+      draft: recentConversationModel(null),
+      settings: { defaultProviderId: "openai", defaultModelId: "gpt-4.1-mini" },
+      providers,
+    }),
+    { providerId: "openai", modelId: "gpt-4.1-mini" },
+  );
+});
 
 test("new sessions snapshot the app default provider and model", () => {
   assert.deepEqual(

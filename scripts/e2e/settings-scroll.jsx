@@ -22,18 +22,47 @@ let settings = {
   language: "en",
   enterToSend: true,
   developerMode: false,
+  networkProxy: { mode: "custom", url: "socks5://10.0.0.8:1080" },
 };
+let updateState = {
+  mode: "in-app",
+  preference: "automatic",
+  defaultPreference: "automatic",
+  automaticSupported: true,
+  manualReminder: false,
+  status: "available",
+  currentVersion: "0.15.8",
+  availableVersion: "0.15.9",
+  releasesUrl: "https://github.com/vastsa/PI-Desktop/releases/latest",
+};
+const updateStateListeners = new Set();
 window.piDesktop = {
-  platform: "darwin", on: () => () => {},
+  platform: "darwin",
+  on(channel, listener) {
+    if (channel === IPC.event.updatesState) updateStateListeners.add(listener);
+    return () => updateStateListeners.delete(listener);
+  },
   async invoke(channel, input) {
     let data;
     switch (channel) {
       case IPC.invoke.pluginScenicThemesDestinations: data = destinations; break;
       case IPC.invoke.settingsGet: data = settings; break;
-      case IPC.invoke.settingsSet: settings = input; data = settings; break;
+      case IPC.invoke.settingsSet:
+        settings = input;
+        data = settings;
+        if (settings.updatePreference === "automatic" || settings.updatePreference === "manual") {
+          updateState = {
+            ...updateState,
+            preference: settings.updatePreference,
+            mode: settings.updatePreference === "automatic" ? "in-app" : "manual",
+          };
+          for (const listener of updateStateListeners) listener(updateState);
+        }
+        break;
       case IPC.invoke.providersList: data = { providers: [] }; break;
       case IPC.invoke.sessionList: data = { sessions: [] }; break;
       case IPC.invoke.appGetOnboarding: data = {}; break;
+      case IPC.invoke.updatesGetState: data = updateState; break;
       case IPC.invoke.configSyncGetState:
         data = {
           configured: false,
@@ -92,37 +121,59 @@ async function setSettingsSearch(value) {
   await settle();
 }
 async function checkCloudSyncVisibility() {
-  await setSettingsSearch("Cloud sync");
-  assert(!navButton("Cloud sync"), "Cloud sync must be absent from search without developer mode");
-  await setSettingsSearch("");
-
-  settings = { ...settings, developerMode: true };
-  flushSync(() => useAppStore.setState({ settings }));
-  await settle();
+  // The isolated renderer is a development build; packaged-build visibility is
+  // asserted by settings-developer-only-destinations.test.mjs.
   await setSettingsSearch("Cloud sync");
   const syncButton = navButton("Cloud sync");
-  assert(syncButton, "Cloud sync must appear in settings search with developer mode");
+  assert(syncButton, "Cloud sync must appear in Settings search");
   assert(
     syncButton.querySelector(".settings-nav-experimental")?.textContent?.trim() === "Experimental",
-    "Cloud sync's rail entry must be marked Experimental",
+    "Cloud sync's rail entry must carry the Experimental badge",
   );
 
   flushSync(() => syncButton.click());
   await settle();
+  assert(useAppStore.getState().settingsTab === "sync", "Cloud sync must open its page");
   assert(
     document.querySelector(".settings-section-title")?.textContent?.includes("Experimental"),
-    "Cloud sync's page title must be marked Experimental",
+    "Cloud sync's page title must carry the Experimental badge",
   );
+  await setSettingsSearch("");
 
+  // Developer mode does not gate Cloud sync or Remote Hosts.
+  settings = { ...settings, developerMode: true };
+  flushSync(() => useAppStore.setState({ settings }));
+  await settle();
+  assert(navButton("Cloud sync"), "Cloud sync must stay in the rail with developer mode on");
   settings = { ...settings, developerMode: false };
   flushSync(() => useAppStore.setState({ settings }));
   await settle();
+  assert(useAppStore.getState().settingsTab === "sync", "Cloud sync must stay selected");
+  assert(navButton("Cloud sync"), "Cloud sync must stay in the rail without developer mode");
+
+  await setSettingsSearch("Remote hosts");
+  const remoteButton = navButton("Remote hosts");
+  assert(remoteButton, "Remote hosts must appear in Settings search");
   assert(
-    useAppStore.getState().settingsTab === "general",
-    "A Cloud sync page hidden by developer mode must return to General",
+    remoteButton.querySelector(".settings-nav-experimental")?.textContent?.trim() === "Experimental",
+    "Remote hosts must carry the Experimental badge",
   );
-  assert(!navButton("Cloud sync"), "Cloud sync must leave the rail when developer mode is off");
+  flushSync(() => remoteButton.click());
+  await settle();
+  assert(useAppStore.getState().settingsTab === "remoteHosts", "Remote hosts must open");
+  assert(
+    document.querySelector(".settings-section-title")?.textContent?.includes("Experimental"),
+    "Remote hosts page title must carry the Experimental badge",
+  );
   await setSettingsSearch("");
+
+  for (const developerMode of [true, false]) {
+    settings = { ...settings, developerMode };
+    flushSync(() => useAppStore.setState({ settings }));
+    await settle();
+    assert(useAppStore.getState().settingsTab === "remoteHosts");
+    assert(navButton("Remote hosts"), "Remote hosts must stay visible in every developer mode");
+  }
 }
 async function scroll() {
   pane().scrollTop = 220;
@@ -130,6 +181,51 @@ async function scroll() {
   assert(pane().scrollTop > 0, "Destination must be scrollable for this check");
   return pane().scrollTop;
 }
+async function exerciseUpdatePreference() {
+  await select("Info");
+  await settle();
+  const trigger = () => document.querySelector('button[aria-label="Update behavior"]');
+  assert(trigger() instanceof HTMLButtonElement, "Update behavior selector must render");
+  assert(trigger().textContent?.includes("Automatic"), "Installed package defaults to Automatic");
+  const updateActionLabels = [...document.querySelectorAll(".about-update-actions button")]
+    .map((button) => button.textContent?.trim() ?? "");
+  assert(
+    updateActionLabels.some((label) => label.includes("Check for updates")),
+    `Automatic mode keeps the existing update check action: ${updateActionLabels.join(", ")}`,
+  );
+
+  async function choosePreference(label, value) {
+    const selectTrigger = trigger();
+    assert(selectTrigger instanceof HTMLButtonElement, "Update selector trigger must remain mounted");
+    flushSync(() => selectTrigger.click());
+    await settle();
+    const option = [...document.querySelectorAll('[role="option"]')]
+      .find((candidate) => candidate.textContent?.trim() === label);
+    assert(option instanceof HTMLButtonElement, `Missing update preference option: ${label}`);
+    flushSync(() => option.click());
+    await settle();
+    assert(settings.updatePreference === value, `${label} preference must persist through settings IPC`);
+    assert(useAppStore.getState().settings?.updatePreference === value, `${label} preference must update the renderer store`);
+    assert(updateState.preference === value, `${label} preference must update the shared update state`);
+  }
+
+  await choosePreference("Manual", "manual");
+  assert(trigger().textContent?.includes("Manual"), "Manual must become the selected value");
+  assert(
+    [...document.querySelectorAll(".about-update-actions button")]
+      .some((button) => button.textContent?.includes("View release")),
+    "Manual mode must offer the release page for an available version",
+  );
+
+  await select("AI");
+  await select("Info");
+  await settle();
+  assert(trigger().textContent?.includes("Manual"), "Manual preference must survive leaving and reopening Info");
+  await choosePreference("Automatic", "automatic");
+  assert(trigger().textContent?.includes("Automatic"), "Automatic must be selectable again");
+  return { updatePreference: settings.updatePreference, updateMode: updateState.mode };
+}
+
 async function exerciseBrazilianPortuguese() {
   await select("General");
   const trigger = document.querySelector(".settings-language-trigger");
@@ -165,9 +261,48 @@ async function exerciseBrazilianPortuguese() {
   assert(selectedLabel?.textContent?.trim() === "Português (Brasil)", "Picker must show the selected native name");
   return { locale: i18n.language, language: settings.language, label: selectedLabel.textContent.trim() };
 }
+async function exerciseProxyDraftRestoration() {
+  await select("General");
+  const urlInput = () => document.querySelector('input[aria-label="Proxy URL"]');
+  const input = urlInput();
+  assert(input instanceof HTMLInputElement, "Custom proxy URL field must render");
+  const rememberedUrl = settings.networkProxy.url;
+  const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set;
+  assert(setter, "Proxy URL input must expose its value setter");
+  setter.call(input, "not-a-proxy");
+  input.dispatchEvent(new Event("input", { bubbles: true }));
+  await settle();
+  urlInput().blur();
+  await settle();
+  assert(settings.networkProxy.url === rememberedUrl, "An invalid draft must not overwrite the saved proxy");
+
+  const chooseMode = async (label) => {
+    const group = document.querySelector('.settings-segment[aria-label="Proxy"]');
+    assert(group, "Proxy mode control must render");
+    const option = [...group.querySelectorAll('[role="radio"]')]
+      .find((candidate) => candidate.textContent?.trim() === label);
+    assert(option instanceof HTMLButtonElement, `Missing proxy mode: ${label}`);
+    flushSync(() => option.click());
+    await settle();
+  };
+
+  await chooseMode("System");
+  assert(settings.networkProxy.mode === "system", "System mode must persist");
+  assert(settings.networkProxy.url === rememberedUrl, "System mode must retain the remembered proxy");
+  await chooseMode("Custom");
+  assert(settings.networkProxy.mode === "custom", "Custom mode must persist on re-entry");
+  assert(urlInput()?.value === rememberedUrl, "Re-entering Custom must restore the remembered URL");
+  assert(settings.networkProxy.url === rememberedUrl, "Re-entry must not replace the saved URL with the default");
+  return { proxyMode: settings.networkProxy.mode, proxyUrl: settings.networkProxy.url };
+}
 window.settingsScrollProbe = async () => {
   await settle();
+  assert(
+    document.activeElement === document.querySelector(".settings-search"),
+    "Mounting Settings must move focus to its search control",
+  );
   const checks = [];
+  checks.push(await exerciseProxyDraftRestoration());
   await checkCloudSyncVisibility();
   for (const theme of ["light", "dark"]) {
     document.documentElement.dataset.theme = theme;
@@ -238,6 +373,7 @@ window.settingsScrollProbe = async () => {
     assert(pane().scrollTop > 0, "Search within the active tab must still locate its row");
     checks.push({ theme, ok: true });
   }
+  checks.push(await exerciseUpdatePreference());
   checks.push(await exerciseBrazilianPortuguese());
   return { ok: true, checks };
 };

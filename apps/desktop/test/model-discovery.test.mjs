@@ -23,6 +23,35 @@ test("openai-style lists normalize, dedupe, and sort", () => {
   assert.equal(normalizeModelList("responses", [{ id: "o4-mini" }]).length, 1);
 });
 
+test("a models[] response with slug rows is read as a list too", () => {
+  /*
+    Zhipu publishes three model-list shapes on one host: OpenAI Responses serves
+    `{ models: [{ slug }] }`, Anthropic and the coding plan serve `{ data: [{ id }] }`.
+    Reading only `data[].id` left the Responses row with an empty list, and the
+    larger sweep then looked for the models somewhere else entirely.
+  */
+  assert.deepEqual(
+    normalizeModelList("responses", {
+      models: [
+        { slug: "glm-5.3", display_name: "glm-5.3", context_window: 1_048_576, supported_in_api: true },
+        { slug: "glm-5.3" },
+      ],
+    }),
+    [{ modelId: "glm-5.3", displayName: "glm-5.3", contextWindow: 1_048_576 }],
+  );
+  // The two id keys are mutually exclusive; `id` wins if a gateway publishes both.
+  assert.deepEqual(normalizeModelList("chat_completions", { models: [{ id: "m", slug: "s" }] }), [
+    { modelId: "m", displayName: "m" },
+  ]);
+  // A Google list still takes its own branch and keeps the `models/` prefix off.
+  assert.deepEqual(normalizeModelList("google_generative_ai", { models: [{ name: "models/gemini-3" }] }), [
+    { modelId: "gemini-3", displayName: "gemini-3" },
+  ]);
+  // A data list still wins over a models wrapper when both are present.
+  assert.deepEqual(normalizeModelList("responses", { data: [{ id: "a" }], models: [{ slug: "b" }] }), [
+    { modelId: "a", displayName: "a" },
+  ]);
+});
 test("anthropic lists keep display names", () => {
   const models = normalizeModelList("anthropic_messages", {
     data: [{ id: "claude-sonnet-5", display_name: "Claude Sonnet 5" }],
@@ -35,14 +64,51 @@ test("anthropic lists keep display names", () => {
 test("google lists strip the models/ prefix", () => {
   const models = normalizeModelList("google_generative_ai", {
     models: [
-      { name: "models/gemini-2.5-pro", displayName: "Gemini 2.5 Pro" },
+      {
+        name: "models/gemini-2.5-pro",
+        displayName: "Gemini 2.5 Pro",
+        inputTokenLimit: 1_048_576,
+        outputTokenLimit: 65_536,
+      },
       { name: "models/gemini-2.5-flash" },
     ],
   });
   assert.deepEqual(models, [
     { modelId: "gemini-2.5-flash", displayName: "gemini-2.5-flash" },
-    { modelId: "gemini-2.5-pro", displayName: "Gemini 2.5 Pro" },
+    {
+      modelId: "gemini-2.5-pro",
+      displayName: "Gemini 2.5 Pro",
+      contextWindow: 1_048_576,
+      maxTokens: 65_536,
+    },
   ]);
+});
+
+test("a model list's own capacity report is kept, nothing is guessed when absent", () => {
+  const models = normalizeModelList("chat_completions", {
+    data: [
+      { id: "with-capacity", context_window: 1_000_000, max_output_tokens: 64_000 },
+      { id: "openrouter-style", context_length: 200_000, max_tokens: 8_192 },
+      { id: "gemini-style", inputTokenLimit: 1_048_576, outputTokenLimit: 65_536 },
+      { id: "camel-style", contextWindow: 32_000, maxTokens: 4_096 },
+      { id: "silent" },
+      { id: "zero", context_window: 0 },
+      { id: "unsafe", context_window: Number.MAX_SAFE_INTEGER + 1 },
+    ],
+  });
+  const byId = new Map(models.map((model) => [model.modelId, model]));
+  assert.equal(byId.get("with-capacity").contextWindow, 1_000_000);
+  assert.equal(byId.get("with-capacity").maxTokens, 64_000);
+  assert.equal(byId.get("openrouter-style").contextWindow, 200_000);
+  assert.equal(byId.get("openrouter-style").maxTokens, 8_192);
+  assert.equal(byId.get("gemini-style").contextWindow, 1_048_576);
+  assert.equal(byId.get("gemini-style").maxTokens, 65_536);
+  assert.equal(byId.get("camel-style").contextWindow, 32_000);
+  // An omitted or non-positive capacity states nothing: no guessed default.
+  assert.equal(byId.get("silent").contextWindow, undefined);
+  assert.equal(byId.get("silent").maxTokens, undefined);
+  assert.equal(byId.get("zero").contextWindow, undefined);
+  assert.equal(byId.get("unsafe").contextWindow, undefined);
 });
 
 test("requests use per-style endpoints and auth headers", () => {

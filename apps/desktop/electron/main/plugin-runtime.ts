@@ -12,14 +12,17 @@ import type { Stats } from "node:fs";
 import { open as openFile } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
+import { pluginNetFetch, parseFetchRedirect, type PluginFetchTransport } from "./plugin-net-fetch";
+import type { LoadedSkillDocument } from "./skill-document";
+import { getModuleDirectory } from "./module-path";
 import {
   busTopicAllowed,
   isDeniedFsPath,
   isFsPathInScope,
   isValidBusTopic,
   isValidBusTopicPattern,
-  isNetUrlAllowed,
-  isNetSocketUrlAllowed,
+  isNetSocketUrlAllowedWithGrant,
+  isNetUrlAllowedWithGrant,
   matchesBusTopic,
   matchFsGlob,
   normalizeFsPath,
@@ -41,6 +44,7 @@ import {
   validatePluginThemeVariables,
   THEME_ASSET_MAX_BYTES,
   THEME_CSS_MAX_BYTES,
+  MAX_WINDOW_CORNER_RADIUS,
   WINDOW_BACKGROUND_COLOR_PATTERN,
   resolvePluginLocalizedString,
   validateManifest,
@@ -57,8 +61,14 @@ import {
   type PluginNativeNotificationInput,
   type PluginNativeNotificationResult,
   type PluginNotificationPermission,
+  type PluginNetEgressGrant,
+  type PluginProviderOAuthEvent,
+  type PluginProviderOAuthPrompt,
+  type PluginProviderOAuthRequest,
+  type PluginProviderContrib,
   type PluginServiceContrib,
   type PluginSettingContrib,
+  type PluginComposerTransformInput,
   type PluginSkillContrib,
   type PluginThemeVariableContrib,
 } from "@pi-desktop/plugin-sdk";
@@ -66,8 +76,10 @@ import {
   isAllowedKeybinding,
   isReservedKeybinding,
   normalizeKeybinding,
+  type PluginRendererDescriptor,
   type PluginServiceStatus,
   type PluginSettingDefinition,
+  type PluginComposerTransformMeta,
   type PluginWorkspaceInfo,
   BUILTIN_SPEECH_PROTOCOL_IDS,
 } from "@pi-desktop/shared";
@@ -87,6 +99,12 @@ import {
 import { desktopDataDir } from "./data-paths";
 import { McpServerClient, type McpServerClientOptions } from "./plugin-mcp";
 import { PluginToolInvocations, type PluginToolInvocation } from "./plugin-tool-invocations";
+import { McpCallRegistry } from "./mcp-call-registry";
+import {
+  RendererCallRelay,
+  rendererDescriptorFor,
+  resolveRendererSourcePath,
+} from "./plugin-renderer-extension";
 import { DevPluginWatcher, type DevPluginWatcherDeps } from "./plugin-watcher";
 import { parseAllowedExternalUrl } from "./safe-open-external";
 import type { PluginAppearance } from "../shared/plugin-panel-chrome";
@@ -102,6 +120,11 @@ import {
   type PluginShortcutRegistry,
 } from "./plugin-shortcut-registry";
 import { repairImportedExtensionWrapper } from "./imported-plugin-wrapper";
+import {
+  migrateLegacyPromptEnhancementSettings,
+  PROMPT_ENHANCEMENT_PLUGIN_ID,
+  type LegacyPromptEnhancementSettings,
+} from "./plugin-prompt-enhancement-migration";
 
 export type RegisteredCommand = {
   id: string;
@@ -194,6 +217,7 @@ export type RegisteredPluginTheme = {
    * `ui.window.appearance` (ADR 0248).
    */
   windowBackground?: { light?: string; dark?: string };
+  windowCornerRadius?: number;
 };
 
 export type PluginPanelRequest = {
@@ -216,6 +240,8 @@ export type PluginPanelRequest = {
   resizable?: boolean;
   /** The plugin's egress allowlist; the panel session is confined to it. */
   netDomains?: readonly string[];
+  /** The install-time `net.anyHost` grant lifts the panel's allowlist too. */
+  netAnyHost?: boolean;
   /** Allows the isolated panel to request microphone audio, never camera access. */
   allowMicrophone?: boolean;
   /** Development panels show the host drag-band reminder in their chrome. */
@@ -290,6 +316,12 @@ export type PluginHostServices = {
   agentExtensionsChanged?: () => void;
   getLocale?: () => string;
   getAppVersion?: () => string;
+  /** Legacy host-owned prompt enhancement settings, used only for one-time migration. */
+  getLegacyPromptEnhancementSettings?: () =>
+    | LegacyPromptEnhancementSettings
+    | null
+    | undefined
+    | Promise<LegacyPromptEnhancementSettings | null | undefined>;
   /**
    * The appearance the host is currently showing (palette, language, active
    * plugin theme). Panels and plugin processes read it through `app.getAppearance`;
@@ -316,6 +348,18 @@ export type PluginHostServices = {
     input: PluginNativeNotificationInput,
   ) => Promise<PluginNativeNotificationResult>;
   openExternal: (url: string) => Promise<void>;
+  /** Host-rendered prompts for an active provider OAuth login. */
+  providerOAuthPrompt?: (
+    pluginId: string,
+    loginId: string,
+    input: PluginProviderOAuthPrompt,
+  ) => Promise<string>;
+  /** Host-rendered, non-secret progress for an active provider OAuth login. */
+  providerOAuthNotify?: (
+    pluginId: string,
+    loginId: string,
+    event: PluginProviderOAuthEvent,
+  ) => Promise<void>;
   /** Open one already-authorized file with the OS-associated application. */
   openPath: (fullPath: string) => Promise<void>;
   /** Reveal one already-authorized file in the OS file manager. */
@@ -325,13 +369,8 @@ export type PluginHostServices = {
   readClipboardHistory: () => Promise<ClipboardHistoryEntry[]>;
   openPanel: (request: PluginPanelRequest) => Promise<void>;
   closePanel: (pluginId: string) => Promise<void>;
-  fetch?: (input: {
-    url: string;
-    method?: string;
-    headers?: Record<string, string>;
-    body?: string;
-    timeoutMs?: number;
-  }) => Promise<{ status: number; headers: Record<string, string>; bodyText: string }>;
+  /** Single-hop transport; the runtime owns redirect and timeout policy. */
+  fetch?: PluginFetchTransport;
   /** The reviewed desktop operation controller shared with MCP. */
   desktopControl?: McpControlController;
   /**
@@ -406,18 +445,20 @@ export type PluginHostServices = {
     name: string;
     ok: boolean;
     message?: string;
-  }) => void;
+  }) => Promise<void> | void;
   /** Work-panel guest + CDP, gated by `browser.cdp` in the runtime. */
   browser?: {
+    reveal: (sessionId?: string) => Promise<void>;
     navigate: (
       input: { url?: string; path?: string },
       sessionId?: string,
+      tabId?: string,
     ) => Promise<unknown>;
-    action: (action: "back" | "forward" | "reload" | "stop") => void;
+    action: (action: "back" | "forward" | "reload" | "stop", sessionId?: string, tabId?: string) => void;
     setBounds: (pluginId: string, hole: unknown) => unknown;
     setVisible: (pluginId: string, visible: boolean) => void;
     getState: () => unknown;
-    openExternal: () => void;
+    openExternal: (sessionId?: string, tabId?: string) => void;
     snapshot: () => Promise<unknown>;
     screenshot: (
       input?: { fullPage?: boolean },
@@ -441,6 +482,8 @@ export type PluginHostServices = {
     list: (pluginId: string, input: Record<string, unknown>) => Promise<unknown>;
     get: (pluginId: string, input: Record<string, unknown>) => Promise<unknown>;
     listMessages: (pluginId: string, input: Record<string, unknown>) => Promise<unknown>;
+    getAutoTitleContext: (pluginId: string, input: Record<string, unknown>) => Promise<unknown>;
+    setAutoTitle: (pluginId: string, input: Record<string, unknown>) => Promise<unknown>;
     import: (pluginId: string, input: Record<string, unknown>) => Promise<unknown>;
     importBatch: (pluginId: string, input: Record<string, unknown>) => Promise<unknown>;
     rename: (pluginId: string, input: Record<string, unknown>) => Promise<unknown>;
@@ -453,6 +496,16 @@ export type PluginHostServices = {
   usage?: {
     listTurns: (pluginId: string, input: Record<string, unknown>) => Promise<unknown>;
   };
+};
+
+export type PluginOAuthProvider = {
+  pluginId: string;
+  runtimeId: string;
+  contributionId: string;
+  providerId: string;
+  name: string;
+  loginLabel?: string;
+  isSubscription: boolean;
 };
 
 /** Host APIs a plugin process may reach. Anything else does not exist (spec 04 §2). */
@@ -494,9 +547,11 @@ const HOST_API_ALLOWLIST = new Set([
   "clipboard.getHistory",
   "shell.openExternal",
   "net.fetch",
+  "net.getCapabilities",
   "bus.publish",
   "bus.subscribe",
   "bus.unsubscribe",
+  "browser.reveal",
   "browser.navigate",
   "browser.action",
   "browser.setBounds",
@@ -525,6 +580,8 @@ const HOST_API_ALLOWLIST = new Set([
   "browser.cdp",
   "models.list",
   "session.getLlmContext",
+  "session.getAutoTitleContext",
+  "session.setAutoTitle",
   "session.list",
   "session.get",
   "session.listMessages",
@@ -534,6 +591,8 @@ const HOST_API_ALLOWLIST = new Set([
   "session.delete",
   "usage.listTurns",
   "agent.complete",
+  "providers.oauth.prompt",
+  "providers.oauth.notify",
   "keyboard.registerGlobalShortcut",
   "keyboard.unregisterGlobalShortcut",
   "keyboard.listGlobalShortcuts",
@@ -555,10 +614,15 @@ const PLUGIN_DISPOSE_ALL_TIMEOUT_MS = 3_000;
 const PLUGIN_COMMAND_TIMEOUT_MS = 30_000;
 /** Kept under host-core's 120s tool budget so the plugin-side error wins. */
 const PLUGIN_TOOL_TIMEOUT_MS = 110_000;
+/** User-invoked Composer transforms share the bounded plugin tool budget. */
+const PLUGIN_COMPOSER_TRANSFORM_TIMEOUT_MS = PLUGIN_TOOL_TIMEOUT_MS;
+const MAX_COMPOSER_TRANSFORM_TEXT_LENGTH = 100_000;
 /** Side completions sit under the plugin tool budget (ADR 0174). */
 export const PLUGIN_COMPLETE_TIMEOUT_MS = 90_000;
 /** Fixed panel operations are user-facing and must not hang the renderer. */
 const PLUGIN_PANEL_TIMEOUT_MS = 30_000;
+/** OAuth login may wait for browser or device approval by the user. */
+const PLUGIN_PROVIDER_OAUTH_TIMEOUT_MS = 5 * 60_000;
 const PANEL_SKILL_CHANNELS = new Set([
   "skill.list",
   "skill.read",
@@ -569,8 +633,6 @@ const PANEL_SKILL_CHANNELS = new Set([
 ]);
 /** A plugin may teach at most this many skills; the rest are ignored. */
 const MAX_SKILLS_PER_PLUGIN = 32;
-/** Redirect hops `pi.net.fetch` follows; each one is re-checked against egress. */
-const NET_FETCH_MAX_REDIRECTS = 5;
 
 /**
  * The delay a response advertises, verbatim — the value a plugin has to parse
@@ -706,6 +768,7 @@ type PendingCall = {
 
 type LoadedPlugin = {
   manifest: PluginManifest;
+  runtimeId: string;
   path: string;
   development: boolean;
   permissions: Set<string>;
@@ -1195,6 +1258,15 @@ function resolveWindowBackground(
   return result.light || result.dark ? result : undefined;
 }
 
+function resolveWindowCornerRadius(value: unknown): number | undefined {
+  if (!value || typeof value !== "object") return undefined;
+  const radius = (value as { cornerRadius?: unknown }).cornerRadius;
+  return typeof radius === "number" && Number.isInteger(radius) &&
+    radius >= 0 && radius <= MAX_WINDOW_CORNER_RADIUS
+    ? radius
+    : undefined;
+}
+
 /** Default spawner: an Electron utilityProcess per plugin. */
 const spawnUtilityProcess: PluginProcessSpawner = async ({ pluginId, entry }) => {
   const { utilityProcess } = await import("electron");
@@ -1287,11 +1359,13 @@ export class PluginRuntime {
   private themeAssets = new Map<string, Map<string, string>>();
   private themeAssetGroups = new Map<string, Map<string, ReadonlyMap<string, string>>>();
   private mcpClients = new Map<string, McpServerClient[]>();
+  private readonly mcpCalls = new McpCallRegistry();
   private serviceStates = new Map<string, PluginServiceStatus>();
   private restarts = new Map<string, RestartRecord>();
   private busSubscriptions = new Map<string, BusSubscription>();
   private busRate = new Map<string, { windowStart: number; count: number }>();
   private readonly toolInvocations = new PluginToolInvocations();
+  private readonly rendererCalls = new RendererCallRelay();
   private completeRate = new Map<string, { windowStart: number; count: number }>();
   /**
    * File accesses the user allowed for the rest of the run, keyed
@@ -1503,7 +1577,7 @@ export class PluginRuntime {
    * only, and the size cap is re-checked because the file may have changed
    * since load.
    */
-  loadSkillBody(id: string): { id: string; name: string; body: string } {
+  loadSkillBody(id: string): LoadedSkillDocument {
     const skill = this.skills.get(id);
     if (!skill) throw apiError("NOT_FOUND", `unknown skill: ${id}`);
     if (!this.loaded.has(skill.pluginId)) {
@@ -1529,11 +1603,225 @@ export class PluginRuntime {
       skillId: skill.id,
       ts: Date.now(),
     });
-    return { id: skill.id, name: skill.name, body: parsed.body };
+    return { id: skill.id, name: skill.name, body: parsed.body, location: skill.path };
+  }
+
+  /**
+   * Source resolver behind the `plugin-renderer://` scheme: the current load
+   * of a permission-granted plugin serves module files from inside its own
+   * package, and nothing else (`docs/plugin-plan/ui/`).
+   */
+  resolveRendererSource(pluginId: string, generation: number, requestPath: string): string | null {
+    return resolveRendererSourcePath(this.loaded.get(pluginId), generation, requestPath);
+  }
+
+  /** What the renderer host loads for this plugin, while it may load anything. */
+  rendererDescriptor(pluginId: string): PluginRendererDescriptor | undefined {
+    return rendererDescriptorFor(this.loaded.get(pluginId));
+  }
+
+  /**
+   * The `plugin.call` relay: a renderer slot component asks its own plugin
+   * for one JSON answer (`docs/plugin-plan/render/plugin-call/`).
+   */
+  async callRenderer(pluginId: string, method: string, args: unknown): Promise<unknown> {
+    const loaded = this.loaded.get(pluginId);
+    return this.rendererCalls.call(
+      pluginId,
+      loaded?.child ? loaded : undefined,
+      method,
+      args,
+      (plugin, payload, timeoutMs) =>
+        this.sendToChild(plugin, { t: "call", method: "renderer.call", payload }, timeoutMs),
+    );
+  }
+
+  /** User-facing transform actions from loaded plugins with explicit consent. */
+  getComposerTransforms(pluginId?: string): PluginComposerTransformMeta[] {
+    const locale = this.services.getLocale?.();
+    const result: PluginComposerTransformMeta[] = [];
+    const candidates = pluginId
+      ? [this.loaded.get(pluginId)].filter((plugin): plugin is LoadedPlugin => Boolean(plugin))
+      : [...this.loaded.values()];
+    for (const loaded of candidates) {
+      if (loaded.disposing || !loaded.permissions.has("composer.transform")) continue;
+      const transforms = loaded.manifest.contributes?.composerTransforms ?? [];
+      for (const transform of transforms) {
+        result.push({
+          pluginId: loaded.manifest.id,
+          pluginName: loaded.manifest.name,
+          id: transform.id,
+          title: resolvePluginLocalizedString(transform.title, locale, transform.id),
+          undoTitle: resolvePluginLocalizedString(
+            transform.undoTitle,
+            locale,
+            `Undo ${resolvePluginLocalizedString(transform.title, locale, transform.id)}`,
+          ),
+        });
+      }
+    }
+    return result;
+  }
+
+  /** Invoke only a declared action; the plugin receives the draft text alone. */
+  async runComposerTransform(
+    input: PluginComposerTransformInput & { pluginId: string },
+  ): Promise<string> {
+    const pluginId = typeof input?.pluginId === "string" ? input.pluginId.trim() : "";
+    const transformId = typeof input?.id === "string" ? input.id.trim() : "";
+    const text = typeof input?.text === "string" ? input.text : "";
+    const modelKey = typeof input?.modelKey === "string" ? input.modelKey.trim() : undefined;
+    if (
+      !pluginId ||
+      !transformId ||
+      !text.trim() ||
+      text.length > MAX_COMPOSER_TRANSFORM_TEXT_LENGTH
+    ) {
+      throw apiError("INVALID_ARGUMENT", "composer transform input is invalid");
+    }
+    if (modelKey && modelKey.length > 512) {
+      throw apiError("INVALID_ARGUMENT", "composer transform modelKey is invalid");
+    }
+    const loaded = this.loaded.get(pluginId);
+    if (!loaded || loaded.disposing || !loaded.child) {
+      throw apiError("NOT_FOUND", "composer transform plugin is not loaded");
+    }
+    this.assertPermission(loaded, "composer.transform");
+    const transform = (loaded.manifest.contributes?.composerTransforms ?? []).find(
+      (entry) => entry.id === transformId,
+    );
+    if (!transform) throw apiError("NOT_FOUND", "composer transform is not declared");
+
+    const startedAt = Date.now();
+    try {
+      const result = await this.sendToChild(
+        loaded,
+        {
+          t: "call",
+          method: "composer.transform",
+          payload: { id: transformId, text, ...(modelKey ? { modelKey } : {}) },
+        },
+        PLUGIN_COMPOSER_TRANSFORM_TIMEOUT_MS,
+      );
+      if (this.loaded.get(pluginId) !== loaded || loaded.disposing) {
+        throw apiError("PLUGIN_UNLOADED", "composer transform plugin was unloaded");
+      }
+      if (typeof result !== "string" || result.length > MAX_COMPOSER_TRANSFORM_TEXT_LENGTH) {
+        throw apiError("PLUGIN_INVALID_RESULT", "composer transform must return a text string");
+      }
+      this.services.audit?.({
+        pluginId,
+        api: "composer.transform",
+        ok: true,
+        transformId,
+        durationMs: Date.now() - startedAt,
+        ts: Date.now(),
+      });
+      return result;
+    } catch (error) {
+      this.services.audit?.({
+        pluginId,
+        api: "composer.transform",
+        ok: false,
+        transformId,
+        errorCode: (error as PluginApiError)?.code ?? "PLUGIN_TRANSFORM_FAILED",
+        durationMs: Date.now() - startedAt,
+        ts: Date.now(),
+      });
+      throw error;
+    }
   }
 
   getLoaded(pluginId: string): LoadedPlugin | undefined {
     return this.loaded.get(pluginId);
+  }
+
+  /** OAuth provider entries exposed to the Host's provider sign-in surface. */
+  listOAuthProviders(): PluginOAuthProvider[] {
+    const result: PluginOAuthProvider[] = [];
+    for (const loaded of this.loaded.values()) {
+      if (!loaded.permissions.has("provider.oauth")) continue;
+      const providers = (loaded.manifest.contributes?.providers ?? []) as PluginProviderContrib[];
+      for (const provider of providers) {
+        if (provider.authKind !== "oauth") continue;
+        result.push({
+          pluginId: loaded.manifest.id,
+          runtimeId: loaded.runtimeId,
+          contributionId: provider.id,
+          providerId: `plugin:${loaded.manifest.id}:${provider.id}`,
+          name: provider.name,
+          loginLabel: provider.oauth?.loginLabel,
+          isSubscription: provider.oauth?.isSubscription === true,
+        });
+      }
+    }
+    return result;
+  }
+
+  /** Invoke a declared provider's OAuth hook after rechecking its grant and owner. */
+  async invokeProviderOAuth(
+    pluginId: string,
+    contributionId: string,
+    request: PluginProviderOAuthRequest,
+    signal?: AbortSignal,
+    expectedRuntimeId?: string,
+  ): Promise<unknown> {
+    const loaded = this.loaded.get(pluginId);
+    if (!loaded || loaded.disposing) {
+      throw apiError("NOT_FOUND", `plugin not loaded: ${pluginId}`);
+    }
+    if (expectedRuntimeId && loaded.runtimeId !== expectedRuntimeId) {
+      throw apiError("PLUGIN_UNLOADED", "provider OAuth plugin runtime changed");
+    }
+    this.assertPermission(loaded, "provider.oauth");
+    const providers = (loaded.manifest.contributes?.providers ?? []) as PluginProviderContrib[];
+    const provider = providers.find((entry) => entry.id === contributionId);
+    if (!provider || provider.authKind !== "oauth") {
+      throw apiError("PERMISSION_DENIED", "provider OAuth contribution is not declared");
+    }
+    if (request.providerId !== contributionId) {
+      throw apiError("INVALID_ARGUMENT", "provider OAuth contribution does not match");
+    }
+    try {
+      const value = await this.sendToChild(
+        loaded,
+        { t: "call", method: "provider.oauth", payload: request },
+        PLUGIN_PROVIDER_OAUTH_TIMEOUT_MS,
+        signal,
+      );
+      if (this.loaded.get(pluginId) !== loaded || loaded.disposing) {
+        throw apiError("PLUGIN_UNLOADED", "provider OAuth plugin runtime changed");
+      }
+      let bytes = 0;
+      try {
+        bytes = Buffer.byteLength(JSON.stringify(value ?? null), "utf8");
+      } catch {
+        throw apiError("INVALID_ARGUMENT", "provider OAuth result must be JSON serializable");
+      }
+      if (bytes > 64 * 1024) {
+        throw apiError("LIMIT_EXCEEDED", "provider OAuth result exceeds 64 KiB");
+      }
+      this.services.audit?.({
+        pluginId,
+        api: "provider.oauth",
+        operation: request.operation,
+        providerId: contributionId,
+        ok: true,
+        ts: Date.now(),
+      });
+      return value;
+    } catch (error) {
+      this.services.audit?.({
+        pluginId,
+        api: "provider.oauth",
+        operation: request.operation,
+        providerId: contributionId,
+        ok: false,
+        errorCode: (error as { code?: string } | null | undefined)?.code ?? "PLUGIN_OAUTH_FAILED",
+        ts: Date.now(),
+      });
+      throw error;
+    }
   }
 
   /**
@@ -1738,12 +2026,47 @@ export class PluginRuntime {
             ),
           );
 
-    const entry = this.services.hostEntry ?? join(__dirname, "plugin-host-process.js");
+    if (
+      manifest.id === PROMPT_ENHANCEMENT_PLUGIN_ID &&
+      granted.has("composer.transform") &&
+      (manifest.contributes?.composerTransforms?.length ?? 0) > 0 &&
+      this.services.getLegacyPromptEnhancementSettings
+    ) {
+      try {
+        const legacy = await this.services.getLegacyPromptEnhancementSettings();
+        const migration = migrateLegacyPromptEnhancementSettings(
+          this.pluginDataDir(manifest.id),
+          legacy,
+        );
+        if (migration.migrated.length > 0) {
+          this.services.audit?.({
+            pluginId: manifest.id,
+            api: "plugin.settings.migrate",
+            ok: true,
+            keys: migration.migrated,
+            ts: Date.now(),
+          });
+        }
+      } catch (error) {
+        this.services.audit?.({
+          pluginId: manifest.id,
+          api: "plugin.settings.migrate",
+          ok: false,
+          errorCode: (error as PluginApiError)?.code ?? "MIGRATION_FAILED",
+          ts: Date.now(),
+        });
+      }
+    }
+
+    const entry =
+      this.services.hostEntry ??
+      join(getModuleDirectory(import.meta.url), "plugin-host-process.js");
     const spawn = this.services.spawnProcess ?? spawnUtilityProcess;
     const child = await spawn({ pluginId: manifest.id, entry, pluginPath });
 
     const loaded: LoadedPlugin = {
       manifest,
+      runtimeId: randomUUID(),
       path: pluginPath,
       development: options.development ?? this.devPlugins.has(manifest.id),
       permissions: granted,
@@ -1816,6 +2139,7 @@ export class PluginRuntime {
   /** Abort this session's invocations without affecting sibling sessions. */
   cancelSessionTools(sessionId: string, reason = "Session tool execution aborted"): void {
     this.toolInvocations.cancelSession(sessionId, reason);
+    this.mcpCalls.cancelSession(sessionId);
   }
 
   /** Deregister contributions, run `onUnload` in the child, then stop it. */
@@ -1914,6 +2238,7 @@ export class PluginRuntime {
    * `onUnload` must never be the reason the app appears to hang on quit.
    */
   async disposeAll(): Promise<void> {
+    this.mcpCalls.cancelAll();
     const loadedPlugins = [...this.loaded.values()];
     // Mark first, in one pass: a child that dies while a sibling is still
     // stopping must already be covered by the guard in `handleChildExit`.
@@ -1995,7 +2320,7 @@ export class PluginRuntime {
         ok: true,
         ts: Date.now(),
       });
-      this.services.onPluginReloaded?.({ pluginId, name: manifest.name, ok: true });
+      await this.services.onPluginReloaded?.({ pluginId, name: manifest.name, ok: true });
     } catch (error) {
       const message = (error as Error).message;
       this.services.audit?.({
@@ -2005,7 +2330,7 @@ export class PluginRuntime {
         message,
         ts: Date.now(),
       });
-      this.services.onPluginReloaded?.({ pluginId, name, ok: false, message });
+      await this.services.onPluginReloaded?.({ pluginId, name, ok: false, message });
     } finally {
       this.reloading.delete(pluginId);
     }
@@ -2111,6 +2436,8 @@ export class PluginRuntime {
       case "shell.openExternal":
         await api.shell.openExternal(String(payload?.url ?? ""));
         return { ok: true };
+      case "net.getCapabilities":
+        return api.net.getCapabilities();
       case "net.fetch":
         return api.net.fetch({
           url: String(payload?.url ?? ""),
@@ -2118,6 +2445,7 @@ export class PluginRuntime {
           headers: (payload?.headers as Record<string, string> | undefined) ?? undefined,
           body: payload?.body ? String(payload.body) : undefined,
           timeoutMs: typeof payload?.timeoutMs === "number" ? payload.timeoutMs : undefined,
+          redirect: payload?.redirect,
         });
       case "plugin.getSettings":
         return api.plugin.getSettings();
@@ -2209,9 +2537,11 @@ export class PluginRuntime {
     const id = `h${loaded.nextCallId++}`;
     return new Promise((resolvePromise, rejectPromise) => {
       const cancelChild = (error: Error) => {
-        if (typeof message.invocationId !== "string") return;
+        const cancellation = typeof message.invocationId === "string"
+          ? { invocationId: message.invocationId }
+          : { callId: id };
         try {
-          child.postMessage({ t: "cancel", invocationId: message.invocationId, reason: error.message });
+          child.postMessage({ t: "cancel", ...cancellation, reason: error.message });
         } catch {
           // The process may already be gone; the host still revokes the call.
         }
@@ -2649,6 +2979,59 @@ export class PluginRuntime {
       case "session.getLlmContext": {
         return this.readSessionContext(loaded);
       }
+      case "session.getAutoTitleContext": {
+        this.assertPermission(loaded, "session.autoTitle");
+        const input = normalizePluginSessionInput(args[0] ?? {}, "other");
+        const sessionId = typeof input.sessionId === "string" ? input.sessionId.trim() : "";
+        if (!sessionId || sessionId.length > 128) {
+          throw apiError("INVALID_PARAMS", "sessionId must be a non-empty string");
+        }
+        if (!this.services.session?.getAutoTitleContext) {
+          throw apiError("UNSUPPORTED", "host api not available: session.getAutoTitleContext");
+        }
+        const context = await this.services.session.getAutoTitleContext(
+          loaded.manifest.id,
+          { sessionId },
+        );
+        this.services.audit?.({
+          pluginId,
+          api,
+          ok: true,
+          sessionId,
+          ts: Date.now(),
+        });
+        return context;
+      }
+      case "session.setAutoTitle": {
+        this.assertPermission(loaded, "session.autoTitle");
+        const input = normalizePluginSessionInput(args[0] ?? {}, "other");
+        const sessionId = typeof input.sessionId === "string" ? input.sessionId.trim() : "";
+        const expectedTitle = typeof input.expectedTitle === "string" ? input.expectedTitle : "";
+        const title = typeof input.title === "string" ? input.title : "";
+        if (!sessionId || sessionId.length > 128 || !expectedTitle || !title) {
+          throw apiError("INVALID_PARAMS", "sessionId, expectedTitle and title are required");
+        }
+        if ([...expectedTitle].length > 80 || [...title].length > 80) {
+          throw apiError("LIMIT_EXCEEDED", "session title exceeds 80 characters");
+        }
+        if (!this.services.session?.setAutoTitle) {
+          throw apiError("UNSUPPORTED", "host api not available: session.setAutoTitle");
+        }
+        const result = await this.services.session.setAutoTitle(loaded.manifest.id, {
+          sessionId,
+          expectedTitle,
+          title,
+        }) as { updated?: unknown };
+        this.services.audit?.({
+          pluginId,
+          api,
+          ok: true,
+          sessionId,
+          updated: result?.updated === true,
+          ts: Date.now(),
+        });
+        return result;
+      }
       case "session.import": {
         this.assertPermission(loaded, "session.import");
         const input = normalizePluginSessionInput(args[0] ?? {}, "import");
@@ -2692,6 +3075,38 @@ export class PluginRuntime {
           throw apiError("UNSUPPORTED", "host api not available: project.create");
         }
         return this.services.project.create(loaded.manifest.id, { path: path.trim() });
+      }
+      case "providers.oauth.prompt": {
+        this.assertPermission(loaded, "provider.oauth");
+        this.assertHasOAuthProvider(loaded);
+        const loginId = args[0];
+        const input = args[1];
+        if (typeof loginId !== "string" || !loginId || !input || typeof input !== "object") {
+          throw apiError("INVALID_ARGUMENT", "provider OAuth prompt requires a loginId and request");
+        }
+        if (!this.services.providerOAuthPrompt) {
+          throw apiError("UNSUPPORTED", "provider OAuth prompts are unavailable in this host");
+        }
+        this.services.audit?.({ pluginId, api, ok: true, ts: Date.now(), kind: "prompt" });
+        return this.services.providerOAuthPrompt(pluginId, loginId, input as PluginProviderOAuthPrompt);
+      }
+      case "providers.oauth.notify": {
+        this.assertPermission(loaded, "provider.oauth");
+        this.assertHasOAuthProvider(loaded);
+        const loginId = args[0];
+        const event = args[1];
+        if (typeof loginId !== "string" || !loginId || !event || typeof event !== "object") {
+          throw apiError("INVALID_ARGUMENT", "provider OAuth notification requires a loginId and event");
+        }
+        if (!this.services.providerOAuthNotify) {
+          throw apiError("UNSUPPORTED", "provider OAuth notifications are unavailable in this host");
+        }
+        const kind = (event as { kind?: unknown }).kind;
+        if (!new Set(["info", "authUrl", "deviceCode", "progress"]).has(String(kind))) {
+          throw apiError("INVALID_ARGUMENT", "unsupported provider OAuth event");
+        }
+        this.services.audit?.({ pluginId, api, ok: true, ts: Date.now(), kind });
+        return this.services.providerOAuthNotify(pluginId, loginId, event as PluginProviderOAuthEvent);
       }
       case "session.list": {
         this.assertPermission(loaded, "session.read.own");
@@ -3293,6 +3708,9 @@ export class PluginRuntime {
     const windowBackground = loaded.permissions.has("ui.window.appearance")
       ? resolveWindowBackground(loaded.manifest.contributes?.windowAppearance)
       : undefined;
+    const windowCornerRadius = loaded.permissions.has("ui.window.appearance")
+      ? resolveWindowCornerRadius(loaded.manifest.contributes?.windowAppearance)
+      : undefined;
     if (windowAppearanceDeclared && !loaded.permissions.has("ui.window.appearance")) {
       this.services.audit?.({
         pluginId,
@@ -3377,6 +3795,7 @@ export class PluginRuntime {
           ? { variablesCss: this.themeVariablesCss(loaded, id, contrib.variables) }
           : {}),
         ...(windowBackground ? { windowBackground } : {}),
+        ...(windowCornerRadius !== undefined ? { windowCornerRadius } : {}),
       });
       accepted += 1;
     }
@@ -3489,10 +3908,11 @@ export class PluginRuntime {
         continue;
       }
       // An http MCP endpoint is an outbound channel like any other, so it
-      // answers to the same allowlist rather than to its permission alone.
+      // answers to the same egress decision as pi.net.fetch: the allowlist,
+      // plus the install-time net.anyHost grant.
       if (server.transport === "http") {
         const url = String(server.url ?? "");
-        if (!isNetUrlAllowed(url, this.netDomains(loaded))) {
+        if (!isNetUrlAllowedWithGrant(url, this.netEgressGrant(loaded))) {
           this.skipMcpServer(
             pluginId,
             server.id,
@@ -3541,7 +3961,11 @@ export class PluginRuntime {
           // Remote code the desktop cannot inspect; never silently auto-approved.
           risk: "medium",
           schema: tool.inputSchema,
-          execute: async (toolArgs) => client.callTool(tool.name, toolArgs),
+          execute: async (toolArgs, ctx) => this.mcpCalls.run(
+            ctx?.sessionId,
+            (signal) => client.callTool(tool.name, toolArgs, signal),
+            ctx?.signal,
+          ),
         });
       }
     }
@@ -3884,14 +4308,27 @@ export class PluginRuntime {
   }
 
   /**
+   * The plugin's egress decision input: its allowlist plus whether the user
+   * granted `net.anyHost` at install. One shape for every chokepoint so the
+   * grant means the same thing everywhere.
+   */
+  private netEgressGrant(loaded: LoadedPlugin): PluginNetEgressGrant {
+    return {
+      domains: this.netDomains(loaded),
+      anyHost: loaded.permissions.has("net.anyHost"),
+    };
+  }
+
+  /**
    * Confine one outbound URL to the allowlist. Reading a secret only becomes a
    * leak when it can leave, so every host-owned egress path funnels through
-   * here — and an undeclared `net.domains` means nothing leaves at all.
+   * here — an undeclared `net.domains` means nothing leaves at all, unless the
+   * install-time `net.anyHost` grant lifted the allowlist.
    */
   private assertEgress(loaded: LoadedPlugin, url: string, api: string): void {
-    const domains = this.netDomains(loaded);
-    if (isNetUrlAllowed(url, domains)) return;
-    this.refuseEgress(loaded, url, api, domains);
+    const grant = this.netEgressGrant(loaded);
+    if (isNetUrlAllowedWithGrant(url, grant)) return;
+    this.refuseEgress(loaded, url, api, grant.domains);
   }
 
   /**
@@ -3900,9 +4337,9 @@ export class PluginRuntime {
    * the transport never opens a connection to an undeclared host.
    */
   private assertSocketEgress(loaded: LoadedPlugin, url: string): void {
-    const domains = this.netDomains(loaded);
-    if (isNetSocketUrlAllowed(url, domains)) return;
-    this.refuseEgress(loaded, url, "net.websocket.connect", domains);
+    const grant = this.netEgressGrant(loaded);
+    if (isNetSocketUrlAllowedWithGrant(url, grant)) return;
+    this.refuseEgress(loaded, url, "net.websocket.connect", grant.domains);
   }
 
   /** One refusal path for both schemes: same audit shape, same message. */
@@ -4114,7 +4551,9 @@ export class PluginRuntime {
     payload?: Record<string, unknown>,
   ): Promise<unknown> {
     this.assertPermission(loaded, "browser.cdp");
-    const api = this.hostApi(loaded).browser;
+    const context = loaded.manifest.id === "pi.browser" && typeof payload?.sessionId === "string" && typeof payload?.tabId === "string"
+      ? { sessionId: payload.sessionId, tabId: payload.tabId } : undefined;
+    const api = this.hostApi(loaded, context).browser;
     switch (method) {
       case "navigate":
         return api.navigate({
@@ -4177,6 +4616,13 @@ export class PluginRuntime {
         ts: Date.now(),
       });
       throw apiError("PERMISSION_DENIED", `missing permission: ${perm}`);
+    }
+  }
+
+  private assertHasOAuthProvider(loaded: LoadedPlugin): void {
+    const providers = (loaded.manifest.contributes?.providers ?? []) as PluginProviderContrib[];
+    if (!providers.some((provider) => provider.authKind === "oauth")) {
+      throw apiError("PERMISSION_DENIED", "provider OAuth requires a declared OAuth provider");
     }
   }
 
@@ -4606,7 +5052,7 @@ export class PluginRuntime {
     throw apiError("UNSUPPORTED", `host api not available: ${api}`);
   }
 
-  private hostApi(loaded: LoadedPlugin) {
+  private hostApi(loaded: LoadedPlugin, browserContext?: { sessionId: string; tabId: string }) {
     const pluginId = loaded.manifest.id;
     const pluginPath = loaded.path;
 
@@ -4682,6 +5128,9 @@ export class PluginRuntime {
             base,
             css: sanitized.css,
             ...(previous?.windowBackground ? { windowBackground: previous.windowBackground } : {}),
+            ...(previous?.windowCornerRadius !== undefined
+              ? { windowCornerRadius: previous.windowCornerRadius }
+              : {}),
           });
           this.services.onPluginThemesChanged?.(pluginId);
           this.services.audit?.({
@@ -4817,6 +5266,7 @@ export class PluginRuntime {
             height: loaded.manifest.ui?.height ?? 360,
             htmlPath,
             netDomains: this.netDomains(loaded),
+            netAnyHost: loaded.permissions.has("net.anyHost"),
             allowMicrophone: loaded.permissions.has("ui.microphone"),
             ...(loaded.development ? { development: true } : {}),
           });
@@ -5495,58 +5945,31 @@ export class PluginRuntime {
         closeOutput: async () => this.refuseAudio(loaded, "audio.closeOutput"),
       },
       net: {
+        getCapabilities: async () => ({ fetchRedirectModes: ["follow", "error", "manual"] }),
         fetch: async (input: {
           url: string;
           method?: string;
           headers?: Record<string, string>;
           body?: string;
           timeoutMs?: number;
+          redirect?: unknown;
         }) => {
           this.assertPermission(loaded, "net.fetch");
-          if (!/^https?:\/\//i.test(input.url)) {
-            throw apiError("INVALID_ARGUMENT", "only http(s) URLs allowed");
-          }
-          this.assertEgress(loaded, input.url, "net.fetch");
-          if (this.services.fetch) {
-            const result = await this.services.fetch(input);
-            this.services.audit?.(
-              netFetchAuditEntry(pluginId, input.url, result.status, result.headers),
-            );
-            return result;
-          }
-          const controller = new AbortController();
-          const timer = setTimeout(() => controller.abort(), input.timeoutMs ?? 15000);
+          const redirect = parseFetchRedirect(input.redirect);
           try {
-            // Follow redirects by hand: an allowlisted host that 30x-es to an
-            // undeclared one would otherwise carry the request straight out.
-            let url = input.url;
-            let res: Response;
-            for (let hop = 0; ; hop += 1) {
-              res = await fetch(url, {
-                method: input.method ?? "GET",
-                headers: input.headers,
-                body: input.body,
-                redirect: "manual",
-                signal: controller.signal,
-              });
-              if (res.status < 300 || res.status > 399) break;
-              const location = res.headers.get("location");
-              if (!location) break;
-              if (hop >= NET_FETCH_MAX_REDIRECTS) {
-                throw apiError("UNAVAILABLE", `too many redirects: ${input.url}`);
-              }
-              url = new URL(location, url).toString();
-              this.assertEgress(loaded, url, "net.fetch");
+            const { url, result } = await pluginNetFetch(
+              { ...input, redirect },
+              (url) => this.assertEgress(loaded, url, "net.fetch"),
+              this.services.fetch,
+            );
+            this.services.audit?.(netFetchAuditEntry(pluginId, url, result.status, result.headers));
+            return result;
+          } catch (error) {
+            if (error instanceof Error && "code" in error && error.code === "REDIRECT_DISALLOWED") {
+              this.services.audit?.({ pluginId, api: "net.fetch", ok: false,
+                errorCode: error.code, ts: Date.now() });
             }
-            const headers: Record<string, string> = {};
-            res.headers.forEach((value, key) => {
-              headers[key] = value;
-            });
-            const bodyText = await res.text();
-            this.services.audit?.(netFetchAuditEntry(pluginId, url, res.status, headers));
-            return { status: res.status, headers, bodyText };
-          } finally {
-            clearTimeout(timer);
+            throw error;
           }
         },
       },
@@ -5557,6 +5980,19 @@ export class PluginRuntime {
           this.busUnsubscribe(loaded, subscriptionId),
       },
       browser: {
+        reveal: async () => {
+          this.assertPermission(loaded, "browser.cdp");
+          if (!this.services.browser) {
+            throw apiError("UNAVAILABLE", "browser host missing");
+          }
+          await this.services.browser.reveal(this.browserSessionId(pluginId));
+          this.services.audit?.({
+            pluginId,
+            api: "browser.reveal",
+            ok: true,
+            ts: Date.now(),
+          });
+        },
         navigate: async (input: { url?: string; path?: string } = {}) => {
           this.assertPermission(loaded, "browser.cdp");
           if (!this.services.browser) {
@@ -5564,7 +6000,8 @@ export class PluginRuntime {
           }
           const result = await this.services.browser.navigate(
             input,
-            this.browserSessionId(pluginId),
+            browserContext?.sessionId ?? this.browserSessionId(pluginId),
+            browserContext?.tabId,
           );
           this.services.audit?.({
             pluginId,
@@ -5586,7 +6023,7 @@ export class PluginRuntime {
             action === "reload" ||
             action === "stop"
           ) {
-            this.services.browser.action(action);
+            this.services.browser.action(action, browserContext?.sessionId, browserContext?.tabId);
           }
         },
         setBounds: (hole: unknown) => {
@@ -5616,7 +6053,7 @@ export class PluginRuntime {
           if (!this.services.browser) {
             throw apiError("UNAVAILABLE", "browser host missing");
           }
-          this.services.browser.openExternal();
+          this.services.browser.openExternal(browserContext?.sessionId, browserContext?.tabId);
           this.services.audit?.({
             pluginId,
             api: "browser.openExternal",

@@ -120,6 +120,7 @@ export function buildHost(limits: Partial<import("@pi-desktop/shared").RacpLimit
     async listPendingTools() {
       return [];
     },
+    async listPendingContracts() { return []; },
   };
   const host = new AgentHost({ runtime, sessions: sessionPort, approvals: approvalPort, limits: { replayWindowEvents: 50, ...limits } });
   return { host, runtime, sessions, approvals };
@@ -155,6 +156,14 @@ export function fakeOperations(sessions: Map<string, SessionSummary>): RacpHostO
       async rename(sessionId, title) {
         const current = sessions.get(sessionId);
         if (current) sessions.set(sessionId, { ...current, title });
+      },
+      async deriveTitle(sessionId, title) {
+        const current = sessions.get(sessionId);
+        // The fake mirrors the Host rule: a session renamed to something else
+        // already left the placeholder state and refuses the fallback.
+        if (!current || current.title !== "New session" || title === current.title) return false;
+        sessions.set(sessionId, { ...current, title });
+        return true;
       },
       async delete(sessionId) {
         sessions.delete(sessionId);

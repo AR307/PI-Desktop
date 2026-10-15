@@ -5,6 +5,7 @@ import {
   vendorAccountOmitsSessionModel,
 } from "../lib/chat-launch-error";
 import { Composer } from "./Composer";
+import { BackgroundDelegationsChip } from "../features/chat/BackgroundDelegationsChip";
 import { HomeMascotLogo } from "./HomeMascotLogo";
 import { HomeProjectSwitcher } from "./HomeProjectSwitcher";
 import { IconX } from "./icons";
@@ -16,6 +17,7 @@ import { useAppStore } from "../stores/app-store";
 import { headPermission } from "../lib/pending-permissions";
 import { headAsk } from "../lib/pending-asks";
 
+import { isRemoteSession } from "../lib/remote-session-safety";
 const StableComposer = memo(Composer);
 
 function i18nHasError(t: (key: string) => string, code: string) {
@@ -86,15 +88,21 @@ export const ChatSurface = memo(function ChatSurface({
     ),
   );
 
-  const heroProject = useMemo(
-    () =>
-      activeSession?.projectPath?.trim()
-        ? projectName(activeSession.projectPath, workspace?.name)
-        : null,
-    [activeSession?.projectPath, workspace?.name],
-  );
+  // The project the empty home names: the session on screen decides when there
+  // is one, because a temporary session deliberately belongs to no project. A
+  // project the user has just opened has no session yet, so its active
+  // workspace names the hero instead of falling back to the generic title.
+  const heroProject = useMemo(() => {
+    if (isRemoteSession(activeSession)) {
+      return projectName(activeSession?.remoteWorkspaceLabel) ?? activeSession?.remoteHostLabel ?? null;
+    }
+    const path = activeSession
+      ? activeSession.projectPath?.trim()
+      : workspace?.path?.trim();
+    return path ? projectName(path, workspace?.name) : null;
+  }, [activeSession, workspace?.path, workspace?.name]);
   const isTemporarySession = Boolean(
-    activeSessionId && activeSession && !activeSession.projectPath?.trim(),
+    activeSessionId && activeSession && !isRemoteSession(activeSession) && !activeSession.projectPath?.trim(),
   );
   const emptyTitleParts = useMemo(() => {
     const marker = "__PROJECT__";
@@ -125,7 +133,7 @@ export const ChatSurface = memo(function ChatSurface({
   // not take over just because the destination projection is still empty.
   const showEmptyState =
     !hasTranscript && (!visibleSessionId || visibleSessionId === activeSessionId);
-  const vendorModelMissing = vendorAccountOmitsSessionModel(
+  const vendorModelMissing = !isRemoteSession(activeSession) && vendorAccountOmitsSessionModel(
     activeSession,
     providers,
   );
@@ -174,7 +182,7 @@ export const ChatSurface = memo(function ChatSurface({
                   {heroProject ? (
                     <>
                       {emptyTitleParts.before}
-                      <HomeProjectSwitcher name={heroProject} path={workspace?.path || activeSession?.projectPath || null} />
+                      <HomeProjectSwitcher name={heroProject} path={isRemoteSession(activeSession) ? null : workspace?.path || activeSession?.projectPath || null} />
                       {emptyTitleParts.after}
                     </>
                   ) : isTemporarySession ? (
@@ -184,7 +192,7 @@ export const ChatSurface = memo(function ChatSurface({
                   )}
                 </h1>
               </div>
-              <OnboardingChecklist />
+              {!isRemoteSession(activeSession) ? <OnboardingChecklist /> : null}
             </div>
           </div>
           <div className="home-composer-wrap">
@@ -202,6 +210,7 @@ export const ChatSurface = memo(function ChatSurface({
               />
             ))}
           </div>
+          <BackgroundDelegationsChip />
           <StableComposer variant="docked" />
         </>
       )}
@@ -220,7 +229,7 @@ export const ChatSurface = memo(function ChatSurface({
                 </>
               ) : null}
             </span>
-            {(noticeCode === "MODEL_NOT_CONFIGURED" ||
+            {!isRemoteSession(activeSession) && (noticeCode === "MODEL_NOT_CONFIGURED" ||
               noticeCode === "PROVIDER_SECRET_MISSING" ||
               noticeCode === "PROVIDER_UNAUTHORIZED") && (
               <button

@@ -1,9 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
-  createCompactionSummaryMessage,
   type AgentMessage,
   type PrepareNextTurnContext,
 } from "@earendil-works/pi-agent-core";
+import { createCompactionSummaryMessage } from "./pi-runtime-messages.js";
 import type {
   Api,
   AssistantMessage,
@@ -215,7 +215,7 @@ describe("prepareDelegateTurnContext", () => {
     const messages: AgentMessage[] = [
       userMessage(taskBrief),
       assistantToolCall("soft-trigger"),
-      toolResult("x".repeat(7_500), "soft-trigger"),
+      toolResult("x".repeat(7_000), "soft-trigger"),
     ];
     const budget = contextBudgetFor(smallModel(), messages);
     const { factory, prompts } = summaryModels(() => summarySuccess("SUMMARY TEXT"));

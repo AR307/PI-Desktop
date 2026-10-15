@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   NAMED_ENDPOINT_PRESETS,
+  addressesPublishedVendorHost,
   deepseekRequestCompat,
   DEEPSEEK_REASONING_REPLAY_PLACEHOLDER,
   isDeepSeekReasoningReplay,
@@ -181,6 +182,19 @@ describe("named endpoint presets", () => {
     });
   });
 
+  it("keeps StepFun Plan on its subscription endpoint and catalog vendor", () => {
+    const expected = {
+      id: "stepfun-plan",
+      vendorKey: "stepfun-step-plan",
+      baseUrl: "https://api.stepfun.com/step_plan/v1",
+      apiStyle: "anthropic_messages",
+    };
+    expect(NAMED_ENDPOINT_PRESETS.find((preset) => preset.id === expected.id)).toMatchObject(expected);
+    expect(matchNamedPreset({ vendorKey: expected.vendorKey })).toMatchObject(expected);
+    expect(matchNamedPreset({ baseUrl: expected.baseUrl })).toMatchObject(expected);
+    expect(matchNamedPreset({ baseUrl: "https://api.stepfun.com/v1" })?.id).not.toBe(expected.id);
+  });
+
   it("maps DashScope and Doubao aliases to China catalog keys", () => {
     expect(matchNamedPreset({ vendorKey: "dashscope" })?.id).toBe("alibaba-cn");
     expect(matchNamedPreset({ vendorKey: "doubao" })?.id).toBe("volcengine");
@@ -193,5 +207,138 @@ describe("named endpoint presets", () => {
         baseUrl: "https://opencode.ai/zen/go/v1",
       })?.id,
     ).toBe("opencode_go");
+  });
+});
+
+describe("pi-ai built-in API-key services", () => {
+  it("resolves newly synced international vendors by key and by URL", () => {
+    const expected = [
+      ["ant-ling", "https://api.ant-ling.com/v1", "chat_completions"],
+      ["baseten", "https://inference.baseten.co/v1", "chat_completions"],
+      ["cerebras", "https://api.cerebras.ai/v1", "chat_completions"],
+      ["huggingface", "https://router.huggingface.co/v1", "chat_completions"],
+      ["nvidia", "https://integrate.api.nvidia.com/v1", "chat_completions"],
+      ["opencode", "https://opencode.ai/zen/v1", "chat_completions"],
+      ["vercel", "https://ai-gateway.vercel.sh/v1", "chat_completions"],
+    ] as const;
+    for (const [id, baseUrl, apiStyle] of expected) {
+      expect(matchNamedPreset({ vendorKey: id })).toMatchObject({
+        id,
+        vendorKey: id,
+        baseUrl,
+        apiStyle,
+      });
+      expect(matchNamedPreset({ baseUrl })).toMatchObject({ id, apiStyle });
+    }
+  });
+
+  it("keeps international and China hosts apart", () => {
+    expect(
+      matchNamedPreset({ baseUrl: "https://api.minimax.io/anthropic/v1" }),
+    ).toMatchObject({ id: "minimax", apiStyle: "anthropic_messages" });
+    expect(
+      matchNamedPreset({ baseUrl: "https://api.minimaxi.com/anthropic/v1" })?.id,
+    ).toBe("minimax-cn");
+    expect(matchNamedPreset({ baseUrl: "https://api.moonshot.ai/v1" })?.id).toBe(
+      "moonshotai",
+    );
+    expect(matchNamedPreset({ baseUrl: "https://api.moonshot.cn/v1" })?.id).toBe(
+      "moonshotai-cn",
+    );
+  });
+
+  it("maps pi-ai gateway and token-plan ids onto catalog keys", () => {
+    expect(matchNamedPreset({ vendorKey: "vercel-ai-gateway" })?.id).toBe("vercel");
+    expect(matchNamedPreset({ vendorKey: "opencode-zen" })?.id).toBe("opencode");
+    expect(matchNamedPreset({ vendorKey: "hf" })?.id).toBe("huggingface");
+    expect(matchNamedPreset({ vendorKey: "qwen-token-plan" })?.id).toBe(
+      "alibaba-token-plan",
+    );
+    expect(
+      matchNamedPreset({ vendorKey: "qwen-token-plan-individual" })?.vendorKey,
+    ).toBe("alibaba-token-plan");
+    expect(matchNamedPreset({ vendorKey: "qwen-token-plan-cn" })?.vendorKey).toBe(
+      "alibaba-token-plan-cn",
+    );
+  });
+
+  it("keeps OpenCode Zen and OpenCode Go as separate services", () => {
+    expect(matchNamedPreset({ baseUrl: "https://opencode.ai/zen/v1" })?.id).toBe(
+      "opencode",
+    );
+    expect(matchNamedPreset({ baseUrl: "https://opencode.ai/zen/go/v1" })?.id).toBe(
+      "opencode_go",
+    );
+  });
+
+  it("exposes Meta and the Xiaomi token plans as named services", () => {
+    expect(matchNamedPreset({ vendorKey: "meta" })).toMatchObject({
+      id: "meta",
+      apiStyle: "responses",
+    });
+    for (const id of [
+      "xiaomi-token-plan-cn",
+      "xiaomi-token-plan-ams",
+      "xiaomi-token-plan-sgp",
+    ]) {
+      expect(matchNamedPreset({ vendorKey: id })?.apiStyle).toBe("chat_completions");
+    }
+  });
+});
+
+describe("addressesPublishedVendorHost", () => {
+  it("matches the hosts the preset table publishes", () => {
+    for (const baseUrl of [
+      "https://api.openai.com/v1",
+      "https://api.anthropic.com",
+      "https://generativelanguage.googleapis.com/v1beta",
+      "https://api.deepseek.com",
+      "https://api.moonshot.cn/v1",
+      "https://openrouter.ai/api/v1",
+      "https://opencode.ai/zen/go/v1",
+      "https://token-plan.cn-beijing.maas.aliyuncs.com/compatible-mode/v1",
+    ]) {
+      expect(addressesPublishedVendorHost(baseUrl)).toBe(true);
+    }
+  });
+
+  it("matches by host, not by the full canonical URL", () => {
+    // The preset records spell `https://api.deepseek.com` and
+    // `https://api.groq.com/openai/v1`; both paths below are still that host.
+    expect(addressesPublishedVendorHost("https://api.deepseek.com/v1")).toBe(true);
+    expect(addressesPublishedVendorHost("https://api.deepseek.com/beta")).toBe(true);
+    expect(addressesPublishedVendorHost("https://api.groq.com/v1")).toBe(true);
+    expect(addressesPublishedVendorHost("https://api.openai.com/v1/")).toBe(true);
+    expect(addressesPublishedVendorHost("https://API.OPENAI.COM/v1")).toBe(true);
+  });
+
+  it("leaves a self-hosted gateway, relay, or loopback to the user", () => {
+    for (const baseUrl of [
+      "https://gateway.example.com/v1",
+      "https://relay.example.com",
+      "http://127.0.0.1:11434/v1",
+      "https://llm.internal:8443/v1",
+    ]) {
+      expect(addressesPublishedVendorHost(baseUrl)).toBe(false);
+    }
+  });
+
+  it("does not accept a host that merely contains a vendor host", () => {
+    expect(addressesPublishedVendorHost("https://api.openai.com.evil.test/v1")).toBe(false);
+    expect(addressesPublishedVendorHost("https://openai.com/v1")).toBe(false);
+    expect(addressesPublishedVendorHost("https://api.anthropic.com.evil.test")).toBe(false);
+  });
+
+  it("is false for missing or malformed input", () => {
+    for (const baseUrl of [
+      undefined,
+      "",
+      "   ",
+      "not a url",
+      "://broken",
+      "http://",
+    ]) {
+      expect(addressesPublishedVendorHost(baseUrl)).toBe(false);
+    }
   });
 });

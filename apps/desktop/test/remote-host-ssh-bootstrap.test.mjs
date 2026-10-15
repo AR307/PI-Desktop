@@ -14,9 +14,11 @@ const { sshHostRecord, sshMetadataOf, transportOf } = await import(
   "../electron/main/bootstrap/remote-hosts.ts"
 );
 
+const { GITHUB_REPO } = await import("@pi-desktop/shared");
+
 const VERSION = "0.15.1-beta.5";
 const ARTIFACT_NAME = `pi-host-${VERSION}-linux-x64.tar.gz`;
-const ARTIFACT_URL = `https://github.com/vastsa/PI-Desktop/releases/download/v${VERSION}/${ARTIFACT_NAME}`;
+const ARTIFACT_URL = `https://github.com/${GITHUB_REPO}/releases/download/v${VERSION}/${ARTIFACT_NAME}`;
 const DIGEST = "0123456789abcdef".repeat(4);
 const RESERVED_PORT = 49_152;
 
@@ -133,6 +135,7 @@ test("bootstrap probes, installs, forwards, and pairs in order", async () => {
     user: "deploy",
     remotePort: 41_234,
     version: VERSION,
+    hostId: "host_x",
   });
 
   // One tunnel: reserved here, bound to the port the host reported remotely.
@@ -145,7 +148,7 @@ test("bootstrap probes, installs, forwards, and pairs in order", async () => {
 
   // Pairing spends the single-use token over the forwarded URL only.
   assert.deepEqual(pairings, [
-    { url: `ws://127.0.0.1:${RESERVED_PORT}/v1/racp/ws`, pairingToken: "ppt1.abc", label: "Prod box" },
+    { url: `ws://127.0.0.1:${RESERVED_PORT}/v1/racp/ws`, pairingToken: "ppt1.abc", label: "Prod box", expectedHostId: "host_x" },
   ]);
 
   // What travelled over SSH is the script with the pinned digest and URL, not
@@ -171,14 +174,37 @@ test("a remote host running a different release is refused before the forward", 
 });
 
 test("an unpublished target fails without downloading anything", async () => {
-  // arm64 Linux is in the release matrix's shape but not in its published set.
-  const transport = fakeTransport({ uname: "Linux\naarch64\n" });
+  // macOS is in the bootstrap's `uname` vocabulary but the release publishes no
+  // pi-host bundle for it.
+  const transport = fakeTransport({ uname: "Darwin\nx86_64\n" });
   const { bootstrap, fetched } = harness({ transport });
   const error = await catchError(() => bootstrap.bootstrap(request()));
   assert.equal(error.errorCode, "HOST_BOOTSTRAP_FAILED");
-  assert.equal(error.target, "linux-arm64");
+  assert.equal(error.target, "darwin-x64");
   assert.deepEqual(fetched, [], "no checksum request for a bundle that does not exist");
   assert.deepEqual(transport.calls.uploads, []);
+});
+
+test("an arm64 Linux remote installs the published arm64 bundle", async () => {
+  // The arm64 lane publishes its own bundle, so the desktop resolves the arm64
+  // artifact and pins its published digest instead of reusing the x64 one.
+  const arm64Artifact = `pi-host-${VERSION}-linux-arm64.tar.gz`;
+  const transport = fakeTransport({ uname: "Linux\naarch64\n" });
+  const { bootstrap, fetched } = harness({
+    transport,
+    checksum: `${DIGEST}  ${arm64Artifact}\n`,
+  });
+
+  const outcome = await bootstrap.bootstrap(request());
+
+  assert.equal(
+    fetched[0],
+    `https://github.com/AR307/PI-Desktop/releases/download/v${VERSION}/${arm64Artifact}.sha256`,
+  );
+  assert.equal(outcome.ssh.version, VERSION);
+  const upload = transport.calls.uploads[0];
+  assert.ok(upload.input.includes(`/${arm64Artifact}'`), "the script downloads the arm64 tarball");
+  assert.ok(upload.input.includes(`EXPECTED_SHA256='${DIGEST}'`));
 });
 
 test("a checksum file with no digest for this artifact fails the bootstrap", async () => {
@@ -314,4 +340,12 @@ test("sshMetadataOf refuses direct, missing, and malformed descriptors", () => {
       `remotePort ${String(remotePort)}`,
     );
   }
+});
+
+test("SSH identity metadata remains optional for legacy records and rejects malformed enrollment", () => {
+  const ssh = { host: "remote.example", remotePort: 1234, version: VERSION };
+  const record = (value) => ({ hostKey: "h", metadata: { transport: "ssh", ssh: value } });
+  assert.equal(sshMetadataOf(record(ssh)).hostId, undefined);
+  assert.equal(sshMetadataOf(record({ ...ssh, hostId: "enrolled" })).hostId, "enrolled");
+  for (const hostId of ["", "x\n", 42, "x".repeat(257)]) assert.equal(sshMetadataOf(record({ ...ssh, hostId })), null);
 });

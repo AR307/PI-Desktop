@@ -359,10 +359,35 @@
 }
 
 /* The heading's help mark sits beside the heading rather than inside it: a
-   nested button would join the heading's accessible name. */
+   nested button would join the heading's accessible name.
+   The 10px gap below the heading belongs to this flex row: a margin inside it
+   would extend the icon's centering box and lift the question mark off the
+   heading text. */
 .settings-card-heading-help {
   display: flex;
   align-items: center;
+  margin-bottom: 10px;
+}
+
+.settings-card-heading-help .settings-card-heading {
+  margin-bottom: 0;
+}
+
+/* A card heading that carries a card-level action keeps heading, help mark and
+   action on one line, centered on each other. */
+.settings-card-heading-row.settings-card-heading-with-action {
+  align-items: center;
+}
+
+.settings-card-heading-row.settings-card-heading-with-action .settings-card-heading-help {
+  min-width: 0;
+  margin-bottom: 0;
+}
+
+.settings-card-heading-row.settings-card-heading-with-action
+  .settings-card-heading-help
+  .settings-card-heading {
+  margin-bottom: 0;
 }
 
 .settings-card-heading-row {
@@ -423,7 +448,6 @@
 .settings-panel:has(> .settings-row),
 .settings-panel.shortcut-map,
 .settings-panel.agent-capability-panel,
-.settings-panel.provider-list-panel:has(> .provider-row-list),
 .settings-panel.model-provider-panel:has(> .model-provider-list) {
   gap: 6px;
   background: transparent;
@@ -457,6 +481,82 @@
   padding: 12px 14px 14px;
 }
 
+.settings-disclosure > summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 44px;
+  padding: 12px 16px;
+  list-style: none;
+  border-radius: var(--radius-sm);
+  color: var(--ds-text-secondary);
+  font-size: var(--text-sm-plus);
+  font-weight: var(--font-weight-medium);
+  cursor: pointer;
+}
+
+.settings-disclosure > summary::-webkit-details-marker {
+  display: none;
+}
+
+.settings-disclosure > summary:hover {
+  background: var(--ds-tile-hover);
+}
+
+.settings-disclosure > summary:focus-visible {
+  outline: 2px solid var(--ds-focus);
+  outline-offset: -4px;
+}
+
+.settings-disclosure > summary svg {
+  flex: 0 0 auto;
+  transition: transform var(--motion-duration-fast) var(--motion-ease-out);
+}
+
+.settings-disclosure[open] > summary {
+  color: var(--ds-text-primary);
+}
+
+.settings-disclosure[open] > summary svg {
+  transform: rotate(180deg);
+}
+
+.settings-disclosure-body > .settings-disclosure {
+  margin: 0 16px;
+}
+
+.settings-disclosure-body > .settings-disclosure > summary {
+  padding-inline: 0;
+}
+
+.settings-config-sync {
+  container-type: inline-size;
+  container-name: config-sync;
+  gap: 16px;
+}
+
+.settings-config-sync > .settings-card-block {
+  margin-bottom: 0;
+}
+
+.settings-config-sync-intro,
+.settings-config-sync-note {
+  margin: 0;
+  color: var(--ds-text-secondary);
+  font-size: var(--text-sm);
+  line-height: var(--leading-body);
+  overflow-wrap: anywhere;
+}
+
+.settings-config-sync-note {
+  padding: 0 16px 8px;
+}
+
+.settings-config-sync .settings-disclosure-body > .settings-row {
+  background: transparent;
+}
+
 .settings-config-sync-form {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -469,18 +569,12 @@
   width: 100%;
 }
 
-.settings-config-sync-http-option {
-  display: grid;
-  grid-column: 1 / -1;
+.settings-config-sync-form-actions {
+  display: flex;
+  justify-content: flex-end;
+  flex-wrap: wrap;
   gap: 8px;
-  padding: 10px 12px;
-  border: 1px solid color-mix(in srgb, var(--ds-warning) 32%, transparent);
-  border-radius: var(--radius-md);
-  background: color-mix(in srgb, var(--ds-warning) 7%, transparent);
-}
-
-.settings-config-sync-http-option .settings-config-sync-warning {
-  margin: 0;
+  padding: 12px 16px 16px;
 }
 
 .settings-config-sync-actions {
@@ -490,30 +584,148 @@
   gap: 8px;
 }
 
-.settings-config-sync > .settings-card-block:first-child .settings-config-sync-actions {
-  padding: 0 16px 14px;
-}
 
-.settings-config-sync-message {
+/* A failed sync is a state, not a stray paragraph: the notice wears the error
+   ink on its frame and glyph, keeps the copy legible on both themes, and hides
+   the raw host text behind a disclosure. */
+.settings-config-sync-alert {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
   margin: 0 16px 14px;
+  padding: 12px 14px;
+  border: 1px solid color-mix(in srgb, var(--ds-error) 30%, transparent);
+  border-radius: var(--radius-md-plus);
+  background: color-mix(in srgb, var(--ds-error) 8%, transparent);
   color: var(--ds-text-secondary);
-  font-size: var(--text-sm);
+  font-size: var(--text-sm-plus);
+  line-height: var(--leading-body);
   overflow-wrap: anywhere;
 }
 
-.settings-config-sync-message.error,
-.settings-config-sync-error {
-  color: var(--ds-danger);
+.settings-config-sync-alert-icon {
+  flex: none;
+  margin-top: 1px;
+  color: var(--ds-error);
 }
 
-/*
- * A manual sync reports itself while its request is still open: the phase it
- * is in, a bar once it announced a total, and the figures it has moved so far.
- * It sits between the cards rather than inside one, because the first enable —
- * the slowest sync of all — runs before the status card exists. The page stack
- * spaces the cards around it, so only the inset that lines it up with their
- * content is left here.
- */
+.settings-config-sync-alert-copy {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.settings-config-sync-alert-title {
+  margin: 0;
+  color: var(--ds-text-primary);
+  font-size: var(--text-md);
+  font-weight: var(--font-weight-medium);
+  line-height: var(--leading-compact);
+}
+
+.settings-config-sync-alert-text {
+  margin: 0;
+}
+
+.settings-config-sync-alert-details {
+  margin-top: 2px;
+}
+
+.settings-config-sync-alert-details > summary {
+  color: var(--ds-text-secondary);
+  font-size: var(--text-sm);
+  line-height: var(--leading-compact);
+  cursor: pointer;
+  user-select: none;
+}
+
+.settings-config-sync-alert-details > summary:hover,
+.settings-config-sync-alert-details > summary:focus-visible {
+  color: var(--ds-text-primary);
+}
+
+.settings-config-sync-alert-details > pre {
+  max-height: 120px;
+  margin: 6px 0 0;
+  padding: 8px 10px;
+  border-radius: var(--radius-sm);
+  background: var(--ds-tile-deep);
+  color: var(--ds-text-secondary);
+  font-size: var(--text-xs-plus);
+  line-height: var(--leading-body);
+  overflow: auto;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.settings-storage-path,
+.settings-storage-message,
+.settings-storage-confirmation dd {
+  overflow-wrap: anywhere;
+}
+
+.settings-storage-message {
+  margin: 12px 16px;
+  color: var(--ds-text-secondary);
+  font-size: var(--text-sm);
+  line-height: var(--leading-body);
+}
+
+.settings-storage-message.error {
+  color: var(--ds-error);
+}
+
+.settings-storage-confirmation {
+  margin: 12px 16px 16px;
+  padding: 16px;
+  border: 1px solid var(--ds-border-default);
+  border-radius: var(--radius-md);
+  color: var(--ds-text-secondary);
+  font-size: var(--text-sm);
+  line-height: var(--leading-body);
+}
+
+.settings-storage-confirmation h4 {
+  margin: 0 0 12px;
+  color: var(--ds-text-primary);
+  font-size: var(--text-md);
+  font-weight: var(--font-weight-medium);
+}
+
+.settings-storage-confirmation p {
+  margin: 8px 0;
+}
+
+.settings-storage-confirmation dl {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 8px 16px;
+  margin: 0 0 12px;
+}
+
+.settings-storage-confirmation dd {
+  margin: 0;
+  color: var(--ds-text-primary);
+}
+
+.settings-storage-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 16px;
+}
+
+.settings-config-sync-refresh {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0 16px;
+  color: var(--ds-text-muted);
+  font-size: var(--text-sm);
+}
+
+/* Manual progress stays above setup and never hides behind a disclosure. */
 .settings-config-sync-progress {
   display: grid;
   gap: 8px;
@@ -578,13 +790,6 @@
   font-size: var(--text-sm);
 }
 
-.settings-config-sync-category input {
-  accent-color: var(--ds-accent);
-}
-
-.settings-config-sync-sensitive {
-  color: var(--ds-warning);
-}
 
 .settings-config-sync-warning {
   margin: 0 16px 14px;
@@ -694,7 +899,7 @@
   font-size: var(--text-sm);
 }
 
-@media (max-width: 700px) {
+@container config-sync (max-width: 560px) {
   .settings-config-sync-form,
   .settings-config-sync-categories {
     grid-template-columns: minmax(0, 1fr);
@@ -726,9 +931,9 @@
 }
 
 /*
-  Remote hosts: inventory tiles, one Add form with SSH/Pair tabs, and
-  Experimental rows. The form keeps a two-column grid; host cards are
-  inventory rows rather than settings-copy + control.
+  Remote hosts: inventory tiles, explicit Add actions with on-demand SSH/Pair
+  forms, and Experimental rows. The form keeps a two-column grid; host cards
+  are inventory rows rather than settings-copy + control.
 */
 .settings-remote-host-list {
   display: grid;
@@ -757,13 +962,6 @@
   color: var(--ds-text-muted);
   font-size: var(--text-md);
   line-height: var(--leading-compact);
-}
-
-.settings-remote-host-empty-detail {
-  flex: 1 1 100%;
-  color: var(--ds-text-secondary);
-  font-family: var(--font-mono);
-  font-size: var(--text-xs-plus);
 }
 
 .settings-remote-host-pulse {
@@ -820,6 +1018,50 @@
   margin-bottom: 0;
 }
 
+.settings-remote-host-add-actions {
+  display: inline-flex;
+  align-items: center;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.settings-remote-host-add-button-content {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.settings-remote-host-add-overlay {
+  z-index: 45;
+}
+
+.settings-remote-host-add-dialog {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  width: min(100%, 640px);
+  max-height: min(90vh, 760px);
+  overflow: hidden;
+  padding: 16px;
+}
+
+.settings-remote-host-add-dialog-title {
+  margin: 0;
+  color: var(--ds-text-primary);
+  font-size: var(--text-base-plus);
+  font-weight: var(--font-weight-semibold);
+  line-height: var(--leading-tight);
+}
+
+.settings-remote-host-add-dialog .settings-remote-host-form {
+  min-height: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  padding: 2px;
+  overscroll-behavior: contain;
+}
+
 .settings-remote-host-form {
   display: grid;
   gap: 12px;
@@ -838,6 +1080,17 @@
 
 .settings-remote-host-form-row.is-narrow-port {
   grid-template-columns: minmax(0, 1fr) minmax(120px, 0.4fr);
+}
+
+.settings-remote-host-identity-file {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 8px;
+}
+
+.settings-remote-host-identity-file-input {
+  display: none;
 }
 
 .settings-remote-host-form-auth {
@@ -910,7 +1163,27 @@
 }
 
 /*
-  A toggle paired with an icon action (prompt enhancement). The control column
+  A toggle is 20 px tall, while the field metric (select triggers, text inputs)
+  resolves to ~38 px. Give the control column a matching minimum so toggle rows
+  are the same height as select rows; the switch stays centred via align-items.
+*/
+.settings-row-control:has(> .settings-toggle) {
+  min-height: var(--ds-field-height);
+}
+
+/*
+  The Jev row's control column: two actions and the switch. The row metric
+  above only matches a bare toggle, so the group keeps its own height.
+*/
+.jev-settings-controls {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: var(--ds-field-height);
+}
+
+/*
+  A toggle paired with an icon action. The control column
   has no gap of its own, so the two would otherwise touch.
 */
 .settings-row-control:has(> .settings-toggle + .settings-icon-button) {
@@ -1262,14 +1535,164 @@
   padding: 16px 14px;
 }
 
-.settings-about-meta {
+/*
+  About tab hero: centered app name and version, echoing an "About" panel.
+  The protocol/host line doubles as the card's soft divider.
+*/
+.settings-about-hero {
   display: flex;
   flex-direction: column;
-  align-items: flex-end;
-  gap: 2px;
-  text-align: right;
+  align-items: center;
+  gap: 4px;
+  padding: 26px 16px 8px;
+  text-align: center;
+}
+
+.settings-about-hero-name {
   color: var(--ds-text-primary);
-  font-size: var(--text-md);
+  font-size: var(--text-xl);
+  font-weight: var(--font-weight-semibold);
+  line-height: var(--leading-heading);
+}
+
+.settings-about-hero-version {
+  color: var(--ds-text-secondary);
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  font-variant-numeric: tabular-nums;
+  line-height: var(--leading-body);
+}
+
+.settings-about-hero-meta {
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid color-mix(in oklab, var(--ds-text-primary) 8%, transparent);
+  color: var(--ds-text-muted);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  line-height: var(--leading-body);
+}
+
+/*
+  App-update card: icon + title + description on the left, actions on the
+  right, live status (progress bar, error, readiness) beneath.
+*/
+.settings-panel.about-update-panel {
+  gap: 12px;
+  padding: 16px;
+}
+
+.about-update-header {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+}
+
+.about-update-icon {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 38px;
+  height: 38px;
+  border-radius: var(--radius-md);
+  background: color-mix(in oklab, var(--ds-accent) 10%, transparent);
+  color: var(--ds-accent);
+}
+
+.about-update-copy {
+  flex: 1;
+  min-width: 0;
+}
+
+.about-update-title {
+  color: var(--ds-text-primary);
+  font-size: var(--text-md-plus);
+  font-weight: var(--font-weight-medium);
+  line-height: var(--leading-compact);
+}
+
+.about-update-desc {
+  margin-top: 3px;
+  color: var(--ds-text-muted);
+  font-size: var(--text-sm);
+  line-height: var(--leading-body);
+}
+
+.about-update-actions {
+  display: flex;
+  flex: none;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 6px;
+}
+
+.about-update-status {
+  color: var(--ds-text-secondary);
+  font-size: var(--text-sm);
+  line-height: var(--leading-body);
+  overflow-wrap: anywhere;
+}
+
+.about-update-status.is-ready {
+  color: var(--ds-success);
+}
+
+.about-update-status.is-error {
+  color: var(--ds-error);
+}
+
+/* Background download: rounded bar, label/percent pair, reassurance hint. */
+.about-update-download {
+  display: grid;
+  gap: 6px;
+}
+
+.about-update-progress {
+  height: 6px;
+  overflow: hidden;
+  border-radius: var(--radius-full);
+  background: color-mix(in oklab, var(--ds-text-primary) 10%, transparent);
+}
+
+.about-update-progress > span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--ds-accent);
+  transition: width var(--motion-duration-normal) var(--motion-ease-out);
+}
+
+.about-update-progress-meta {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  color: var(--ds-text-secondary);
+  font-size: var(--text-sm);
+  font-variant-numeric: tabular-nums;
+  line-height: var(--leading-compact);
+}
+
+.about-update-hint {
+  color: var(--ds-text-muted);
+  font-size: var(--text-xs-plus);
+  line-height: var(--leading-body);
+}
+
+.about-update-notes {
+  margin-top: 0;
+  max-width: none;
+}
+
+@media (max-width: 820px) {
+  .about-update-header {
+    flex-direction: column;
+  }
+
+  .about-update-actions {
+    width: 100%;
+    justify-content: flex-start;
+  }
 }
 
 .settings-pill-select,
@@ -1438,19 +1861,28 @@
 .settings-font-trigger {
   display: inline-flex;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
   width: max-content;
   max-width: 100%;
   min-width: 0;
-  /* One closed-trigger height for every picker: the metric a text input in the
-     same Settings row resolves to, so the two never disagree (see the token). */
-  height: var(--ds-field-height);
-  padding: 0 10px 0 12px;
+  padding: 0 10px;
   border-radius: var(--radius-full);
   background: var(--ds-raised);
   box-shadow: var(--ds-raised-shadow);
   color: var(--ds-text-primary);
   font-size: var(--text-sm-plus);
+}
+
+.settings-language-trigger,
+.settings-theme-trigger,
+.settings-font-trigger {
+  /* Appearance values are brief; the compact trigger frees vertical space
+     while SettingsMenuSelect continues to align with adjacent field inputs. */
+  height: var(--ds-settings-picker-height);
+}
+
+.settings-menu-select-trigger {
+  height: var(--ds-field-height);
 }
 
 .settings-menu-select-anchor.is-full .settings-menu-select-trigger {
@@ -1695,7 +2127,7 @@
  * One workbench per page: a description line, a single toolbar (level filter
  * with counts, one search field, project picker, primary actions), then one
  * elevated panel whose rows are divided by level group headers. Rows follow
- * the provider-row rhythm, lists flow at natural height, and loading/empty
+ * the service-row rhythm, lists flow at natural height, and loading/empty
  * states reuse the same row anatomy.
  */
 
@@ -1982,7 +2414,7 @@
   gap: 6px;
 }
 
-/* Rows follow the provider-row rhythm: quiet icon, name + badges, meta. */
+/* Rows follow the service-row rhythm: quiet icon, name + badges, meta. */
 .agent-capability-row {
   display: flex;
   align-items: center;
@@ -2259,12 +2691,14 @@
 }
 
 /*
-  The menu floats over a `#212121` panel, and the shared elevated gray is only
-  `#282828` — too close to read as detached. Light mode keeps the plain white
-  surface, where the ring and drop shadow already separate it.
+  The menu floats over the settings panel (--ds-bg-secondary, #212121 in the
+  built-in dark) and the shared elevated gray is only #282828 — too close to
+  read as detached. Light mode keeps the plain white surface, where the ring
+  and drop shadow already separate it. Both colours ride tokens so a
+  contributed theme can move the plate with the rest of the settings chrome.
 */
 :root[data-theme="dark"] .agent-capability-menu {
-  background: color-mix(in oklab, var(--gray-0) 8%, var(--gray-800));
+  background: color-mix(in oklab, var(--ds-text-primary) 8%, var(--ds-bg-secondary));
   box-shadow:
     0 0 0 0.5px var(--ds-border-strong),
     0 12px 32px rgb(0 0 0 / 44%);
@@ -2848,7 +3282,7 @@
 }
 
 .mcpm-search .field-input:focus-visible {
-  border-color: color-mix(in oklab, var(--gray-0) 32%, transparent);
+  border-color: color-mix(in oklab, var(--ds-text-primary) 32%, transparent);
   box-shadow: 0 0 0 3px var(--ds-tile-deep);
 }
 
@@ -2913,7 +3347,7 @@
 
 .mcpm-card:hover {
   transform: translateY(-2px);
-  border-color: color-mix(in oklab, var(--gray-0) 20%, transparent);
+  border-color: color-mix(in oklab, var(--ds-text-primary) 20%, transparent);
   background: var(--ds-tile-hover);
   box-shadow: 0 10px 28px color-mix(in oklab, #000 24%, transparent);
 }
@@ -3353,7 +3787,7 @@
 }
 
 .sklm-search .field-input:focus-visible {
-  border-color: color-mix(in oklab, var(--gray-0) 32%, transparent);
+  border-color: color-mix(in oklab, var(--ds-text-primary) 32%, transparent);
   box-shadow: 0 0 0 3px var(--ds-tile-deep);
 }
 
@@ -3418,7 +3852,7 @@
 
 .sklm-card:hover {
   transform: translateY(-2px);
-  border-color: color-mix(in oklab, var(--gray-0) 20%, transparent);
+  border-color: color-mix(in oklab, var(--ds-text-primary) 20%, transparent);
   background: var(--ds-tile-hover);
   box-shadow: 0 10px 28px color-mix(in oklab, #000 24%, transparent);
 }

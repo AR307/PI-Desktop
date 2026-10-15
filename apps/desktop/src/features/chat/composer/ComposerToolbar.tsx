@@ -6,10 +6,12 @@ import {
   type PermissionMode,
   type ShortcutPlatform,
   type SessionThinkingLevel,
+  type PluginComposerTransformMeta,
 } from "@pi-desktop/shared";
 import type { AppState } from "../../../stores/app-store";
 import { ComposerPermissionPicker } from "./ComposerPermissionPicker";
 import { ContextUsageInspector } from "../../../components/ContextUsageInspector";
+import { ComposerControlSlots } from "./ComposerControlSlots";
 import { TooltipButton } from "../../../components/ui";
 import {
   IconArrowUp,
@@ -18,12 +20,10 @@ import {
   IconStop,
   IconUndo2,
 } from "../../../components/icons";
-import { ModeIcon } from "./ComposerModeIcon";
+import { ComposerModePicker, type ComposerMode } from "./ComposerModePicker";
+import { LiveVoiceControls } from "../../voice/live/LiveVoiceControls";
 import { ComposerModelPicker } from "./ComposerModelPicker";
-import {
-  MODE_LABEL_KEYS,
-  nextMode,
-} from "./model";
+import type { ComposerTask } from "./model";
 import type { useComposerModelMenu } from "./hooks/useComposerModelMenu";
 
 type ModelMenuController = ReturnType<typeof useComposerModelMenu>;
@@ -32,6 +32,7 @@ type ContextUsage = Parameters<typeof ContextUsageInspector>[0];
 export type ComposerToolbarProps = {
   t: TFunction;
   mode: Mode;
+  task: ComposerTask;
   planningLive: boolean;
   providerId?: string;
   modelId?: string;
@@ -40,6 +41,9 @@ export type ComposerToolbarProps = {
   permissionOpen: boolean;
   setPermissionOpen: Dispatch<SetStateAction<boolean>>;
   controlsBlocked: boolean;
+  localToolsAllowed?: boolean;
+  attachmentsAllowed?: boolean;
+  stopAllowed?: boolean;
   pasting: boolean;
   pickAndAttach: () => Promise<void>;
   configureActiveSession: AppState["configureActiveSession"];
@@ -48,25 +52,29 @@ export type ComposerToolbarProps = {
   modelLabel: string;
   thinkingLabel: string;
   contextUsage: ContextUsage | null;
-  enhancementDraft: string;
   value: string;
   modelReady: boolean;
   sendBlocked: boolean;
-  enhancingPrompt: boolean;
-  enhancementUndoText: string | null;
-  enhancePrompt: () => Promise<void>;
-  undoPromptEnhancement: () => void;
-  clearEnhancementError: () => void;
+  composerTransforms: PluginComposerTransformMeta[];
+  activeTransformKey: string | null;
+  undoTransform: PluginComposerTransformMeta | null;
+  runComposerTransform: (transform: PluginComposerTransformMeta) => Promise<void>;
+  undoComposerTransform: () => void;
   runActive: boolean;
   hasDraftContent: boolean;
   abort: AppState["abort"];
   submit: () => Promise<void>;
+  onModeChange: (mode: ComposerMode) => Promise<void>;
+  modeBlocked: boolean;
+  workSessionId?: string;
+  workSessionLabel?: string;
 };
 
-/** Composer controls: mode, permission, model, enhancement, and send/stop. */
+/** Composer controls: mode, permission, model, plugin actions, and send/stop. */
 export function ComposerToolbar({
   t,
   mode,
+  task,
   planningLive,
   providerId,
   modelId,
@@ -75,6 +83,9 @@ export function ComposerToolbar({
   permissionOpen,
   setPermissionOpen,
   controlsBlocked,
+  localToolsAllowed = true,
+  attachmentsAllowed = true,
+  stopAllowed = true,
   pasting,
   pickAndAttach,
   configureActiveSession,
@@ -83,19 +94,22 @@ export function ComposerToolbar({
   modelLabel,
   thinkingLabel,
   contextUsage,
-  enhancementDraft,
   value,
   modelReady,
   sendBlocked,
-  enhancingPrompt,
-  enhancementUndoText,
-  enhancePrompt,
-  undoPromptEnhancement,
-  clearEnhancementError,
+  composerTransforms,
+  activeTransformKey,
+  undoTransform,
+  runComposerTransform,
+  undoComposerTransform,
   runActive,
   hasDraftContent,
   abort,
   submit,
+  onModeChange,
+  modeBlocked,
+  workSessionId,
+  workSessionLabel,
 }: ComposerToolbarProps) {
   const platform = (window.piDesktop?.platform ?? "darwin") as ShortcutPlatform;
   const steeringShortcut = keybindingDisplayParts("Alt+Enter", platform).join("+");
@@ -108,7 +122,7 @@ export function ComposerToolbar({
             className="icon-btn icon-btn-square"
             tooltip={t("chat.addFiles")}
             ariaLabel={t("chat.addFiles")}
-            disabled={controlsBlocked || pasting}
+            disabled={controlsBlocked || pasting || !attachmentsAllowed}
             onClick={() => {
               setPermissionOpen(false);
               void pickAndAttach();
@@ -117,40 +131,18 @@ export function ComposerToolbar({
             <IconPlus size={15} aria-hidden="true" />
           </TooltipButton>
         </div>
-        <TooltipButton
-          type="button"
-          className="icon-btn mode-chip composer-mode-chip"
-          data-mode={mode}
-          data-planning={planningLive ? "true" : undefined}
-          tooltip={planningLive ? t(`${mode}.planning`) : t("settings.mode")}
-          ariaLabel={planningLive ? t(`${mode}.planning`) : t("settings.mode")}
-          disabled={controlsBlocked}
-          onClick={async () => {
+        {task === "chat" && localToolsAllowed ? <LiveVoiceControls t={t} workSessionId={workSessionId} /> : null}
+        <ComposerModePicker
+          mode={task === "image" ? "image" : mode}
+          planningLive={planningLive}
+          blocked={controlsBlocked || modeBlocked}
+          onSelect={onModeChange}
+          onOpen={() => {
             modelMenu.setOpen(false);
             setPermissionOpen(false);
-            const next: Mode = nextMode(mode);
-            try {
-              await configureActiveSession({
-                mode: next,
-                providerId,
-                modelId,
-                thinkingLevel,
-              });
-            } catch (error) {
-              showToast(error instanceof Error ? error.message : String(error), {
-                variant: "error",
-              });
-            }
           }}
-        >
-          <span className="composer-mode-chip-face" key={mode}>
-            <ModeIcon mode={mode} />
-            <span className="composer-mode-chip-label text-sm">
-              {t(MODE_LABEL_KEYS[mode])}
-            </span>
-          </span>
-        </TooltipButton>
-        <ComposerPermissionPicker t={t} mode={mode}
+        />
+        {task === "chat" ? <ComposerPermissionPicker t={t} mode={mode}
           composerPermissionMode={composerPermissionMode}
           permissionOpen={permissionOpen} setPermissionOpen={setPermissionOpen}
           controlsBlocked={controlsBlocked} onCloseOtherMenus={() => modelMenu.setOpen(false)}
@@ -168,64 +160,68 @@ export function ComposerToolbar({
                     variant: "error",
                   });
                 }
-          }} />
+          }} /> : null}
+        {localToolsAllowed ? <ComposerControlSlots side="left" /> : null}
       </div>
 
       <div className="composer-right">
-        {contextUsage ? <ContextUsageInspector {...contextUsage} /> : null}
+        {localToolsAllowed ? <ComposerControlSlots side="right" /> : null}
+        {task === "chat" && contextUsage ? <ContextUsageInspector {...contextUsage} /> : null}
         <ComposerModelPicker
           t={t}
           controller={modelMenu}
           modelLabel={modelLabel}
           thinkingLabel={thinkingLabel}
           thinkingLevel={thinkingLevel}
-          selectedProviderId={providerId}
-          selectedModelId={modelId}
+          selectedProviderId={task === "image" ? modelMenu.selectedImage?.providerId : providerId}
+          selectedModelId={task === "image" ? modelMenu.selectedImage?.modelId : modelId}
           controlsBlocked={controlsBlocked}
           onCloseOtherMenus={() => setPermissionOpen(false)}
         />
-        <TooltipButton
-          type="button"
-          className={`icon-btn icon-btn-square composer-enhance-btn${enhancingPrompt ? " is-loading" : ""}`}
-          tooltip={t("chat.enhancePrompt")}
-          ariaLabel={enhancingPrompt ? t("chat.enhancingPrompt") : t("chat.enhancePrompt")}
-          aria-busy={enhancingPrompt}
-          disabled={
-            !enhancementDraft.trim() ||
-            enhancementDraft.trim().startsWith("/") ||
-            !modelReady ||
-            sendBlocked ||
-            enhancingPrompt
-          }
-          onClick={() => void enhancePrompt()}
-        >
-          {enhancingPrompt ? (
-            <>
-              <span className="tool-spinner" aria-hidden="true" />
-              <span>{t("chat.enhancingPrompt")}</span>
-            </>
-          ) : (
-            <IconSparkles size={15} aria-hidden="true" />
-          )}
-        </TooltipButton>
-        {enhancementUndoText !== null ? (
+        {task === "chat" && composerTransforms.map((transform) => {
+          const key = `${transform.pluginId}/${transform.id}`;
+          const isActive = activeTransformKey === key;
+          return (
+          <TooltipButton
+            key={key}
+            type="button"
+            className={`icon-btn icon-btn-square composer-plugin-transform-btn${isActive ? " is-loading" : ""}`}
+            tooltip={transform.title}
+            ariaLabel={transform.title}
+            aria-busy={isActive}
+            disabled={
+              !value.trim() ||
+              value.trim().startsWith("/") ||
+              controlsBlocked ||
+              sendBlocked ||
+              pasting ||
+              activeTransformKey !== null
+            }
+            onClick={() => void runComposerTransform(transform)}
+          >
+            {isActive ? <span className="tool-spinner" aria-hidden="true" /> : <IconSparkles size={15} aria-hidden="true" />}
+          </TooltipButton>
+          );
+        })}
+        {task === "chat" && undoTransform ? (
           <TooltipButton
             type="button"
-            className="icon-btn icon-btn-square composer-enhance-undo"
-            tooltip={t("chat.undoEnhancement")}
-            ariaLabel={t("chat.undoEnhancement")}
+            className="icon-btn icon-btn-square composer-plugin-transform-undo"
+            tooltip={undoTransform.undoTitle}
+            ariaLabel={undoTransform.undoTitle}
             disabled={controlsBlocked}
-            onClick={undoPromptEnhancement}
+            onClick={undoComposerTransform}
           >
             <IconUndo2 size={15} aria-hidden="true" />
           </TooltipButton>
         ) : null}
-        {runActive && !hasDraftContent ? (
+        {runActive && (task === "image" || !hasDraftContent) ? (
           <TooltipButton
             type="button"
             className="stop-btn"
             tooltip={t("chat.stopGenerating")}
             ariaLabel={t("chat.stopGenerating")}
+            disabled={!stopAllowed}
             onClick={() => void abort()}
           >
             <IconStop size={14} />

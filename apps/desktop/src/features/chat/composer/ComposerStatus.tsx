@@ -23,15 +23,13 @@ export type ComposerStatusProps = {
   editQueuedPrompt: (id: string) => void;
   sendQueuedNow: (id: string) => Promise<void>;
   approvalPending: boolean;
-  enhancementError: { message: string; code: string } | null;
-  clearEnhancementError: () => void;
   droppedDirectories: ComposerDropItem[];
   openDroppedFolderAsProject: () => Promise<void>;
   insertDroppedDirectoryPaths: () => void;
   dismissDroppedDirectories: () => void;
 };
 
-/** Non-editor composer status rows: queue, enhancement errors, and folder drops. */
+/** Non-editor composer status rows: queue and folder drops. */
 export function ComposerStatus({
   t,
   queuedPrompts,
@@ -40,8 +38,6 @@ export function ComposerStatus({
   editQueuedPrompt,
   sendQueuedNow,
   approvalPending,
-  enhancementError,
-  clearEnhancementError,
   droppedDirectories,
   openDroppedFolderAsProject,
   insertDroppedDirectoryPaths,
@@ -145,23 +141,6 @@ export function ComposerStatus({
               </div>
             );
           })}
-        </div>
-      ) : null}
-      {enhancementError ? (
-        <div className="composer-enhancement-error" role="alert">
-          <span className="composer-enhancement-error-message">
-            {t("chat.enhancementFailed")}: {enhancementError.message}
-          </span>
-          <code>{enhancementError.code}</code>
-          <TooltipButton
-            type="button"
-            className="composer-enhancement-error-dismiss"
-            tooltip={t("chat.dismissEnhancementError")}
-            ariaLabel={t("chat.dismissEnhancementError")}
-            onClick={clearEnhancementError}
-          >
-            <IconX size={13} aria-hidden="true" />
-          </TooltipButton>
         </div>
       ) : null}
       {droppedDirectories.length ? (

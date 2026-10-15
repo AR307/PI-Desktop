@@ -1,7 +1,7 @@
 import i18n from "i18next";
-import { prepareTranscriptAction } from "../runtime/transcript-action";
 import type {
   Mode,
+  PendingInteractiveRequests,
   PlanProposal,
   ProposalKind,
   SessionDetail,
@@ -26,7 +26,6 @@ import {
   retainSessionPane,
 } from "../../lib/session-panes";
 import {
-  normalizeProjectPath,
   projectPathsForNewSessions,
   sessionMatchesProject,
 } from "../../lib/sidebar-session-groups";
@@ -36,7 +35,9 @@ import {
   type SessionMeta,
 } from "../../lib/sidebar-preferences";
 import { api } from "../../lib/api";
+import { isRemoteSession, safeSessionSummary, sessionAllows } from "../../lib/remote-session-safety";
 import { createRefreshCoordinator } from "../../lib/refresh-coordinator";
+import { openRemoteProjectSession, remoteProjectForSession } from "../../lib/remote-project-session";
 import {
   applyOptimisticSessionConfiguration,
 } from "../../lib/session-thinking";
@@ -48,12 +49,9 @@ import { sessionReadLooksEmpty } from "../../lib/session-transcript-read";
 import type {
   AppState,
   DraftSessionConfiguration,
-  NavigationOptions,
-  PendingPlanRefreshResult,
   SessionHistoryWindow,
 } from "../app-state";
 import {
-  type SessionConfiguration,
   type SessionRuntime,
 } from "../runtime/session-runtime";
 import type { StoreAccess } from "./types";
@@ -96,6 +94,55 @@ export type SessionSliceDependencies = StoreAccess & {
   }) => Promise<string | null>;
 };
 
+function reconcilePendingQueue<T extends { requestId: string }>(
+  current: T[],
+  initialRequestIds: ReadonlySet<string>,
+  restored: T[],
+): T[] {
+  const restoredById = new Map(
+    restored.map((entry) => [entry.requestId, entry] as const),
+  );
+  const currentRequestIds = new Set<string>();
+  const next = current.flatMap((entry) => {
+    currentRequestIds.add(entry.requestId);
+    if (
+      initialRequestIds.has(entry.requestId) &&
+      !restoredById.has(entry.requestId)
+    ) {
+      return [];
+    }
+    return [restoredById.get(entry.requestId) ?? entry];
+  });
+  const appendedRequestIds = new Set<string>();
+  for (const entry of restored) {
+    if (
+      currentRequestIds.has(entry.requestId) ||
+      initialRequestIds.has(entry.requestId) ||
+      appendedRequestIds.has(entry.requestId)
+    ) {
+      continue;
+    }
+    next.push(entry);
+    appendedRequestIds.add(entry.requestId);
+  }
+  return next;
+}
+
+function replacePendingQueue<T>(
+  queues: Record<string, T[]>,
+  sessionId: string,
+  queue: T[],
+): Record<string, T[]> {
+  if (queue.length === 0) {
+    if (!queues[sessionId]) return queues;
+    const next = { ...queues };
+    delete next[sessionId];
+    return next;
+  }
+  if (queues[sessionId] === queue) return queues;
+  return { ...queues, [sessionId]: queue };
+}
+
 export function createSessionSlice({
   get,
   set,
@@ -110,6 +157,7 @@ export function createSessionSlice({
 }: SessionSliceDependencies): Pick<
   AppState,
   | "refreshSessions"
+  | "restorePendingInteractive"
   | "restorePendingPlan"
   | "refreshPlanCheckpoints"
   | "prefetchSession"
@@ -120,9 +168,18 @@ export function createSessionSlice({
   | "configureActiveSession"
   | "abortSession"
 > {
+  const pendingInteractiveRestoreGenerations = new Map<string, number>();
+
   const refreshSessionList = createRefreshCoordinator(async () => {
     const result = await api.listSessions();
-    set({ sessions: decorateSessions(result.sessions, get().sessionMeta) });
+    set((state) => {
+      const next = result.sessions.map(safeSessionSummary);
+      const active = state.sessions.find((session) => session.id === state.activeSessionId);
+      // A disconnected host may temporarily disappear from inventory; keep the
+      // active identity fail-closed until an authoritative detail/list replaces it.
+      if (active && isRemoteSession(active) && !next.some((session) => session.id === active.id)) next.push(safeSessionSummary(active));
+      return { sessions: decorateSessions(next, state.sessionMeta) };
+    });
     return result;
   });
 
@@ -214,10 +271,101 @@ export function createSessionSlice({
       }
     },
 
+    /**
+     * Reconcile a session's decision cards with the Host-owned read.
+     *
+     * `pendingAsks` / `pendingPermissions` live in renderer memory only, so a
+     * renderer reload forgets both. A successful read is authoritative for
+     * requests that existed when the read started: answered or completed cards
+     * are removed, while requests delivered during the read are preserved.
+     * Failed reads remain non-destructive, and an older overlapping read cannot
+     * overwrite a newer result.
+     *
+     * Only this desktop's own sessions have that read. `native-pi:` sessions
+     * are read-mostly imports and remote sessions are driven over RACP-WS, so
+     * both keep their own transports.
+     */
+    restorePendingInteractive: async (sessionId) => {
+      if (!sessionId || sessionId.startsWith("native-pi:")) return;
+      const session = get().sessions.find(
+        (candidate) => candidate.id === sessionId,
+      );
+      if (!session) return;
+      if (session.source === "pi-native" || session.source === "remote") return;
+
+      const generation =
+        (pendingInteractiveRestoreGenerations.get(sessionId) ?? 0) + 1;
+      pendingInteractiveRestoreGenerations.set(sessionId, generation);
+      const beforeRead = get();
+      const initialAskIds = new Set(
+        (beforeRead.pendingAsks[sessionId] ?? []).map((ask) => ask.requestId),
+      );
+      const initialPermissionIds = new Set(
+        (beforeRead.pendingPermissions[sessionId] ?? []).map(
+          (permission) => permission.requestId,
+        ),
+      );
+
+      let pending: PendingInteractiveRequests;
+      try {
+        pending = await api.pendingInteractive(sessionId);
+      } catch {
+        // Silent and non-destructive: an unavailable Main leaves the queues
+        // exactly as the live stream left them.
+        return;
+      }
+      if (
+        pendingInteractiveRestoreGenerations.get(sessionId) !== generation
+      ) {
+        return;
+      }
+
+      set((state) => {
+        if (!state.sessions.some((candidate) => candidate.id === sessionId)) {
+          return {};
+        }
+        const pendingAsks = reconcilePendingQueue(
+          state.pendingAsks[sessionId] ?? [],
+          initialAskIds,
+          pending.asks,
+        );
+        const pendingPermissions = reconcilePendingQueue(
+          state.pendingPermissions[sessionId] ?? [],
+          initialPermissionIds,
+          pending.permissions,
+        );
+        const nextPendingAsks = replacePendingQueue(
+          state.pendingAsks,
+          sessionId,
+          pendingAsks,
+        );
+        const nextPendingPermissions = replacePendingQueue(
+          state.pendingPermissions,
+          sessionId,
+          pendingPermissions,
+        );
+        if (
+          nextPendingAsks === state.pendingAsks &&
+          nextPendingPermissions === state.pendingPermissions
+        ) {
+          return {};
+        }
+        return {
+          pendingAsks: nextPendingAsks,
+          pendingPermissions: nextPendingPermissions,
+        };
+      });
+    },
+
     refreshPlanCheckpoints: async () => {
       const sessionIds = get().sessions.map((session) => session.id);
       await Promise.allSettled(
-        sessionIds.map((sessionId) => get().restorePendingPlan(sessionId)),
+        sessionIds.map(async (sessionId) => {
+          await get().restorePendingPlan(sessionId);
+          // A sidecar restart or reload is when a forgotten card has to come
+          // back, so both reads run in the same per-session batch.
+          await get().restorePendingInteractive(sessionId);
+        }),
       );
     },
 
@@ -243,6 +391,7 @@ export function createSessionSlice({
         );
       }
       set({ selectingSessionId: id, page: "chat" });
+      const outcomeAcknowledgement = get().acknowledgeSessionOutcome(id);
 
       const commitSelection = (
         messages: UiMessage[],
@@ -281,7 +430,9 @@ export function createSessionSlice({
         });
       };
 
-      const alignWorkspace = async (projectPath?: string | null) => {
+      const alignWorkspace = async (session?: SessionSummary | null) => {
+        if (isRemoteSession(session)) return runtime.navigationIntentIsCurrent(intent);
+        const projectPath = session?.projectPath;
         if (projectPath) {
           if (
             !sessionMatchesProject(
@@ -329,7 +480,7 @@ export function createSessionSlice({
         if (summary) {
           if (
             !(await runtime.queueWorkspaceAlignment(() =>
-              alignWorkspace(summary.projectPath),
+              alignWorkspace(summary),
             ))
           ) {
             return;
@@ -339,7 +490,7 @@ export function createSessionSlice({
           if (!runtime.navigationIntentIsCurrent(intent)) return;
           if (
             !(await runtime.queueWorkspaceAlignment(() =>
-              alignWorkspace(detail?.session?.projectPath),
+              alignWorkspace(detail?.session),
             ))
           ) {
             return;
@@ -411,6 +562,12 @@ export function createSessionSlice({
             : detail.session.messages ?? []
           : liveMessages ?? [];
         if (detail.session) {
+          if (isRemoteSession(detail.session)) {
+          const { messages: _messages, ...summary } = detail.session;
+          set((state) => ({ sessions: decorateSessions([
+            safeSessionSummary(summary), ...state.sessions.filter((session) => session.id !== id),
+          ], state.sessionMeta) }));
+          }
           runtime.cacheSessionTranscript(id, selectedMessages, historyWindow);
         }
         commitSelection(selectedMessages, false, historyWindow);
@@ -422,10 +579,13 @@ export function createSessionSlice({
         }
         rememberSessionCompactions(id, detail.session);
         void get().restorePendingPlan(id);
-        void get().acknowledgeSessionOutcome(id);
+        // Opening a session is where its unanswered cards become visible again
+        // after a renderer reload; the live stream only re-delivers new ones.
+        void get().restorePendingInteractive(id);
         const selected = get().sessions.find((session) => session.id === id);
         if (
           selected &&
+          sessionAllows(selected, "canConfigureModel") &&
           sessionNeedsModelPin(selected) &&
           get().pendingPlans[id]?.status !== "pending"
         ) {
@@ -434,6 +594,7 @@ export function createSessionSlice({
             messages: selectedMessages,
             settings: get().settings,
             providers: get().providers,
+            recentModels: get().recentModels,
           });
           if (pin.providerId && pin.modelId) {
             set((state) => ({
@@ -460,6 +621,7 @@ export function createSessionSlice({
           }
         }
       } finally {
+        await outcomeAcknowledgement;
         if (runtime.isCurrentSessionSelection(selection)) {
           runtime.clearSessionSelection(selection);
           set((state) =>
@@ -472,11 +634,21 @@ export function createSessionSlice({
     },
 
     newSession: async (options) => {
+      const activeSession = get().sessions.find((session) => session.id === get().activeSessionId);
+      const remoteProject = options?.remoteProject ?? (
+        options && "projectPath" in options ? undefined
+          : remoteProjectForSession(activeSession)
+      );
+      if (remoteProject) return openRemoteProjectSession({ get, set, runtime }, remoteProject);
+      if (!(options && "projectPath" in options) && isRemoteSession(activeSession ?? (
+        get().activeSessionId?.startsWith("remote:") ? { id: get().activeSessionId! } : undefined
+      ))) throw new Error(i18n.t("remote:REMOTE_PROJECT_REQUIRED"));
       const requestedProjectPath =
         options && "projectPath" in options
           ? options.projectPath ?? null
           : get().workspace?.path ?? null;
-      const scopeKey = runtime.newSessionScopeKey(requestedProjectPath);
+      const isolated = options?.isolated === true;
+      const scopeKey = `${runtime.newSessionScopeKey(requestedProjectPath)}${isolated ? "\u0000isolated" : ""}`;
       const pending = runtime.pendingNewSessionRequests.get(scopeKey);
       if (pending) {
         await pending;
@@ -511,6 +683,7 @@ export function createSessionSlice({
         if (
           latest &&
           sessionIsReusableEmpty(latest, {
+            isolated,
             running: get().runningSessions[latest.id] === true,
             liveMessageCount: runtime.liveMessageCountForSession(latest.id, get()),
             submitted: runtime.submittedComposerDrafts.has(latest.id),
@@ -525,6 +698,7 @@ export function createSessionSlice({
           intent,
           projectPath: requestedProjectPath,
           draftConfiguration: null,
+          ...(isolated ? { isolated: true } : {}),
         });
       })();
       runtime.pendingNewSessionRequests.set(scopeKey, request);
@@ -543,6 +717,7 @@ export function createSessionSlice({
       if (!id || state.runningSessions[id]) return;
       const source = state.sessions.find((session) => session.id === id);
       if (!source) throw new Error(i18n.t("errors.sessionNotFound"));
+      if (!sessionAllows(source, "canEditMessages")) return;
 
       if (source.projectPath) {
         if (
@@ -574,13 +749,15 @@ export function createSessionSlice({
 
     forkAssistantMessage: async (messageId) => {
       const intent = runtime.beginNavigationIntent();
-      const state = await prepareTranscriptAction({ get, set }, runtime, messageId);
-      if (!state || !runtime.navigationIntentIsCurrent(intent)) return;
+      // Fork needs only the anchor id: the host reads the canonical prefix.
+      // Hydrating the source here would overwrite its concurrently streaming tail.
+      const state = get();
       const sessionId = state.activeSessionId;
-      if (!sessionId || state.runningSessions[sessionId]) return;
+      if (!sessionId || state.selectingSessionId) return;
       const message = state.messages.find((candidate) => candidate.id === messageId);
       const source = state.sessions.find((session) => session.id === sessionId);
       if (!message || message.role !== "assistant" || !source) return;
+      if (!sessionAllows(source, "canEditMessages")) return;
 
       try {
         const sourceTitle = source.title.trim() || i18n.t("chat.untitledTask");
@@ -607,6 +784,8 @@ export function createSessionSlice({
         set((state) => ({
           draftConfiguration: {
             mode: config.mode,
+            ultra: config.ultra ?? ((config.providerId === state.draftConfiguration?.providerId && config.modelId === state.draftConfiguration?.modelId) && state.draftConfiguration?.ultra === true),
+            fast: config.fast ?? state.draftConfiguration?.fast ?? false,
             thinkingLevel: config.thinkingLevel,
             providerId:
               config.providerId ?? state.draftConfiguration?.providerId,
@@ -617,33 +796,9 @@ export function createSessionSlice({
         }));
         return;
       }
+      if (!sessionAllows(get().sessions.find((session) => session.id === sessionId), "canConfigureModel")) return;
       if (get().pendingPlans[sessionId]?.status === "pending") return;
-      if (
-        get().runningSessions[sessionId] ||
-        runtime.sessionConfigurationFlushes.has(sessionId)
-      ) {
-        runtime.pendingSessionConfigurations.set(
-          sessionId,
-          runtime.mergeSessionConfiguration(
-            runtime.pendingSessionConfigurations.get(sessionId),
-            config,
-          ),
-        );
-        set((state) => ({
-          sessions: state.sessions.map((session) =>
-            session.id === sessionId
-              ? applyOptimisticSessionConfiguration(session, config)
-              : session,
-          ),
-        }));
-        return;
-      }
-      const payload = runtime.mergeSessionConfiguration(
-        runtime.pendingSessionConfigurations.get(sessionId),
-        config,
-      );
-      runtime.pendingSessionConfigurations.delete(sessionId);
-      const result = await api.configureSession(sessionId, payload);
+      const result = await api.configureSession(sessionId, config);
       set((state) => ({
         sessions: state.sessions.map((session) =>
           session.id === sessionId

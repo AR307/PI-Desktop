@@ -21,19 +21,23 @@ the renderer, prompt, or host protocol.
 
 1. Active built-in, plugin, and user Skills contribute entries to the composer
    slash menu. They appear in a separate `Skills` group after extension
-   commands; the group is always last. The exact skill id is the slash name.
-   Existing command names win collisions, so a Skill cannot shadow a template,
-   builtin, plugin, or extension command.
-2. Selecting a Skill inserts `/<skill-id> `. Sending follows the ordinary
+   commands; the group is always last. Skill command names use the explicit
+   `skill:<id>` prefix while `skillId` retains the original id for send-time
+   resolution. This namespace prevents collisions with commands and templates
+   that keep their existing unprefixed names.
+2. Selecting a Skill inserts `/skill:<skill-id> `. Later slash tokens can select
+   further Skills without opening app commands. Sending follows the ordinary
    prompt path. Electron main resolves the command against the current session
    project, revalidates its active scope and permissions at send time, and
    keeps the typed slash form for the transcript chip.
 3. Main persists a model-facing instruction asking the model to call the local
-   `Skill` tool with the validated id, followed by any user body text. The Skill
+   `Skill` tool with each validated id, followed by the remaining user text. The Skill
    body is still loaded on demand by that tool; it is not sent to the renderer
    or injected directly into the prompt. `agent.prompt.inject` and existing
    user-Skill activation rules remain authoritative.
-4. No host protocol or storage schema changes are required. The additive
+4. No host protocol version or SQL migration is required. The optional
+   `command` and `skillMentions` transcript metadata preserve the user's typed
+   text and each validated token across session reloads. The additive
    command contract permits `kind: "skill"` and `skillId`, and the existing
    composer-command IPC response carries the extra entries. Skill catalog,
    body-size, path, and runtime-reuse boundaries remain those of D174 and

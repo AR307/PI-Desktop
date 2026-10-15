@@ -19,6 +19,10 @@ const headerEditorSource = await read("../src/components/settings/ProviderHeader
 const vendorDialogSource = await read("../src/components/settings/VendorAccountDialog.tsx");
 // The panes themselves live in the picker both dialogs render (D269).
 const pickerSource = await read("../src/components/settings/ModelSelectionPanes.tsx");
+const fetchErrorCopySource = await read("../src/components/settings/models-fetch-error-copy.ts");
+const probeFeedbackSource = await read("../src/components/settings/useProbeFeedback.ts");
+// The credential rows live in their own component since D625.
+const fieldsSource = await read("../src/components/settings/ProviderConnectionFields.tsx");
 const styles = await loadStyles();
 
 /** Declaration block for exactly one selector, so matches cannot span rules. */
@@ -50,10 +54,11 @@ test("the scrolling body keeps the credential focus ring inside the dialog", () 
 
 test("credentials use explicit rows for predictable field alignment", () => {
   assert.match(setupSource, /className="provider-setup-credentials"/);
-  assert.match(setupSource, /provider-setup-fields/);
-  assert.match(setupSource, /provider-setup-service-row/);
-  assert.match(setupSource, /provider-setup-custom-identity-row/);
-  assert.match(setupSource, /provider-setup-custom-auth-row/);
+  assert.match(setupSource, /<ProviderConnectionFields/);
+  assert.match(fieldsSource, /provider-setup-fields/);
+  assert.match(fieldsSource, /provider-setup-service-row/);
+  assert.match(fieldsSource, /provider-setup-custom-identity-row/);
+  assert.match(fieldsSource, /provider-setup-custom-auth-row/);
   const fields = block(".provider-setup-fields");
   assert.ok(fields.includes("display: flex"));
   assert.ok(fields.includes("flex-direction: column"));
@@ -70,28 +75,30 @@ test("custom API format sits beside the key, not in a disclosure", () => {
   assert.doesNotMatch(setupSource, /provider-setup-advanced-toggle/);
   assert.match(setupSource, /provider-advanced-dialog/);
   assert.match(setupSource, /settings\.advancedSettings/);
-  const fieldsBlock = setupSource.slice(
-    setupSource.indexOf("provider-setup-fields"),
-    setupSource.indexOf("<ModelSelectionPanes"),
+  assert.match(fieldsSource, /settings\.apiStyle"/);
+  assert.match(fieldsSource, /CUSTOM_PROVIDER_API_STYLES\.map/);
+  assert.doesNotMatch(fieldsSource, /settings\.apiStyleDerived/);
+  assert.match(fieldsSource, /provider-service-chip/);
+  // The format choice belongs to the custom rows only.
+  assert.ok(
+    fieldsSource.indexOf("{custom ? (") < fieldsSource.indexOf("settings.apiStyle\""),
+    "API format must sit inside the custom rows",
   );
-  assert.match(fieldsBlock, /settings\.apiStyle"/);
-  assert.match(fieldsBlock, /CUSTOM_PROVIDER_API_STYLES\.map/);
-  assert.doesNotMatch(fieldsBlock, /settings\.apiStyleDerived/);
-  assert.match(fieldsBlock, /<ServicePicker/);
   assert.match(pickerSource, /provider-chosen-advanced-toggle/);
 });
 
 test("custom Name and Base URL sit on one row without helper copy", () => {
-  assert.match(setupSource, /type="url"/);
-  assert.match(setupSource, /inputMode="url"/);
-  assert.match(setupSource, /autoComplete="url"/);
+  assert.match(fieldsSource, /type="url"/);
+  assert.match(fieldsSource, /inputMode="url"/);
+  assert.match(fieldsSource, /autoComplete="url"/);
   // Placeholder is enough; a hint under the URL would un-align the name field.
-  assert.doesNotMatch(setupSource, /settings\.baseUrlHint/);
-  assert.match(setupSource, /onBlur={commitBaseUrl}/);
+  assert.doesNotMatch(fieldsSource, /settings\.baseUrlHint/);
+  assert.match(fieldsSource, /onBlur={commitBaseUrl}/);
+  assert.match(setupSource, /commitBaseUrl=\{commitBaseUrl\}/);
   assert.match(setupSource, /normalizeBaseUrlInput\(resolvedBaseUrl, resolvedApiStyle\)/);
   assert.match(setupSource, /!baseUrlIssue/);
-  assert.match(setupSource, /aria-invalid={Boolean\(baseUrlError\)}/);
-  assert.match(setupSource, /provider-base-url-error/);
+  assert.match(fieldsSource, /aria-invalid={Boolean\(baseUrlError\)}/);
+  assert.match(fieldsSource, /provider-base-url-error/);
 
   const customIdentity = block(".provider-setup-custom-identity-row");
   assert.ok(customIdentity.includes("grid-template-columns: minmax(180px, 0.8fr)"));
@@ -103,25 +110,28 @@ test("custom Name and Base URL sit on one row without helper copy", () => {
   assert.match(styles, /\.provider-setup-base-url \.field-input\[aria-invalid="true"\]/);
   assert.match(styles, /\.provider-setup-field-error\s*\{[\s\S]*overflow-wrap: anywhere/);
 
-  const customBlock = setupSource.slice(
-    setupSource.indexOf("{custom ? ("),
-    setupSource.indexOf("<ModelSelectionPanes"),
-  );
+  const customBlock = fieldsSource.slice(fieldsSource.indexOf("{custom ? ("));
   assert.ok(
     customBlock.indexOf("settings.name") < customBlock.indexOf("provider-setup-base-url"),
     "Name must precede Base URL so they occupy the same 2-column row",
   );
 });
 
-test("a failed model list uses a classified error, not a raw dump plus empty copy", () => {
-  assert.match(pickerSource, /describeModelsFetchError/);
-  assert.match(pickerSource, /ModelsFetchErrorMessage/);
-  assert.match(pickerSource, /variant="placeholder"/);
-  assert.match(pickerSource, /variant="banner"/);
-  assert.match(pickerSource, /emptyFetchError/);
+test("a failed model list is classified once and toasted, not dumped into the pane", () => {
+  assert.match(fetchErrorCopySource, /describeModelsFetchError/);
+  assert.match(probeFeedbackSource, /modelsFetchErrorText\(discovery\.error, t\)/);
+  assert.match(
+    probeFeedbackSource,
+    /showToast\(outcome\.message, \{ variant: outcome\.variant \}\)/,
+  );
+  // The pane keeps one line saying the list is missing; why it failed is the
+  // toast's job, so the classified box and its detail rows are gone.
+  assert.match(pickerSource, /provider-models-placeholder is-error/);
   assert.match(styles, /\.provider-models-placeholder\.is-error\s*\{/);
-  assert.match(styles, /\.provider-models-error-summary\s*\{/);
-  assert.match(styles, /\.provider-models-note\.is-error\s*\{[\s\S]*overflow-wrap: anywhere/);
+  assert.doesNotMatch(pickerSource, /variant="banner"/);
+  assert.doesNotMatch(pickerSource, /variant="placeholder"/);
+  assert.doesNotMatch(styles, /\.provider-models-note\s*\{/);
+  assert.doesNotMatch(styles, /\.provider-models-error-summary\s*\{/);
 });
 
 test("list rows carry no box of their own inside the inset pane", () => {
@@ -199,19 +209,22 @@ test("the dialog's actions live in the header, not in a footer bar", () => {
   assert.match(head, /disabled=\{!canSave\}/);
 });
 
-test("the connection test reports its result next to the fields", () => {
-  // The button moved to the header; its outcome stays where the inputs are.
-  const body = setupSource.slice(setupSource.indexOf('className="provider-setup-body"'));
-  assert.match(body, /provider-credential-test-result/);
-  assert.doesNotMatch(body, /settings\.testConnection/);
+test("the connection test reports its result through the toast stack", () => {
+  // The button sits in the header and its outcome no longer takes a result line
+  // under the credential fields.
+  assert.match(setupSource, /showToast\(t\("settings\.testOk"\), \{ variant: "success" \}\)/);
+  assert.match(setupSource, /settings\.testFailedStatus/);
+  assert.doesNotMatch(setupSource, /provider-credential-test/);
+  assert.doesNotMatch(styles, /\.provider-credential-test\s*\{/);
 });
 
-test("a save error appears next to the fields it refers to", () => {
-  const bodyStart = setupSource.indexOf('className="provider-setup-body"');
-  const credentials = setupSource.indexOf('className="provider-setup-credentials"');
-  const errorLine = setupSource.indexOf('className="provider-setup-error"');
-  assert.ok(errorLine > bodyStart && errorLine < credentials,
-    "the error line should open the body, above the credential grid");
+test("a save failure is toasted instead of opening the body with an error row", () => {
+  assert.match(
+    setupSource,
+    /showToast\(cause instanceof Error \? cause\.message : String\(cause\), \{[\s\S]*variant: "error"/,
+  );
+  assert.doesNotMatch(setupSource, /provider-setup-error/);
+  assert.doesNotMatch(styles, /\.provider-setup-error\s*\{/);
 });
 
 test("picking and reviewing models are two side-by-side panes", () => {
@@ -263,10 +276,15 @@ test("empty panes hold their height instead of collapsing", () => {
   }
 });
 
-test("the panes stack again before the dialog gets too narrow to read", () => {
+test("the panes stack only when the viewport is too narrow to read them side by side", () => {
   const at = styles.indexOf("@media (max-width: 940px)");
   assert.notEqual(at, -1, "missing the two-pane fallback breakpoint");
   const query = styles.slice(at, styles.indexOf("@media", at + 10));
+  assert.doesNotMatch(
+    query.slice(0, query.indexOf("{")),
+    /max-height/,
+    "a short but wide viewport must keep both panes visible",
+  );
   assert.match(query, /\.provider-setup-field-row[\s\S]*?\{\s*grid-template-columns: minmax\(0, 1fr\)/);
   // The explicit custom rows must also collapse or Name | URL and Key | Format
   // stay side-by-side on a stacked dialog.
@@ -278,6 +296,7 @@ test("the panes stack again before the dialog gets too narrow to read", () => {
     query,
     /\.provider-setup-dialog,\s*\n\s*\.vendor-account-dialog\s*\{[\s\S]*?height: auto/,
   );
+  assert.match(query, /max-height: min\(240px, 30vh\)/);
 });
 
 test("Advanced opens from the dialog header into a separate modal", () => {
@@ -335,12 +354,8 @@ test("Advanced offers presets plus JSON import and copy without redundant helper
   assert.match(headersViewport, /overflow-y: auto/);
   assert.match(headersViewport, /overscroll-behavior: contain/);
   // Named and custom both expose Advanced; API format stays beside the key.
-  const fieldsBlock = setupSource.slice(
-    setupSource.indexOf("provider-setup-fields"),
-    setupSource.indexOf("<ModelSelectionPanes"),
-  );
   assert.match(setupSource, /named \|\| custom/);
-  assert.match(fieldsBlock, /settings\.apiStyle"/);
+  assert.match(fieldsSource, /settings\.apiStyle"/);
 });
 
 test("the vendor account dialog hosts the same panes in the same shell", () => {
@@ -352,6 +367,8 @@ test("the vendor account dialog hosts the same panes in the same shell", () => {
   assert.match(dialog, /min-width: 0/);
   assert.match(dialog, /height: min\(720px, calc\(100vh - 64px\)\)/);
   assert.match(vendorDialogSource, /<ModelSelectionPanes/);
+  // Neither dialog folds the picker behind a chosen-models summary.
+  assert.doesNotMatch(vendorDialogSource, /<ChosenModelsSummary/);
   // The duplicated chosen-pane and custom-model rules are retired with it.
   assert.doesNotMatch(styles, /\.vendor-account-chosen/);
   assert.doesNotMatch(styles, /\.vendor-account-custom-model/);
@@ -359,7 +376,9 @@ test("the vendor account dialog hosts the same panes in the same shell", () => {
 
 test("Advanced says a fullwidth value folds and a non-Latin-1 value is refused", () => {
   // The rule itself lives in @pi-desktop/shared (unit-tested there) and is
-  // mirrored in host-core; this pins that the editor asks it and renders both
+  // mirrored in host-core; this pins that the editor asks it, refuses a bad
+  // value next to the row it is about, and announces a value the host will
+  // fold once as a toast instead of taking a line above the list.
   assert.match(headerEditorSource, /import \{ APP_VERSION, inspectHeaderValue \}/);
   assert.match(headerEditorSource, /inspectHeaderValue\(pair\.value\)/);
   // Only a row that will be persisted may claim it folds: the hint has to
@@ -368,10 +387,35 @@ test("Advanced says a fullwidth value folds and a non-Latin-1 value is refused",
   assert.match(headerEditorSource, /header\.value !== ""/);
   assert.match(headerEditorSource, /header\.fault === null/);
   assert.match(headerEditorSource, /row\.storable && row\.header\.folded/);
-  assert.match(headerEditorSource, /provider-setup-header-note/);
-  assert.match(headerEditorSource, /role="status"/);
+  assert.match(
+    headerEditorSource,
+    /showToast\(t\("settings\.headersFullwidthFolded"\), \{ variant: "info" \}\)/,
+  );
+  // Announced when a foldable value appears, never on mount and never twice
+  // while the same rows stay folded.
+  assert.match(headerEditorSource, /foldedReportedRef\.current = foldedHeaderValue/);
   assert.match(headerEditorSource, /role="alert"/);
   assert.match(headerEditorSource, /settings\.headersFullwidthFolded/);
   assert.match(headerEditorSource, /settings\.headersValueNotLatin1/);
-  assert.match(block(".provider-setup-header-note"), /color: var\(--ds-text-muted\)/);
+  assert.doesNotMatch(styles, /\.provider-setup-header-note\s*\{/);
+});
+
+test("both dialogs open straight on the two panes, with no summary to fold (D625)", () => {
+  for (const source of [setupSource, vendorDialogSource]) {
+    assert.match(source, /<ModelSelectionPanes/);
+    // The chosen-models summary and its Manage/Collapse pair are gone: the
+    // service's own list and the models this credential runs are both on
+    // screen from the first paint, so nothing has to be opened to see them.
+    assert.doesNotMatch(source, /<ChosenModelsSummary/);
+    assert.doesNotMatch(source, /setManaging/);
+    assert.doesNotMatch(source, /settings\.manageModels/);
+    assert.doesNotMatch(source, /settings\.collapseModels/);
+  }
+  // The picker carries no fold-back control of its own either.
+  assert.doesNotMatch(pickerSource, /onCollapse/);
+  assert.doesNotMatch(pickerSource, /settings\.collapseModels/);
+  // The recommendation says so where the picks are, and no model opens its
+  // advanced settings on its own any more.
+  assert.match(pickerSource, /settings\.modelsAutoPicked/);
+  assert.match(pickerSource, /useState<string \| null>\(null\)/);
 });

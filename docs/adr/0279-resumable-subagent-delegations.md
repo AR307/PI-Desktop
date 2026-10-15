@@ -15,6 +15,16 @@
 
 ## Context
 
+### Current fork integration note (2026-10-12)
+
+The historical lifecycle restrictions below are superseded by
+`detached-delegation-and-wake.md` and runtime spec section 5f. Parent failure or
+Stop leaves detached workers active; explicit worker Stop remains independent.
+Settled stopped/aborted chains are resumable using their persisted actual
+provider/model/group binding and their own tool history. No automatic retry
+or model change is introduced. The integrated `agent.stopSubagents` interface
+replaces the older fork-only cancellation IPC.
+
 Delegation as built by ADR 0062 and ADR 0089 spawns one `SubagentRun` per `Task`
 call. Each run starts with `messages: []` (`packages/agent-runtime/src/subagent.ts`)
 and is single-use. A delegate's transcript rows are persisted — they carry
@@ -70,7 +80,12 @@ A new module (`packages/agent-runtime/src/delegation-history.ts`) owns:
 - synthesizing the original `task` as the first user message from the first
   `Task` tool row's persisted arguments,
 - converting to `AgentMessage[]` with the delegate's own provider/model binding
-  (a pinned delegation model is not the session model),
+  (a pinned delegation model is not the session model). Assistant transport
+  identity is `model.provider` / `model.id` — the same values live requests
+  use — not the account row id. When `vendorKey` is set, `model.provider`
+  differs from `provider.id`; tagging restored history with the account id
+  makes pi-ai treat same-model reasoning as foreign and empty
+  `reasoning_content` on resume,
 - a read-file / line-count budget gate.
 
 `SubagentRun` gains `initialMessages?: AgentMessage[]`; when present it seeds
@@ -105,18 +120,19 @@ the session binding, and currently authorized overrides. A remembered key whose
 turn grant expired is reauthorized before use; a denied key cannot select another
 account by model id. Other definitions' private pins are never candidates (#841). Changing the
 parent's own session model therefore does not strand a chain, and a delegate never
-swaps models by accident. If nothing resolves the recorded binding any more, the
-run continues on the binding the definition resolves to now and records the
-previous model id in the delegation's lifecycle details as `modelChangedFrom`:
-refusing instead would strand the chain forever, and swapping silently would hand
-the same conversation to a different model with no trace.
+swaps models by accident. If the recorded binding is no longer authorized,
+resume fails before starting a request. Restore that binding or start a new
+delegation explicitly; resume never changes the model.
 
 ### 5. Only `completed` and `failed` are resumable
 
 A `failed` run's reads and findings still have value; its failed assistant row
 is dropped by the converter like any other error row. `stopped` and `aborted`
-encode the user's or the parent's decision to abandon that line of work, and
-resuming it would contradict the stop. `interrupted` (the app closed while the
+encode an explicit Stop or runtime disposal, and resuming it would contradict
+the cancellation. A terminal parent error still cancels active execution, but
+its interrupted delegates settle as `failed` with `SUBAGENT_PARENT_FAILED`
+instead: this system interruption preserves manual resume eligibility (#680).
+`interrupted` (the app closed while the
 run still worked) means the same thing for this purpose: the delegate never
 settled, so there is nothing trustworthy to continue. (`timed_out` is a vestigial
 status — ADR 0119's timeouts were withdrawn by D328 — and is treated as `failed`

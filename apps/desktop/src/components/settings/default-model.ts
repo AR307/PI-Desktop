@@ -20,12 +20,15 @@ export function defaultModelOptions(
   imageGeneration?: ImageGenerationBindings | null,
 ): DefaultModelOption[] {
   return providers.flatMap((provider) => {
+    if (provider.mirrorCoding?.scope === "account") return [];
     const modelIds = (provider.models ?? [])
       .map((binding) => binding.id.trim())
       .filter(Boolean);
     const ids = modelIds.length > 0 ? modelIds : [defaultModelIdOf(provider)?.trim() ?? ""];
     return [...new Set(ids)].filter((modelId) => !!modelId &&
       !isImageGenerationModel(imageGeneration, provider.id, modelId),
+    ).filter((modelId) =>
+      provider.authKind !== "mirrorcoding" || Boolean(provider.mirrorCoding?.routes[modelId]),
     ).map((modelId) => ({ provider, modelId }));
   });
 }
@@ -101,7 +104,7 @@ export function providerServesChatModels(
   imageGeneration?: ImageGenerationBindings | null,
 ): boolean {
   return provider.enabled &&
-    (provider.hasSecret || !!provider.hasOauth || provider.authKind === "none") &&
+    (provider.hasSecret || !!provider.hasOauth || provider.authKind === "none" || provider.authKind === "mirrorcoding") &&
     defaultModelOptions([provider], imageGeneration).length > 0;
 }
 
@@ -124,4 +127,30 @@ export function keepsAppDefaultModel(
   const provider = providers.find((candidate) => candidate.id === defaultProviderId);
   if (!provider || !providerServesChatModels(provider, imageGeneration)) return false;
   return hasResolvedDefaultModel(providers, defaultProviderId, defaultModelId);
+}
+
+/**
+ * The app default a finished vendor login claims, or null to leave it alone.
+ *
+ * Signing in follows the rule adding an API service follows: the new account's
+ * head chat model becomes the app default only while the current default does
+ * not resolve to a runnable provider, so a first-time subscriber can chat right
+ * away and a second login never moves what the user already runs.
+ */
+export function loginDefaultModel(
+  providers: readonly ProviderPublic[],
+  providerId: string,
+  defaults: { defaultProviderId?: string; defaultModelId?: string },
+  imageGeneration?: ImageGenerationBindings | null,
+): { providerId: string; modelId: string } | null {
+  if (keepsAppDefaultModel(
+    providers,
+    defaults.defaultProviderId,
+    defaults.defaultModelId,
+    imageGeneration,
+  )) return null;
+  const account = providers.find((candidate) => candidate.id === providerId);
+  if (!account || !providerServesChatModels(account, imageGeneration)) return null;
+  const modelId = defaultModelOptions([account], imageGeneration)[0]?.modelId;
+  return modelId ? { providerId: account.id, modelId } : null;
 }

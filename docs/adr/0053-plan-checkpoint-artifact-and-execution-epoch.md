@@ -78,6 +78,17 @@ Renderer reload preserves the original deadline while the host remains alive.
 Expiry is recorded with the canonical error `PLAN_APPROVAL_TIMEOUT`; the
 deadline never extends when the card is reopened.
 
+### Historical display amendment (issue #933)
+
+The live approval card remains unchanged. Completed submission rows additionally
+render read-only historical cards. `session.get` joins only returned submission
+call IDs to the existing approval table, preserving complete Markdown and the
+current host status without rewriting the original tool result. Same-kind newer
+rows mark older submissions superseded, independently of approval status.
+This is an additive read projection with no schema migration or execution grant.
+Old/native hosts and forks lacking approvals may display the immutable snapshot,
+but its captured `pending` result is not authoritative current approval state.
+
 ### 4. Process-epoch fence and recovery
 
 The host process has an internal boot epoch, but it is not serialized in the

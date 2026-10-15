@@ -166,8 +166,9 @@
 .settings-content-enter {
   /* No `forwards`/`both` fill: this entrance ends on the element's own state,
      so a fill would only keep the animation "in effect" — and with it the
-     stacking context that left route-level overlays (the plugin modals, the
-     plugin detail sheet) underneath the opaque titlebar band. */
+     stacking context that can leave any legacy route-level fixed surface
+     underneath the opaque titlebar band. Modal surfaces use the viewport
+     overlay host, but keeping this invariant protects other fixed content. */
   animation: route-surface-in var(--motion-duration-normal) var(--motion-ease-out);
 }
 
@@ -194,6 +195,16 @@
   flex-direction: column;
 }
 
+/* Destination pages have ordinary document scrolling. Keep this separate from
+ * `.thread-scroll`, whose Composer reserve, follow behavior, and occlusion mask
+ * are specific to the chat transcript. */
+.route-scroll {
+  min-height: 0;
+  flex: 1;
+  overflow: auto;
+  scrollbar-gutter: stable;
+}
+
 .thread-scroll {
   /* Promote to own compositing layer for smooth scrolling */
   will-change: scroll-position;
@@ -205,6 +216,26 @@
   scrollbar-gutter: stable;
   /* Pinned-follow drives the scroll position; native anchoring fights it. */
   overflow-anchor: none;
+  /* Hide the transcript across the Composer reserve instead of covering it with
+   * an opaque dock band (issue #728, revised by D624). The gradient resolves
+   * against this scrollport's own box, so it stays anchored to the pane while
+   * the rows move through it. `- 16px` is exactly the trailing reserve
+   * `.thread-content` adds below the Composer's measured height, so a
+   * transcript pinned to its end keeps its last row fully opaque and only the
+   * rows crossing the boundary fade.
+   * The mask belongs here rather than on `.thread-wrap`: its other children -
+   * the minimap rail, the jump-to-latest button, the settle veil, and the
+   * navigation status - must stay fully painted. */
+  -webkit-mask-image: linear-gradient(
+    to bottom,
+    #000 calc(100% - var(--composer-dock-height, 168px) - 16px),
+    transparent calc(100% - var(--composer-dock-height, 168px) + 2px)
+  );
+  mask-image: linear-gradient(
+    to bottom,
+    #000 calc(100% - var(--composer-dock-height, 168px) - 16px),
+    transparent calc(100% - var(--composer-dock-height, 168px) + 2px)
+  );
 }
 
 /* Floats above the docked composer fade when the user scrolls away from latest */
@@ -948,5 +979,37 @@
   .home-stack-inner {
     padding-top: 18px;
     padding-bottom: 18px;
+  }
+}
+
+/* Idle-session hint above the docked composer: detached delegates still run (D628). */
+.background-delegations-chip {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  align-self: center;
+  margin: 0 16px 2px;
+  padding: 3px 10px;
+  border-radius: var(--radius-full);
+  border: 1px solid color-mix(in oklab, var(--ds-warning) 35%, transparent);
+  background: color-mix(in oklab, var(--ds-warning) 10%, transparent);
+  color: var(--ds-text-muted);
+  font-size: var(--text-xs);
+  line-height: var(--leading-compact);
+  width: max-content;
+  max-width: 100%;
+}
+
+.background-delegations-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: var(--radius-full);
+  background: var(--ds-warning);
+  animation: sidebar-status-breathe 1.6s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .background-delegations-dot {
+    animation: none;
   }
 }

@@ -8,7 +8,7 @@ import { genericModelConfig } from "./model-capabilities.js";
 import type { RuntimeProviderConfig } from "./provider-binding.js";
 import { PROVIDER_RATE_LIMIT_MAX_RETRIES, PROVIDER_TRANSIENT_MAX_RETRIES } from "./provider-retry.js";
 
-type Request = { model: string; messages: Array<{ role: string; content: unknown }>; reasoning_effort?: string };
+type Request = { service_tier?: string; model: string; messages: Array<{ role: string; content: unknown }>; reasoning_effort?: string };
 const cleanups: Array<() => Promise<void>> = [];
 afterEach(async () => { for (const cleanup of cleanups.splice(0)) await cleanup(); });
 
@@ -79,6 +79,22 @@ async function fixture(options: {
 }
 
 describe("subagent model fallback over real transport", () => {
+
+  it("sends requested Fast on a delegate and its tool continuation over HTTP", async () => {
+    const f = await fixture({ fail: [], editFirst: true });
+    const result = await f.run({ provider: { ...f.provider("primary"), authKind: "mirrorcoding", fastAvailable: true, fast: true } });
+    expect(result.status).toBe("completed"); expect(result.fast).toBe(true);
+    expect(f.requests.length).toBe(2); expect(f.edits()).toBe(1);
+    expect(f.requests.map(request => request.service_tier)).toEqual(["fast", "fast"]);
+  });
+
+  it("does not downgrade rejected Fast or run a fallback model", async () => {
+    const f = await fixture({ failureStatus: { primary: 400 } });
+    const result = await f.run({ provider: { ...f.provider("primary"), authKind: "mirrorcoding", fastAvailable: true, fast: true } });
+    expect(result.status).toBe("failed");
+    expect(f.requests.map(request => [request.model, request.service_tier])).toEqual([["primary", "fast"]]);
+  });
+
   const chain = ["primary", "secondary", "third", "fourth", "unused"];
 
   it.each([0, 1, 2, 3])("succeeds after %i unavailable models and stops at the first working model", async (failedCount) => {

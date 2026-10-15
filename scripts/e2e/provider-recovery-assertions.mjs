@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 export function verifyProviderRecovery(cases) {
   assert.equal(cases.length, 5);
-  const expectedCounts = [3, 2, 3, 11, 24];
+  const expectedCounts = [3, 1, 3, 11, 24];
   const expectedDelays = [1000, 2000, 4000, 8000, 8000, 8000, 8000, 8000, 8000, 8000];
   const summary = cases.map((result, index) => {
     const events = result.events
@@ -16,13 +16,20 @@ export function verifyProviderRecovery(cases) {
     );
     const tools = result.detail.session.messages.filter((m) => m.role === "tool");
     assert.equal(result.requests.length, expectedCounts[index], result.name);
-    assert.equal(result.retryShot, true, `${result.name}: retry countdown visible`);
+    assert.equal(result.retryShot, index !== 1, `${result.name}: only output-free failures retry`);
     assert.equal(
       events.filter((e) => e.type === "agent_end").length,
       1,
       `${result.name}: one terminal lifecycle`,
     );
-    if (index !== 3) {
+    if (index === 1) {
+      assert.equal(errors.length, 1);
+      assert.equal(errors[0].error.code, "STREAM_FAILED");
+      assert.equal(retries.length, 0);
+      assert.equal(assistants.at(-1).content, "PARTIAL_699");
+      assert.equal(assistants.at(-1).status, "error");
+      assert.equal(result.continuation.requests, 1);
+    } else if (index !== 3) {
       assert.equal(errors.length, 0);
       assert.equal(assistants.length, index === 4 ? 12 : 1);
       assert(assistants.every((m) => m.status === "complete"));

@@ -28,6 +28,15 @@ test("an empty latest session is reusable only when the renderer agrees", () => 
   );
 });
 
+test("isolated sessions are never reused for a new task (ADR 0329)", () => {
+  const empty = { messageCount: 0 };
+  const emptyIsolated = { messageCount: 0, worktree: { branch: "pi-desktop/a", status: "active" } };
+  assert.equal(sessionIsReusableEmpty(emptyIsolated), false, "ordinary + must not pick an isolated session");
+  assert.equal(sessionIsReusableEmpty(emptyIsolated, { isolated: true }), false);
+  assert.equal(sessionIsReusableEmpty(empty, { isolated: true }), false, "isolation always creates a worktree");
+  assert.equal(sessionIsReusableEmpty(empty, { isolated: false }), true);
+});
+
 test("empty sessions have a whole, already-known transcript window", () => {
   assert.deepEqual(EMPTY_SESSION_WINDOW, {
     messageStart: 0,
@@ -63,10 +72,11 @@ test("creating a session reveals the empty destination before host IO", () => {
   assert.match(sessionCoordination, /function commitCreatedEmptySession/);
   assert.match(sessionCoordination, /scheduleHomeDraftAdopt/);
   assert.match(persist, /inheritedSessionModelBinding/);
+  assert.doesNotMatch(persist, /latestSessionInScope/);
   assert.match(persist, /providerId: inherited\.providerId/);
   assert.match(persist, /modelId: inherited\.modelId/);
-  assert.doesNotMatch(persist, /providerId: draftConfig\?\.providerId/);
-  assert.doesNotMatch(persist, /modelId: draftConfig\?\.modelId/);
+  assert.match(persist, /draft: draftConfig/);
+  assert.match(persist, /recentModels: state\.recentModels/);
 });
 
 test("send and paste wait for an in-flight New Task instead of creating a second session", () => {
@@ -76,6 +86,15 @@ test("send and paste wait for an in-flight New Task instead of creating a second
     )?.[0] ?? "";
   assert.match(materialize, /pendingNewSessionRequests/);
   assert.match(materialize, /await pending/);
+});
+
+test("the home composer chip uses the same new-conversation model binding", async () => {
+  const composer = await readFile(
+    new URL("../src/components/Composer.tsx", import.meta.url),
+    "utf8",
+  );
+  assert.match(composer, /newConversationModelBinding/);
+  assert.match(composer, /latestSessionInScope/);
 });
 
 test("opening an unpinned session snapshots its first selected model", () => {

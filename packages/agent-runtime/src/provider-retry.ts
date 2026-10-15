@@ -1,3 +1,5 @@
+import { requestDiagnostics, type RequestDiagnostics } from "./request-diagnostics.js";
+import { responseContentFacts } from "./response-outcome.js";
 import {
   createAssistantMessageEventStream,
   type Api,
@@ -337,6 +339,7 @@ export function captureProviderResponse(
     requestBytes?: number,
     failure?: ProviderFetchFailure,
   ) => void,
+  onRequest?: (request: RequestDiagnostics) => void,
 ): FetchFunction {
   const baseFetch = fetchFn ?? globalThis.fetch;
   return async (input, init) => {
@@ -344,6 +347,7 @@ export function captureProviderResponse(
     // before receiving headers, a prior 429 must not classify the new failure.
     onResponse();
     const requestBytes = requestBodyBytes(init?.body);
+    onRequest?.(requestDiagnostics(input, init));
     try {
       const response = await baseFetch(input, init);
       const headers: Record<string, string> = {};
@@ -431,6 +435,7 @@ export function createProviderRetryStream(
   void context;
   const outer = createAssistantMessageEventStream();
   const sleep = controller.sleep ?? delayWithAbort;
+  let lastPartial: AssistantMessage | undefined;
 
   void (async () => {
     // One repair per logical turn: after an opaque 400/422 the next attempt
@@ -444,6 +449,7 @@ export function createProviderRetryStream(
         maxRetries: 0,
       });
       let sawStart = false;
+      let meaningful = false;
       let retry:
         | { error: ClassifiedAgentError; attempt: number }
         | undefined;
@@ -451,7 +457,19 @@ export function createProviderRetryStream(
 
       for await (const event of inner) {
         if (event.type === "start") sawStart = true;
+        const partial = event.type === "error" ? event.error : event.type === "done" ? event.message : event.partial;
+        // Some adapters emit a fresh empty error envelope after streaming.
+        // Preserve what was received, including real native replay metadata.
+        if ((event.type === "error" || event.type === "done") && lastPartial &&
+            !responseContentFacts(partial).meaningful) {
+          partial.content = lastPartial.content;
+          partial.usage = lastPartial.usage;
+          partial.providerThinkingLevel ??= lastPartial.providerThinkingLevel;
+        }
+        meaningful ||= responseContentFacts(partial).meaningful;
+        if (responseContentFacts(partial).meaningful) lastPartial = { ...partial, content: [...partial.content] };
         if (
+          !meaningful &&
           !sawStart &&
           event.type === "error" &&
           event.reason === "error"
@@ -530,6 +548,7 @@ export function createProviderRetryStream(
       options.signal?.aborted ||
       (error instanceof Error && error.name === "AbortError");
     const message = setupErrorMessage(model, error, Boolean(aborted));
+    if (lastPartial) { message.content = lastPartial.content; message.usage = lastPartial.usage; message.providerThinkingLevel = lastPartial.providerThinkingLevel; }
     outer.push({
       type: "error",
       reason: message.stopReason === "aborted" ? "aborted" : "error",
@@ -607,6 +626,7 @@ export function withStreamIdleTimeout(
 ): AssistantMessageEventStream {
   if (timeoutMs <= 0) return inner;
   const outer = createAssistantMessageEventStream();
+  let lastPartial: AssistantMessage | undefined;
 
   void (async () => {
     const iterator = inner[Symbol.asyncIterator]();
@@ -633,6 +653,7 @@ export function withStreamIdleTimeout(
           new Error(streamIdleTimeoutMessage(timeoutMs)),
           false,
         );
+        if (lastPartial) { message.content = lastPartial.content; message.usage = lastPartial.usage; message.providerThinkingLevel = lastPartial.providerThinkingLevel; }
         outer.push({ type: "error", reason: "error", error: message });
         outer.end(message);
         return;
@@ -642,6 +663,7 @@ export function withStreamIdleTimeout(
         outer.end(await inner.result());
         return;
       }
+      if (step.value.type !== "done" && step.value.type !== "error") lastPartial = step.value.partial;
       outer.push(step.value);
       if (step.value.type === "done" || step.value.type === "error") {
         return;

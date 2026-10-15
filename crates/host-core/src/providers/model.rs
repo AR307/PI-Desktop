@@ -49,6 +49,10 @@ pub struct ProviderPublic {
     /// Sampling temperature override. `None` leaves the provider default.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub temperature: Option<f64>,
+    /// Public MirrorCoding account/group routing metadata. Credentials remain
+    /// owned by Electron main and never appear here.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mirror_coding: Option<MirrorCodingProvider>,
     /// Owning plugin id when the row came from `contributes.providers`
     /// (ADR 0259). Absent for a row the user created. A plugin-owned row is
     /// read-only in Settings: the plugin refreshes it on every load, and
@@ -57,6 +61,70 @@ pub struct ProviderPublic {
     pub owner_plugin_id: Option<String>,
     pub created_at: String,
     pub updated_at: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct MirrorCodingImageRoute {
+    pub generation: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reference: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct MirrorCodingProvider {
+    #[serde(flatten)]
+    pub client: MirrorCodingClientMetadata,
+    /// `group` rows are retained for historical sessions; `account` is the
+    /// model-first provider projected from the complete authorized catalog.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub scope: Option<String>,
+    pub account_id: i64,
+    pub group_id: String,
+    pub group_name: String,
+    pub description: String,
+    pub ratio: Option<f64>,
+    pub dynamic_billing: bool,
+    pub routes: BTreeMap<String, String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub image_routes: Option<BTreeMap<String, MirrorCodingImageRoute>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub image_capabilities: Option<BTreeMap<String, serde_json::Value>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub image_models: Option<BTreeMap<String, serde_json::Value>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub groups: Option<Vec<MirrorCodingGroupRoute>>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct MirrorCodingGroupRoute {
+    #[serde(flatten)]
+    pub client: MirrorCodingClientMetadata,
+    pub id: String,
+    pub name: String,
+    pub description: String,
+    pub ratio: Option<f64>,
+    pub dynamic_billing: bool,
+    pub routes: BTreeMap<String, String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub image_routes: Option<BTreeMap<String, MirrorCodingImageRoute>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub image_capabilities: Option<BTreeMap<String, serde_json::Value>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub image_models: Option<BTreeMap<String, serde_json::Value>>,
+}
+
+#[derive(Debug, Default, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct MirrorCodingClientMetadata {
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub model_capabilities: BTreeMap<String, serde_json::Value>,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub supported_endpoints: BTreeMap<String, serde_json::Value>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub candidate_groups: Vec<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -119,7 +187,7 @@ pub struct ProviderUpdateInput {
     pub enabled: Option<bool>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct ModelBinding {
     pub id: String,
@@ -134,6 +202,10 @@ pub struct ModelBinding {
     /// seed is inherited).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub context_window_source: Option<String>,
+    /// Provenance of `max_tokens`, independent from the context-window marker.
+    /// Absent legacy values keep the historical generic-seed fallback.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_tokens_source: Option<String>,
     /// Context window in tokens. Optional on the wire: an absent key reads as
     /// `0`, which `normalize_model_bindings` replaces with the generic default,
     /// so a stored record that omits it still loads as one binding instead of
@@ -148,6 +220,9 @@ pub struct ModelBinding {
     #[serde(default)]
     pub thinking_levels: Vec<String>,
     pub default_thinking_level: Option<String>,
+    /// Provider request protocol used when thinking is enabled.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub thinking_protocol: Option<String>,
     /// Attachment capability overrides. `None` follows the published catalog
     /// capability, so a models.dev correction still reaches a saved binding.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -163,7 +238,18 @@ pub struct ModelBinding {
     /// default because models.dev does not publish hosted-tool capability.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub native_web_search: Option<bool>,
+    /// Selected MirrorCoding group for an account-level provider.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mirror_coding_group_id: Option<String>,
+    /// Model-level sampling override. Absent leaves the adapter default.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub temperature: Option<f64>,
+    /// Model-level wire protocol override.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub api_style: Option<String>,
 }
+
+impl Eq for ModelBinding {}
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]

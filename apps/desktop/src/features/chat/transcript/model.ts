@@ -26,6 +26,19 @@ export function delegateModelId(message: UiMessage): string {
   return typeof modelId === "string" ? modelId.trim() : "";
 }
 
+/** Requested tier accepted for the child, not its parent or an unaccepted tool argument. */
+export function delegateGroupId(message: UiMessage): string {
+  const payload = toolResultPayload(message);
+  const value = payload && typeof payload === "object" ? (payload as { groupId?: unknown }).groupId : undefined;
+  return typeof value === "string" ? value : "";
+}
+
+/** Requested tier accepted for the child, not its parent or an unaccepted tool argument. */
+export function delegateFastRequested(message: UiMessage): boolean {
+  const payload = toolResultPayload(message);
+  return !!payload && typeof payload === "object" && (payload as { fast?: unknown }).fast === true;
+}
+
 /** Effective thinking level resolved for this delegation, from the Task result.
  * `off` and `omit` deliberately have no visible suffix. */
 export function delegateThinkingLevel(message: UiMessage): ThinkingLevel | undefined {

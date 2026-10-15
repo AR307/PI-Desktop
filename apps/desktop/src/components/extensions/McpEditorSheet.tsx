@@ -12,10 +12,14 @@ import {
   type McpTransport,
   type ProjectRecord,
 } from "@pi-desktop/shared";
-import { Button, Field, HelpIcon, Input, TooltipButton, cx, portalOverlay } from "../ui";
+import { Button, Field, HelpIcon, Input, SettingsToggle, TooltipButton, cx, portalOverlay } from "../ui";
 import { IconPlay, IconServer, IconTerminal, IconX } from "../icons";
 import { ScopeControl } from "./ScopeControl";
 import { KeyValueRows, pairsToRecord, recordToPairs, type KeyValuePair } from "./KeyValueRows";
+import {
+  MCP_STDIO_LAUNCHER_PRESETS,
+  mcpStdioLauncherChoice,
+} from "./mcp-stdio-launcher";
 
 /**
  * Tool names shown beside a test result.
@@ -45,6 +49,7 @@ export type McpDraft = {
   headers: KeyValuePair[];
   enabled: boolean;
   scope: ActivationScope;
+  timeoutSeconds: string;
 };
 
 export function emptyMcpDraft(): McpDraft {
@@ -53,13 +58,14 @@ export function emptyMcpDraft(): McpDraft {
     label: "",
     description: "",
     transport: "stdio",
-    command: "",
+    command: "npx",
     args: "",
     env: [],
     url: "",
     headers: [],
     enabled: true,
     scope: GLOBAL_SCOPE,
+    timeoutSeconds: "",
   };
 }
 
@@ -76,6 +82,7 @@ export function draftFromRecord(record: McpServerRecord): McpDraft {
     headers: recordToPairs(record.headers),
     enabled: record.enabled,
     scope: resolveScope(record.scope),
+    timeoutSeconds: record.timeoutSeconds !== undefined ? String(record.timeoutSeconds) : "",
   };
 }
 
@@ -128,12 +135,21 @@ export function draftToInput(
   draft: McpDraft,
   context?: { level?: AgentCapabilityLevel; projectPath?: string },
 ): McpServerInput {
+  const parsedTimeout = draft.timeoutSeconds.trim()
+    ? Number.parseInt(draft.timeoutSeconds.trim(), 10)
+    : undefined;
+  const timeoutInput: { timeoutSeconds?: number | null } = {};
+  if (!draft.timeoutSeconds.trim()) timeoutInput.timeoutSeconds = null;
+  else if (typeof parsedTimeout === "number" && !Number.isNaN(parsedTimeout)) {
+    timeoutInput.timeoutSeconds = parsedTimeout;
+  }
   const base = {
     id: draft.id.trim(),
     ...(context?.level ? { level: context.level } : {}),
     ...(context?.projectPath ? { projectPath: context.projectPath } : {}),
     label: draft.label.trim() || draft.id.trim(),
     description: draft.description.trim() || undefined,
+    ...timeoutInput,
     enabled: draft.enabled,
     scope: draft.scope,
   };
@@ -186,16 +202,11 @@ function ManagementScope({
           />
         </span>
       </div>
-      <button
-        type="button"
-        className={cx("settings-toggle", draft.enabled && "on")}
-        role="switch"
-        aria-checked={draft.enabled}
-        aria-label={t("settings.enableCapability", { name: draft.label || draft.id })}
-        onClick={() => setDraft({ ...draft, enabled: !draft.enabled })}
-      >
-        <span className="settings-toggle-thumb" />
-      </button>
+      <SettingsToggle
+        checked={draft.enabled}
+        label={t("settings.enableCapability", { name: draft.label || draft.id })}
+        onChange={() => setDraft({ ...draft, enabled: !draft.enabled })}
+      />
     </div>
   );
 }
@@ -204,6 +215,12 @@ function ManagementScope({
 export function mcpDraftError(draft: McpDraft): string | null {
   if (!draft.id.trim()) return "extensions.mcp.errorId";
   if (!/^[a-zA-Z][a-zA-Z0-9_-]{0,63}$/.test(draft.id.trim())) return "extensions.mcp.errorIdShape";
+  if (draft.timeoutSeconds.trim()) {
+    const parsed = Number(draft.timeoutSeconds.trim());
+    if (!Number.isInteger(parsed) || parsed < 1 || parsed > 600) {
+      return "extensions.mcp.errorTimeoutRange";
+    }
+  }
   if (draft.transport === "stdio") {
     if (!draft.command.trim()) return "extensions.mcp.errorCommand";
     if (draft.command.includes("..")) return "extensions.mcp.errorCommandDots";
@@ -254,6 +271,7 @@ export function McpEditorSheet({
 }) {
   const { t } = useTranslation();
   const [idTouched, setIdTouched] = useState(!!editing);
+  const launcher = mcpStdioLauncherChoice(draft.command);
   const errorKey = mcpDraftError(draft);
   // A form the user has not started saying "an identifier is required" scolds
   // them for opening it. The message appears once there is something to correct.
@@ -261,7 +279,7 @@ export function McpEditorSheet({
     !editing &&
     !draft.id.trim() &&
     !draft.label.trim() &&
-    !draft.command.trim() &&
+    (draft.command.trim() === "" || draft.command.trim().toLowerCase() === "npx") &&
     !draft.url.trim();
 
   useEffect(() => {
@@ -385,17 +403,59 @@ export function McpEditorSheet({
 
           {draft.transport === "stdio" ? (
             <>
-              <Field label={t("extensions.mcp.command")} hint={t("extensions.mcp.commandHint")}>
-                <Input
-                  value={draft.command}
-                  placeholder="npx"
-                  onChange={(event) => set("command", event.target.value)}
-                />
-              </Field>
+              <div className="ext-field-group">
+                <div className="ext-field-label">
+                  {t("extensions.mcp.command")}
+                  <HelpIcon
+                    label={t(
+                      launcher === "npx"
+                        ? "extensions.mcp.commandHintNpx"
+                        : launcher === "uvx"
+                          ? "extensions.mcp.commandHintUvx"
+                          : "extensions.mcp.commandHint",
+                    )}
+                  />
+                </div>
+                <div className="ext-preset-pick" role="radiogroup" aria-label={t("extensions.mcp.command")}>
+                  {MCP_STDIO_LAUNCHER_PRESETS.map((id) => (
+                    <button
+                      key={id}
+                      type="button"
+                      role="radio"
+                      aria-checked={launcher === id}
+                      className={cx("ext-preset-chip", launcher === id && "is-selected")}
+                      onClick={() => set("command", id)}
+                    >
+                      <span className="ext-preset-chip-name">{id}</span>
+                    </button>
+                  ))}
+                  <button
+                    type="button"
+                    role="radio"
+                    aria-checked={launcher === "custom"}
+                    className={cx("ext-preset-chip", launcher === "custom" && "is-selected")}
+                    onClick={() => {
+                      if (launcher === "custom") return;
+                      set("command", "");
+                    }}
+                  >
+                    <span className="ext-preset-chip-name">{t("extensions.mcp.launcherCustom")}</span>
+                  </button>
+                </div>
+              </div>
+              {launcher === "custom" ? (
+                <Field label={t("extensions.mcp.commandPath")} hint={t("extensions.mcp.commandHint")}>
+                  <Input
+                    value={draft.command}
+                    placeholder={t("extensions.mcp.commandPlaceholder")}
+                    onChange={(event) => set("command", event.target.value)}
+                  />
+                </Field>
+              ) : null}
               <Field label={t("extensions.mcp.args")} hint={t("extensions.mcp.argsHint")}>
                 <Input
                   value={draft.args}
-                  placeholder="-y @upstash/context7-mcp"
+                  placeholder={launcher === "uvx" ? "mcp-server-git" : "-y @upstash/context7-mcp"}
                   onChange={(event) => set("args", event.target.value)}
                 />
               </Field>
@@ -410,7 +470,6 @@ export function McpEditorSheet({
                   keyPlaceholder="API_KEY"
                   valuePlaceholder={t("extensions.mcp.valuePlaceholder")}
                   addLabel={t("extensions.mcp.addEnv")}
-                  secret
                 />
               </div>
             </>
@@ -439,7 +498,6 @@ export function McpEditorSheet({
                   keyPlaceholder="Authorization"
                   valuePlaceholder={t("extensions.mcp.valuePlaceholder")}
                   addLabel={t("extensions.mcp.addHeader")}
-                  secret
                 />
               </div>
             </>
@@ -450,6 +508,17 @@ export function McpEditorSheet({
               value={draft.description}
               placeholder={t("extensions.mcp.descriptionPlaceholder")}
               onChange={(event) => set("description", event.target.value)}
+            />
+          </Field>
+
+          <Field label={t("extensions.mcp.timeout")} hint={t("extensions.mcp.timeoutHint")}>
+            <Input
+              type="number"
+              min={1}
+              max={600}
+              value={draft.timeoutSeconds}
+              placeholder={t("extensions.mcp.timeoutPlaceholder")}
+              onChange={(event) => set("timeoutSeconds", event.target.value)}
             />
           </Field>
 

@@ -7,6 +7,7 @@ import type {
 import {
   contextCompactionMark,
   initialThinkingLevelForBinding,
+  initialThinkingLevelForUnmatchedModel,
   normalizeMode,
 } from "@pi-desktop/shared";
 import { api } from "../../lib/api";
@@ -36,10 +37,11 @@ export type PersistSessionOptions = {
   intent?: number;
   projectPath?: string | null;
   draftConfiguration?: DraftSessionConfiguration | null;
+  /** Run the new session in its own git worktree (ADR 0329). */
+  isolated?: boolean;
 };
 
 export type SessionCoordination = {
-  flushPendingSessionConfiguration: (sessionId: string) => Promise<void>;
   rememberSessionCompactions: (
     sessionId: string,
     session:
@@ -78,69 +80,6 @@ export function createSessionCoordination({
   withoutRecordKey,
   untitledTaskTitle,
 }: SessionCoordinationDependencies): SessionCoordination {
-  function flushPendingSessionConfiguration(sessionId: string): Promise<void> {
-    const active = runtime.sessionConfigurationFlushes.get(sessionId);
-    if (active) return active;
-    if (get().runningSessions[sessionId]) return Promise.resolve();
-
-    const flush = (async () => {
-      let failed = false;
-      while (!get().runningSessions[sessionId]) {
-        const config = runtime.pendingSessionConfigurations.get(sessionId);
-        if (!config) break;
-        try {
-          const result = await api.configureSession(sessionId, config);
-          if (runtime.pendingSessionConfigurations.get(sessionId) === config) {
-            runtime.pendingSessionConfigurations.delete(sessionId);
-          }
-          set((state) => ({
-            sessions: state.sessions.map((session) =>
-              session.id === sessionId
-                ? {
-                    ...result.session,
-                    pinned: sessionIsPinned(sessionId, state.sessionMeta),
-                    archived: sessionIsArchived(sessionId, state.sessionMeta),
-                  }
-                : session,
-            ),
-            planningStates: {
-              ...state.planningStates,
-              [sessionId]:
-                result.session.mode === "plan" ? "planning" : "inactive",
-            },
-          }));
-        } catch (error) {
-          get().showToast(
-            error instanceof Error ? error.message : String(error),
-            { variant: "error" },
-          );
-          void get().refreshSessions();
-          if (runtime.pendingSessionConfigurations.get(sessionId) !== config) {
-            continue;
-          }
-          failed = true;
-          break;
-        }
-      }
-      return failed;
-    })();
-    const settled = flush.then(() => undefined);
-    runtime.sessionConfigurationFlushes.set(sessionId, settled);
-    void flush.then((failed) => {
-      if (runtime.sessionConfigurationFlushes.get(sessionId) === settled) {
-        runtime.sessionConfigurationFlushes.delete(sessionId);
-      }
-      if (
-        !failed &&
-        runtime.pendingSessionConfigurations.has(sessionId) &&
-        !get().runningSessions[sessionId]
-      ) {
-        void flushPendingSessionConfiguration(sessionId);
-      }
-    });
-    return settled;
-  }
-
   function rememberSessionCompactions(
     sessionId: string,
     session:
@@ -154,7 +93,7 @@ export function createSessionCoordination({
     const records =
       session?.compactions ??
       (session?.compaction ? [session.compaction] : []);
-    const marks = records.map(contextCompactionMark);
+    const marks = records.map((record) => ({ ...contextCompactionMark(record), summary: record.summary }));
     set((state) => ({
       sessionCompactions:
         marks.length > 0
@@ -202,6 +141,7 @@ export function createSessionCoordination({
     });
     rememberSessionCompactions(summary.id, session);
     void get().restorePendingPlan(summary.id);
+    void get().restorePendingInteractive(summary.id);
   }
 
   function revealEmptyCreatingSession(intent: number): void {
@@ -274,7 +214,7 @@ export function createSessionCoordination({
     const settings = state.settings;
     const projectPath =
       options && "projectPath" in options
-        ? options.projectPath
+        ? options.projectPath ?? null
         : state.workspace?.path ?? null;
     const draftConfig =
       options && "draftConfiguration" in options
@@ -284,6 +224,7 @@ export function createSessionCoordination({
       draft: draftConfig,
       settings,
       providers: state.providers,
+      recentModels: state.recentModels,
     });
     const defaultProvider = state.providers.find(
       (provider) => provider.id === inherited.providerId,
@@ -291,10 +232,20 @@ export function createSessionCoordination({
     const inheritedBinding = defaultProvider?.models.find((candidate) =>
       sameComposerModelId(candidate.id, inherited.modelId ?? ""),
     );
-    const defaultThinkingLevel = initialThinkingLevelForBinding(
-      inheritedBinding,
-      defaultProvider?.supportedThinkingLevels,
-    );
+    const catalogModel = inherited.providerId && inherited.modelId
+      ? state.providerModels[inherited.providerId]?.find((candidate) =>
+          sameComposerModelId(candidate.modelId, inherited.modelId ?? ""),
+        )
+      : undefined;
+    const defaultThinkingLevel = catalogModel?.catalogSource === "models.dev"
+      ? initialThinkingLevelForBinding(
+          inheritedBinding,
+          defaultProvider?.supportedThinkingLevels,
+        )
+      : initialThinkingLevelForUnmatchedModel(
+          inheritedBinding,
+          defaultProvider?.supportedThinkingLevels,
+        );
     const previousSessionId = state.activeSessionId;
     revealEmptyCreatingSession(active);
     let created: Awaited<ReturnType<typeof api.createSession>>;
@@ -307,6 +258,7 @@ export function createSessionCoordination({
         providerId: inherited.providerId,
         modelId: inherited.modelId,
         projectPath: projectPath ?? undefined,
+        ...(options.isolated ? { isolated: true } : {}),
       });
     } catch (error) {
       if (previousSessionId && runtime.navigationIntentIsCurrent(active)) {
@@ -317,6 +269,10 @@ export function createSessionCoordination({
       throw error;
     }
     const sessionId = created.session.id;
+    if (draftConfig?.fast === true || draftConfig?.ultra === true) {
+      const configured = await api.configureSession(sessionId, { mode: created.session.mode, fast: draftConfig?.fast === true, ultra: draftConfig?.ultra === true });
+      if (configured.session) created.session = { ...created.session, ...configured.session };
+    }
     if (!runtime.navigationIntentIsCurrent(active)) {
       commitCreatedEmptySession(created.session, { activate: false });
       return null;
@@ -340,7 +296,6 @@ export function createSessionCoordination({
   }
 
   return {
-    flushPendingSessionConfiguration,
     rememberSessionCompactions,
     commitForkedSession,
     persistSessionAndSelect,

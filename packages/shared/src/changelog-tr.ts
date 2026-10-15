@@ -2,6 +2,220 @@ import type { ChangelogEntry } from "./changelog.js";
 
 export const trEntries: ChangelogEntry[] = [
   {
+    "version": "0.20.2",
+    "date": "2026-10-15",
+    "highlights": [
+      "MirrorCoding yetkilendirmesinden sonra aracı, görüntü modunu elle ayarlamadan model ve grup seçerek görsel üretir.",
+      "Masaüstü ve Android için yeni ortak logo kullanılır.",
+      "Mobil gezinme, bildirimler, arka plan bağlantısı ve okuma konumu iyileştirmeleri eklendi.",
+      "Veri taşıma düzeltmeleri, mobil geçmiş ve bağımsız arka plan görevleri korunarak upstream 0.20.1 eşitlendi."
+    ]
+  },
+  {
+    "version": "0.20.1",
+    "date": "2026-10-13",
+    "highlights": [
+      "Özel uç noktaları API anahtarı olmadan yapılandırın; bu modda isteklerle kimlik doğrulama bilgisi gönderilmez.",
+      "Yerleşik tarayıcıda proje klasörünün dışındaki yerel dosyaları açın; web sayfaları proje dosyalarıyla sınırlı kalır.",
+      "Bağlam kullanım panelinde sağlayıcı bekleme, akışlı model yanıtı ve üst düzey araç sürelerini ayrı ayrı, toplam süre ve oranlarıyla görün.",
+      "Durdurulan tur tamamen sonuçlanana kadar sonraki tur bekler; böylece işler üst üste binmez.",
+      "Windows taşınabilir ZIP'i artık güncelleme akışını içeriyor; kurulu kopyalar güncellemeleri bulup indirebilir.",
+      "Eklentiler fetch'in desteklediği yönlendirme modlarını sorgulayabilir ve yönlendirmeyi izlemeden incelemeyi veya reddetmeyi seçebilir; mevcut fetch çağrıları varsayılan olarak yönlendirmeleri izlemeyi sürdürür.",
+      "Uzun metin sıkıştırma ve model yanıt hızı tahminleri daha doğrudur; kesilen akışlarda mevcut yedek yöntem korunur.",
+      "Metin seçimi açılır katmanların üzerinden sürüklerken kesintisiz kalır.",
+      "Kenar çubuğunun altındaki satırlardan açılan proje menüleri görünür kalır.",
+      "Windows eski yedekleri kaldırırken yükleme kilidini korur.",
+    ],
+  },
+  {
+    "version": "0.19.1",
+    "date": "2026-10-13",
+    "highlights": [
+      "Özel moda döndüğünüzde geçerli bir taslak olmasa bile kayıtlı özel proxy adresiniz geri yüklenir.",
+      "Tarayıcı yanıt vermediğinde işlemler zaman aşımına uğrayıp kurtarılır; araç çağrıları süresiz beklemez.",
+    ],
+  },
+  {
+    "version": "0.19.0",
+    "date": "2026-10-13",
+    "highlights": [
+      "Ana sayfadan SSH çalışma alanı projeleri oluşturun, ayrı bir iletişim kutusunda uzak klasörleri gezinin ve her ana makine için bir SSH kimliği seçin.",
+      "Bir projeye uygun klasörler ekleyip kaldırın; mevcut sohbetler özgün çalışma alanlarında kalır.",
+      "Seçili ayarları cihazlar arasında eşitleyin, proje listelerini ise her cihazda yerel tutun.",
+      "Eşleştirilmiş uzak Host'lar doğrulanmış SSH kurulumu üzerinden güncel masaüstü sürümüne otomatik güncellenip aynı yerde yeniden bağlanır.",
+      "Ayarlar'dan yerleşik Skill'leri etkinleştirin, devre dışı bırakın veya uygulamayla gelen varsayılanları geri yükleyin.",
+      "Güncelleme kartında indirme ilerlemesini görün, indirmeyi iptal edin veya yeniden deneyin.",
+      "Ağ modları arasında geçerken özel proxy ayarlarınız korunur.",
+      "Bir mesajı silmek canlı AI çıktısını ve konuşmanın geri kalanını silmez.",
+      "Tarayıcı ekran görüntüsü yakalama takıldığında kurtarılır ve sayfanın kilitlenmesi önlenir.",
+      "Yerleşik model kataloğu yeni modeller ve güncel yetenek bilgileriyle yenilendi.",
+      "AskTool soruları için net bir uzunluk sınırı vardır; fazla uzun sorular kart açılmadan reddedilir.",
+    ],
+  },
+  {
+    "version": "0.18.2",
+    "date": "2026-10-14",
+    "highlights": [
+      "app.asar arşivleri içeren verileri ENOTDIR hatası olmadan taşıyın.",
+      "Hedefi artık bulunmayan Windows bağlantılarını koruyarak taşımaya devam edin.",
+      "Dosya kopyalanamadığında kaynak ve hedef yollarını gösterin."
+    ]
+  },
+  {
+    "version": "0.18.1",
+    "date": "2026-10-14",
+    "highlights": [
+      "Hedef klasör veya eski veri dizini henüz oluşturulmamış olsa bile kurulumdan hemen sonra depolama konumunu değiştirin.",
+      "Orijinal yedeği koruyarak mevcut verileri yeni bir klasöre veya başka bir sürücüye taşıyın.",
+      "Windows üzerinde veriler taşındıktan sonra proje belleğine ve talimatlarına erişmeye devam edin."
+    ]
+  },
+  {
+    "version": "0.18.0",
+    "date": "2026-10-09",
+    "highlights": [
+      "Ana sayfadan SSH çalışma alanı projeleri oluşturup adlandırın; klasörleri ayrı bir iletişim kutusunda seçin, model istekleri ve kimlik bilgileri bilgisayarınızda kalsın.",
+      "TypeSafe Jev sınıflandırıcısını Hizmet Ekle'den kurun ve kaydetmeden önce API anahtarını doğrulayın.",
+      "Bulut eşitlemesi paketlenmiş sürümün ayarlarında kullanılabilir ve deneysel olarak işaretlenir. Proje listeleri her cihazda yerel olarak kalır.",
+      "Yerelleştirilmiş açıklamalar ve anahtar kurulumundan sonra model keşfiyle eklenti kaynaklı API anahtarlı hizmetleri ekleyin.",
+      "İzin verilen eklenti işlemleri Composer taslağını dönüştürebilir ve geri alınabilir; istem iyileştirme artık isteğe bağlı bir eklentide sunulur.",
+      "Yanıt görünür kalsın diye araç ayrıntıları siz açana kadar kapalı kalır.",
+      "Geçmiş AskTool soru ve yanıtlarını düzenli bir Soru-Cevap kartında inceleyin.",
+      "İsteğe bağlı bir eklentiyle oturum başlığı oluşturun; ilk istem yedek başlık olarak kalır ve elle yeniden adlandırmalar önceliklidir.",
+      "Göreli bağlantılar ve satır başvuruları dahil yerel Markdown dosya bağlantılarını sohbetten yerleşik Dosya Yöneticisi'nde açın.",
+      "Composer'ın model listesi artık yapılandırılmış bağlam penceresi sınırlarını gösterir.",
+      "Eklentiler ağ yönlendirmelerini inceleyebilir veya reddedebilir; mevcut fetch çağrıları varsayılan olarak yönlendirmeleri izlemeyi sürdürür.",
+      "Çalışan bir alt ajanı kartından veya ayrıntı panelinden ya da geçerli oturumdaki tüm alt ajanları koordinatörü durdurmadan durdurabilirsiniz.",
+      "Bağlam kullanımı panelinde toplam oturum süresini, birikimli model yanıt süresini ve oturum içindeki payını görün.",
+      "Masaüstü sürümünün gerisinde kalan eşleştirilmiş bir uzak Host artık aynı doğrulanmış SSH kurulumuyla kendini günceller ve yerinde yeniden eşleştirilir.",
+    ],
+  },
+  {
+    "version": "0.17.0",
+    "date": "2026-10-07",
+    "highlights": [
+      "Yazarken görsel eklerini yerinde tutun, gönderdiğiniz görselleri de sohbet içinde önizleyin.",
+      "Konuşma referanslarını okunabilir etiketler olarak görün ve bağlantılı oturumu doğrudan açın.",
+      "Her istemin kullanabileceği MCP sunucularını ve araçlarını seçin.",
+      "Model seçicisinden son kullandığınız modellere hızla dönün.",
+      "Oturum açmış ChatGPT hesabınızla görsel üretin ve düzenleyin.",
+      "Eklenti sağlayıcıları artık OAuth ile kimlik doğrulayabilir.",
+      "İstediğiniz Skill'i bulmak için ad alanlı eğik çizgi komutlarını kullanın.",
+      "Genişletilmiş Todo listesinde bir kontrol listesinin tüm maddelerini inceleyin.",
+      "Modelleri, Skill'leri ve MCP sunucularını ilgili Ayarlar sayfalarından içe aktarın.",
+      "Sağlayıcı ve pazar yeri isteklerinde sistem proxy'sini kullanın.",
+      "Büyük araç çıktılarını sayfalayıp aktarım çizimini hızlandırarak sohbeti akıcı tutun.",
+      "Bir eklenti paneli hiç yüklenmezse hata durumu açıkça gösterilir.",
+    ],
+  },
+  {
+    "version": "0.16.2",
+    "date": "2026-10-07",
+    "highlights": [
+      "Zamanlanmış görevler, dosya başvuruları, model yetenekleri ve konuşma görünümü için upstream 0.16.1 iyileştirmelerini içerir.",
+      "Telefonu bir kez eşleştirerek hesap paylaşımını etkinleştiren tüm bilgisayarları, projelerini ve konuşmalarını bulun.",
+      "Yüklenen geçmişi 500 mesaj sınırı olmadan çevrimdışı okuyun ve masaüstü yeniden başladıktan sonra kalıcı değişikliklerle eşitleyin.",
+      "Hesap bölümünden Android güncellemelerini denetleyin, APK indirin ve mevcut verileri koruyarak sistem yükleyicisini açın.",
+      "Mobil giriş, eşleştirme hataları, çevrimdışı keşif ve hesap paylaşımı değiştikten sonra kurtarma iyileştirildi.",
+      "Yerel HTML önizlemeleri düzeltildi; BOM içeren UTF-16 günlükleri ikili dosya sayılmadan okunabilir ve düzenlenebilir.",
+      "Alt ajan düzenleme hataları yalıtılır, kurtarma tükendiğinde görev başarısız olarak bildirilir ve çıkmadan önce konuşma kaydı tamamlanır."
+    ]
+  },
+  {
+    "version": "0.16.1",
+    "date": "2026-10-04",
+    "highlights": [
+      "Ayarlar'dan özel bir veri konumu seçin, doğrulanmış soğuk taşımayı izleyin ve yalnızca yeniden oluşturulabilir önbellekleri temizleyin.",
+      "Zamanlanmış görevler aralık temposunda çalışabilir: görev kurulduktan sonra 5 dakikadan 24 saate kadar.",
+      "Zamanlanmış sayfası görev listesini seçili görevle birlikte sunar: son sonucu, sonraki çalışmayı, talimatı ve çalışma geçmişini.",
+      "Bir çalışmanın konuşmasında görevine ve çalışmasına dönen bir satır bulunur ve her görev bir çalışmanın yeni konuşma mı açacağını yoksa mevcut konuşmayı mı sürdüreceğini seçer.",
+      "Composer'a bir pi-desktop://session/<id> bağlantısı yapıştırın ve bir konuşmayı başka bir tura devredin.",
+      "Sohbetten, çalışma panelinden ve paketlenmiş dosya yöneticisinden path:line dosya başvurularını açın ve doğrudan o satıra gidin.",
+      "Gerçek bir dosya yoluna çözümlenen satır içi kod artık tıklanabilir bir bağlantıdır; diğer satır içi kodlar ve kod blokları sade kalır.",
+      "Her MCP sunucusu kendi bağlantı zaman aşımını (1-600 saniye) ayarlayabilir; temizlemek varsayılan değeri geri getirir.",
+      "Okumalar PNG, JPEG, GIF ve WebP dosyalarını görsel olarak döndürür ve MCP ile eklenti araçlarından gelen görsel sonuçlar görme modellerine görsel bloğu olarak ulaşır.",
+      "Sohbet modeli sınırları ve yetenekleri artık models.dev üzerinden geliyor ve kendi sabitlediğiniz bağlam penceresinin üzerine artık yazılmıyor.",
+      "Otomatik sıkıştırma okunabilir bir oturumu korur: eksik bir plan çalışma alanı artık turu sonlandırmıyor.",
+      "Ajan çalışma zamanı, sağlayıcı, OAuth ve güvenilen uzantı davranışını koruyarak Pi 1.0.1 hattına geçiyor.",
+      "Kullanıcı MCP araçları artık Sor ve Düzenlemeleri kabul et modlarında onay ister; Otomatik bunları istem göstermeden çalıştırmaya devam eder.",
+      "Uzun oturumlar harici MCP istemcileri için kullanılabilir kalır: oturum okuması yanıtı kesmek yerine sıkıştırma üst verisini sınırlar.",
+      "Yanıtlar akarken uzun sohbetler akıcı kalır; dikey atlama olmaz ve iç içe listelerde başıboş imleç satırı görünmez.",
+      "Bir oturum dosyasının kopyaları veya yedekleri artık ikinci bir konuşma olarak görünmüyor.",
+      "Çok klasörlü bir grup içindeki projeyi silmek ve hâlâ sohbetleri bulunan bir klasörü ayırmak artık güvenle çalışıyor.",
+      "Kapalı bir proje grubuna ait klasörü seçmek, kopya oluşturmak yerine o grubu yeniden açar.",
+      "Konuşma taslağındaki bir çizgiye tıklamak, dibe geri dönmek yerine o tura kaydırır.",
+      "Oturum değiştirmeden hemen önce gönderilen bir istem, geri döndüğünüzde artık iki kez görünmüyor.",
+      "Soru kartları kompakt ve ana bilgisayar üzerinden sonuçlanıyor: yanıtlar ajana ulaşıyor, gönder düğmesi toparlanıyor ve yanıtlanmış kart geri gelmiyor.",
+      "Tarayıcı ve dosya yöneticisi gibi sabitlenmiş eklenti görünümleri proje iletişim kutuları ve uzantı istemleri açıkken gizleniyor ve Dock'tan başlatılan eklentiler npm'i yeniden bulabiliyor.",
+      "Güncelleme bildirimini kapatmak hatırlanıyor ve o sürümün indirmesini iptal ediyor, böylece çıkışta kurulamıyor.",
+      "Zamanlanmış çalışma dökümleri oturum listesinin, hızlı geçiş aracının ve sistem tepsisinin dışında kalıyor.",
+      "Emekliye ayrılmış veya iptal edilmiş modeller canlı hizmet panelinin dışında kalırken kayıtlı bağlamalarınız ve geçersiz kılmalarınız düzenlenebilir kalıyor.",
+      "İsteğe bağlı araçlar oturum boyunca kullanılabilir kalır ve araç bildirimleri hesap başına bir kez gönderilir, böylece araç aramaları istek önekini geçersiz kılmaz.",
+      "Uygulama kökünü bir seviye derine çözen paylaşılan parçaların neden olduğu açılıştaki siyah pencere düzeltildi.",
+      "Üretim bağımlılıkları artık yamalanmış brace-expansion ve js-yaml sürümlerini çözümlüyor.",
+    ],
+  },
+
+  {
+    "version": "0.16.0",
+    "date": "2026-10-02",
+    "highlights": [
+      "Canlı Ses artık herkesin kullanımına açık ve görüşmeler geçerli oturumda başlıyor.",
+      "Yerel hizmet yeniden başlatılsa bile bağlayıcı durumunu koruyan oturum bazlı kontrol listesi eklendi.",
+      "Tek seferlik bildirimler artık engelleyici iletişim kutuları yerine ortak toast yığınında gösteriliyor.",
+      "Model listeleri resmi sağlayıcı üst verileriyle eşleşir; aktarma hizmetleri ve model adları doğru kalır.",
+      "Canlı Ses görüşme çubuğunu masaüstü bileşeni olarak sabitleyin ve bağlı oturumun açık sorusunu sesle yanıtlayın.",
+      "Bir çalışma oturumuna bağlı Canlı Ses görüşmesi beklediği soruyu, izni veya planı gösterir ve o oturumu açan bir eylem sunar.",
+      "Eklentiler son haline gelmiş yedi arayüz yuvasını doldurabilir ve kendi katmanlı iletişim kutularını çizebilir.",
+      "Eklentiler Composer taslağını okuyup yeniden yazabilir ve kurulum sırasında tüm ana bilgisayarlara ağ erişimi talep edebilir.",
+      "Güvenilen bir uzantı iptal edildiğinde SDK komutları, araç güncellemeleri, alt süreçleri ve kuyruktaki istemleri kaldırılır; başlatma, kapatma ve bildirim işleyicilerinin beklemeleri artık sınırlı.",
+      "Büyük alt ajan taslak çıktısını diske aktarın ve turu başarısız kılmak yerine sürdürme ipuçları gösterin.",
+      "Bir alt ajanı sürdürmek artık başka bir tanımın özel model bağlamasını seçmiyor ve iptal edilen devretme izinleri sonraki turda geçerli oluyor.",
+      "Alt ajan topoloji kartları ve canlı süreç satırları artık ana sohbetin genişliğini izliyor.",
+      "GitHub Copilot hesabındaki Claude modelleri eksik Authorization başlığıyla başarısız olmak yerine Bearer belirteciyle kimlik doğruluyor.",
+      "Google Gemini sağlayıcı satırları yeniden istek gönderiyor (issue #1072).",
+      "Bir sağlayıcı silindiğinde ona bağlı görsel oluşturma varsayılanı da kaldırılır.",
+      "OpenAI Codex OAuth modelleri sağlayıcı tarafından barındırılan yerel web aramasını seçebilir.",
+      "Barındırılan web aramasının eksiksiz bir yeniden oynatma ve tahmin sözleşmesi var; sözleşme değişikliğinden önce yazılan geçmişler de kullanılabilir kalıyor.",
+      "Bir Codex arka ucunun önünde duran ağ geçidinde sıkıştırma yeniden çalışıyor.",
+      "Tek tek Markdown tablolarını kopyalayın, CSV olarak indirin veya okumak için genişletin.",
+      "Sohbetteki dosya başvurularını proje kökleri içindeki tam yollarda açın ve kullanıcı mesajı bağlantılarını seçilebilir ve kopyalanabilir tutun.",
+      "Composer akıl yürütme kaydırıcısı tıklanan veya klavyeyle seçilen seviyelere akıcı biçimde geçiyor, sürüklemeyi izliyor ve artık dolu rayını ve üzerine gelme vurgularını tutarlı biçimde boyuyor.",
+      "Uzun sohbetleri akış sırasında duyarlı tutun ve her ana bilgisayar istek yuvasını gerçek zaman bütçesi içinde serbest bırakın.",
+      "MCP bağlantılarını güvenilir tutun: streamable-HTTP yanıtları SSE akışı kapanmadan önce geliyor ve OAuth veren yolları ile kaynak kapsamları korunuyor.",
+      "Eski modellerin Edit'e hâlâ gönderdiği eski old_string/new_string araç biçimini kabul edin.",
+      "Pencere alt sınırını çalışma alanıyla sınırlı 800×560 değerine indirin ve Windows çerçevesiz kenarını kaldırın.",
+      "Renderer'ı yeniden yüklemek bir oturumun bekleyen onay ve soru kartlarını korur.",
+    ],
+  },
+  {
+    "version": "0.15.11",
+    "date": "2026-10-01",
+    "highlights": [
+      "Ultra, modele özgü akıl yürütme, asenkron devir ve farklı modellerle sürdürülebilir alt ajanlar sunar.",
+      "Kalıcı ReturnToParent kartları sonuçları ve doğru durumu gösterir; alt ajanlar tek tek veya topluca durdurulabilir.",
+      "MirrorCoding katalogları, yerel protokoller ve oturuma özel Fast uyumlu hâle getirildi; kısmi yanıtlar devam etmek için korunur.",
+      "Android model ve mod denetimleri, eşitlenen Fast ve Ultra, görsel üretimi ve sonuç kartları güncellendi."
+    ]
+  },
+
+  {
+    "version": "0.15.10",
+    "date": "2026-09-28",
+    "highlights": [
+      "Eklenti pazarı artık eklentileri alfabetik sıra yerine rastgele sırada gösteriyor.",
+    ],
+  },
+
+  {
+    "version": "0.15.9",
+    "date": "2026-09-27",
+    "highlights": [
+      "macOS DMG ve ZIP paketlerindeki eski ilk açılış yardım dosyalarını kaldırır.",
+    ],
+  },
+
+  {
     "version": "0.15.6",
     "date": "2026-09-23",
     "highlights": [

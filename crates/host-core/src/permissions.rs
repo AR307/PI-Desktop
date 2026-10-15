@@ -1,11 +1,8 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::time::{Duration, Instant};
 use uuid::Uuid;
 
 use crate::db::{ms_to_ts, now_ms};
-
-pub const PERMISSION_TIMEOUT_MS: u64 = 120_000;
 
 /// Longest string leaf kept in a permission request's args preview. Full args
 /// (e.g. a Write's whole file content) would otherwise cross every stdio/IPC
@@ -63,7 +60,6 @@ pub struct PermissionRequest {
     pub risk: Risk,
     pub args_preview: serde_json::Value,
     pub reason: String,
-    pub timeout_ms: u64,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub command_shell_id: Option<String>,
 }
@@ -91,8 +87,7 @@ pub struct PermissionEvaluationParams<'a> {
 
 #[derive(Debug)]
 struct Pending {
-    created_at: Instant,
-    /// Wall-clock twin of `created_at` for the `permissions.pending` read.
+    /// Creation time used by the `permissions.pending` read and ordering.
     created_at_ms: i64,
     /// Arrival order; two requests can share a millisecond.
     sequence: u64,
@@ -113,8 +108,6 @@ pub struct PendingPermission {
     #[serde(flatten)]
     pub request: PermissionRequest,
     pub created_at: String,
-    pub expires_at: String,
-    pub remaining_ms: u64,
 }
 
 #[derive(Default)]
@@ -126,7 +119,7 @@ pub struct PermissionManager {
 impl PermissionManager {
     pub fn tool_risk_with_declared(tool_name: &str, declared: Option<&str>) -> Risk {
         match tool_name {
-            "Read" | "Glob" | "Grep" | "ScheduledTaskList" => Risk::Low,
+            "Read" | "Glob" | "Grep" | "ScheduledTaskList" | "TodoWrite" => Risk::Low,
             "Write" | "Edit" | "Bash" | "GenerateImages" => Risk::High,
             name if name.starts_with("plugin_") => match declared {
                 Some("low") => Risk::Low,
@@ -136,7 +129,10 @@ impl PermissionManager {
                 // low-risk grant. Medium preserves the normal approval path.
                 _ => Risk::Medium,
             },
-            name if name.starts_with("mcp_") => Risk::Low,
+            // MCP servers are user-configured but their tools are opaque; a
+            // self-declared annotation comes from the server, so it is not
+            // trusted and never lowers the approval path.
+            name if name.starts_with("mcp_") => Risk::Medium,
             _ => Risk::Medium,
         }
     }
@@ -317,7 +313,6 @@ impl PermissionManager {
             risk: Self::tool_risk_with_declared(tool_name, declared_risk),
             args_preview: preview_value(&args_preview),
             reason: reason.to_string(),
-            timeout_ms: PERMISSION_TIMEOUT_MS,
             command_shell_id: command_shell_id.map(str::to_string),
         };
         let (tx, rx) = tokio::sync::oneshot::channel();
@@ -325,7 +320,6 @@ impl PermissionManager {
         self.pending.insert(
             request_id,
             Pending {
-                created_at: Instant::now(),
                 created_at_ms: now_ms(),
                 sequence: self.next_sequence,
                 session_id: session_id.to_string(),
@@ -338,26 +332,18 @@ impl PermissionManager {
     }
 
     /// Open requests, oldest first, optionally scoped to one session. Requests
-    /// past the timeout are omitted even before `expire_stale` sweeps them,
-    /// so a reader never sees a request that can no longer be answered.
+    /// remain open until an explicit decision or cancellation settles them.
     pub fn pending_requests(&self, session_id: Option<&str>) -> Vec<PendingPermission> {
-        let timeout = Duration::from_millis(PERMISSION_TIMEOUT_MS);
         let mut open: Vec<&Pending> = self
             .pending
             .values()
-            .filter(|pending| pending.created_at.elapsed() <= timeout)
             .filter(|pending| session_id.is_none_or(|id| pending.session_id == id))
             .collect();
         open.sort_by_key(|pending| (pending.created_at_ms, pending.sequence));
         open.into_iter()
-            .map(|pending| {
-                let elapsed = pending.created_at.elapsed();
-                PendingPermission {
-                    request: pending.request.clone(),
-                    created_at: ms_to_ts(pending.created_at_ms),
-                    expires_at: ms_to_ts(pending.created_at_ms + PERMISSION_TIMEOUT_MS as i64),
-                    remaining_ms: timeout.saturating_sub(elapsed).as_millis() as u64,
-                }
+            .map(|pending| PendingPermission {
+                request: pending.request.clone(),
+                created_at: ms_to_ts(pending.created_at_ms),
             })
             .collect()
     }
@@ -370,13 +356,6 @@ impl PermissionManager {
         let Some(mut pending) = self.pending.remove(request_id) else {
             return Err("NOT_FOUND".into());
         };
-        if pending.created_at.elapsed() > Duration::from_millis(PERMISSION_TIMEOUT_MS) {
-            let _ = pending
-                .tx
-                .take()
-                .map(|tx| tx.send(PermissionDecision::Deny));
-            return Err("PERMISSION_TIMEOUT".into());
-        }
         if let Some(tx) = pending.tx.take() {
             let _ = tx.send(decision);
         }
@@ -405,23 +384,6 @@ impl PermissionManager {
             })
             .map(|(request_id, _)| request_id.clone());
         request_id.is_some_and(|request_id| self.cancel(&request_id))
-    }
-
-    pub fn expire_stale(&mut self) {
-        let timeout = Duration::from_millis(PERMISSION_TIMEOUT_MS);
-        let stale: Vec<String> = self
-            .pending
-            .iter()
-            .filter(|(_, p)| p.created_at.elapsed() > timeout)
-            .map(|(k, _)| k.clone())
-            .collect();
-        for id in stale {
-            if let Some(mut p) = self.pending.remove(&id) {
-                if let Some(tx) = p.tx.take() {
-                    let _ = tx.send(PermissionDecision::Deny);
-                }
-            }
-        }
     }
 }
 
@@ -454,8 +416,6 @@ mod tests {
         assert_eq!(all.len(), 2);
         assert_eq!(all[0].request.request_id, first.request_id);
         assert_eq!(all[0].request.tool_name, "Bash");
-        assert!(all[0].remaining_ms <= PERMISSION_TIMEOUT_MS);
-        assert!(all[0].expires_at > all[0].created_at);
         let scoped = pm.pending_requests(Some("session-b"));
         assert_eq!(scoped.len(), 1);
         assert_eq!(scoped[0].request.request_id, second.request_id);
@@ -464,6 +424,28 @@ mod tests {
         assert_eq!(pm.pending_requests(None).len(), 1);
         pm.cancel(&second.request_id);
         assert!(pm.pending_requests(None).is_empty());
+    }
+
+    #[test]
+    fn pending_permissions_remain_resolvable_without_deadline() {
+        let mut pm = PermissionManager::default();
+        let (request, _rx) = pm.create_request(
+            "session-a",
+            "call-1",
+            "Bash",
+            serde_json::json!({ "command": "ls" }),
+            "high risk",
+        );
+        let pending = pm
+            .pending
+            .get_mut(&request.request_id)
+            .expect("request is pending");
+        pending.created_at_ms = pending.created_at_ms.saturating_sub(121_000);
+
+        assert_eq!(pm.pending_requests(None).len(), 1);
+        assert!(pm
+            .resolve(&request.request_id, PermissionDecision::AllowOnce)
+            .is_ok());
     }
 
     #[test]
@@ -609,6 +591,50 @@ mod tests {
         }
     }
 
+    /// TodoWrite is the session checklist: low risk, so the normal permission
+    /// modes never prompt for it inside Agent mode, and part of the contract
+    /// modes' hard deny — a Plan/Goal checklist is negotiated through the
+    /// proposal instead of written directly.
+    #[test]
+    fn todo_write_is_low_risk_in_agent_and_denied_in_contract_modes() {
+        let pm = PermissionManager::default();
+        assert!(matches!(
+            PermissionManager::tool_risk_with_declared("TodoWrite", None),
+            Risk::Low
+        ));
+        for mode in ["ask", "accept-edits", "auto"] {
+            assert_eq!(
+                pm.evaluate_auto_with_permission_mode(
+                    "s",
+                    "TodoWrite",
+                    "agent",
+                    mode,
+                    &no_grants()
+                ),
+                Some(PermissionDecision::AllowOnce),
+                "agent + {mode}"
+            );
+        }
+        let mut grants = HashMap::new();
+        grants.insert("s".to_string(), vec!["TodoWrite".to_string()]);
+        for contract in ["plan", "goal"] {
+            for mode in ["ask", "accept-edits", "auto"] {
+                assert_eq!(
+                    pm.evaluate_auto_with_permission_mode(
+                        "s",
+                        "TodoWrite",
+                        contract,
+                        mode,
+                        &grants
+                    ),
+                    Some(PermissionDecision::Deny),
+                    "{contract} + {mode} denies even with a session grant"
+                );
+            }
+        }
+        assert!(!PermissionManager::plan_mode_allows("TodoWrite"));
+    }
+
     #[test]
     fn external_paths_prompt_for_low_risk_tools_outside_auto() {
         let pm = PermissionManager::default();
@@ -670,6 +696,96 @@ mod tests {
         grants.insert("s".to_string(), vec!["Bash".to_string()]);
         let d = pm.evaluate_auto_with_permission_mode("s", "Bash", "agent", "ask", &grants);
         assert_eq!(d, Some(PermissionDecision::AllowSession));
+    }
+
+    #[test]
+    fn mcp_tools_default_to_medium_and_ignore_declared_risk() {
+        for declared in [
+            None,
+            Some("low"),
+            Some("medium"),
+            Some("high"),
+            Some("bogus"),
+        ] {
+            assert!(
+                matches!(
+                    PermissionManager::tool_risk_with_declared("mcp_srv_tool", declared),
+                    Risk::Medium
+                ),
+                "mcp tool with declared {declared:?} must be medium"
+            );
+        }
+    }
+
+    #[test]
+    fn mcp_tools_prompt_under_ask_and_accept_edits() {
+        let pm = PermissionManager::default();
+        for mode in ["ask", "accept-edits"] {
+            for declared in [None, Some("low")] {
+                let d =
+                    pm.evaluate_auto_with_permission_mode_and_risk(PermissionEvaluationParams {
+                        session_id: "s",
+                        tool_name: "mcp_srv_tool",
+                        mode: "agent",
+                        permission_mode: mode,
+                        session_grants: &no_grants(),
+                        declared_risk: declared,
+                        requires_external_path_permission: false,
+                        plan_safe_actions: None,
+                    });
+                assert!(
+                    d.is_none(),
+                    "mcp tool must prompt under {mode} ({declared:?})"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn mcp_tools_auto_allow_under_auto() {
+        let pm = PermissionManager::default();
+        let d = pm.evaluate_auto_with_permission_mode(
+            "s",
+            "mcp_srv_tool",
+            "agent",
+            "auto",
+            &no_grants(),
+        );
+        assert_eq!(d, Some(PermissionDecision::AllowOnce));
+    }
+
+    #[test]
+    fn mcp_session_grant_skips_prompt() {
+        let pm = PermissionManager::default();
+        let mut grants = HashMap::new();
+        grants.insert("s".to_string(), vec!["mcp_srv_tool".to_string()]);
+        let d = pm.evaluate_auto_with_permission_mode("s", "mcp_srv_tool", "agent", "ask", &grants);
+        assert_eq!(d, Some(PermissionDecision::AllowSession));
+        let other =
+            pm.evaluate_auto_with_permission_mode("s", "mcp_srv_other", "agent", "ask", &grants);
+        assert!(other.is_none(), "grant is scoped to the exact tool name");
+    }
+
+    #[test]
+    fn mcp_tools_denied_in_contract_modes() {
+        let pm = PermissionManager::default();
+        let mut grants = HashMap::new();
+        grants.insert("s".to_string(), vec!["mcp_srv_tool".to_string()]);
+        for contract in ["plan", "goal"] {
+            for mode in ["ask", "accept-edits", "auto"] {
+                assert_eq!(
+                    pm.evaluate_auto_with_permission_mode(
+                        "s",
+                        "mcp_srv_tool",
+                        contract,
+                        mode,
+                        &grants
+                    ),
+                    Some(PermissionDecision::Deny),
+                    "mcp tool must be denied in {contract} + {mode}"
+                );
+            }
+        }
     }
 
     #[test]

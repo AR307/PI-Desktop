@@ -128,6 +128,55 @@ pi.commands.register(def: {
 pi.commands.unregister(id: string): Promise<void>
 ```
 
+### Composer text transforms (`composer.transform`)
+
+A plugin may contribute explicit, user-invoked text actions through
+`manifest.contributes.composerTransforms`. A non-empty contribution requires
+the `composer.transform` permission. The host only lists actions from a loaded
+plugin whose permission is currently granted; the manifest supplies the action
+title and optional undo title.
+
+```ts
+type PluginComposerTransformInput = {
+  id: string;
+  text: string;
+  modelKey?: string; // current Composer provider/model key; no credentials
+};
+
+type PluginModule = {
+  onComposerTransform?: (
+    input: PluginComposerTransformInput,
+  ) => Promise<string> | string;
+};
+```
+
+The callback receives only the draft text and optional model key. It does not
+receive a session id, transcript, or separate attachment and file-reference
+metadata. The host removes inline file-reference tokens before dispatch and
+restores them after success.
+The callback returns a string; input and output are each capped at 100,000
+characters and the call uses the 110-second plugin-tool timeout. The host
+rechecks the plugin load, declaration, and grant, and audits both outcomes.
+Composer discards results that arrive after an edit, send, or session switch and
+provides one-step undo after success. A plugin that makes a model request
+separately declares the permissions required by that API, such as
+`agent.complete` and `models.list`.
+
+```json
+{
+  "permissions": ["composer.transform"],
+  "contributes": {
+    "composerTransforms": [
+      {
+        "id": "enhance",
+        "title": { "en": "Enhance prompt", "zh-CN": "增强提示词" },
+        "undoTitle": { "en": "Undo", "zh-CN": "撤销" }
+      }
+    ]
+  }
+}
+```
+
 ### speech (`speech.adapter.register`)
 ```ts
 pi.speech.registerAdapter(adapter: {
@@ -341,6 +390,95 @@ Only enabled, authenticated provider rows are returned (API key, OAuth, or
 so a picker page can populate itself. When the host transport is unavailable,
 the call returns an empty list instead of warning (D080).
 
+### Provider entries in Add Service
+
+The Host exposes unconfigured, manifest-declared API-key providers in Settings
+→ Models → Add Service. This is a data-only projection of
+`contributes.providers`; plugins do not register chooser entries at runtime and
+receive no API key. `category` groups the entries and may be a plain string or
+an `{ en, "zh-CN" }` label. The Host saves the key in its existing encrypted
+provider secret store. A configured row remains in the provider list and is
+hidden from Add Service. The `provider.register` grant is sufficient; there is
+no additional permission or plugin API method.
+
+Tiles show the provider name only. Optional `description` copy appears as a
+single-sentence tooltip on hover or keyboard focus; search also checks the
+description. The selected key form shows the endpoint and plugin name for a
+final destination check before saving.
+
+A provider may declare an empty `models` list only when it is API-key based and
+has a `baseUrl`. After the user saves a key, the Host requests that endpoint's
+model list and caches the answer. The cached models are available to the
+plugin-owned row, whose manifest continues to own its endpoint and other
+provider fields. If discovery returns no models, the key remains saved and the
+user can retry from the provider's model controls. Provider count is not capped
+per plugin; the package's existing size limit bounds the manifest.
+
+### provider OAuth (requires `provider.oauth`)
+
+An OAuth provider contribution needs both `provider.register` and
+`provider.oauth`, a `baseUrl`, and an `onProviderOAuth` export from the plugin's
+main module. The host invokes the hook only for a declared contribution:
+
+```ts
+type PluginProviderOAuthRequest = {
+  operation: "login" | "refresh"
+  providerId: string       // plugin-local contribution id
+  loginId?: string         // login only; pass to prompt/notify
+  credential?: PluginProviderOAuthCredential // refresh only; this provider's credential
+}
+
+type PluginProviderOAuthCredential = {
+  accessToken: string
+  refreshToken?: string
+  expiresAt?: number       // Unix epoch milliseconds
+  accountLabel?: string
+  headers?: Record<string, string>
+}
+
+type PluginProviderOAuthContext = { signal: AbortSignal }
+
+onProviderOAuth(request, { signal }): Promise<PluginProviderOAuthCredential>
+```
+
+During login, return the credential after the user authorizes it. During
+refresh, the host passes the current credential to the same callback; return the
+updated credential. The host encrypts it under the provider row's OAuth secret
+reference and serializes refreshes. A callback can access only its own
+contribution's credential. The host sends the resolved access token to the
+Agent Runtime per request; refresh tokens never reach the renderer or Agent
+Runtime. One account is stored for each provider contribution; sign out clears
+that credential while the manifest-owned provider row remains.
+
+The plugin can use host-owned login UI without opening its own window:
+
+```ts
+if (!request.loginId) throw new Error("loginId is required for sign-in")
+const loginId = request.loginId
+
+await pi.providers.oauth.notify(loginId, {
+  kind: "deviceCode",
+  userCode,
+  verificationUri,
+  intervalSeconds,
+  expiresInSeconds,
+})
+
+const code = await pi.providers.oauth.prompt(loginId, {
+  type: "secret",
+  message: "Enter the verification code",
+})
+```
+
+`prompt` supports `text`, `secret`, `select`, and `manual_code`. `notify`
+supports non-secret `info`, `authUrl`, `deviceCode`, and `progress` events; the
+host opens valid HTTP(S) authorization URLs and reports whether the browser
+opened. The callback context signal is aborted when the user cancels, the plugin
+unloads, or the host call times out. OAuth token requests still require
+`net.fetch` and the manifest's `net.domains` when they use the host network API.
+This permission does not grant a general host secret API. Plugin entry code is
+not an OS sandbox and can use raw Node APIs, so grant it only to code you trust.
+
 ### session (requires `session.read`)
 ```ts
 pi.session.getLlmContext(): Promise<PluginLlmContext>
@@ -365,6 +503,43 @@ session (D333 / D336). Calling this outside a tool execution fails with
 `INVALID_ARGUMENT`. Subagent rows are omitted. An in-flight call of the
 plugin's own tool is stripped from the tail. A compaction summary replaces
 pre-checkpoint history. Combined content is capped at 200k characters.
+
+### session auto-title (requires `session.autoTitle`)
+
+This capability is separate from `session.read`: it never exposes a transcript
+window or arbitrary message lookup. It exists for plugins that generate a title
+after a completed turn.
+
+```ts
+type PluginAutoTitleContext = {
+  sessionId: string
+  expectedTitle: string
+  userPrompt: string // first user message, at most 1,000 characters
+  assistantReply?: string // first assistant reply, at most 500 characters
+  modelKey?: string // providerId/modelId from the session configuration
+}
+
+pi.session.getAutoTitleContext(input: {
+  sessionId: string
+}): Promise<PluginAutoTitleContext | null>
+
+pi.session.setAutoTitle(input: {
+  sessionId: string
+  expectedTitle: string
+  title: string
+}): Promise<{ updated: boolean }>
+```
+
+Context is returned only for an active session whose title source is still
+`default`. That source covers both a new session's placeholder and the
+deterministic first-prompt fallback the core writes itself, so a plugin must
+expect `expectedTitle` to be the current derived text rather than a localized
+placeholder. The host does not return attachments, tool calls, later turns, or
+the rest of the transcript. Title updates accept 1–80 Unicode code points and
+use the exact `expectedTitle` as a compare-and-set; a manual rename or another
+update makes the result `{ updated: false }`. Both methods require
+`session.autoTitle`, which is high risk because the first-turn text can be sent
+to a model by a plugin holding `agent.complete`.
 
 ### plugin-owned sessions (P0/P1; requires the matching permission)
 
@@ -585,9 +760,9 @@ pi.agent.complete(input: {
 }>
 ```
 
-The host resolves credentials and runs a one-shot completion with `tools: []`
-through the same path as Composer prompt enhancement. The plugin never receives
-a secret. `includeSessionContext: true` also requires `session.read` and an
+The host resolves credentials and runs a one-shot completion with `tools: []`.
+The plugin never receives a secret. The standalone prompt-enhancement plugin
+uses this API from its `onComposerTransform` callback. `includeSessionContext: true` also requires `session.read` and an
 in-flight tool session; the host serializes that context and, if `messages` is
 empty, appends `Please respond to the request.` System prompt
 ≤ 32 KiB; combined messages ≤ 200k characters; eight calls per plugin per
@@ -628,6 +803,7 @@ hrefs (D330 / ADR 0168). Other schemes fail with `INVALID_ARGUMENT`.
 
 ### browser (requires `browser.cdp`)
 ```ts
+pi.browser.reveal(): Promise<void>
 pi.browser.navigate(input: { url?: string; path?: string }): Promise<BrowserState | null>
 pi.browser.action(input: { action: "back" | "forward" | "reload" | "stop" }): Promise<void>
 pi.browser.setBounds(hole: { x: number; y: number; width: number; height: number }): Promise<unknown>
@@ -643,12 +819,42 @@ pi.browser.console(input?: { limit?: number }): Promise<{ messages: unknown[] }>
 pi.browser.cdp(input: { method: string; params?: unknown }): Promise<unknown>
 ```
 
-The guest page is a host-owned `WebContentsView` (`persist:work-browser`).
+`navigate` returns when the current main-frame navigation commits, including
+redirects; it does not wait for slow images or subframes. `browser:state` reports
+loading immediately and optionally includes `loadError` for failed navigation.
+Optional `sessionId` and `tabId` identify the host-owned work-panel destination;
+plugins do not select these identities through navigation arguments.
+With the high-risk `browser.cdp` permission, `navigate` may open an existing
+local file through an absolute path or `file:` URL. Relative paths remain
+workspace-scoped. A local file page may navigate to other existing local files;
+web pages retain only the prior in-workspace file-navigation allowance.
+
+The current guest page is a host-owned `WebContentsView` (`persist:work-browser`).
+Each resource tab retains its own page. A navigation for a background session is
+queued for that session's last selected tab, or its first tab when none exists.
+It does not navigate or return another session's visible page.
 `setBounds` is content-relative to the calling plugin view and is clamped so
 the guest cannot cover chat/composer. `cdp` is deny-by-default; cookie,
 storage, target, and network-interception methods fail with
 `PERMISSION_DENIED`. Session identity for agent calls comes from the in-flight
 `plugins.execute` `sessionId`, not from plugin arguments (D333 / ADR 0170).
+Page operations (`navigate`, `action`, `openExternal`, `getState`, snapshot,
+screenshot, and CDP calls) are available only while the Browser view is
+visible. `reveal()` asks the host to activate the Browser tab for the calling
+session and resolves only after that session's view is visible. A background
+session never takes focus; if it cannot become visible, `reveal()` fails with
+`UNAVAILABLE`. The bundled Browser agent tool calls `reveal()` before each
+operation. `BrowserPreview` remains the live-reloading workspace-file preview.
+
+Full-page `screenshot` captures are proportionally scaled to no more than
+1280×2048 output pixels. Viewport screenshots and raw `Page.captureScreenshot`
+CDP calls retain their existing dimensions.
+
+Screenshot captures, including raw `Page.captureScreenshot` CDP calls, have a
+30-second host-side deadline. A capture that exceeds it fails with `TIMEOUT`;
+the host detaches the stalled CDP session and releases that page's capture
+queue so a later capture can reattach and proceed. Other CDP methods retain
+their existing timeout behavior.
 
 `getHistory` returns newest-first entries explicitly recorded by the host, with
 text and images interleaved in capture order. Content written through
@@ -707,8 +913,36 @@ pi.net.fetch(input: {
  headers?: Record<string, string>
  body?: string
  timeoutMs?: number
+ redirect?: "follow" | "error" | "manual"
 }): Promise<{ status: number; headers: Record<string, string>; bodyText: string }>
 ```
+
+
+`redirect` is optional: omitted or `follow` preserves the existing policy (up to
+five followed 3xx responses with Location, relative to the current URL, each
+checked against the granted egress policy). Existing method/header/body handling
+is unchanged; this is not a promise of browser Fetch redirect rewriting.
+`manual` returns the first response's status, headers (including Location) and
+body without visiting its target. `error` rejects **any 300–399 response** with
+`REDIRECT_DISALLOWED`, even without Location; it never visits the target. Other
+statuses, including 429, remain normal responses. In follow mode a 3xx without
+Location is returned unchanged; a loop exceeds the five-hop cap with
+`UNAVAILABLE`. One timeout covers the whole chain and response body (`TIMEOUT`).
+Invalid redirect values fail with `INVALID_ARGUMENT` before network I/O.
+
+The host owns redirect handling for both the default and injected single-hop
+transport. Every followed hop still passes the existing permission/egress
+checks; these modes grant no additional network access. Policy refusals are
+audited without response bodies or headers.
+
+Before using the option on a potentially older host, query
+`pi.net.getCapabilities(): Promise<{ fetchRedirectModes: string[] }>` and require
+the desired mode. This read-only query needs no network permission and performs
+no network I/O. A missing method, rejected query, or absent mode means
+unsupported: do not send the request. Older hosts may silently ignore unknown
+fetch options, so passing `redirect` alone is **not** capability detection.
+This API is unreleased; released 0.17.0 and older do not advertise it.
+No same-origin-only mode is introduced by this change.
 
 `fetch` answers with the upstream response unchanged — `status`, `headers`, and
 `bodyText` — so a `429` is data your plugin can read, `Retry-After` included,
@@ -1109,6 +1343,7 @@ Any of the following calls must be logged for audit:
 - models.list (returned row count)
 - session.getLlmContext (session id, message count, truncated flag — never transcript text)
 - agent.complete (model key, sizes, usage — never prompt or completion text)
+- provider.oauth (plugin id, declared provider id, operation, result/error code — never credential contents)
 
 Log fields:
 - pluginId
@@ -1137,6 +1372,7 @@ The desktop plugin runtime now implements the MVP host API surface used by local
 - `agent.registerTool` / `unregisterTool` / `agent.complete`
 - `speech.registerAdapter` / `unregisterAdapter` (`speech.adapter.register`)
 - `models.list`, `session.getLlmContext`
+- `onProviderOAuth` and `pi.providers.oauth.prompt` / `notify` (`provider.oauth`)
 - `clipboard.*`, `shell.openExternal`, `net.fetch`
 - `browser.*` (guest CDP; `browser.cdp`)
 - `services.register` / `unregister`, `bus.publish` / `subscribe`, `events.on` / `off`
@@ -1162,3 +1398,9 @@ one at runtime.
 
 All high-risk entry points assert declared+granted permissions and emit audit log lines.
 Plugin panels no longer receive the full `pi` object; they use `window.pluginBridge.invoke`.
+
+Renderer ES modules may import `react/jsx-runtime` or
+`react/jsx-dev-runtime` for automatic JSX. The host import map exposes both of
+its runtimes alongside `react`, `react-dom`, and `react-dom/client`, before
+evaluating plugin entries. This keeps compiled JSX, hooks and context on the
+host React instance in production and development builds.

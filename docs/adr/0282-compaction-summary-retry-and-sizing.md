@@ -106,6 +106,15 @@ summary request and is untouched.
   including historical ones, because the mark is derived from persisted
   details on session open.
 
+### Implementation note (2026-10-03)
+
+The retry, sizing, reduction, and chunking contract remains unchanged. The
+summary request adapter and conversation serializer are now owned by
+`packages/agent-runtime` because pi-agent-core removed its experimental harness
+exports. The desktop adapter still uses pi-ai `completeSimple` and the same
+retry policy. See
+`docs/spec/02-architecture/06-pi-runtime-dependency-boundary.md`.
+
 ## Alternatives
 
 ### Outer retry loop around `buildCheckpoint` (PR #554)

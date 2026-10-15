@@ -18,15 +18,16 @@
  * existed keep the old one-user-message normalization.
  *
  * Deliberately dependency-light, like `context-budget.ts`: token estimation is
- * pi-agent-core's, the record guard and the text bounding are the shared
+ * owned by the runtime adapter, the record guard and text bounding are shared
  * helpers, and nothing here imports `runtime.ts`, so this module can never form
  * a cycle with it.
  */
 
+import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import {
+  ESTIMATED_TEXT_CHARS_PER_TOKEN,
   estimateTokens,
-  type AgentMessage,
-} from "@earendil-works/pi-agent-core";
+} from "./pi-runtime-estimates.js";
 import { isRecord, truncateMessageText } from "./agent-messages.js";
 
 /**
@@ -64,7 +65,10 @@ export function truncateMessageToTail(
 ): AgentMessage {
   return truncateMessageText(
     message,
-    Math.max(64, Math.floor(Math.max(1, maxTokens)) * 4),
+    Math.max(
+      64,
+      Math.floor(Math.max(1, maxTokens) * ESTIMATED_TEXT_CHARS_PER_TOKEN),
+    ),
     CHECKPOINT_TRUNCATION_MARKER,
   );
 }

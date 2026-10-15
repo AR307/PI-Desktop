@@ -1,6 +1,6 @@
 {
   "name": "@pi-desktop/i18n",
-  "version": "0.15.6",
+  "version": "0.20.2",
   "private": true,
   "type": "module",
   "main": "./dist/index.js",
@@ -9,6 +9,14 @@
     ".": {
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js"
+    },
+    "./locale-info": {
+      "types": "./dist/locale-info.d.ts",
+      "import": "./dist/locale-info.js"
+    },
+    "./locales/*": {
+      "types": "./dist/locales/*/index.d.ts",
+      "import": "./dist/locales/*/index.js"
     },
     "./locales/en": {
       "types": "./dist/locales/en/index.d.ts",
@@ -23,6 +31,6 @@
   },
   "devDependencies": {
     "typescript": "^5.9.3",
-    "vitest": "^4.1.10"
+    "vitest": "^4.1.11"
   }
 }

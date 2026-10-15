@@ -1,8 +1,10 @@
 import { describe, expect, it } from "vitest";
+import { isContextOverflow, type AssistantMessage } from "@earendil-works/pi-ai";
 import {
   classifyAgentError,
   describeNetworkFailure,
 } from "./agent-errors.js";
+import { classifyProviderError } from "./provider-retry.js";
 
 describe("classifyAgentError", () => {
   it.each(["context-validation", "context-estimation", "request-preparation"])(
@@ -249,6 +251,26 @@ describe("classifyAgentError", () => {
       .toMatchObject({ code: "PROVIDER_ERROR", retriable: false });
   });
 
+  it("treats a request option an adapter refuses as non-retriable", () => {
+    expect(
+      classifyAgentError(
+        "Custom fetch is not supported by the Google Generative AI adapter",
+      ),
+    ).toMatchObject({ code: "PROVIDER_ERROR", retriable: false });
+    expect(
+      classifyAgentError(
+        "Custom fetch is not supported by the Google Vertex adapter",
+      ),
+    ).toMatchObject({ code: "PROVIDER_ERROR", retriable: false });
+    // A status some layer attached to the same message must not re-arm the
+    // transient retry budget for a request the adapter will refuse again.
+    expect(
+      classifyAgentError(
+        "502: Custom fetch is not supported by the Google Generative AI adapter",
+      ),
+    ).toMatchObject({ code: "PROVIDER_ERROR", retriable: false });
+  });
+
   it("detects context overflow from 400 bodies and bare messages", () => {
     expect(
       classifyAgentError(
@@ -257,6 +279,43 @@ describe("classifyAgentError", () => {
     ).toMatchObject({ code: "CONTEXT_TOO_LARGE", retriable: false });
     expect(classifyAgentError("prompt is too long: 210000 tokens"))
       .toMatchObject({ code: "CONTEXT_TOO_LARGE" });
+  });
+
+  // Each message is what pi-ai 1.1.0 reports for that provider's overflow:
+  // OpenAI-compatible bodies arrive as "<status>: <body>", Bedrock as its
+  // exception prefix. pi-ai's `isContextOverflow` already sends every one of
+  // them to overflow recovery, so the terminal code has to agree.
+  it.each([
+    ["DashScope/Qwen", '400: {"code":"invalid_parameter_error","type":"invalid_request_error","message":"Range of input length should be [1, 98304]"}'],
+    ["z.ai", '400: {"code":"1261","message":"Prompt exceeds max length"}'],
+    ["xAI", "400: {\"message\":\"This model's maximum prompt length is 131072 but the request contains 537812 tokens.\"}"],
+    ["Groq", '400: {"message":"Please reduce the length of the messages or completion.","type":"invalid_request_error"}'],
+    ["llama.cpp", '400: {"code":400,"message":"the request exceeds the available context size, try increasing it","type":"exceed_context_size_error"}'],
+    ["Bedrock", "Validation error: Input is too long for requested model."],
+  ])("classifies the %s overflow pi-ai recovers from as CONTEXT_TOO_LARGE", (_provider, errorMessage) => {
+    const message = { role: "assistant", stopReason: "error", errorMessage };
+    expect(isContextOverflow(message as AssistantMessage)).toBe(true);
+    expect(classifyAgentError(message)).toMatchObject({
+      code: "CONTEXT_TOO_LARGE",
+      retriable: false,
+    });
+    expect(classifyProviderError(message)).toMatchObject({
+      code: "CONTEXT_TOO_LARGE",
+      retriable: false,
+    });
+  });
+
+  it("classifies Bedrock's token throttle as rate limiting, not an overflow", () => {
+    const message = {
+      role: "assistant",
+      stopReason: "error",
+      errorMessage: "Throttling error: Too many tokens, please wait before trying again.",
+    };
+    expect(isContextOverflow(message as AssistantMessage)).toBe(false);
+    expect(classifyAgentError(message)).toMatchObject({
+      code: "PROVIDER_RATE_LIMITED",
+      retriable: true,
+    });
   });
 
   it("keeps context checkpoint failures distinct from provider failures", () => {
@@ -537,5 +596,33 @@ describe("classifyAgentError", () => {
         "getaddrinfo ENOTFOUND user:pass@api.example.com?api_key=sk-1",
       ).details,
     ).not.toHaveProperty("networkHost");
+  });
+
+  it("classifies host capacity exhaustion and timeout distinctly from provider failures (#1071)", () => {
+    // Error caused by host RPC slot exhaustion during credential/config resolution
+    const overloadError = new Error(
+      "API key auth failed for provider chatgpt: host RPC capacity is exhausted",
+    );
+    expect(classifyAgentError(overloadError)).toMatchObject({
+      code: "HOST_OVERLOADED",
+      retriable: true,
+      details: { origin: "host" },
+    });
+
+    const typedOverload = Object.assign(new Error("RPC failed"), {
+      errorCode: "HOST_OVERLOADED",
+    });
+    expect(classifyAgentError(typedOverload)).toMatchObject({
+      code: "HOST_OVERLOADED",
+      retriable: true,
+      details: { origin: "host" },
+    });
+
+    const unavailableError = new Error("host RPC timeout: session.appendMessage");
+    expect(classifyAgentError(unavailableError)).toMatchObject({
+      code: "HOST_UNAVAILABLE",
+      retriable: true,
+      details: { origin: "host" },
+    });
   });
 });

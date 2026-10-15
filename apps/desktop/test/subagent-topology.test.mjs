@@ -224,19 +224,19 @@ test("preserves denied lifecycle outcomes", () => {
   );
 });
 
-test("reads stopped status from TaskStop, including a running snapshot", () => {
+test("TaskStop cannot label a still-running cancellation as stopped", () => {
   const statuses = collectDelegationStatuses([
     task("d1", "success", "running"),
     lifecycle("TaskStop", {
-      stopped: [
+      stopPending: [
         { delegationId: "d1", agent: "explorer", status: "running" },
       ],
     }),
   ]);
-  assert.equal(statuses.get("d1"), "stopped");
+  assert.equal(statuses.get("d1"), "running");
   assert.equal(
     subagentOutcome(task("d1", "success", "running").message, statuses),
-    "stopped",
+    "running",
   );
 });
 
@@ -345,10 +345,9 @@ test("a refreshed Task row carries its terminal failure before lifecycle polling
   assert.deepEqual(failures.get("d1"), { code: "PROVIDER_ERROR", message: "provider failed" });
 });
 
-test("a finished turn treats leftover running delegates as aborted", () => {
+test("stopping the parent does not mark detached running delegates as aborted", () => {
   const live = collectDelegationStatuses(
     [task("d1", "success", "running")],
-    { turnLive: true },
   );
   assert.equal(live.get("d1"), undefined);
   assert.equal(
@@ -357,12 +356,11 @@ test("a finished turn treats leftover running delegates as aborted", () => {
   );
   const settled = collectDelegationStatuses(
     [task("d1", "success", "running")],
-    { turnLive: false },
   );
-  assert.equal(settled.get("d1"), "aborted");
+  assert.equal(settled.get("d1"), undefined);
   assert.equal(
     subagentOutcome(task("d1", "success", "running").message, settled),
-    "aborted",
+    "running",
   );
 });
 
@@ -450,7 +448,7 @@ test("TaskStop reads its roster from `stopped`, and Task has none", () => {
   const stale = lifecycle("TaskStop", {
     stopped: [{ delegationId: "s2", agent: "explorer", status: "running" }],
   });
-  assert.equal(delegationRosterOutcome(delegationRoster(stale.message)), "stopped");
+  assert.equal(delegationRosterOutcome(delegationRoster(stale.message)), "running");
   // The start call is not a lifecycle row: it keeps the topology card.
   const start = task("one", "running");
   assert.equal(lifecycleKindOf(start.message), null);
@@ -503,7 +501,7 @@ test("settled Task snapshots outrank stale lifecycle polling during a parallel f
     { delegationId: "second", status: "running", startedAt: 1100 },
   ] });
   const items = [first, second, stalePoll];
-  const statuses = collectDelegationStatuses(items, { turnLive: true });
+  const statuses = collectDelegationStatuses(items);
   assert.equal(subagentOutcome(first.message, statuses), "completed");
   assert.equal(subagentOutcome(second.message, statuses), "running");
   assert.deepEqual(summarizeSubagentActivity([first, second], statuses), {
@@ -513,5 +511,5 @@ test("settled Task snapshots outrank stale lifecycle polling during a parallel f
     startedAt: 1000, completedAt: 5000,
   });
   // History reconstruction must preserve success, rather than infer abortion.
-  assert.equal(collectDelegationStatuses(items, { turnLive: false }).get("first"), "completed");
+  assert.equal(collectDelegationStatuses(items).get("first"), "completed");
 });

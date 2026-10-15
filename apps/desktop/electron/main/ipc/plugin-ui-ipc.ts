@@ -10,6 +10,7 @@ import { PluginViewHost, pluginViewKey } from "../plugin-view-host";
 import { PluginPanelHost } from "../plugin-panel-host";
 import type { PluginPanelTheme } from "../../shared/plugin-panel-chrome";
 import type { IpcRegistrar } from "./types";
+import { pluginProviderCatalogEntries } from "../plugin-provider-catalog";
 
 export type PluginUiIpcDependencies = {
   registrar: IpcRegistrar;
@@ -180,16 +181,13 @@ export function registerPluginUiIpc({
       viewId?: string;
       sessionId?: string;
       location?: string;
+      tabId?: string;
     }) => {
       const pluginId = String(payload?.pluginId ?? "");
       const viewId = String(payload?.viewId ?? "");
       const sessionId = String(payload?.sessionId ?? "").trim();
       const location = String(payload?.location ?? "").trim();
       const isBrowserView = pluginId === BROWSER_PLUGIN_ID && viewId === BROWSER_VIEW_ID;
-      if (isBrowserView && sessionId) browserHost.setChromeSession(sessionId);
-      if (isBrowserView && sessionId && location) {
-        browserHost.rememberLocation(sessionId, location);
-      }
       const loaded = plugins.getLoaded(pluginId);
       if (!loaded) throw new Error("plugin not loaded");
       if (!loaded.permissions.has("ui.view")) {
@@ -204,6 +202,9 @@ export function registerPluginUiIpc({
       if (!view) throw new Error("plugin has no such view");
       const htmlPath = join(loaded.path, view.entry);
       if (!existsSync(htmlPath)) throw new Error("view entry missing");
+      if (isBrowserView && sessionId) {
+        browserHost.setChromeSession(sessionId, typeof payload.tabId === "string" ? payload.tabId : undefined, location);
+      }
       pluginViews.open({
         pluginId,
         viewId,
@@ -211,24 +212,24 @@ export function registerPluginUiIpc({
         theme: getPluginPanelTheme(),
         htmlPath,
         netDomains: loaded.manifest.net?.domains?.map((domain) => String(domain)),
+        netAnyHost: loaded.permissions.has("net.anyHost"),
         // The browser view owns an address bar and its own history, so its
         // location keeps going through `browserHost`; every other contributed
         // view receives the opener's subject untouched (D320 follow-up).
         ...(isBrowserView || !location ? {} : { location }),
       });
-      if (isBrowserView && location) {
-        void browserHost.navigate(
-          { path: location, url: location },
-          sessionId || undefined,
-        );
-      }
       return { ok: true };
     },
   );
 
   handle(
     IPC.invoke.pluginViewClose,
-    async (payload: { pluginId?: string; viewId?: string }) => {
+    async (payload: { pluginId?: string; viewId?: string; sessionId?: string; tabId?: string }) => {
+      if (payload.pluginId === BROWSER_PLUGIN_ID && payload.viewId === BROWSER_VIEW_ID && typeof payload.sessionId === "string") {
+        if (typeof payload.tabId === "string") browserHost.closeTab(payload.sessionId, payload.tabId);
+        else browserHost.closeSession(payload.sessionId);
+        return { ok: true };
+      }
       pluginViews.close(String(payload?.pluginId ?? ""), String(payload?.viewId ?? ""));
       return { ok: true };
     },
@@ -275,6 +276,13 @@ export function registerPluginUiIpc({
   // resolves. Project scope governs what a plugin may *do* in a project, not
   // how the app looks.
   handle(IPC.invoke.pluginThemes, async () => plugins.getThemes());
+
+  // Add Service offers only API-key rows that are declared by a loaded plugin
+  // with the existing provider.register grant. The credential is still entered
+  // and stored by the Host's provider path.
+  handle(IPC.invoke.pluginProviderCatalog, async () =>
+    pluginProviderCatalogEntries(plugins.listLoaded(), getUpdaterLocale()),
+  );
 
   // Resident service supervision state; refreshed on the pluginChanged event.
   handle(IPC.invoke.pluginServices, async () => plugins.getServiceStates());

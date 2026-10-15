@@ -44,8 +44,8 @@ test("renderer exposes Agent, Plan, and Goal as the only operating modes", () =>
   assert.match(composerSource, /settings\.modeGoal/);
   assert.match(composerSource, /IconListChecks/);
   assert.match(composerSource, /IconTarget/);
-  assert.match(settingsSource, /\["plan", "settings\.modePlan"\]/);
-  assert.match(settingsSource, /\["goal", "settings\.modeGoal"\]/);
+  assert.match(settingsSource, /value: "plan", label: t\("settings\.modePlan"\)/);
+  assert.match(settingsSource, /value: "goal", label: t\("settings\.modeGoal"\)/);
   assert.match(commandsSource, /case "builtin\.mode\.plan"/);
   assert.match(commandsSource, /case "builtin\.mode\.goal"/);
   for (const source of [composerSource, settingsSource, commandsSource]) {
@@ -244,7 +244,10 @@ test("pending approval keeps the draft while gating every composer control", () 
   assert.match(composerSource, /aria-readonly=\{inputBlocked\}/);
   assert.match(composerSource, /enabled: !inputBlocked/);
   assert.match(composerSource, /disabled=\{controlsBlocked\}/);
-  assert.match(composerSource, /const controlsBlocked = approvalPending \|\| nativeSession;/);
+  assert.match(
+    composerSource,
+    /const controlsBlocked = approvalPending \|\| nativeSession \|\| !sessionAllows\(capabilitySession, "canConfigureModel"\);/,
+  );
   assert.match(composerSource, /const sendBlocked = approvalPending \|\| pasting \|\| nativeInputBlocked;/);
   assert.match(storeSource, /if \(get\(\)\.pendingPlans\[sessionId\]\?\.status === "pending"\) return/);
 });

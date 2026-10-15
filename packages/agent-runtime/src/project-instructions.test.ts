@@ -77,24 +77,76 @@ describe("loadProjectInstructions", () => {
     });
   });
 
-  it("caps the complete chain at 32 KiB without splitting UTF-8 characters", async () => {
+  it("caps the project chain at 32 KiB without splitting UTF-8 characters and marks the cut", async () => {
     root = await mkdtemp(join(tmpdir(), "pi-desktop-instructions-"));
     await writeFile(join(root, "AGENTS.md"), "中".repeat(20_000));
 
     const loaded = await loadProjectInstructions(root);
-    expect(Buffer.byteLength(loaded!.entries[0].content, "utf8")).toBeLessThanOrEqual(
-      32 * 1024,
+    const [content, notice] = loaded!.entries[0].content.split("\n\n");
+    expect(Buffer.byteLength(content, "utf8")).toBeLessThanOrEqual(32 * 1024);
+    expect(content.endsWith("中")).toBe(true);
+    expect(notice).toBe(
+      "[PI-Desktop truncated AGENTS.md: loaded the first 32766 of 60000 bytes; the rest of this file is not in context.]",
     );
-    expect(loaded!.entries[0].content.endsWith("中")).toBe(true);
   });
 
-  it("treats missing, blank, and out-of-workspace files as absent", async () => {
+  it("does not load later project files once a truncated file exhausts the budget", async () => {
+    root = await mkdtemp(join(tmpdir(), "pi-desktop-instructions-"));
+    await mkdir(join(root, "packages"), { recursive: true });
+    await writeFile(join(root, "AGENTS.md"), "r".repeat(40 * 1024));
+    await writeFile(join(root, "packages", "AGENTS.md"), "Use package rules.");
+
+    const loaded = await loadProjectInstructions(root, "packages/index.ts");
+    expect(loaded!.entries.map((entry) => entry.source)).toEqual(["AGENTS.md"]);
+    expect(loaded!.entries[0].content).toBe(
+      `${"r".repeat(32 * 1024)}\n\n[PI-Desktop truncated AGENTS.md: loaded the first 32768 of 40960 bytes; the rest of this file is not in context.]`,
+    );
+  });
+
+  it("treats missing and blank project instructions as absent", async () => {
     root = await mkdtemp(join(tmpdir(), "pi-desktop-instructions-"));
     await expect(loadProjectInstructions(root)).resolves.toBeUndefined();
 
     await writeFile(join(root, "AGENTS.md"), " \n\t ");
     await expect(loadProjectInstructions(root)).resolves.toBeUndefined();
     await expect(loadProjectInstructions(root, "../outside/file.ts")).resolves.toBeUndefined();
+  });
+
+  it("falls back to the project-root chain for a target outside the workspace", async () => {
+    root = await mkdtemp(join(tmpdir(), "pi-desktop-instructions-"));
+    const outside = await mkdtemp(join(tmpdir(), "pi-desktop-instructions-outside-"));
+    await writeFile(join(root, "AGENTS.md"), "Use root conventions.");
+    await writeFile(join(outside, "AGENTS.md"), "Use outside rules.");
+
+    try {
+      await expect(
+        loadProjectInstructions(root, join(outside, "attached.txt")),
+      ).resolves.toEqual({
+        entries: [{ source: "AGENTS.md", content: "Use root conventions." }],
+      });
+    } finally {
+      await rm(outside, { recursive: true, force: true });
+    }
+  });
+
+  it("uses the project-root chain when the workspace root itself is the target", async () => {
+    root = await mkdtemp(join(tmpdir(), "pi-desktop-instructions-"));
+    await writeFile(join(root, "AGENTS.md"), "Use root conventions.");
+
+    await expect(loadProjectInstructions(root, root)).resolves.toEqual({
+      entries: [{ source: "AGENTS.md", content: "Use root conventions." }],
+    });
+  });
+
+  it("does not fabricate instructions without a project or a project-root file", async () => {
+    root = await mkdtemp(join(tmpdir(), "pi-desktop-instructions-"));
+
+    await expect(
+      loadProjectInstructions(root, join(root, "..", "outside", "attached.txt")),
+    ).resolves.toBeUndefined();
+    await expect(
+      loadProjectInstructions(undefined, join(root, "..", "outside", "attached.txt")),
+    ).resolves.toBeUndefined();
   });
 });
 
@@ -113,14 +165,50 @@ describe("loadInstructionChain", () => {
     });
   });
 
-  it("shares the 32 KiB byte budget between global and project instructions", async () => {
+  it("keeps the global and root entries when the target is outside the workspace", async () => {
+    root = await mkdtemp(join(tmpdir(), "pi-desktop-instructions-"));
+    const globalPath = join(root, "global-AGENTS.md");
+    await writeFile(globalPath, "Use global conventions.");
+    await writeFile(join(root, "AGENTS.md"), "Use project conventions.");
+
+    await expect(
+      loadInstructionChain(root, join(root, "..", "outside", "attached.txt"), globalPath),
+    ).resolves.toEqual({
+      entries: [
+        { source: "~/.pi/agent/AGENTS.md", content: "Use global conventions." },
+        { source: "AGENTS.md", content: "Use project conventions." },
+      ],
+    });
+  });
+
+  it("gives global and project instructions independent 32 KiB budgets", async () => {
     root = await mkdtemp(join(tmpdir(), "pi-desktop-instructions-"));
     const globalPath = join(root, "global-AGENTS.md");
     await writeFile(globalPath, "a".repeat(32 * 1024));
+    await writeFile(join(root, "AGENTS.md"), "p".repeat(32 * 1024));
+
+    await expect(loadInstructionChain(root, undefined, globalPath)).resolves.toEqual({
+      entries: [
+        { source: "~/.pi/agent/AGENTS.md", content: "a".repeat(32 * 1024) },
+        { source: "AGENTS.md", content: "p".repeat(32 * 1024) },
+      ],
+    });
+  });
+
+  it("marks an oversized global file as truncated and still loads project instructions", async () => {
+    root = await mkdtemp(join(tmpdir(), "pi-desktop-instructions-"));
+    const globalPath = join(root, "global-AGENTS.md");
+    await writeFile(globalPath, "a".repeat(64 * 1024));
     await writeFile(join(root, "AGENTS.md"), "Use project conventions.");
 
     await expect(loadInstructionChain(root, undefined, globalPath)).resolves.toEqual({
-      entries: [{ source: "~/.pi/agent/AGENTS.md", content: "a".repeat(32 * 1024) }],
+      entries: [
+        {
+          source: "~/.pi/agent/AGENTS.md",
+          content: `${"a".repeat(32 * 1024)}\n\n[PI-Desktop truncated ~/.pi/agent/AGENTS.md: loaded the first 32768 of 65536 bytes; the rest of this file is not in context.]`,
+        },
+        { source: "AGENTS.md", content: "Use project conventions." },
+      ],
     });
   });
 });

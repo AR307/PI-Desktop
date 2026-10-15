@@ -103,6 +103,34 @@ export const RacpRequestContextSchema = Type.Object({
 });
 export type RacpRequestContext = Static<typeof RacpRequestContextSchema>;
 
+export const WorkspaceFilesRequestSchema = Type.Object({
+  path: Type.String({ minLength: 1, maxLength: 4096 }),
+  operation: Type.Union([Type.Literal("list"), Type.Literal("read"), Type.Literal("index"), Type.Literal("resolve"), Type.Literal("image"), Type.Literal("diff"), Type.Literal("instructions")]),
+  ref: Type.Optional(Type.String({ maxLength: 4096 })),
+  mimeType: Type.Optional(Type.String({ maxLength: 256 })),
+}, { additionalProperties: false });
+export type WorkspaceFilesRequest = Static<typeof WorkspaceFilesRequestSchema>;
+
+/** Narrow owner-only tool service; model configuration and credentials never cross it. */
+export const WorkspaceToolExecuteSchema = Type.Object({
+  path: Type.String({ minLength: 1, maxLength: 4096 }),
+  sessionId: Type.String({ minLength: 1, maxLength: 256 }),
+  turnId: Type.String({ minLength: 1, maxLength: 256 }),
+  toolCallId: Type.String({ minLength: 1, maxLength: 256 }),
+  toolName: Type.Union([Type.Literal("Read"), Type.Literal("Glob"), Type.Literal("Grep"), Type.Literal("Write"), Type.Literal("Edit"), Type.Literal("Bash")]),
+  args: Type.Record(Type.String(), Type.Unknown()),
+  timeoutMs: Type.Optional(Type.Integer({ minimum: 1, maximum: 21_600_000 })),
+  expectedCommandShellId: Type.Optional(Type.String({ minLength: 1, maxLength: 256 })),
+  expectedCommandShellDialect: Type.Optional(Type.Union([Type.Literal("posix"), Type.Literal("powershell"), Type.Literal("cmd")])),
+}, { additionalProperties: false });
+export type WorkspaceToolExecute = Static<typeof WorkspaceToolExecuteSchema>;
+export const WorkspaceToolAbortSchema = Type.Object({
+  sessionId: Type.String({ minLength: 1, maxLength: 256 }),
+  toolCallId: Type.String({ minLength: 1, maxLength: 256 }),
+}, { additionalProperties: false });
+export type WorkspaceToolAbort = Static<typeof WorkspaceToolAbortSchema>;
+export type WorkspaceToolResult = { ok: boolean; content: unknown; isError?: boolean; errorCode?: string; toolCallId?: string };
+
 // ---------------------------------------------------------------------------
 // Canonical resources (spec §5)
 // ---------------------------------------------------------------------------
@@ -213,6 +241,7 @@ export const RacpEventEnvelopeSchema = Type.Object({
   kind: RacpEventKindSchema,
   occurredAt: Type.String(),
   parentToolCallId: Type.Optional(Type.String()),
+  nestedParentToolCallId: Type.Optional(Type.String()),
   agentName: Type.Optional(Type.String()),
   payload: Type.Unknown(),
 });
@@ -237,10 +266,38 @@ export const RacpItemSummarySchema = Type.Object({
   sequence: Type.Optional(Type.Integer({ minimum: 1 })),
   createdAt: Type.String(),
   parentToolCallId: Type.Optional(Type.String()),
+  nestedParentToolCallId: Type.Optional(Type.String()),
   agentName: Type.Optional(Type.String()),
   content: Type.Unknown(),
 });
 export type RacpItemSummary = Static<typeof RacpItemSummarySchema>;
+
+/** A durable transcript change; this revision survives host process restarts. */
+export const RacpSessionChangeSchema = Type.Union([
+  Type.Object({
+    revision: Type.Integer({ minimum: 1 }),
+    kind: Type.Literal("upsert"),
+    messageId: Type.String({ minLength: 1 }),
+    sequence: Type.Integer({ minimum: 0 }),
+    item: RacpItemSummarySchema,
+  }),
+  Type.Object({
+    revision: Type.Integer({ minimum: 1 }),
+    kind: Type.Literal("delete"),
+    messageId: Type.String({ minLength: 1 }),
+  }),
+]);
+export type RacpSessionChange = Static<typeof RacpSessionChangeSchema>;
+
+export const RacpSessionChangesPageSchema = Type.Object({
+  sessionId: Type.String({ minLength: 1 }),
+  afterRevision: Type.Integer({ minimum: 0 }),
+  /** Advance only after the complete page has been committed by the client. */
+  revision: Type.Integer({ minimum: 0 }),
+  hasMore: Type.Boolean(),
+  changes: Type.Array(RacpSessionChangeSchema),
+});
+export type RacpSessionChangesPage = Static<typeof RacpSessionChangesPageSchema>;
 
 export const RACP_TOOL_APPROVAL_DECISIONS = ["allow-once", "allow-session", "deny"] as const;
 export type RacpToolApprovalDecision = (typeof RACP_TOOL_APPROVAL_DECISIONS)[number];
@@ -270,6 +327,7 @@ export const RacpApprovalRequestSchema = Type.Object({
   risk: Type.Optional(Type.Union([Type.Literal("low"), Type.Literal("medium"), Type.Literal("high")])),
   agentName: Type.Optional(Type.String()),
   parentToolCallId: Type.Optional(Type.String()),
+  nestedParentToolCallId: Type.Optional(Type.String()),
   title: Type.Optional(Type.String()),
   question: Type.Optional(Type.String()),
   artifact: Type.Optional(
@@ -326,6 +384,7 @@ export const RacpInputRequestSchema = Type.Object({
   expiresAt: Type.String(),
   agentName: Type.Optional(Type.String()),
   parentToolCallId: Type.Optional(Type.String()),
+  nestedParentToolCallId: Type.Optional(Type.String()),
   questions: Type.Array(
     Type.Object({
       id: Type.String({ minLength: 1 }),
@@ -386,8 +445,28 @@ export const RacpSessionSnapshotSchema = Type.Object({
   cursor: RacpCursorSchema,
   revision: Type.Integer({ minimum: 0 }),
   generatedAt: Type.String(),
+  syncRevision: Type.Optional(Type.Integer({ minimum: 0 })),
 });
 export type RacpSessionSnapshot = Static<typeof RacpSessionSnapshotSchema>;
+
+/**
+ * A snapshot without the transcript page: everything a client needs to refresh
+ * live session state (turns, approvals, inputs, cursor) when it already holds
+ * the transcript, at a fraction of the payload of `session/snapshot`.
+ */
+export const RacpSessionStateSchema = Type.Object({
+  session: RacpSessionSchema,
+  activeTurn: Type.Optional(RacpTurnSchema),
+  queuedTurns: Type.Array(RacpTurnSchema),
+  activeItems: Type.Array(RacpItemSummarySchema),
+  pendingApprovals: Type.Array(RacpApprovalRequestSchema),
+  pendingInputs: Type.Array(RacpInputRequestSchema),
+  cursor: RacpCursorSchema,
+  revision: Type.Integer({ minimum: 0 }),
+  generatedAt: Type.String(),
+  syncRevision: Type.Optional(Type.Integer({ minimum: 0 })),
+});
+export type RacpSessionState = Static<typeof RacpSessionStateSchema>;
 
 // ---------------------------------------------------------------------------
 // Initialization (spec §3)
@@ -401,6 +480,8 @@ export const RacpClientCapabilitiesSchema = Type.Object({
   turnQueue: Type.Optional(Type.Boolean()),
   hostEvents: Type.Optional(Type.Boolean()),
   history: Type.Optional(Type.Boolean()),
+  directory: Type.Optional(Type.Boolean()),
+  incrementalSync: Type.Optional(Type.Boolean()),
   toolRelay: Type.Optional(Type.Boolean()),
   terminal: Type.Optional(Type.Boolean()),
 });
@@ -418,7 +499,17 @@ export const RacpServerCapabilitiesSchema = Type.Object({
   remoteHostProfile: Type.Boolean(),
   toolRelay: Type.Boolean(),
   terminal: Type.Boolean(),
+  workspaceTools: Type.Optional(Type.Boolean()),
+  workspaceFiles: Type.Optional(Type.Boolean()),
   notifications: Type.Boolean(),
+  /** `session/state` light refresh is served (mobile profile addition). */
+  sessionState: Type.Optional(Type.Boolean()),
+  /** `session/item` chunked full-content reads are served (mobile profile addition). */
+  itemContent: Type.Optional(Type.Boolean()),
+  /** `mobile.sessionActivity` live session status and attention pushes (mobile profile addition). */
+  sessionActivity: Type.Optional(Type.Boolean()),
+  directory: Type.Optional(Type.Boolean()),
+  incrementalSync: Type.Optional(Type.Boolean()),
   bindings: Type.Array(Type.Union([Type.Literal("RACP-WS"), Type.Literal("RACP-HTTP"), Type.Literal("RACP-GRPC")])),
 });
 export type RacpServerCapabilities = Static<typeof RacpServerCapabilitiesSchema>;
@@ -524,11 +615,14 @@ export const RACP_OPERATIONS = {
   "connection/ping": { role: "authenticated", profile: "v1", mutation: false },
   "host/list": { role: "authenticated", profile: "v1", mutation: false },
   "project/list": { role: "viewer", profile: "v1", mutation: false },
+  "directory/list": { role: "viewer", profile: "remote-host", mutation: false },
   "session/list": { role: "viewer", profile: "v1", mutation: false },
   "session/get": { role: "viewer", profile: "v1", mutation: false },
   "session/create": { role: "controller", profile: "v1", mutation: true },
   "session/attach": { role: "viewer", profile: "v1", mutation: false },
+  "session/modelCatalog": { role: "viewer", profile: "remote-host", mutation: false },
   "session/history": { role: "viewer", profile: "v1", mutation: false },
+  "session/changes": { role: "viewer", profile: "remote-host", mutation: false },
   "events/subscribe": { role: "viewer", profile: "v1", mutation: false },
   "events/unsubscribe": { role: "viewer", profile: "v1", mutation: false },
   "events/ack": { role: "viewer", profile: "v1", mutation: false },
@@ -548,11 +642,17 @@ export const RACP_OPERATIONS = {
   "session/configure": { role: "controller", profile: "remote-host", mutation: true },
   "session/fork": { role: "controller", profile: "remote-host", mutation: true },
   "session/rename": { role: "controller", profile: "remote-host", mutation: true },
+  /** The Host's own deterministic first-prompt title; never a controller choice. */
+  "session/deriveTitle": { role: "controller", profile: "remote-host", mutation: true },
   "session/delete": { role: "owner", profile: "remote-host", mutation: true },
   "session/compact": { role: "controller", profile: "remote-host", mutation: true },
   "workspace/list": { role: "viewer", profile: "remote-host", mutation: false },
   "workspace/read": { role: "viewer", profile: "remote-host", mutation: false },
   "workspace/diff": { role: "viewer", profile: "remote-host", mutation: false },
+  "workspace/toolExecute": { role: "owner", profile: "remote-host", mutation: true },
+  "workspace/toolAbort": { role: "owner", profile: "remote-host", mutation: true },
+  "workspace/toolShell": { role: "owner", profile: "remote-host", mutation: false },
+  "workspace/files": { role: "owner", profile: "remote-host", mutation: false },
   "terminal/open": { role: "controller", profile: "remote-host", mutation: true },
   "terminal/input": { role: "controller", profile: "remote-host", mutation: true },
   "terminal/resize": { role: "controller", profile: "remote-host", mutation: true },
@@ -614,10 +714,12 @@ export const RACP_HTTP_ROUTES: Partial<Record<RacpOperation, { method: "GET" | "
   "host/list": { method: "GET", path: "/v1/hosts" },
   "project/list": { method: "GET", path: "/v1/projects" },
   "session/list": { method: "GET", path: "/v1/sessions" },
+  "directory/list": { method: "GET", path: "/v1/directory" },
   "session/create": { method: "POST", path: "/v1/sessions" },
   "session/get": { method: "GET", path: "/v1/sessions/{sessionId}" },
   "session/attach": { method: "POST", path: "/v1/sessions/{sessionId}:attach" },
   "session/history": { method: "GET", path: "/v1/sessions/{sessionId}/history" },
+  "session/changes": { method: "GET", path: "/v1/sessions/{sessionId}/changes" },
   "turn/start": { method: "POST", path: "/v1/sessions/{sessionId}/turns" },
   "turn/get": { method: "GET", path: "/v1/turns/{turnId}" },
   "turn/stop": { method: "POST", path: "/v1/turns/{turnId}:stop" },
@@ -679,6 +781,8 @@ export function racpKindForAgentEvent(
       return { kind: options.interrupted ? "turn.interrupted" : "turn.completed", durable: true };
     case "error":
       return { kind: "turn.failed", durable: true };
+    case "usage":
+      return { kind: "turn.activity", durable: false };
     case "turn_start":
     case "turn_end":
     case "status":
@@ -719,6 +823,7 @@ export const LOCAL_AGENT_EVENT_TYPES: readonly AgentEvent["type"][] = [
   "agent_end",
   "turn_start",
   "turn_end",
+  "usage",
   "message_start",
   "message_update",
   "message_end",
@@ -834,7 +939,10 @@ export const RACP_SCHEMAS = {
   Cursor: RacpCursorSchema,
   EventEnvelope: RacpEventEnvelopeSchema,
   ItemSummary: RacpItemSummarySchema,
+  SessionChange: RacpSessionChangeSchema,
+  SessionChangesPage: RacpSessionChangesPageSchema,
   SessionSnapshot: RacpSessionSnapshotSchema,
+  SessionState: RacpSessionStateSchema,
   ApprovalRequest: RacpApprovalRequestSchema,
   ApprovalResponse: RacpApprovalResponseSchema,
   ApprovalResult: RacpApprovalResultSchema,

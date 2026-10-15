@@ -1,7 +1,7 @@
 # 06. Desktop Release Runbook
 
 > Scope: D126/D285/D603 tag artifacts for macOS arm64 and Intel x64, Windows x64,
-> and Linux x64, including the Linux system-Electron ASAR asset;
+> and Linux x64 and arm64, including the Linux system-Electron ASAR assets;
 > macOS signing/notarization remains the detailed qualification lane below.
 > Cross-references: [milestones](01-mvp-milestones.md) · [process model](../03-runtime/07-process-model.md) · [security](../05-security/01-security.md)
 
@@ -109,8 +109,8 @@ Surfaces in scope:
 | Surface | Requirement |
 |---|---|
 | `apps/desktop/resources/models.dev/api.json` | Refreshed from https://models.dev/api.json before tagging; the release workflow packages this snapshot unchanged |
-| `packages/shared/src/changelog.ts` | Newest-first English, zh-CN, and zh-TW entries, matching highlight counts |
-| `packages/shared/src/changelog-de.ts`, `changelog-es.ts`, `changelog-fr.ts`, `changelog-ko.ts`, `changelog-tr.ts` | Same versions and highlight counts as English |
+| `packages/shared/src/changelog-en.ts` | Newest-first English entries (source of truth, ADR 0009) |
+| `packages/shared/src/changelog-zh-CN.ts`, `changelog-zh-TW.ts`, `changelog-tr.ts`, `changelog-de.ts`, `changelog-es.ts`, `changelog-fr.ts`, `changelog-ko.ts`, `changelog-pt-BR.ts` | Same version set and highlight counts as English; a newly shipped locale is also registered in `packages/shared/src/changelog.ts` |
 | `packages/shared/src/changelog.test.ts` | Version added at the top of the newest-first list |
 | `package.json`, `apps/*/package.json`, `packages/*/package.json`, `docs/package.json` | Same version (`docs` is a third workspace root, not under `apps`/`packages`) |
 | `Cargo.toml` `[workspace.package]`, `Cargo.lock` `host-core` | Same version |
@@ -119,16 +119,21 @@ Surfaces in scope:
 
 Blocking steps:
 
-1. Refresh `apps/desktop/resources/models.dev/api.json` **before** tagging.
-   `scripts/release.mjs` does this by default for every bump, including
-   prereleases. A no-op refresh (already current) still counts: the snapshot
-   in the tagged tree is what artifacts ship. Do not treat a minified
-   one-line JSON diff as absent.
-2. Edit `packages/shared/src/changelog.ts` **before**
+1. Refresh `apps/desktop/resources/models.dev/api.json` **before** tagging:
+
+   ```bash
+   curl -fsSL https://models.dev/api.json -o apps/desktop/resources/models.dev/api.json
+   ```
+
+   The version-bump script does not fetch this catalog. The release preflight
+   checks that the snapshot is a valid provider catalog, and the tagged tree
+   determines what artifacts ship. A no-op refresh (already current) still
+   counts. Do not treat a minified one-line JSON diff as absent.
+2. Edit `packages/shared/src/changelog-en.ts` **before**
    `node scripts/release.mjs <version>` / `git tag`:
    - Add a **newest-first** entry under `en` and every shipped product locale
-     (`zh-CN` / `zh-TW` in this file; `de` / `es` / `fr` / `ko` / `tr` in
-     `packages/shared/src/changelog-*.ts`).
+     (`zh-CN` / `zh-TW` in `changelog-zh-CN.ts` / `changelog-zh-TW.ts`; the
+     remaining catalogs are the sibling `packages/shared/src/changelog-*.ts` files).
    - Same `version` string (semver **without** a leading `v`, matching
      `apps/desktop` / `APP_VERSION` for a stable cut).
    - Optional ISO `date` (`YYYY-MM-DD`).
@@ -156,8 +161,8 @@ Blocking steps:
    checked even though `scripts/release.mjs` skips that preflight for
    `x.y.z-beta.*` / `x.y.z-rc.*`. The preflight compiles the TypeScript
    changelog in a temporary directory, so it does not require a prior
-   workspace build. `scripts/release.mjs` still refreshes models.dev for
-   prereleases; `--skip-docs-check` exists only for a deliberate
+   workspace build. Refresh the models.dev snapshot explicitly for stable and
+   prerelease builds; `--skip-docs-check` exists only for a deliberate
    non-release bump.
 7. Commit the documentation updates so the tagged commit contains notes and
    accurate version claims for that version (alone or adjacent to the bump).
@@ -168,8 +173,8 @@ Pre-tag checklist:
 
 - [ ] `apps/desktop/resources/models.dev/api.json` is refreshed or confirmed
       current in the tagged tree
-- [ ] `packages/shared/src/changelog.ts` has English / zh-CN / zh-TW entries
-      for the stable version being shipped or previewed
+- [ ] `packages/shared/src/changelog-en.ts` and every shipped locale catalog
+      carry entries for the stable version being shipped or previewed
 - [ ] `packages/shared/src/changelog-de.ts` and the other locale catalogs
       match the English version set and highlight counts
 - [ ] Highlight counts match across locales
@@ -238,6 +243,15 @@ tickets before any artifact upload. The per-architecture `latest-mac.yml` files
 are renamed before upload; the publish job merges them into one feed after
 downloading both artifacts.
 
+For the app ticket, the signing watchdog injects a temporary `xcrun` shim when
+`PI_STAPLER_MAX_ATTEMPTS` is set. It retries only the exact `stapler staple`
+operation, at most six total attempts with a 10-second delay; `notarytool` and
+all other `xcrun` commands pass through unchanged. electron-notarize reaches
+that command only after Apple accepts the app submission. The DMG script has
+its own bounded retry after its separate submission is accepted. Both retry
+paths fail the job if their limit is exhausted, and artifact verification
+still requires valid stapled tickets on the app and DMG.
+
 The shared electron-builder configuration applies the architecture-labelled
 pattern at the macOS platform level for ZIPs and overrides it at the DMG target
 level. Both public architectures are therefore explicit: the arm64 lane
@@ -251,33 +265,26 @@ exactly one architecture-labelled DMG and ZIP (including blockmaps) and rejects
 any unlabelled or wrong-architecture macOS artifact.
 
 The DMG uses a branded 720×440 background with a two-icon drag-to-Applications
-gesture. The app and Applications link are the only items in the window. The
-opening-help note and the executable command helper are not included in the DMG.
+gesture. The app and Applications link are the only items in the window.
 
-The macOS ZIP includes both `PI-Desktop-macOS-opening-help.txt` and the
-executable `PI-Desktop-macOS-open.command` at the package root. After moving
-`PI-Desktop.app` to `/Applications` or `~/Applications`, ZIP users can
-double-click the helper. It searches only those two fixed locations, removes
-only the recursive `com.apple.quarantine` attribute when present, and opens
-PI-Desktop. Before doing so it verifies `CFBundleIdentifier=net.aiuo.pi-desktop`.
-It does not use `sudo` or accept an arbitrary application path. The manual
-fallback for the standard system location is:
-
-```sh
-xattr -r -d com.apple.quarantine /Applications/PI-Desktop.app
-```
-
-This helper is only for a trusted unsigned artifact when macOS reports that the
-app is damaged. Signed and notarized builds should open without it.
+The macOS ZIP contains `PI-Desktop.app` at its root. Neither the DMG nor ZIP
+ships an opening-help note or executable first-launch helper, including local
+and unsigned debug builds. Tagged artifacts remain signed and notarized; the
+unsigned lane is for debugging and does not imply Gatekeeper qualification.
 
 DMG, ZIP, NSIS, AppImage, deb, rpm, blockmap, and updater feed outputs are already
 compressed or compression-insensitive. The workflow therefore uploads their
 temporary Actions artifacts with compression level zero before the publish job
-assembles the GitHub Release. The Linux runner also copies
-`linux-unpacked/resources/app.asar` to the versioned
-`PI-Desktop-<version>-linux-x64.asar` asset before upload. This preserves the
-exact archive used by the Linux installers for downstream repackaging with a
-system Electron.
+assembles the GitHub Release. The Linux runners also copy their unpacked
+`resources/app.asar` (`linux-unpacked` on x64, `linux-arm64-unpacked` on arm64)
+to the versioned `PI-Desktop-<version>-linux-<arch>.asar` asset before upload.
+This preserves the exact archive used by the Linux installers for downstream
+repackaging with a system Electron.
+
+The Linux updater feeds carry the architecture they were built for:
+`latest-linux.yml` for x64 and `latest-linux-arm64.yml` for arm64. Those are the
+channel files `electron-updater` requests on the matching architecture, so a
+lane fails before upload if its own feed is missing.
 
 ### 4.4 Documentation site deployment
 
@@ -345,6 +352,7 @@ hide in that gap, and the macOS lanes now expose all three:
 | Per-file signing | `codesign --force --sign <identity> --timestamp --entitlements ... <file>` runs serially, deepest file first, the app bundle last | `DEBUG=electron-osx-sign*` prints `Signing... <file>` and `Executing... <file> codesign ...`; the codesign shim times every invocation. If a keychain ever refuses to hand the key to a wrapped `codesign`, `PI_SIGNING_NO_CODESIGN_SHIM=1` runs the phase without the shim |
 | Silent retry | A failing pass is retried up to three more times with a 5s/10s/15s backoff and no log line | The watchdog's `codesign-calls` and `failures` lines expose repeated passes |
 | App notarization | `@electron/notarize` zips the app, uploads it, and waits for Apple's queue (`mac.notarize=true`) | `DEBUG=electron-notarize*` prints `zipping application to`, `attempting to upload file to Apple`, `notarization success`, then electron-builder prints `notarization successful` |
+| App ticket stapling | `xcrun stapler staple` attaches the accepted app ticket; the watchdog retries only this exact command up to six attempts with a 10-second delay | `stapler-shim=on` appears in the watchdog header and each failed attempt is reported |
 | DMG notarization | The DMG carries its own signature, so the next step submits it again with `xcrun notarytool submit --wait` | The same watchdog keeps that wait observable and bounded |
 
 `scripts/macos-signing-watchdog.mjs` wraps both long phases. It forwards every
@@ -364,6 +372,8 @@ block. The knobs:
 | `PI_SIGNING_TIMEOUT_SECONDS` | 2400 (CI: 1800 packaging, 1200 DMG) | Hard limit for the wrapped phase: diagnostics are dumped, the process group is killed, and the step exits 124 instead of hanging |
 | `PI_SIGNING_STALL_SECONDS` | 300 | Silence with no codesign activity for this long triggers one diagnostics dump; the phase keeps running, because Apple's notarization queue is a legitimate wait |
 | `PI_SIGNING_HEARTBEAT_SECONDS` | 60 | Heartbeat interval while the child produces no output |
+| `PI_STAPLER_MAX_ATTEMPTS` | unset (no stapler shim) | When set for signed app packaging, enables at most six attempts for `xcrun stapler staple` |
+| `PI_STAPLER_RETRY_DELAY_SECONDS` | 10 | Delay between failed app stapler attempts (maximum 60 seconds) |
 | `DEBUG` | `electron-osx-sign*,electron-notarize*` | Namespaces that expose walking, per-file signing, and notarization progress |
 
 `DEBUG` lists only the two namespaces that sanitize their own command lines,
@@ -414,7 +424,7 @@ artifact per submission and electron-builder only covers the app:
 
 | Artifact | Submitted by | Ticket |
 |---|---|---|
-| `PI-Desktop.app` (inside the ZIP) | electron-builder `-c.mac.notarize=true` | stapled by electron-builder |
+| `PI-Desktop.app` (inside the ZIP) | electron-builder `-c.mac.notarize=true` | stapled by electron-builder through the watchdog's bounded `xcrun stapler staple` retry shim |
 | `PI-Desktop-<version>-<arch>.dmg` | `scripts/notarize-and-staple-macos-release-dmg.sh` (`notarytool submit --wait`) | stapled by the same script after `status: Accepted` |
 
 A DMG that was never submitted has no ticket, so stapling it fails with
@@ -577,7 +587,7 @@ their electron-updater manifests. Run a target command on that target OS:
 macOS Apple Silicon: pnpm --filter @pi-desktop/desktop run dist:mac -- --arm64
 macOS Intel:         pnpm --filter @pi-desktop/desktop run dist:mac -- --x64
 Windows: pnpm --filter @pi-desktop/desktop dist:win
-Linux:   pnpm --filter @pi-desktop/desktop dist:linux
+Linux:   pnpm --filter @pi-desktop/desktop dist:linux -- --x64|--arm64
 ```
 
 The Windows `dist:win` command runs `scripts/build-desktop-release.mjs`,
@@ -585,8 +595,9 @@ which invokes electron-builder once for NSIS and once for ZIP so each package
 gets the correct updater distribution marker.
 
 The macOS packages include `bin/pi-desktop-host-core` built for their runner
-architecture; Windows includes `bin/pi-desktop-host-core.exe`; Linux includes
-`bin/pi-desktop-host-core`. Signing, rollback, and installer upgrade
+architecture; the Linux packages do the same on their native x64 and arm64
+runners; Windows includes `bin/pi-desktop-host-core.exe`. Signing, rollback,
+and installer upgrade
 qualification remain release hardening work; publication is active under
 D126/D285/D603.
 
@@ -598,8 +609,9 @@ Native-runner output matrix:
   `PI-Desktop-<version>-x64-mac.zip`
 - Windows x64: NSIS installer `PI-Desktop-Setup-<version>.exe` and portable
   ZIP `PI-Desktop-Portable-<version>.zip`
-- Linux x64: AppImage, deb, and rpm
-- Linux x64 system Electron asset: `PI-Desktop-<version>-linux-x64.asar`
+- Linux x64 and arm64: AppImage, deb, and rpm
+- Linux system Electron assets: `PI-Desktop-<version>-linux-x64.asar` and
+  `PI-Desktop-<version>-linux-arm64.asar`
 
 The portable Windows ZIP target does not write `latest.yml`. The Windows
 release helper builds NSIS and ZIP separately and stamps the ZIP app metadata
@@ -620,7 +632,7 @@ target Electron resources layout together with the native host and other
 resources from the target package, then launch it with:
 
 ```bash
-electron PI-Desktop-<version>-linux-x64.asar
+electron PI-Desktop-<version>-linux-<arch>.asar
 ```
 
 Shell smoke on each native runner:
@@ -638,10 +650,15 @@ Shell smoke on each native runner:
 - Linux deb/rpm and the Windows portable ZIP remain notify-and-link update
   modes. Packaged macOS, Windows NSIS, and Linux AppImage use in-app
   `electron-updater`.
-- Linux x64 packages are built on Ubuntu 22.04 so host-core needs glibc 2.35
-  or newer (Ubuntu 22.04, Debian 12, Fedora 36+). The tag job runs
+- Linux x64 and arm64 packages are built on Ubuntu 22.04 (native `ubuntu-22.04`
+  and `ubuntu-22.04-arm` runners), so host-core needs glibc 2.35 or newer
+  (Ubuntu 22.04, Debian 12, Fedora 36+). Each tag job runs
   `scripts/check-linux-host-glibc.mjs` and refuses a binary that needs a
   newer glibc.
+- Linux arm64 microphone capture works on Raspberry Pi boards only:
+  `@picovoice/pvrecorder-node` classifies Linux arm64 by `/proc/cpuinfo` CPU
+  part. Speech-to-text (`transcribe-cpp` ships a `linux-arm64-cpu-vulkan`
+  bundle) and every other feature work on any arm64 Linux device.
 - Rollback, staged rollout, and prerelease channel policy remain open release
   work. Existing unsigned macOS installs may need one manual signed DMG before
   in-app updates succeed.

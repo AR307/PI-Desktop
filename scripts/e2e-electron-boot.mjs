@@ -33,11 +33,13 @@ for (const preloadPath of [
   join(appDir, "out/preload/index.cjs"),
   join(appDir, "out/preload/plugin-panel.js"),
 ]) {
-  if (!existsSync(preloadPath)) {
-    console.error("preload output missing:", preloadPath);
+  let source;
+  try {
+    source = readFileSync(preloadPath, "utf8");
+  } catch {
+    console.error("preload output missing or unreadable:", preloadPath);
     process.exit(1);
   }
-  const source = readFileSync(preloadPath, "utf8");
   if (/require\(["']\.\//.test(source)) {
     console.error("sandbox preload must not require a local runtime chunk:", preloadPath);
     process.exit(1);
@@ -119,6 +121,7 @@ child.on("close", (code) => {
     projectRemove?.ok === true &&
     projectRemove.removed === false &&
     projectRemove.sessionsRemoved === 0;
+  const ctrlRBlocked = probe?.ctrlRBlocked === true;
   if (
     code === 0 &&
     probe?.ok &&
@@ -127,7 +130,8 @@ child.on("close", (code) => {
     (process.platform === "darwin" || probe.maximized === true) &&
     menuContractOk &&
     sessionListOk &&
-    projectRemoveOk
+    projectRemoveOk &&
+    ctrlRBlocked
   ) {
     const menuDetail =
       process.platform === "darwin"
@@ -145,6 +149,7 @@ child.on("close", (code) => {
         "projectRemove IPC round-trip through the sandboxed preload " +
         `{removed:${probe.projectRemove.removed}, sessionsRemoved:${probe.projectRemove.sessionsRemoved}}`,
     );
+    console.log("PASS E2E-072-main-window-ctrl-r-blocked");
     cleanup(0);
   } else {
     console.error("FAIL boot-probe —", JSON.stringify(probe));

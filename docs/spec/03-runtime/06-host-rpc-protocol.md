@@ -53,9 +53,14 @@ Permission prompts do not consume an execution slot. A full queue returns
 `HOST_OVERLOADED` with retryable semantics in the tool result instead of
 waiting indefinitely or spawning more work. The limits are host-owned so
 Electron and the sidecar cannot independently over-admit the same resources.
-The per-session mutation permit is acquired before the global mutation slot;
-queued `Write`/`Edit` calls therefore do not hold global capacity while waiting
-for an earlier mutation in the same session.
+Admission reserves total, tool-class, session, and session-mutation capacity
+atomically. A queued call holds no execution capacity. When capacity returns,
+the oldest runnable request is admitted; a request blocked by one class or
+session does not block unrelated runnable work. Calls wait at most 30 seconds.
+Dropping a waiting admission future or letting it time out removes its queue
+entry and releases any reservation made before the caller receives its permit. The health counters report only
+fully admitted reservations, including those awaiting delivery to the caller;
+`queued` counts only requests still waiting for capacity.
 
 Electron's `HostProcess` treats an explicit `HOST_OVERLOADED` response as
 retryable backpressure for renderer-facing calls. It waits 50, 100, 200, and
@@ -166,12 +171,14 @@ Rules:
    advertises `"a2a"`. A v10 host or client is rejected before the UI becomes
    interactive, so a mixed pair cannot call a missing domain.
 
-Protocol v11 is paired with host-core storage schema v16. Schema v12 had added
+Protocol v11 is paired with host-core storage schema v23. Schema v12 had added
 the A2A tables (`a2a_tasks`, `a2a_messages`, `a2a_artifacts`,
 `a2a_push_configs`) via `migrate_v11_to_v12`; `migrate_v12_to_v13` drops those
 tables, and v14 adds the plugin-session ownership sidecar and soft-delete
 column. Schema v15 adds the Host-owned turn queue, and schema v16 adds the
-session collaboration ledger and its turn-queue binding. A fresh database
+session collaboration ledger and its turn-queue binding. Schema v23 adds
+`sessions.title_source` to preserve default, manual, and plugin-generated title
+ownership. A fresh database
 creates neither A2A tables nor unowned plugin-session rows. The schema version is an
 internal persistence invariant, not an additional JSON-RPC field; the
 checkpoint architecture remains host-owned.
@@ -217,10 +224,13 @@ type ToolBudgetHealth = {
   every session attached to it, removing those sessions' transcript, scratch,
   and review files and the project's durable memory, and never touching the
   project folder on disk. Idempotent: an unknown path returns
-  `{ removed: false, sessionsRemoved: 0 }`. A path that is a root of a stored
-  multi-folder project group is refused so the group keeps a valid primary root,
-  and the call is refused (1008 / `CONFLICT`) while any attached session has a
-  running turn, so a live turn never loses the transcript it is writing.
+  `{ removed: false, sessionsRemoved: 0 }`. If the path belongs to a stored
+  project group, deletion detaches that root in the same flow; deleting the
+  primary promotes the first remaining root, and deleting the last root also
+  removes the group record. The call is refused (1008 / `CONFLICT`) while any
+  attached session has a running turn, before changing group membership, so a
+  live turn never loses the transcript it is writing and a rejected delete
+  leaves the project group unchanged.
 - `project.memory.get({ path })` — returns the durable memory for the canonical
   project path, or an empty record when no memory has been saved
 - `project.memory.set({ path, entries })` — normalizes and stores visual memory
@@ -235,12 +245,14 @@ type ToolBudgetHealth = {
   without changing the active workspace. A non-legacy root cannot belong to a
   second group.
 - `project.group.rename({ groupId, name })` — persists the group display name.
-- `project.group.update({ groupId, name, folders })` — edits the group name and
-  ordered roots. The primary root must remain first; duplicate roots are
-  removed, roots owned by another non-legacy group are rejected, and a root
-  with existing chats cannot be detached. Removed roots are retained as
-  suppressed historical paths rather than reappearing as standalone legacy
-  groups.
+- `project.group.update({ groupId, name, folders, primary? })` — edits the group
+  name and ordered roots. The stored primary root must remain first; naming a
+  `primary` promotes that selected root and reorders the roots around it, while
+  omitting it keeps the stored primary and refuses dropping it. Duplicate roots
+  are removed, a `primary` outside `folders` is rejected, roots owned by
+  another non-legacy group are rejected, and a root with existing chats cannot
+  be detached. Removed roots are retained as suppressed historical paths rather
+  than reappearing as standalone legacy groups.
 - `project.group.memory.get/set({ groupId, entries })` — reads or normalizes
   shared group memory using the existing 32 KiB entry limit.
 - `project.group.instructions.get/set({ groupId, content })` — reads or stores
@@ -284,6 +296,10 @@ to later refresh and inference; the vendor picker does not collect them.
   `inheritPermissionFromSessionId`; when present, the host copies the existing
   session's persisted permission mode atomically, while omission preserves the
   existing `inherit` default. Missing/null thinking level defaults to `off`.
+  Optional `isolated: true` (ADR 0329) also requires `projectPath` and gives
+  the new session its own git worktree before it returns; if the worktree
+  cannot be created the session is deleted again and the call fails with a
+  `WORKTREE_*` error (§7).
 - `session.fork` — accepts `sessionId`, an optional caller-provided display
   `title`, and optional `throughMessageId`; creates
   one independent session from the source's current active canonical
@@ -291,10 +307,12 @@ to later refresh and inference; the vendor picker does not collect them.
   The child inherits project/provider/model/mode/thinking and
   permission configuration, receives new message/tool-call ids, and starts
   without turns, revisions, notifications, artifacts, grants, or scratch data.
-  Missing sources return `NOT_FOUND`; Electron rejects active sources with
-  `AGENT_BUSY` before forwarding and normalizes the host's persisted
-  running-turn `CONFLICT` fallback to `AGENT_BUSY`; an unknown source or
-  `throughMessageId` returns `NOT_FOUND`
+  Missing sources or anchors return `NOT_FOUND`. While a Desktop source runs,
+  only a completed assistant prefix containing no indexed messages owned by a
+  running turn is allowed. This check and publication share the host RPC lock.
+  Whole-session, non-assistant, streaming/error, or live-turn anchors return
+  `CONFLICT`, normalized by Electron to `AGENT_BUSY`. The source turn continues
+  without sharing runtime state with the child.
 - `session.get` — accepts an optional renderer read window:
   `messageBefore` is the exclusive zero-based end offset, `messageLimit` is
   the positive page size, and `contentLimit` is the positive character budget
@@ -315,14 +333,22 @@ to later refresh and inference; the vendor picker does not collect them.
   contains the latest matching Task tool-call projection from the same canonical
   transcript. It is capped separately and does not widen the window or alter its
   cursors. Ordinary and uncapped reads omit this navigation-only field.
-- `session.delete`
+- `session.delete` — for an isolated session, also removes its worktree and
+  branch (discarding unmerged work)
 - `session.getScratchPath` — the session's scratch directory (D114), created
   on demand
 - `session.rename({ id, title })` trims and validates the title at the host
   boundary. It accepts 1–80 Unicode code points and returns `{ ok: boolean }`;
   blank or overlong titles are `INVALID_PARAMS`. A successful rename changes
-  only session metadata and does not update `updated_at`, transcript content,
-  message count, or historical notification title snapshots.
+  title metadata and marks the title source `manual`; it does not update
+  `updated_at`, transcript content, message count, or historical notification
+  title snapshots.
+- `session.deriveTitle({ id, title })` applies the deterministic first-prompt
+  fallback and returns `{ updated: boolean }`. It validates the title with the
+  same 1–80 code-point rule, then writes only when the stored title is still a
+  recognized placeholder whose title source is `default`. The write keeps that
+  source so a title plugin can still replace the derived text, and it does not
+  update `updated_at`, transcript content, or message count.
 - `session.configure` — atomically persists `mode`, `providerId`, `modelId`,
   and optional `thinkingLevel` (`off|minimal|low|medium|high|xhigh|max|omit`)
   for the next pi turn; omitting/null
@@ -337,6 +363,7 @@ to later refresh and inference; the vendor picker does not collect them.
   data stay with the session. Blank ids or paths are `INVALID_PARAMS`, an
   unknown session is `NOT_FOUND`, and a session with a running turn is
   `CONFLICT` so a live agent never switches instruction roots mid-turn.
+  An isolated session is refused with `WORKTREE_MOVE_UNSUPPORTED`.
   Additive RPC; no protocol version bump.
 - `session.appendMessage`
 - `session.saveInflightMessage` — Electron-main-only checkpoint of the
@@ -437,6 +464,11 @@ Electron main after plugin permission and manifest-source checks:
 - `plugin.session.importBatch` — bounded `skip` or all-or-nothing `fail` batch
 - `plugin.session.list` / `plugin.session.get` / `plugin.session.listMessages` —
   read only the calling plugin's active imported sessions
+- `plugin.session.autoTitleContext` — under Electron's `session.autoTitle`
+  permission, return only the first user prompt (≤1,000 characters) and first
+  assistant reply (≤500 characters) for an active `default`-titled session
+- `plugin.session.setAutoTitle` — validate a title and update only when the
+  expected title and `default` source still match; returns `{ updated }`
 - `plugin.session.rename` — rename an owned active imported session
 - `plugin.session.delete` — `trash` hides and retains the transcript; `purge`
   removes it and permits re-import
@@ -486,6 +518,28 @@ The host rejects unknown roles, non-RFC3339 or non-monotonic timestamps, and
 oversized/deep payloads. Tool values are sanitized for host-reserved keys. The
 per-plugin rolling limits are 10 single imports, 5 batch imports, and 20
 deletes per 60 seconds. P2/P3 methods are not present in protocol v11.
+
+### Session Todo checklist
+
+- `todos.get({ sessionId })` returns the committed checklist snapshot for a live
+  Desktop session: `{ sessionId, todos, revision, updatedAt }`. Unknown or
+  soft-deleted sessions return `NOT_FOUND`; native Pi sessions and blank ids are
+  rejected as `INVALID_ARGUMENT`.
+- `tools.execute` with `toolName: "TodoWrite"` accepts only `{ todos }` and
+  replaces the complete ordered checklist. The host trims content, defaults
+  priority to `medium`, truncates overlong Unicode content at 500 characters
+  with a warning, demotes later `in_progress` items to `pending`, and rejects
+  more than 50 items or malformed values. The owner session and running turn
+  come from the trusted transport fields, never from tool arguments.
+- TodoWrite is allowed only for an Agent session's own running turn. Plan/Goal,
+  delegated, plugin, and MCP calls receive a tool result error and do not mutate
+  storage. A successful replacement advances the session revision even when
+  `todos` is empty and emits `todos.changed` after the transaction commits.
+  The event payload is the same complete snapshot returned by `todos.get`.
+- SQLite ownership is host-core only. The renderer receives snapshots through
+  Electron Main IPC, keeps them by session id, and ignores revisions older than
+  or equal to the cached revision. Remote RACP sessions are local-only for this
+  vertical slice because RACP v1 has no Todo snapshot operation.
 
 ### Stats
 
@@ -549,6 +603,61 @@ Session summaries/details always return `thinkingLevel`. Assistant messages
 may return `thinking`; host storage maps it to a canonical content block rather
 than appending it to answer `content`.
 
+### Session worktrees (ADR 0329)
+
+Additive `worktree.*` methods; no protocol version bump. Failures use code
+1025 with a `WORKTREE_*` string code.
+
+- `worktree.probe({ projectPath })` → `{ available, uncommittedChanges }`, or
+  `{ available: false, errorCode, message }` when the project cannot host
+  isolated sessions (not git, no commits, detached `HEAD`, git missing or
+  older than 2.29, a remote-host project — `WORKTREE_REMOTE_UNSUPPORTED`, …).
+  `session.create` refuses `isolated: true` for a remote-host project with the
+  same code before any session is created.
+- `worktree.preview({ sessionId })` → `{ preview }` with the commits and files
+  that would land and a `previewToken`. The token covers the session `HEAD`,
+  the project branch tip, the conflict state, and the full content of every
+  uncommitted and untracked file.
+- `worktree.merge({ sessionId, previewToken })` → `{ outcome }`. A token
+  that no longer matches (the session or the project branch changed) is
+  `WORKTREE_CHANGED_SINCE_PREVIEW`; a dirty project is
+  `WORKTREE_PROJECT_DIRTY`; a conflict is `WORKTREE_CONFLICT` and leaves the
+  worktree conflicted and the project untouched. The project checkout must
+  still be on the session's owner branch and the worktree on its own branch,
+  checked again before every write (`WORKTREE_OWNER_BRANCH_CHANGED`,
+  `WORKTREE_SESSION_BRANCH_CHANGED`); the fast-forward is bound to the exact
+  commit that was checked and verified afterwards. While it runs, host-core
+  holds the session's tools: it waits up to five seconds for a running tool,
+  then fails with `WORKTREE_BUSY`, and queues new ones until it is done.
+- `worktree.behind({ sessionId })` → `{ commits }`, project-branch commits the
+  session does not have yet.
+- `worktree.behindAll()` → `{ counts, statusesChanged }`: the same count for
+  every isolated session keyed by session id (sessions whose count cannot be
+  read are omitted), computed a few sessions at a time. Conflicted sessions
+  are checked for a resolution first; `statusesChanged` asks the renderer to
+  refresh its session list. The renderer reads it in the background for the
+  sidebar marker.
+- `worktree.sync({ sessionId })` → `{ outcome }` (`synced` with `commits`, or
+  `upToDate`): "Sync from project" merges the project branch into the session
+  worktree after committing pending session work, under the same tool hold
+  and own-branch check as a merge. The project checkout is not touched; a
+  conflict is `WORKTREE_CONFLICT`, stays in the worktree, and marks the
+  session like a merge conflict.
+- `worktree.pendingWork({ sessionId })` → `{ pending }`, the unmerged work a
+  delete would discard.
+- `worktree.setupLog({ sessionId })` → `{ setupStatus, log }`.
+- `worktree.location({ sessionId })` → `{ path }`; Electron Main uses it for
+  "Reveal in folder" and never forwards it to the renderer.
+- `worktree.setupCommand.get({ projectPath })` → `{ command }`;
+  `worktree.setupCommand.set({ projectPath, command })` → `{ ok }` (unknown
+  project is `NOT_FOUND`). The command runs once in each new worktree.
+- `worktree.delegate.create({ sessionId, delegationId })` → `{ worktree }` and
+  `worktree.delegate.settle({ sessionId, delegationId, merge })` →
+  `{ settlement }` — agent-runtime only, for `Write`/`Edit` delegates of an
+  isolated session (03-tools-and-permissions §10.2). Both use a 10-minute
+  transport deadline (`WORKTREE_DELEGATE_RPC_TIMEOUT_MS`) because they may
+  wait for the session's tools before committing and merging.
+
 ### Tools
 - `tools.list`
 - `tools.execute`
@@ -565,6 +674,12 @@ Tool execution starts only after admission. Shell spawn retries transient
 resource exhaustion (`EAGAIN` / `WouldBlock`) with bounded backoff, never
 retries a command after it has started, and reaps timed-out children before
 releasing the execution slot.
+Admitted `Read`, `Glob`, `Grep`, `Write`, and `Edit` calls run their
+synchronous filesystem work, including the `rg` child wait, on Tokio's blocking
+pool rather than on an async worker, so a long traversal cannot delay unrelated
+RPCs. The read and mutation class limits above also bound those blocking
+threads. Results and error codes are unchanged; a blocking task that panics
+returns `INTERNAL` instead of dropping the response.
 
 `session.appendMessage` is idempotent by message id. An id already indexed in
 another session is remapped to `{sessionId}:{id}` before the JSONL write, and
@@ -573,7 +688,10 @@ message appends in its application-owned outbox while host-core is restarting;
 the outbox flushes in order after a successful handshake and treats
 `UNIQUE constraint failed: messages.id` as an ack rather than pausing the
 queue. A `PERMISSION_DENIED:` append is dropped the same way so a poison head
-cannot stall the FIFO (D597). A missing sessions row is restored from the live JSONL (or created as a
+cannot stall the FIFO (D597). An append the outbox cannot classify is retried
+on a bounded backoff and then quarantined to an application-owned dead-letter
+file instead of holding that head, so one refused append cannot stall every
+session's writes (D656). A missing sessions row is restored from the live JSONL (or created as a
 stub under the same id when the file is gone) so a queued outbox can drain
 (D318). `session.delete` drops that session's outbox entries. In-flight
 checkpoints never go through the outbox: a checkpoint is only meaningful
@@ -769,6 +887,9 @@ type ToolsExecuteParams = {
   expectedCommandShellDialect?: "powershell" | "cmd" | "posix"
   /** Bash only: host default 60000; accepted override 1000..21600000. */
   timeoutMs?: number
+  /** Isolated `Write`/`Edit` delegate chain id; re-roots the call to that
+   * delegate's worktree (ADR 0329). Omitted for every other call. */
+  delegationId?: string
 }
 ```
 
@@ -797,7 +918,7 @@ Authoritative mode and workspace resolution are session-scoped:
 For `Read`/`Glob`/`Grep`/`Write`/`Edit`, the host classifies an explicit path
 outside the workspace and scratch roots before the low-risk auto-allow rule.
 `auto` executes it, while `ask` and `accept-edits` emit
-`permissions.request`; denial, timeout, or cancellation returns `TOOL_DENIED`
+`permissions.request`; denial or cancellation returns `TOOL_DENIED`
 without executing the operation. Relative `..` and symlink escapes use the
 same classification. Bash's working directory and implicit recursive walks do
 not inherit this exception.
@@ -1059,7 +1180,6 @@ params: {
   risk: "low" | "medium" | "high"
   argsPreview: unknown
   reason: string
-  timeoutMs: 120000
 }
 ```
 
@@ -1073,14 +1193,19 @@ params: {
 }
 ```
 
-Timeout behavior (**D005**): after 120s unresolved → deny.
+Local permission behavior (**D636 / ADR 0310**): an unresolved request remains
+pending until an explicit decision, cancellation, or host/process shutdown.
+The transport does not apply a deadline to `tools.execute`; tool-specific
+execution budgets still apply after approval.
+The same lifetime applies to embedding-host local tools, including image catalog
+and generation handlers. Stop and transport disposal abort their active signal;
+an absent RPC deadline must not become a zero-delay timer.
 
 `permissions.pending` returns the open requests as Host state (D374/D375):
 `{ requests: PendingPermission[] }`, oldest first, optionally scoped by
 `sessionId`. Each entry carries the same fields as the `permissions.request`
-notification plus `createdAt`, `expiresAt`, and `remainingMs`. Requests past
-the timeout are omitted. A client that attaches after the notification was
-emitted reads this list and answers through the unchanged
+notification plus `createdAt`. Requests remain listed until settled. A client
+that attaches after the notification was emitted reads this list and answers through the unchanged
 `permissions.resolve`; the notification path itself does not change.
 
 ## 7. Error codes
@@ -1120,6 +1245,7 @@ numeric slot; the string is the contract, the number is transport detail.
 | 1022 | PLUGIN_MARKET_NOT_FOUND | the platform does not have that plugin or version |
 | 1023 | PLUGIN_MARKET_RATE_LIMITED | the download endpoint asked the client to wait |
 | 1024 | PLUGIN_MARKET_NO_SOURCE | no distribution target can serve the package |
+| 1025 | WORKTREE_* | every isolated-session worktree failure (`WORKTREE_NOT_GIT`, `WORKTREE_CONFLICT`, `WORKTREE_PROJECT_DIRTY`, `WORKTREE_MISSING`, …) shares this slot; the string code distinguishes them |
 | -32029 | HOST_OVERLOADED | RPC dispatcher capacity exhausted |
 | -32601 | — | unknown method |
 | -32700 | — | unparseable request line |
@@ -1171,7 +1297,7 @@ Tool outcomes (`TOOL_DENIED`, `TOOL_TIMEOUT`, `PATH_OUTSIDE_WORKSPACE`,
 1. Electron spawns host and completes handshake
 2. health method returns ok
 3. denied tool path returns `TOOL_DENIED`
-4. timeout path returns deny decision after 120s
+4. an unresolved permission remains pending until an explicit decision or cancellation
 5. switching the selected workspace from A to B does not change the tool root
    of a call issued by session A
 6. Protocol v4 `session.endTurn` creates/returns exactly one notification for
@@ -1255,28 +1381,37 @@ The Host exposes the `configSync.getState`, `configSync.test`,
 `configSync.mapProject`, `configSync.listHistory`, `configSync.restore`,
 `configSync.changePassword`, and
 `configSync.disconnect` methods through the existing Electron Host bridge.
-These methods operate on the Host-owned encrypted vault and the explicit
-portable-domain adapter registry. They do not expose raw secrets or local
-filesystem bindings to the Renderer.
+These methods operate on the Host-owned encrypted S3 vault and explicit
+portable-domain adapters. Connection input uses `endpoint`, `region`, `bucket`,
+`prefix`, `accessKeyId`, optional `secretAccessKey` and `sessionToken`,
+`pathStyle`, and `mode: "sync" | "backup"`. The former WebDAV fields are
+rejected. Omitted credential fields mean reuse for the exact connection;
+an empty token clears it. Responses contain no secrets or vault keys.
 
-`configSync.test` performs a capability probe against a temporary remote
-object and reports whether reliable strong conditional writes are available.
-`configSync.syncNow` and the five-minute automatic poll serialize per vault,
-reconcile against the last acknowledged base, publish immutable encrypted
-objects followed by a conditional head update, and retain unresolved
-conflicts/security-sensitive imports as pending state. A failed head
-precondition restarts from the newly read head; it never overwrites blindly.
+`configSync.test` proves reliable conditional writes with a random temporary
+object and verifies cleanup. It returns `{ ok: true, conditionalWrites: true }`
+or an error, never an append-only capability result. `configure` performs the
+same probe and creates or unlocks the vault without applying remote settings.
 
-`configSync.listHistory` returns revision IDs, creation timestamps, parent IDs,
-and counts without decrypting data in the Renderer. `configSync.restore` requires
-an explicit propagation acknowledgement, writes an encrypted local recovery
-point, publishes a new head with a CAS, and keeps executable/security-sensitive
-entities pending until local approval. `configSync.changePassword` updates the
-wrapped-key header with a strong-ETag CAS; it does not revoke copied old vault
-keys.
+`configSync.syncNow` runs the saved mode. Sync reconciles shared, observed and
+remote state before conditional publication and local application. Backup
+publishes only a local snapshot to its separate head. Publication precondition
+failures restart from the latest head, never an unconditional overwrite.
 
-The public result is a redacted state snapshot. `configSync.changed` is a Host
-notification carrying that same snapshot. Approval and rejection require the
-current entity digest, so a security-relevant edit cannot reuse an older local
-decision. Disconnect deletes only local credentials, vault keys, metadata and
-staging files; remote objects remain intact.
+`configSync.syncNow` has no aggregate request deadline: the Host owns the
+multi-step operation, and renderer route navigation does not cancel it. A
+reopened Settings page reads the Host's current `syncing` state. Individual S3
+requests remain bounded; Host shutdown is still the lifecycle boundary.
+
+`configSync.listHistory` returns at most 30 indexed entries for the saved mode.
+It returns metadata only, and is not broadcast as a `configSync.changed` state.
+Sync `restore` requires `acknowledgePropagation: true` and publishes a new
+shared revision. Backup restore is local only and leaves remote heads intact.
+Both save a local recovery point and keep sensitive activation pending.
+`changePassword` CAS-rewraps the same key; it does not revoke unlocked devices.
+
+State responses and `configSync.changed` include `mode` and S3 connection
+metadata. Approval/rejection remain digest-bound. Only the new S3 format is
+supported; there is no old-data detection or migration. Disconnect removes
+only current S3 credentials, keys and local sync metadata/staging; unrelated
+files and remote objects remain intact. See `22-config-sync.md`.

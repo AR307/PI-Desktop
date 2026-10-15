@@ -19,10 +19,13 @@ sidecar launch payload, runtime options, and reuse comparison. Main includes
 only successfully resolved bindings independently marked
 `availableForSubagents` on enabled providers. Reusing a resolved pin does not
 skip this independent opt-in decision. `subagentProviders` continues to carry
-all resolved bindings so existing definition defaults keep working. If an
-opted-in row's vendor/model alias collides with a binding from another row,
-main uses that row's exact provider ID as the override key; one account's
-opt-in cannot authorize another account's pinned credentials.
+all resolved bindings so existing definition defaults keep working. Every
+selectable catalog entry uses its exact provider ID/model ID key, so channels
+with the same model never overwrite one another. MirrorCoding account models
+own opt-in and settings; every enabled, currently authorized text-capable group
+gets a separate routing entry. A stale account default group does not hide the
+other groups. Ambiguous account aliases require an explicit channel choice.
+One account's opt-in cannot authorize another account's pinned credentials.
 
 The runtime uses the separate keys for its model summary. Missing keys mean
 no cached override authorization. Other keys still use the existing
@@ -54,10 +57,17 @@ authority only in main, which is the side a plugin cannot rewrite (#386).
 
 D278's priority remains Task.model → definition pin → session model. The
 existing exact-session-model exception remains unchanged. Repeating the
-target definition's own pin key is treated as omitting `model`, so catalog
-echo does not become a tool error. The Task catalog displays each definition
+target definition's own pin key selects that pin, so catalog echo does not
+become a tool error. The Task catalog displays each definition
 default and says that omitting or repeating that key keeps it; this does not
 prohibit deliberately selecting an opted-in override for a different model.
+
+An explicit Task.model or a resume never follows a definition's fallback model
+list. Task startup text and structured details report the actual model,
+provider/channel, group and native reasoning. Resume retains the recorded
+model key and MC group, including after history reconstruction; an unavailable
+binding produces an error rather than inheriting the parent's model. Failure
+is not authorization for the parent to claim or substitute the requested model.
 
 ## Consequences
 

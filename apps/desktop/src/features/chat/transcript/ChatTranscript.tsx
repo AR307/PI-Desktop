@@ -1,4 +1,4 @@
-import { memo, type MouseEvent as ReactMouseEvent } from "react";
+import { memo, useMemo, useRef, type MouseEvent as ReactMouseEvent } from "react";
 import { useTranslation } from "react-i18next";
 import type { PlanningState, UiMessage } from "@pi-desktop/shared";
 import { proposalKindForMode } from "@pi-desktop/shared";
@@ -16,8 +16,11 @@ import {
   WorkingIndicator,
 } from "./ActivityGroup";
 import { TranscriptHistory, TranscriptTail } from "./AssistantTurn";
+import { collectLiveDelegationEntries } from "../../../lib/live-delegation-entries";
+import { reuseReadonlyMap } from "../../../lib/assistant-turns";
 import { useTranscriptScroll } from "./hooks/useTranscriptScroll";
 import type { TranscriptSearchTarget } from "../../../lib/transcript-reading";
+import type { RestoreTranscriptReading } from "../../../hooks/use-transcript-reading-position";
 import { TranscriptSearchContext } from "../../../lib/transcript-search-context";
 import { DisclosureAnchorContext } from "../../../lib/disclosure-anchor-context";
 import { api } from "../../../lib/api";
@@ -29,6 +32,7 @@ import {
   useTranscriptMenu,
 } from "./TranscriptMenu";
 import { conversationMenuItems } from "./menu-items";
+import { SlotSessionProvider } from "../../../plugins/renderer-slots/use-slots";
 
 type ChatTranscriptProps = {
   sessionId: string | undefined;
@@ -49,6 +53,7 @@ type ChatTranscriptProps = {
   paneVisible?: boolean;
   searchTarget?: TranscriptSearchTarget | null;
   readingWindow?: boolean;
+  onRestoreReading?: RestoreTranscriptReading;
   hasMoreAfter?: boolean;
   onLoadNewer?: () => Promise<void>;
   onReturnToLatest?: () => void;
@@ -83,6 +88,7 @@ function TranscriptBody({
   paneVisible = true,
   searchTarget = null,
   readingWindow = false,
+  onRestoreReading,
   hasMoreAfter = false,
   onLoadNewer,
   onReturnToLatest,
@@ -132,6 +138,7 @@ function TranscriptBody({
     veilPhase,
     handleScroll,
     revealEarlierHistory,
+    releaseFollow,
     jumpToLatest,
     disclosureAnchorNotifier,
   } = useTranscriptScroll({
@@ -148,9 +155,17 @@ function TranscriptBody({
     paneVisible,
     searchTarget,
     readingWindow,
+    onRestoreReading,
   });
 
   const specializedActivity = agentActivity;
+  const rawLiveDelegations = useMemo(
+    () => collectLiveDelegationEntries(historyEntries, tailEntry, transcriptRunning),
+    [historyEntries, tailEntry, transcriptRunning],
+  );
+  const liveDelegationsRef = useRef(rawLiveDelegations);
+  const liveDelegations = reuseReadonlyMap(liveDelegationsRef.current, rawLiveDelegations);
+  liveDelegationsRef.current = liveDelegations;
   const hasSpecializedActivity = specializedActivity !== undefined;
   // Existing output does not mean the turn has finished: a text stream can
   // pause, and completed tool rows can outlive their activity. Keep one tail
@@ -221,6 +236,7 @@ function TranscriptBody({
   return (
     <TranscriptSearchContext.Provider value={searchTarget}>
     <DisclosureAnchorContext.Provider value={disclosureAnchorNotifier}>
+    <SlotSessionProvider sessionId={sessionId ?? ""}>
     <div
       className="thread-wrap"
       ref={wrapRef}
@@ -239,6 +255,7 @@ function TranscriptBody({
           hasEarlier={hasEarlierHistory}
           loadingEarlier={loadingOlder}
           onRevealEarlier={revealEarlierHistory}
+          onReleaseFollow={releaseFollow}
         />
       ) : null}
       <div
@@ -267,7 +284,7 @@ function TranscriptBody({
             // view, which is exactly the jitter this avoids.
             <div className="transcript-hydration-spacer" aria-hidden />
           ) : null}
-          <TranscriptHistory entries={historyEntries} isRunning={isRunning} />
+          <TranscriptHistory entries={historyEntries} isRunning={isRunning} liveDelegations={liveDelegations} />
           {tailEntry ? (
             <TranscriptTail
               entry={tailEntry}
@@ -357,6 +374,7 @@ function TranscriptBody({
         </TooltipButton>
       ) : null}
     </div>
+    </SlotSessionProvider>
     </DisclosureAnchorContext.Provider>
     </TranscriptSearchContext.Provider>
   );

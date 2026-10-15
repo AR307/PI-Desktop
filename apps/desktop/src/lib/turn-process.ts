@@ -1,5 +1,6 @@
 import type { AppSettings, UiMessage } from "@pi-desktop/shared";
 import type { AssistantTurnEntry, AssistantTurnPart } from "./assistant-turns";
+import { isSubagentReturnPart } from "./assistant-turns";
 import { activityItemHasIssue } from "./activity-summary";
 
 type ThinkingDisplayMode = NonNullable<AppSettings["thinkingDisplayMode"]>;
@@ -54,41 +55,35 @@ export function shouldGroupTurnProcess(mode: ThinkingDisplayMode): boolean {
   return mode === "detailed" || mode === "compact";
 }
 
-/** The last activity chunk of a turn owns detailed-mode's default-open tool. */
-export function isLastActivityPart(
-  parts: readonly AssistantTurnPart[],
-  part: AssistantTurnPart,
-): boolean {
-  if (part.kind !== "activity") return false;
-  for (let index = parts.length - 1; index >= 0; index -= 1) {
-    if (parts[index].kind === "activity") return parts[index] === part;
-  }
-  return false;
-}
-
-/** Detailed keeps narration visible; compact reveals active failures only. */
+/** Active processes open in Detailed; settled processes default closed. */
 export function shouldAutoOpenTurnProcess(
   mode: ThinkingDisplayMode,
   isActive: boolean,
   hasToolFailure: boolean,
 ): boolean {
-  return mode === "detailed" || (isActive && hasToolFailure);
+  return isActive && (mode === "detailed" || hasToolFailure);
 }
 
 /**
  * Only a trailing assistant text can be the answer: text followed by tools is
  * progress. The stream carries no final-answer marker, so a live trailing text
  * remains visible until a later activity establishes that it was intermediate.
- * Errors remain outside the disclosure even when more activity follows them.
+ * Errors remain outside the disclosure even when more activity follows them,
+ * and so do image results: a cancelled generation may carry no text at all,
+ * but its card holds the retry-download action.
  */
 export function projectTurnProcess(entry: AssistantTurnEntry) {
   const last = entry.parts.at(-1);
   const answer =
     last?.kind === "message" && last.message.content.trim() ? last : undefined;
   const process: AssistantTurnPart[] = [];
-  const responses: Extract<AssistantTurnPart, { kind: "message" }>[] = [];
+  const responses: AssistantTurnPart[] = [];
   for (const part of entry.parts) {
-    if (part.kind === "message" && (part === answer || part.message.error)) {
+    if (
+      isSubagentReturnPart(part) ||
+      (part.kind === "message" &&
+      (part === answer || part.message.error || part.message.imageGeneration))
+    ) {
       responses.push(part);
     } else {
       process.push(part);

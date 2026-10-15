@@ -1,7 +1,10 @@
 import { useEffect, useRef } from "react";
 import { useTranslation } from "react-i18next";
 import type { ComposerCommand } from "@pi-desktop/shared";
-import type { AutocompleteItem, useComposerAutocomplete } from "../hooks/use-composer-autocomplete";
+import type {
+  CompletionController,
+  CompletionItem,
+} from "../features/chat/composer/hooks/useComposerCompletions";
 import {
   IconBookOpen,
   IconFileText,
@@ -47,12 +50,13 @@ const GROUP_KEYS: Record<ComposerCommand["kind"], string> = {
   plugin: "chat.slashGroupPlugins",
   extension: "chat.slashGroupExtensions",
   skill: "chat.slashGroupSkills",
+  mcp: "chat.slashGroupMcp",
 };
 
 function CommandIcon({ kind }: { kind: ComposerCommand["kind"] }) {
   if (kind === "template") return <IconSlash size={14} />;
   if (kind === "skill") return <IconBookOpen size={14} />;
-  if (kind === "plugin" || kind === "extension") return <IconPlug size={14} />;
+  if (kind === "plugin" || kind === "extension" || kind === "mcp") return <IconPlug size={14} />;
   return <IconSparkles size={14} />;
 }
 
@@ -62,7 +66,7 @@ export function ComposerAutocomplete({
   onAccept,
 }: {
   anchorRef: React.RefObject<HTMLElement | null>;
-  ac: ReturnType<typeof useComposerAutocomplete>;
+  ac: CompletionController;
   onAccept: (index: number) => void;
 }) {
   const { t } = useTranslation();
@@ -77,14 +81,16 @@ export function ComposerAutocomplete({
 
   if (!ac.open) return null;
 
-  const renderRow = (item: AutocompleteItem, index: number) => {
+  const renderRow = (item: CompletionItem, index: number) => {
     const active = index === ac.highlight;
     const rowClass = `composer-plus-item composer-ac-item ${active ? "kb-active" : ""}`;
     const commonProps = {
       key:
         item.kind === "command"
           ? `c:${item.command.kind}:${item.command.name}`
-          : `p:${item.entry.path}`,
+          : item.kind === "plugin"
+            ? `pl:${item.pluginId}:${index}`
+            : `p:${item.entry.path}`,
       type: "button" as const,
       role: "option" as const,
       "aria-selected": active,
@@ -106,7 +112,7 @@ export function ComposerAutocomplete({
           <span className="composer-ac-name">
             /<Highlighted text={item.command.name} ranges={item.match.ranges} />
           </span>
-          {item.command.kind === "skill" && item.command.title !== item.command.name ? (
+          {(item.command.kind === "skill" || item.command.kind === "mcp") && item.command.title !== item.command.name ? (
             <span className="composer-ac-hint">{item.command.title}</span>
           ) : null}
           {item.command.argumentHint ? (
@@ -115,6 +121,17 @@ export function ComposerAutocomplete({
           {item.command.description ? (
             <span className="composer-ac-desc">{item.command.description}</span>
           ) : null}
+        </button>
+      );
+    }
+    if (item.kind === "plugin") {
+      return (
+        <button {...commonProps} title={item.row.detail}>
+          <span className="composer-ac-icon">
+            <IconPlug size={14} />
+          </span>
+          <span className="composer-ac-name">{item.row.label}</span>
+          {item.row.detail ? <span className="composer-ac-desc">{item.row.detail}</span> : null}
         </button>
       );
     }
@@ -148,6 +165,14 @@ export function ComposerAutocomplete({
           </div>,
         );
       }
+    } else if (item.kind === "plugin" && lastGroup !== `plugin:${item.pluginId}`) {
+      // A plugin's rows sit under its own name, after the host's.
+      lastGroup = `plugin:${item.pluginId}`;
+      rows.push(
+        <div key={`g:${lastGroup}`} className="composer-model-group-label">
+          {item.pluginName}
+        </div>,
+      );
     }
     rows.push(renderRow(item, index));
   });
@@ -166,7 +191,13 @@ export function ComposerAutocomplete({
       onClose={ac.close}
       anchorRef={anchorRef}
       menuClassName="composer-autocomplete"
-      label={t(ac.mode === "file" ? "chat.fileMenu" : "chat.slashMenu")}
+      label={t(
+        ac.mode === "file"
+          ? "chat.fileMenu"
+          : ac.mode === "plugin"
+            ? "chat.pluginTriggerMenu"
+            : "chat.slashMenu",
+      )}
       role="listbox"
       side="top"
       matchAnchorWidth

@@ -69,8 +69,15 @@ async function fixture(outcomes, run) {
   const events = [];
   const oauth = new VendorOAuth({ call: host.call, openExternal: async () => {}, emit: event => {
     events.push(event);
-    if (event.kind === "prompt") oauth.respond({ loginId: event.loginId,
-      promptId: event.request.promptId, value: "fixture-authorization-code" });
+    if (event.kind === "prompt") {
+      const value = event.request.type === "select"
+        ? "copy_code"
+        : event.request.type === "manual_code"
+          ? `fixture-authorization-code#${new URL(events.find(candidate =>
+              candidate.kind === "authUrl" && candidate.loginId === event.loginId).url).searchParams.get("state")}`
+          : undefined;
+      oauth.respond({ loginId: event.loginId, promptId: event.request.promptId, value });
+    }
   } });
   const signIn = async () => {
     await oauth.start("anthropic");
@@ -106,8 +113,10 @@ test("real Anthropic authorization exchange retries 429 and stores one successfu
     assert.equal(requests[0].body.grant_type, "authorization_code");
     assert.deepEqual(requests[1].body, requests[0].body, "PKCE/code body changed during retry");
     assert.ok(requests[1].time - requests[0].time >= 950);
-    assert.equal(host.writes.length, 1);
-    assert.equal(JSON.parse(host.writes[0].value).refresh, success.refresh_token);
+    const accountWrites = host.writes.filter(write => write.secretRef === secretRefForProviderOauth(result.providerId));
+    assert.equal(accountWrites.length, 1);
+    assert.equal(JSON.parse(accountWrites[0].value).refresh, success.refresh_token);
+    assert.equal(host.writes.filter(write => write.secretRef === "secret:installation:oauth-device-id").length, 1);
   });
 });
 
@@ -127,6 +136,18 @@ test("real refresh retries inside the provider lock and preserves request header
   });
 });
 
+test("token requests identify the client instead of inheriting a browser User-Agent", async () => {
+  // Electron's main-process fetch is net.fetch, which defaults to Chromium's
+  // "Mozilla/5.0 ..." User-Agent; the token endpoint answers that with a
+  // permanent 429 (issue #1337). Login and refresh must both send pi's own UA.
+  await fixture([{}], async ({ requests, signIn, oauth, seed }) => {
+    assert.equal((await signIn()).kind, "done");
+    await oauth.resolveAuth(seed());
+    assert.deepEqual(requests.map(req => req.body.grant_type), ["authorization_code", "refresh_token"]);
+    for (const req of requests) assert.match(req.headers["user-agent"], /^pi \(/);
+  });
+});
+
 test("429 exhaustion is three attempts with safe recovery text and no stored partial login", async () => {
   await fixture([limited()], async ({ requests, host, signIn }) => {
     const result = await signIn();
@@ -136,7 +157,7 @@ test("429 exhaustion is three attempts with safe recovery text and no stored par
     assert.match(result.message, /rate limited.*start a new sign-in/i);
     safeError({ message: result.message });
     assert.equal(host.providers.size, 0);
-    assert.equal(host.secrets.size, 0);
+    assert.deepEqual([...host.secrets.keys()], ["secret:installation:oauth-device-id"]);
   });
 });
 

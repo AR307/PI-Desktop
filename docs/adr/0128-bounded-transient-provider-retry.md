@@ -1,5 +1,8 @@
 # ADR 0128: Share one bounded budget for transient provider failures
 
+> 2026-09-29 amendment: ADR [response-completion-recovery](response-completion-recovery.md) supersedes post-content automatic replay and thinking-only retry. Pre-content transient budgets remain unchanged.
+
+
 - Status: Accepted
 - Date: 2026-08-21
 - Deciders: PI-Desktop core

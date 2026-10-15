@@ -96,20 +96,26 @@ test("plugin views reach the panel body and the empty state", () => {
   assert.doesNotMatch(panelSource, /openPluginView\(view\)/);
 });
 
-test("the native surface keeps its full bounds while the launcher is active", () => {
+test("the native surface keeps its full and current bounds while the launcher is active", () => {
   assert.match(panelSource, /blocked=\{\s*exiting \|\| panelBlocked \|\| blockingOverlayActive\s*\}/s);
   assert.doesNotMatch(panelSource, /avoid: pluginSurface/);
   assert.doesNotMatch(panelSource, /menuOpen|work-panel-new-menu|placeWorkPanelMenu/);
   assert.doesNotMatch(viewTabSource, /occludedById/);
   assert.match(viewTabSource, /y: rect\.y/);
   assert.match(viewTabSource, /height: rect\.height/);
-  // Visibility and bounds are separate effects: only panel-wide blocking and
-  // lifecycle transitions hide the native page, so creating a New tab cannot
-  // alter the active surface's measured rectangle.
+  // Visibility and bounds are separate effects: blocking controls attachment,
+  // while renderer layout commits and element resizes keep the complete native
+  // rectangle current without changing the active tab.
   assert.match(
     viewTabSource,
-    /pluginViewSetVisible\(pluginId, viewId, !blocked, sessionId\)[\s\S]*pluginViewSetBounds/s,
+    /pluginViewSetVisible\(pluginId, viewId, !blocked, sessionId\)/,
   );
+  assert.match(
+    viewTabSource,
+    /useLayoutEffect\(\(\) => \{\s*reportBounds\(\);\s*\}\)/s,
+  );
+  assert.match(viewTabSource, /new ResizeObserver\(reportBounds\)/);
+  assert.match(viewTabSource, /void api\.pluginViewSetBounds\(\{/);
 });
 
 test("an unknown icon token degrades instead of rendering plugin markup", () => {
@@ -170,7 +176,10 @@ test("a docked view is as isolated as a detached panel window", () => {
   assert.match(viewHostSource, /contextIsolation: true/);
   assert.match(viewHostSource, /nodeIntegration: false/);
   assert.match(viewHostSource, /webviewTag: false/);
-  assert.match(viewHostSource, /preload: join\(__dirname, "\.\.\/preload\/plugin-panel\.js"\)/);
+  assert.match(
+    viewHostSource,
+    /preload: join\(\s*getModuleDirectory\(import\.meta\.url\),\s*"\.\.\/preload\/plugin-panel\.js",?\s*\)/,
+  );
   // `window.open` would mint a chromeless window outside that policy.
   assert.match(viewHostSource, /setWindowOpenHandler\(\(\{ url \}\) =>/);
   assert.match(viewHostSource, /action: "deny"/);
@@ -197,6 +206,10 @@ test("an embedded view drops the window-control chrome", () => {
     preloadSource,
     /if \(isEmbeddedPanel\(\)\) \{[\s\S]*--pi-plugin-titlebar-height", "0px"[\s\S]*return;/,
   );
+  assert.match(preloadSource, /resetEmbeddedSurfaceChrome\(\)/);
+  assert.match(preloadSource, /element\.style\.setProperty\("margin", "0"\)/);
+  assert.match(preloadSource, /element\.style\.setProperty\("border", "0"\)/);
+  assert.match(preloadSource, /element\.style\.setProperty\("background", "transparent"\)/);
   // The bridge is identical either way, so one HTML entry works in both.
   assert.match(preloadSource, /contextBridge\.exposeInMainWorld\("pluginBridge", bridge\)/);
 });
@@ -257,7 +270,7 @@ test("the view list is filtered by permission, scope, and entry existence", () =
     /isBrowserView = pluginId === BROWSER_PLUGIN_ID && viewId === BROWSER_VIEW_ID/,
   );
   assert.match(openBody, /isBrowserView && sessionId/);
-  assert.match(openBody, /isBrowserView && location/);
+  assert.match(openBody, /browserHost\.setChromeSession\(sessionId,.*location\)/);
 });
 
 test("opening a different project refreshes the scope-filtered view list", () => {

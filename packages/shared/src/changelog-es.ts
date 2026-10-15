@@ -2,6 +2,220 @@ import type { ChangelogEntry } from "./changelog.js";
 
 export const esEntries: ChangelogEntry[] = [
   {
+    "version": "0.20.2",
+    "date": "2026-10-15",
+    "highlights": [
+      "El agente genera imágenes tras autorizar MirrorCoding sin configurar manualmente el modo de imagen.",
+      "Nuevos iconos compartidos en escritorio y Android.",
+      "Se integran la navegación móvil, las notificaciones, la conexión en segundo plano y la posición de lectura.",
+      "Se sincroniza upstream 0.20.1 conservando la migración de datos, el historial móvil y las tareas independientes."
+    ]
+  },
+  {
+    "version": "0.20.1",
+    "date": "2026-10-13",
+    "highlights": [
+      "Configura endpoints personalizados sin una clave API; en ese modo las solicitudes no envían credenciales.",
+      "Abre archivos locales fuera de una carpeta de proyecto en el navegador integrado; las páginas web siguen limitadas a los archivos del proyecto.",
+      "Consulta por separado la espera del proveedor, la respuesta transmitida del modelo y el tiempo de las herramientas principales, con totales y porcentajes.",
+      "Tras detener un turno, el siguiente espera a que termine el anterior para evitar que el trabajo se solape.",
+      "El ZIP portátil de Windows ahora incluye el canal de actualización para que las copias instaladas detecten y descarguen actualizaciones.",
+      "Los plugins pueden consultar los modos de redirección que admite fetch y elegir inspeccionar o rechazar una redirección sin seguirla; las llamadas fetch existentes siguen redirigiendo de forma predeterminada.",
+      "Las estimaciones de compactación de textos largos y de velocidad de respuesta del modelo son más precisas; los flujos interrumpidos conservan la alternativa actual.",
+      "La selección de texto se mantiene continua al atravesar superposiciones emergentes.",
+      "Los menús de proyecto siguen visibles al abrirlos desde filas cerca de la parte inferior de la barra lateral.",
+      "Windows mantiene el bloqueo del instalador mientras elimina copias de seguridad antiguas.",
+    ],
+  },
+  {
+    "version": "0.19.1",
+    "date": "2026-10-13",
+    "highlights": [
+      "Al volver al modo personalizado, se restaura la dirección del proxy guardada aunque el borrador actual esté vacío o no sea válido.",
+      "Las acciones del navegador vencen y se recuperan cuando una página deja de responder, en vez de quedarse esperando indefinidamente.",
+    ],
+  },
+  {
+    "version": "0.19.0",
+    "date": "2026-10-13",
+    "highlights": [
+      "Crea proyectos SSH desde Inicio, explora carpetas remotas en un diálogo aparte y elige una identidad SSH para cada host.",
+      "Añade o quita carpetas compatibles de un proyecto sin mover los chats existentes de su espacio de trabajo.",
+      "Sincroniza los ajustes elegidos entre dispositivos y mantén las listas de proyectos locales en cada uno.",
+      "Los Hosts remotos emparejados se actualizan a la versión actual del escritorio mediante la instalación SSH verificada y se reconectan en el mismo lugar.",
+      "Activa o desactiva las Skills integradas desde Ajustes y restaura las opciones incluidas con la aplicación.",
+      "La tarjeta de actualización muestra el progreso de descarga y permite cancelarla o volver a intentarlo.",
+      "La configuración personalizada del proxy se conserva al cambiar de modo de red.",
+      "Al eliminar un mensaje se conservan la salida de IA en curso y los demás mensajes de la conversación.",
+      "Las capturas de pantalla del navegador se recuperan si se bloquean, sin dejar la página atascada.",
+      "El catálogo de modelos integrado se actualizó con nuevos modelos y capacidades vigentes.",
+      "AskTool tiene un límite de longitud claro; las preguntas demasiado largas se rechazan antes de abrir la tarjeta.",
+    ],
+  },
+  {
+    "version": "0.18.2",
+    "date": "2026-10-14",
+    "highlights": [
+      "Migra datos que contienen archivos app.asar sin errores ENOTDIR.",
+      "Conserva los enlaces de Windows cuyos destinos ya no existen sin interrumpir la migración.",
+      "Muestra las rutas de origen y destino cuando falla la copia de un archivo."
+    ]
+  },
+  {
+    "version": "0.18.1",
+    "date": "2026-10-14",
+    "highlights": [
+      "Cambia la ubicación de almacenamiento tras la instalación, aunque aún no exista la carpeta de destino o el directorio de datos original.",
+      "Mueve los datos existentes a otra carpeta o unidad conservando la copia de seguridad original.",
+      "Conserva el acceso a la memoria y las instrucciones del proyecto tras mover los datos en Windows."
+    ]
+  },
+  {
+    "version": "0.18.0",
+    "date": "2026-10-09",
+    "highlights": [
+      "Crea y nombra proyectos SSH desde Inicio, elige carpetas en un diálogo separado y conserva las solicitudes y credenciales del modelo en tu equipo.",
+      "Configura el clasificador Jev de TypeSafe desde Añadir servicio y verifica la clave API antes de guardarla.",
+      "La sincronización en la nube ya está disponible en los ajustes de la versión empaquetada y se marca como experimental. Las listas de proyectos permanecen en cada dispositivo.",
+      "Añade desde Añadir servicio proveedores de plugins con clave API, descripciones localizadas y detección de modelos tras configurarlos.",
+      "Las acciones autorizadas de plugins pueden transformar el borrador del Composer y deshacer el cambio; la mejora de prompts ahora es un plugin opcional.",
+      "Los detalles de las herramientas permanecen contraídos hasta que los abras, para mantener visible la respuesta completa.",
+      "Consulta preguntas y respuestas anteriores de AskTool en una tarjeta clara de preguntas y respuestas.",
+      "Genera títulos de sesión con un plugin opcional; el primer mensaje sigue como alternativa y los cambios manuales tienen prioridad.",
+      "Abre enlaces locales a archivos Markdown desde el chat en el Administrador de archivos integrado, incluidos enlaces relativos y referencias a líneas.",
+      "La lista de modelos del Composer ahora muestra los límites de contexto configurados.",
+      "Los plugins pueden inspeccionar o rechazar redirecciones de red; las llamadas fetch existentes siguen las redirecciones de forma predeterminada.",
+      "Detén un subagente en ejecución desde su tarjeta o panel de detalles, o todos los de la sesión actual, sin detener al coordinador.",
+      "Consulta la duración total de la sesión, el tiempo acumulado de respuesta del modelo y su proporción en el panel de uso del contexto.",
+      "Un Host remoto emparejado que se queda atrás respecto a la versión de escritorio ahora se actualiza mediante la misma instalación SSH verificada y se vuelve a emparejar en el mismo lugar, en lugar de solo pedirle que lo actualice.",
+    ],
+  },
+  {
+    "version": "0.17.0",
+    "date": "2026-10-07",
+    "highlights": [
+      "Adjunta imágenes en línea mientras escribes y previsualiza las imágenes enviadas dentro de la conversación.",
+      "Las referencias a conversaciones se muestran como etiquetas legibles y abren directamente la sesión enlazada.",
+      "Elige qué servidores MCP y herramientas puede usar cada mensaje.",
+      "Vuelve rápidamente a los modelos recientes desde el selector.",
+      "Genera y edita imágenes con tu cuenta de ChatGPT iniciada.",
+      "Los proveedores de plugins ahora pueden autenticar cuentas mediante OAuth.",
+      "Usa comandos de barra con espacio de nombres para encontrar el Skill que necesitas.",
+      "Expande la lista de tareas Todo para revisar todos los elementos de una lista.",
+      "Importa modelos, Skills y servidores MCP desde sus páginas de Ajustes correspondientes.",
+      "Las solicitudes a proveedores y mercados respetan el proxy del sistema.",
+      "El contenido extenso de las herramientas se muestra por páginas y las transcripciones se actualizan más rápido para mantener la fluidez.",
+      "Si un panel de plugin nunca termina de cargar, ahora muestra un error claro.",
+    ],
+  },
+  {
+    "version": "0.16.2",
+    "date": "2026-10-07",
+    "highlights": [
+      "Incluye las mejoras de upstream 0.16.1 en tareas programadas, referencias a archivos, capacidades de modelos y visualización de conversaciones.",
+      "Vincula el teléfono una vez para descubrir todos los equipos que activen el uso compartido de la cuenta, con sus proyectos y conversaciones.",
+      "Lee el historial cargado sin conexión y sin el límite de 500 mensajes; recupera cambios persistentes tras reiniciar el escritorio.",
+      "Busca actualizaciones de Android en Cuenta, descarga el APK y abre el instalador del sistema conservando los datos.",
+      "Mejora el inicio de sesión móvil, los errores de vinculación, la detección sin conexión y la recuperación de permisos compartidos.",
+      "Corrige las vistas previas HTML locales y permite leer o editar registros UTF-16 con BOM sin tratarlos como binarios.",
+      "Aísla los fallos de edición de subagentes, informa cuando se agota la recuperación y guarda la conversación antes de salir."
+    ]
+  },
+  {
+    "version": "0.16.1",
+    "date": "2026-10-04",
+    "highlights": [
+      "Elige una ubicación personalizada de datos en Ajustes, sigue una migración en frío verificada y limpia solo las cachés que se pueden reconstruir.",
+      "Las tareas programadas pueden ejecutarse por intervalos: cada 5 minutos hasta 24 horas, contados desde que la tarea se activó.",
+      "La página de tareas programadas empareja la lista de tareas con la tarea seleccionada: su último resultado, la próxima ejecución, la instrucción y el historial de ejecuciones.",
+      "La conversación de una ejecución tiene una fila de vuelta a su tarea y a su ejecución, y cada tarea decide si una ejecución abre una conversación nueva o continúa una existente.",
+      "Pega un enlace pi-desktop://session/<id> en el Composer para pasar una conversación a otro turno.",
+      "Abre referencias de archivo path:line desde el chat, el panel de trabajo y el administrador de archivos incluido, y salta directamente a esa línea.",
+      "El código en línea que apunta a una ruta de archivo real ahora es un enlace en el que puedes hacer clic; el resto del código en línea y los bloques de código siguen siendo texto simple.",
+      "Cada servidor MCP puede definir su propio tiempo de espera de conexión (1–600 segundos), y borrarlo restaura el valor predeterminado.",
+      "Las lecturas devuelven archivos PNG, JPEG, GIF y WebP como imágenes, y los resultados de imagen de herramientas MCP y de plugins llegan a los modelos de visión como bloques de imagen.",
+      "Los límites y capacidades de los modelos del chat ahora vienen de models.dev, y una ventana de contexto que fijaste tú ya no se sobrescribe.",
+      "La compactación automática conserva su estado autorizado: que falte un espacio de trabajo del plan ya no termina el turno.",
+      "El tiempo de ejecución del agente pasa a la línea Pi 1.0.1 y mantiene el comportamiento de proveedores, OAuth y extensiones de confianza.",
+      "Las herramientas MCP definidas por el usuario ahora piden aprobación en los modos Ask y Accept-edits; Auto sigue ejecutándolas sin preguntar.",
+      "Las sesiones largas siguen siendo utilizables por clientes MCP externos: la lectura de la sesión acota sus metadatos de compactación en lugar de truncar la respuesta.",
+      "Las conversaciones largas siguen fluidas mientras se transmiten las respuestas, sin saltos verticales y sin una línea de cursor perdida dentro de listas anidadas.",
+      "Las copias o respaldos de un archivo de sesión ya no aparecen como una segunda conversación.",
+      "Eliminar un proyecto dentro de un grupo de varias carpetas y desvincular una carpeta que aún tiene chats ahora funcionan de forma segura.",
+      "Seleccionar una carpeta que pertenece a un grupo de proyectos cerrado reabre ese grupo en lugar de crear un duplicado.",
+      "Hacer clic en una marca del esquema de la conversación se desplaza a ese turno en lugar de volver al final.",
+      "Un prompt enviado justo antes de cambiar de sesión ya no aparece dos veces cuando vuelves.",
+      "Las tarjetas de pregunta son compactas y se resuelven a través del host: las respuestas llegan al agente, el botón de enviar se recupera y una tarjeta respondida no vuelve.",
+      "Las vistas de plugins acopladas, como el navegador y el administrador de archivos, se ocultan mientras hay diálogos de proyecto o avisos de extensión abiertos, y los plugins lanzados desde el Dock vuelven a encontrar npm.",
+      "Descartar un aviso de actualización se recuerda y cancela la descarga de esa versión, así que no puede instalarse al salir.",
+      "Las transcripciones de ejecuciones programadas quedan fuera de la lista de sesiones, del cambiador rápido y de la bandeja.",
+      "Los modelos retirados o revocados quedan fuera del panel de servicio activo, mientras tus vinculaciones y anulaciones guardadas siguen siendo editables.",
+      "Las herramientas bajo demanda siguen disponibles durante toda la sesión, y las declaraciones de herramientas se envían una vez por cuenta para que las búsquedas de herramientas dejen de invalidar el prefijo de la solicitud.",
+      "Se corrigió una ventana negra al iniciar causada por chunks compartidos que resolvían la raíz de la aplicación un nivel de más.",
+      "Las dependencias de producción ahora resuelven versiones parcheadas de brace-expansion y js-yaml.",
+    ],
+  },
+
+  {
+    "version": "0.16.0",
+    "date": "2026-10-02",
+    "highlights": [
+      "Live Voice ya está disponible para todos y las llamadas comienzan en la conversación actual.",
+      "Nueva lista de tareas por conversación que conserva su estado autorizado aunque se reinicie el servicio local.",
+      "Los avisos puntuales ahora aparecen en la pila de toasts compartida en lugar de diálogos bloqueantes.",
+      "Las listas de modelos siguen los metadatos oficiales del proveedor para que los servicios relay y los nombres de modelo sean correctos.",
+      "Acopla la barra de llamadas de Live Voice como widget de escritorio y responde por voz a la pregunta abierta de la conversación vinculada.",
+      "Una llamada de Live Voice vinculada a una conversación de trabajo muestra la pregunta, el permiso o el plan que espera, con una acción que abre esa conversación.",
+      "Los plugins pueden ocupar siete espacios de UI finalizados y dibujar sus propios diálogos por capas.",
+      "Los plugins pueden leer y reescribir el borrador del Composer y solicitar acceso de red a cualquier host durante la instalación.",
+      "Cancelar una extensión de confianza retira sus comandos del SDK, actualizaciones de herramientas, subprocesos y prompts en cola; los manejadores de inicio, apagado y notificaciones ahora tienen esperas acotadas.",
+      "La salida grande de los subagentes se vuelca a disco y se muestran sugerencias para continuar en lugar de fallar el turno.",
+      "Reanudar un subagente ya no toma la vinculación de modelo privada de otra definición, y los permisos de delegación revocados se aplican en el siguiente turno.",
+      "Las tarjetas de topología de los subagentes y sus filas de procesos en vivo ahora siguen el ancho de la conversación principal.",
+      "Los modelos Claude en una cuenta de GitHub Copilot se autentican con un token Bearer en lugar de fallar por falta de la cabecera Authorization.",
+      "Las filas de proveedor de Google Gemini vuelven a enviar solicitudes (issue #1072).",
+      "Al eliminar un proveedor se elimina también la generación de imágenes predeterminada vinculada a él.",
+      "Los modelos OpenAI Codex OAuth pueden activar la búsqueda web nativa alojada por el proveedor.",
+      "La búsqueda web alojada tiene un contrato completo de replay y estimación, y las conversaciones escritas antes del cambio de contrato siguen siendo utilizables.",
+      "La compactación vuelve a funcionar en una pasarela que conecta con un backend de Codex.",
+      "Copia tablas Markdown individuales, descárgalas como CSV o expándelas para leerlas.",
+      "Abre las referencias a archivos del chat con rutas completas dentro de las raíces de proyecto, y mantén los enlaces de los mensajes de usuario seleccionables y copiables.",
+      "El control de razonamiento del Composer se desliza con suavidad a los niveles elegidos con clic o teclado, sigue el arrastre y ahora pinta de forma coherente su pista rellena y los resaltados al pasar el cursor.",
+      "Mantén ágiles las conversaciones largas durante el streaming y libera cada espacio de solicitud del host dentro de un límite de tiempo.",
+      "Mantén fiables las conexiones MCP: las respuestas streamable-HTTP llegan antes de que se cierre el flujo SSE, y las rutas del emisor OAuth y los ámbitos de recursos se conservan.",
+      "Acepta la antigua forma de herramienta old_string/new_string que los modelos más antiguos siguen enviando a Edit.",
+      "Reduce el mínimo de la ventana a 800×560, limitado al área de trabajo, y elimina el borde sin marco de Windows.",
+      "Recargar el renderer conserva las tarjetas de aprobación y pregunta pendientes de una conversación.",
+    ],
+  },
+  {
+    "version": "0.15.11",
+    "date": "2026-10-01",
+    "highlights": [
+      "Ultra combina razonamiento específico del modelo, entrega asíncrona y subagentes reanudables con distintos modelos.",
+      "Las tarjetas persistentes ReturnToParent muestran resultados y estado correcto, con controles para detener uno o todos los subagentes.",
+      "Se alinean el catálogo, los protocolos nativos y Fast por sesión de MirrorCoding; las respuestas parciales se conservan para continuar.",
+      "Android incorpora controles de modelo y modo, Fast y Ultra sincronizados, generación de imágenes y tarjetas de resultados."
+    ]
+  },
+
+  {
+    "version": "0.15.10",
+    "date": "2026-09-28",
+    "highlights": [
+      "Los plugins del mercado aparecen ahora en orden aleatorio en lugar de alfabético.",
+    ],
+  },
+
+  {
+    "version": "0.15.9",
+    "date": "2026-09-27",
+    "highlights": [
+      "Elimina los archivos obsoletos de ayuda de primer inicio de los paquetes DMG y ZIP de macOS.",
+    ],
+  },
+
+  {
     "version": "0.15.6",
     "date": "2026-09-23",
     "highlights": [

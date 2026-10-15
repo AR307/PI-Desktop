@@ -24,7 +24,7 @@ those triage fields as optional.
    a fixed GitHub bug-form URL, prefills `app-version`, `os`, and
    `environment` from Main-owned version info, and opens it with
    `shell.openExternal`. The renderer cannot supply a URL.
-3. The constructed URL must stay on `https://github.com/vastsa/PI-Desktop/issues/new`
+3. The constructed URL must stay on `https://github.com/AR307/PI-Desktop/issues/new`
    with `template=bug_report.yml`. Feature requests remain available from
    GitHub's template picker, not from a second Settings action.
 

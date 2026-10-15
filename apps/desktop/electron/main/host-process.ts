@@ -12,6 +12,7 @@ import {
 } from "./linux-glibc";
 import { DbSchemaTooNewError, parseSchemaTooNew } from "./host-boot-diagnostics";
 import { redactValue } from "./logger";
+import { getModuleDirectory } from "./module-path";
 
 export type {
   HostNotificationHandler,
@@ -19,7 +20,7 @@ export type {
   StderrHandler,
 } from "@pi-desktop/host-runtime";
 
-function resolveHostBinary(): string {
+export function resolveHostBinary(): string {
   if (process.env.PI_DESKTOP_HOST_BIN && existsSync(process.env.PI_DESKTOP_HOST_BIN)) {
     return process.env.PI_DESKTOP_HOST_BIN;
   }
@@ -28,8 +29,14 @@ function resolveHostBinary(): string {
     // packaged resources
     join(process.resourcesPath || "", `bin/pi-desktop-host-core${exe}`),
     // monorepo dev/build
-    join(__dirname, `../../../../target/debug/pi-desktop-host-core${exe}`),
-    join(__dirname, `../../../../target/release/pi-desktop-host-core${exe}`),
+    join(
+      getModuleDirectory(import.meta.url),
+      `../../../../target/debug/pi-desktop-host-core${exe}`,
+    ),
+    join(
+      getModuleDirectory(import.meta.url),
+      `../../../../target/release/pi-desktop-host-core${exe}`,
+    ),
   ];
   for (const c of candidates) {
     if (c && existsSync(c)) return c;
@@ -49,8 +56,8 @@ function resolveHostBinary(): string {
 function resolveBuiltinPluginsDir(): string | null {
   const candidates = [
     join(process.resourcesPath || "", "plugins"),
-    join(__dirname, "../../resources/plugins"),
-    join(__dirname, "../../../resources/plugins"),
+    join(getModuleDirectory(import.meta.url), "../../resources/plugins"),
+    join(getModuleDirectory(import.meta.url), "../../../resources/plugins"),
   ];
   for (const candidate of candidates) {
     if (candidate && existsSync(candidate)) return candidate;
@@ -114,7 +121,10 @@ export class HostProcess extends RuntimeHostProcess {
       // Only Electron knows whether this build runs from `resources/` or a
       // source checkout, so it resolves the bundled-plugin directory and
       // host-core simply reconciles its registry against it (ADR 0105).
-      env: builtinPlugins ? { PI_DESKTOP_BUILTIN_PLUGINS_DIR: builtinPlugins } : {},
+      env: {
+        PI_DESKTOP_ELECTRON_PID: String(process.pid),
+        ...(builtinPlugins ? { PI_DESKTOP_BUILTIN_PLUGINS_DIR: builtinPlugins } : {}),
+      },
       onStderr: onStderr ?? fallbackStderrLogger,
       diagnoseFailure: diagnoseHostFailure,
     });

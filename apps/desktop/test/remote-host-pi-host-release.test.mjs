@@ -22,11 +22,12 @@ const {
   targetKey,
   versionsMatch,
 } = await import("../electron/main/remote/pi-host-release.ts");
+const { GITHUB_REPO } = await import("@pi-desktop/shared");
 
 const VERSION = "0.15.1-beta.5";
 const LINUX_X64 = { platform: "linux", arch: "x64" };
 const ARTIFACT_NAME = "pi-host-0.15.1-beta.5-linux-x64.tar.gz";
-const RELEASE_BASE = "https://github.com/vastsa/PI-Desktop/releases/download/v0.15.1-beta.5";
+const RELEASE_BASE = `https://github.com/${GITHUB_REPO}/releases/download/v0.15.1-beta.5`;
 /** 64 hex characters, so it passes `normalizeChecksum`. */
 const DIGEST = "0123456789abcdef".repeat(4);
 /** Same length as {@link DIGEST}, one nibble different: a tampered download. */
@@ -64,12 +65,14 @@ test("resolveTarget refuses a platform or architecture the release cannot serve"
   assert.equal(resolveTarget(""), null);
 });
 
-test("isPublishedTarget matches the release matrix, which ships linux-x64 only", () => {
+test("isPublishedTarget matches the release matrix's Linux architectures", () => {
   assert.equal(targetKey(LINUX_X64), "linux-x64");
   assert.equal(isPublishedTarget(LINUX_X64), true);
+  // The desktop matrix publishes Linux x64 and arm64, and release.yml's
+  // pi-host-bundle job builds one bundle per lane.
+  assert.equal(isPublishedTarget({ platform: "linux", arch: "arm64" }), true);
   // Publishing parity: a 404 halfway through a download is what this guard
   // exists to prevent, so every unpublished cell must be refused here.
-  assert.equal(isPublishedTarget({ platform: "linux", arch: "arm64" }), false);
   assert.equal(isPublishedTarget({ platform: "darwin", arch: "x64" }), false);
   assert.equal(isPublishedTarget({ platform: "darwin", arch: "arm64" }), false);
 });

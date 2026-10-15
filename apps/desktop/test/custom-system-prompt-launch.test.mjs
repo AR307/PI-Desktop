@@ -35,6 +35,7 @@ function launchRuntime() {
         if (method === "providers.list") return { providers: [provider] };
         if (method === "providers.getSecret") return {};
         if (method === "agents.active") return { subagents: [] };
+        if (method === "skills.disabledBuiltins") return { disabled: [] };
         if (method === "skills.active") return { skills: [] };
         if (method === "mcp.active") return { servers: [] };
         if (method === "project.memory.get") return {};
@@ -44,10 +45,9 @@ function launchRuntime() {
     logger: { app() {} }, userMcp: { setRecords() {}, toolsForProject: async () => [] },
     plugins: { listLoaded: () => [], getSkills: () => [], getTools: () => [], getAgentExtensions: () => [] },
     sessionProjects: new Map(), dataDir: workspace, vendorOAuth: {},
-    modelsDevCatalog: { ensureLoaded: async () => {}, findModel: () => undefined },
+    modelsDevCatalog: { configureAccount: () => {}, ensureLoaded: async () => {}, findModel: () => undefined },
     getWorkspacePath: () => workspace, pluginActiveInProject: () => true,
     bindingForModel: (row, id) => row.models.find((m) => m.id === id),
-    modelsDevModelFor: () => undefined,
     effectiveSubagentModelConfig: () => ({}),
     normalizeThinkingLevel: () => "off",
   });

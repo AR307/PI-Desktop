@@ -35,12 +35,21 @@ export function copyProviderConfiguration(provider: ProviderPublic, name: string
         ? { contextWindowSource: model.contextWindowSource }
         : {}),
       maxTokens: model.maxTokens,
+      ...(model.maxTokensSource !== undefined
+        ? { maxTokensSource: model.maxTokensSource }
+        : {}),
       thinkingLevels: [...model.thinkingLevels],
       defaultThinkingLevel: model.defaultThinkingLevel,
+      ...(model.thinkingProtocol !== undefined
+        ? { thinkingProtocol: model.thinkingProtocol }
+        : {}),
       ...(model.supportsImages !== undefined ? { supportsImages: model.supportsImages } : {}),
       ...(model.supportsDocuments !== undefined ? { supportsDocuments: model.supportsDocuments } : {}),
       ...(model.availableForSubagents !== undefined ? { availableForSubagents: model.availableForSubagents } : {}),
       ...(model.nativeWebSearch !== undefined ? { nativeWebSearch: model.nativeWebSearch } : {}),
+      ...(model.temperature !== undefined ? { temperature: model.temperature } : {}),
+      ...(model.apiStyle !== undefined ? { apiStyle: model.apiStyle } : {}),
+      ...(model.mirrorCodingGroupId !== undefined ? { mirrorCodingGroupId: model.mirrorCodingGroupId } : {}),
     })),
   };
 }

@@ -107,7 +107,9 @@ turn that has ended.
    tool row begins, abort preserves the partial transcript and restores no
    draft. The snapshot keeps structured file/image references and is never
    reconstructed by parsing model-facing `@path` text.
-5. Permission timeout moves to tool denied, then agent may continue or end based on runtime handling
+5. A local permission remains in `waiting_permission` until explicit allow,
+   deny, cancellation, or host shutdown; an explicit deny then moves to tool
+   denied and the agent may continue or end based on runtime handling
 6. Session status returns to idle after terminal turn states are persisted
 7. Changing the renderer's active project/session does not transition or abort
    any background session
@@ -121,11 +123,12 @@ turn that has ended.
    calls are no-ops. Renderer terminal lifecycle events update the transcript
    and turn result card; the sidebar terminal mark is derived only from the
    corresponding unread notification, never from `agent_end` alone.
-10. Fork is allowed only while the source is idle. The child begins idle with
-   no turn or waiting-permission state. Electron returns `AGENT_BUSY` for its
-   active runtime guard and normalizes the host's persisted running-turn
-   `CONFLICT` fallback to the same IPC error. Neither path produces a partial
-   child.
+10. Whole-session fork is idle-only. A Desktop message-scoped fork may copy
+   a completed assistant prefix during a later turn, provided no indexed row in
+   the prefix belongs to a running turn. The source continues; the child begins
+   idle with no turn or waiting-permission state. Other busy forks return host
+   `CONFLICT` / IPC `AGENT_BUSY`; native Pi keeps its ownership/idle guard.
+   No refused fork produces a partial child.
 11. Supplying `throughMessageId` changes only the snapshot boundary. Assistant
     Fork/Edit still creates a new idle session id with no shared turn,
     permission wait, runtime, or provider-cache state (D134).
@@ -155,7 +158,9 @@ turn that has ended.
     snapshot.
 17. A terminal parent provider/stream error aborts leftover delegates and
     returns the session to idle so Continue is accepted. Parent idle with
-    running delegates still keeps the turn open (D328 / D352).
+    running delegates still keeps the turn open (D328 / D352). System-interrupted
+    delegates settle as failed and remain manually resumable; explicit Stop and
+    dispose remain non-resumable cancellations.
 
 ## 4. Persistence points
 
@@ -217,8 +222,8 @@ transcript-file line first, index transaction second.
    transcript-event or workspace-root crossover
 5. each unseen completed/failed turn produces exactly one notification record
    while a visible-current result or aborted turn produces none
-6. an idle fork starts as an independent idle session; a busy source cannot
-   produce a child
+6. a fork starts as an independent idle session; a busy Desktop source can
+   fork only a completed assistant prefix outside its running turn
 7. a message-scoped fork excludes later rows and begins with no source runtime
    or provider-cache state
 8. a running session can queue removable FIFO prompts per session; Send now

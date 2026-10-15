@@ -1,8 +1,8 @@
+import { useChatSessionCapability } from "../hooks/use-chat-session-capability";
 import { memo, useId, useState } from "react";
 import { useTranslation } from "react-i18next";
 import type {
   ReviewChangeStatus,
-  ReviewRollbackStatus,
   UiMessage,
 } from "@pi-desktop/shared";
 import { reviewChangeFromMessage } from "../lib/workspace-review";
@@ -21,21 +21,19 @@ const STATUS_MARKS: Record<ReviewChangeStatus, string> = {
 function DiffBody({ message, compact }: { message: UiMessage; compact: boolean }) {
   const { t } = useTranslation();
   const change = reviewChangeFromMessage(message);
+  const localToolsAllowed = useChatSessionCapability("canUseLocalTools");
   const rollback = useAppStore((state) => state.rollbackWorkspaceChange);
   const [rollingBack, setRollingBack] = useState(false);
-  const [rollbackStatus, setRollbackStatus] = useState<ReviewRollbackStatus | null>(
-    null,
-  );
 
   if (!change) return null;
 
   const runRollback = async () => {
-    if (!change.reversible || change.state === "rolledBack" || rollingBack) return;
+    if (!localToolsAllowed || !change.reversible || change.state === "rolledBack" || rollingBack) return;
     setRollingBack(true);
-    setRollbackStatus(null);
-    const result = await rollback(message.id, change.snapshotId);
+    // A conflict or an unavailable snapshot is already reported through the
+    // store's toast; this card owns the rollback action only.
+    await rollback(message.id, change.snapshotId);
     setRollingBack(false);
-    if (result) setRollbackStatus(result.status);
   };
 
   return (
@@ -67,21 +65,12 @@ function DiffBody({ message, compact }: { message: UiMessage; compact: boolean }
       )}
 
       <div className={cx("review-change-card-actions", compact && "is-compact")}>
-        {rollbackStatus === "conflict" ? (
-          <div className="review-change-rollback-note is-warning">
-            {t("panel.review.rollbackConflict")}
-          </div>
-        ) : rollbackStatus === "unavailable" ? (
-          <div className="review-change-rollback-note">
-            {t("panel.review.rollbackUnavailable")}
-          </div>
-        ) : null}
         {change.state === "rolledBack" ? (
           <span className="review-change-state is-rolled-back">
             <IconCheck size={13} />
             {t("panel.review.rolledBack")}
           </span>
-        ) : change.reversible ? (
+        ) : change.reversible && localToolsAllowed ? (
           <button
             type="button"
             className="review-change-rollback"

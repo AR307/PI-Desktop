@@ -1,9 +1,10 @@
 import { useEffect, useState } from "react";
 import { createPortal } from "react-dom";
 import { useTranslation } from "react-i18next";
+import { useBlockingOverlay } from "../lib/blocking-overlay";
 import type { AgentInstructionFile } from "@pi-desktop/shared";
 import { api } from "../lib/api";
-import { Button, Textarea, TooltipButton } from "./ui";
+import { OverlayBackdrop, Button, Textarea, TooltipButton } from "./ui";
 import { IconClose } from "./icons";
 
 export function ProjectInstructionsDialog({
@@ -17,6 +18,7 @@ export function ProjectInstructionsDialog({
   onSaved: () => void;
   onError: (error: unknown) => void;
 }) {
+  useBlockingOverlay();
   const { t } = useTranslation();
   const [file, setFile] = useState<AgentInstructionFile | null>(null);
   const [draft, setDraft] = useState("");
@@ -74,7 +76,7 @@ export function ProjectInstructionsDialog({
 
   const dirty = file !== null && draft !== file.content;
   const dialog = (
-    <div
+    <OverlayBackdrop
       className="overlay project-instructions-dialog-overlay"
       role="presentation"
       onClick={() => {
@@ -123,7 +125,7 @@ export function ProjectInstructionsDialog({
           </Button>
         </div>
       </div>
-    </div>
+    </OverlayBackdrop>
   );
 
   return typeof document === "undefined"

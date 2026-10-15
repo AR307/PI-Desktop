@@ -26,8 +26,10 @@ import {
 } from "@pi-desktop/shared";
 import {
   createVirtualModules,
+  knownMissingCodingAgentApis,
   knownStubSymbols,
   loadExtensionFactory,
+  setMissingCodingAgentApiReporter,
   setStubSymbolReporter,
   type ExtensionFactory,
 } from "./loader.js";
@@ -138,6 +140,8 @@ export type RegisteredTrustedExtensionAgent = {
 export interface TrustedExtensionBridge {
   sessionId: string;
   cwd: string;
+  /** Workspace is remote; implicit workspace exec must never spawn locally. */
+  remoteWorkspace?: boolean;
   getModel(): unknown;
   setModel(model: unknown, signal?: AbortSignal): Promise<boolean>;
   getThinkingLevel(): string;
@@ -344,12 +348,25 @@ export class TrustedExtensionRunner {
         reportedStubs.add(symbol);
         this.report(spec.id, "stub_symbol", `pi-tui symbol "${symbol}" is a no-op in PI-Desktop`, symbol);
       };
+      const reportedMissingApis = new Set<string>();
+      const reportMissingApi = (symbol: string) => {
+        if (reportedMissingApis.has(symbol)) return;
+        reportedMissingApis.add(symbol);
+        this.report(
+          spec.id,
+          "unsupported_api",
+          `@earendil-works/pi-coding-agent export "${symbol}" is outside PI-Desktop's extension compatibility subset`,
+          symbol,
+        );
+      };
       setStubSymbolReporter(spec.id, reportStub);
+      setMissingCodingAgentApiReporter(spec.id, reportMissingApi);
       const virtualModules = createVirtualModules({ extensionId: spec.id });
       let factory = factoryCache.get(spec.id);
       // A cached module keeps the pi-tui symbols it imported the first time;
       // report them here so this session's diagnostics say so too.
       if (factory) for (const symbol of knownStubSymbols(spec.id)) reportStub(symbol);
+      if (factory) for (const symbol of knownMissingCodingAgentApis(spec.id)) reportMissingApi(symbol);
       if (!factory) {
         try {
           factory = await this.lifecycle.run(
@@ -533,6 +550,23 @@ export class TrustedExtensionRunner {
     return this.dispatch(event, payload, fold);
   }
 
+  /** Chain prompt replacements within this turn while keeping handler inputs isolated. */
+  async emitBeforeAgentStart(prompt: string, systemPrompt: string): Promise<string | undefined> {
+    const payload = { type: "before_agent_start", prompt, systemPrompt, systemPromptOptions: {} };
+    const result = await this.emit<{ systemPrompt?: string }>(
+      "before_agent_start",
+      payload,
+      (acc, next) => {
+        if (typeof next.systemPrompt !== "string") return acc ?? {};
+        // dispatch clones this updated payload for the next handler. Only a
+        // timely returned value reaches this fold, never a late input mutation.
+        payload.systemPrompt = next.systemPrompt;
+        return { systemPrompt: next.systemPrompt };
+      },
+    );
+    return result?.systemPrompt;
+  }
+
   private async dispatch<R>(
     event: TrustedExtensionEventName,
     payload: Record<string, unknown>,
@@ -634,6 +668,9 @@ export class TrustedExtensionRunner {
     options?: ExtensionExecOptions,
   ): Promise<ExtensionExecResult> {
     if (this.disposed) return Promise.reject(new DOMException("Extension disposed", "AbortError"));
+    if (this.bridge.remoteWorkspace && (!options?.cwd || options.cwd === this.bridge.cwd)) {
+      return Promise.reject(Object.assign(new Error("extension workspace exec is unavailable for a remote workspace"), { errorCode: "CAPABILITY_UNAVAILABLE" }));
+    }
     const pending = managedExec(command, args, this.bridge.cwd, this.lifecycle.operationSignal, options);
     this.processes.add(pending);
     void pending.then(() => this.processes.delete(pending), (error: unknown) => {

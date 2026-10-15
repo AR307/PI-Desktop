@@ -50,6 +50,35 @@ it("authorizes image calls through the host before executing the local handler",
   expect(calls).toEqual(["tools.execute", "generated"]);
 });
 
+it("waits for an asynchronous image catalog without a transport timeout", async () => {
+  const { sidecar } = harness();
+  let entered!: (signal: AbortSignal) => void;
+  const ready = new Promise<AbortSignal>((resolve) => { entered = resolve; });
+  let finish!: () => void;
+  const completion = new Promise<void>((resolve) => { finish = resolve; });
+  sidecar.setLocalTool("ListImageModels", async ({ signal }) => {
+    entered(signal);
+    await completion;
+    return { ok: true, content: { models: [] } };
+  });
+  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+  const response = sidecar.call("probe", {
+    method: "tools.execute",
+    params: { sessionId: "s", toolCallId: "catalog", mode: "agent", toolName: "ListImageModels", args: {} },
+  }).then(value => ({ value }), error => ({ error }));
+  try {
+    const signal = await ready;
+    await vi.advanceTimersByTimeAsync(1);
+    expect(signal.aborted).toBe(false);
+    finish();
+    expect(await response).toEqual({ value: { ok: true, content: { models: [] } } });
+  } finally {
+    finish();
+    await response;
+    vi.useRealTimers();
+  }
+});
+
 it("preserves stable local error codes through real reverse RPC", async () => {
   const { sidecar, execute } = harness();
   sidecar.setLocalTool("GenerateImages", async () => {

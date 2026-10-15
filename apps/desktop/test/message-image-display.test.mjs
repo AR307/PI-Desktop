@@ -17,7 +17,7 @@ const [transcript, markdown, api, main, panel, protocol, hook] = await Promise.a
 
 test("in-chat image display has a contained renderer-to-main bridge", () => {
   assert.match(protocol, /fsReadImageDataUrl: "pi-desktop\/fs\/readImageDataUrl"/);
-  assert.match(api, /fsReadImageDataUrl: \(ref: string, mimeType\?: string\)/);
+  assert.match(api, /fsReadImageDataUrl: \(ref: string, mimeType\?: string, sessionId\?: string\)/);
   assert.match(main, /IPC\.invoke\.fsReadImageDataUrl/);
   assert.match(main, /readOpenableImage\(/);
   assert.match(panel, /export async function readOpenableImage\(/);
@@ -32,19 +32,24 @@ test("renderer hook loads referenced image data URLs with a scoped bounded cache
   assert.match(hook, /dataUrlCache = new Map<string, string>\(\)/);
   assert.match(hook, /DATA_URL_CACHE_ENTRIES/);
   assert.match(hook, /DATA_URL_CACHE_MAX_BYTES/);
-  assert.match(hook, /fsReadImageDataUrl\(key, mimeType\)/);
+  assert.match(hook, /fsReadImageDataUrl\(normalizedRef, mimeType, sessionId\)/);
+  assert.match(hook, /resolved\.key === requestedKey/);
   assert.match(hook, /result\.kind === "image" && result\.dataUrl/);
-  assert.match(hook, /\^https\?:/);
+  assert.match(hook, /https\?\|data\|blob/);
 });
 
-test("user message image attachments render as thumbnails", () => {
+test("user message image attachments render as chips with a hover card", () => {
   assert.match(transcript, /function MessageAttachmentImage\(/);
   assert.match(transcript, /useReferencedImageDataUrl\(attachment\.ref, attachment\.mimeType\)/);
-  assert.match(transcript, /className="message-attachment-image"/);
+  assert.match(transcript, /className="message-attachment-image-chip"/);
+  assert.match(transcript, /role="listitem"/);
+  assert.match(transcript, /onOpen=\{onOpenFile\}/);
+  // One shared preview card serves the draft and the transcript.
   assert.match(
     transcript,
-    /openFileInWorkPanel\(attachment\.ref, attachment\.mimeType\)/,
+    /import \{ ImageHoverCard, type ImageHoverAnchor \} from "\.\.\/\.\.\/\.\.\/components\/ImageHoverCard";/,
   );
+  assert.match(transcript, /<ImageHoverCard src=\{dataUrl\} anchor=\{anchor\} onDismiss=\{dismiss\} \/>/);
   assert.match(
     transcript,
     /attachment\.kind === "image" \?/,

@@ -79,3 +79,9 @@ test("workspace packages keep their tsbuildinfo inside the output directory", as
     );
   }
 });
+
+test("Electron window branding resolves resources from its ESM output location", async () => {
+  const source = await readFile(new URL("../electron/main/bootstrap/window.ts", import.meta.url), "utf8");
+  assert.match(source, /join\(getModuleDirectory\(import\.meta\.url\), "\.\.\/\.\.\/build\/icon\.ico"\)/);
+  assert.doesNotMatch(source, /\b__dirname\b/);
+});

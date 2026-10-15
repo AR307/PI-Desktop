@@ -1,11 +1,14 @@
 import type { UiMessage } from "@pi-desktop/shared";
+import { subagentReturnDetails } from "@pi-desktop/shared";
 import {
   delegationLifecycleKind,
   getToolAction,
   getToolSummaryKey,
+  isAskToolName,
   type ToolAction,
 } from "./tool-display";
 import { reviewChangeFromMessage } from "./workspace-review";
+import { isWithinHighlightLimits } from "./render-content-limits";
 
 /*
  * Structured presentation of one tool call (D192).
@@ -22,11 +25,8 @@ import { reviewChangeFromMessage } from "./workspace-review";
  */
 
 /** Beyond this, syntax highlighting costs more than it is worth on expand. */
-const MAX_HIGHLIGHT_BYTES = 100_000;
-const MAX_HIGHLIGHT_LINES = 800;
 /** Rendered list caps; the remainder is reported, never silently dropped. */
 const MAX_LIST_ITEMS = 200;
-const MAX_DIFF_LINES = 400;
 const DIFF_CONTEXT_LINES = 2;
 /** Longer single-line strings become their own block instead of a field row. */
 const MAX_FIELD_VALUE = 120;
@@ -77,6 +77,10 @@ type BlockBase = {
 };
 
 export type ToolBlock =
+  | (BlockBase & {
+      kind: "asktool";
+      questions: { question: string; answers: string[] | null }[];
+    })
   | (BlockBase & {
       kind: "code";
       text: string;
@@ -225,14 +229,6 @@ function rosterRows(
   return rows.length > 0 ? { kind: "fields", role: "details", rows } : null;
 }
 
-function countLines(text: string): number {
-  let lines = 1;
-  for (let i = 0; i < text.length; i += 1) {
-    if (text.charCodeAt(i) === 10) lines += 1;
-  }
-  return lines;
-}
-
 /** Extension-derived Shiki tag; `resolveLang` normalizes it at render time. */
 export function langForPath(path: string | null): string {
   if (!path) return "";
@@ -258,8 +254,7 @@ function codeBlock(
     lang,
     highlight:
       lang !== "" &&
-      text.length <= MAX_HIGHLIGHT_BYTES &&
-      countLines(text) <= MAX_HIGHLIGHT_LINES,
+      isWithinHighlightLimits(text),
     ...(extra?.tone ? { tone: extra.tone } : {}),
     ...(extra?.label ? { label: extra.label } : {}),
   };
@@ -333,20 +328,6 @@ export function buildDiffLines(
     lines.push({ type: "context", text: oldLines[i] });
   }
   return lines;
-}
-
-function diffBlock(oldText: string, newText: string): ToolBlock | null {
-  const lines = buildDiffLines(oldText, newText);
-  if (!lines.some((line) => line.type !== "context")) return null;
-  const sign = (line: ToolDiffLine) =>
-    line.type === "add" ? "+" : line.type === "del" ? "-" : " ";
-  return {
-    kind: "diff",
-    role: "diff",
-    lines: lines.slice(0, MAX_DIFF_LINES),
-    hidden: Math.max(0, lines.length - MAX_DIFF_LINES),
-    copy: lines.map((line) => `${sign(line)}${line.text}`).join("\n"),
-  };
 }
 
 function filesBlock(paths: string[], label?: string): ToolBlock | null {
@@ -456,6 +437,41 @@ function safeJson(value: unknown): string {
   } catch {
     return String(value);
   }
+}
+
+function askToolResultBlock(
+  message: ToolPresentationMessage,
+): ToolBlock | null {
+  const details = asRecord(toolResultPayload(message));
+  const rawQuestions = details?.questions;
+  const rawAnswers = details?.answers;
+  if (
+    !Array.isArray(rawQuestions) ||
+    rawQuestions.length === 0 ||
+    !Array.isArray(rawAnswers) ||
+    rawQuestions.length !== rawAnswers.length
+  ) {
+    return null;
+  }
+
+  const questions: Array<{ question: string; answers: string[] | null }> = [];
+  for (let index = 0; index < rawQuestions.length; index += 1) {
+    const question = stringAt(asRecord(rawQuestions[index]), "question");
+    const answer = rawAnswers[index];
+    if (
+      question === null ||
+      !(answer === null ||
+        (Array.isArray(answer) && answer.every((value) => typeof value === "string")))
+    ) {
+      return null;
+    }
+    questions.push({
+      question,
+      answers: answer === null || answer.length === 0 ? null : [...answer],
+    });
+  }
+
+  return { kind: "asktool", role: "details", questions };
 }
 
 /**
@@ -634,7 +650,28 @@ function resultBlocks(
       if (resolved) blocks.push(resolved);
       break;
     }
+    case "todo": {
+      const todoArgs = args ? safeJson(args) : "";
+      if (todoArgs) blocks.push(codeBlock("input", todoArgs, "json"));
+      const warnings = stringArray(details?.warnings);
+      if (warnings) {
+        for (const warning of warnings) {
+          blocks.push({ kind: "note", role: "notice", text: warning });
+        }
+      }
+      const text = stringAt(details, "text");
+      if (text) blocks.push({ kind: "note", role: "notice", text });
+      mapped = true;
+      break;
+    }
     case "delegate": {
+      const returned = subagentReturnDetails(message);
+      if (returned) {
+        if (returned.report) blocks.push(codeBlock("output", returned.report, "markdown"));
+        const metadata = Object.fromEntries(Object.entries(returned).filter(([key]) => key !== "report" && key !== "kind"));
+        blocks.push(...recordBlocks(metadata, "details"));
+        break;
+      }
       // A lifecycle row (ADR 0089) has no brief and no report of its own: it
       // reports on subagents. Its body is the roster the runtime returned, as
       // a named table rather than the raw `delegations[]` JSON (D268).
@@ -664,6 +701,7 @@ function resultBlocks(
             Object.entries(details).filter(
               ([key]) =>
                 key !== "agent" &&
+                key !== "report" &&
                 key !== "error" &&
                 key !== "modelId" &&
                 key !== "thinkingLevel",
@@ -706,6 +744,11 @@ export function buildToolPresentation(
   message: ToolPresentationMessage,
   options: ToolPresentationOptions = {},
 ): ToolBlock[] {
+  if (isAskToolName(message.toolName)) {
+    const askToolBlock = askToolResultBlock(message);
+    if (askToolBlock) return [askToolBlock];
+  }
+
   const action = getToolAction(message.toolName);
   const args = asRecord(message.toolArgs);
   const payload = toolResultPayload(message);

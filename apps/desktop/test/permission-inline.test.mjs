@@ -13,7 +13,6 @@ import {
   clearSessionPermissions,
   enqueuePermission,
   headPermission,
-  permissionSecondsLeft,
   queuedPermissionCount,
   removePermission,
   removePermissionForToolCall,
@@ -58,7 +57,6 @@ function permission(sessionId, requestId, extra = {}) {
     argsPreview: { path: `${sessionId}.txt` },
     risk: "high",
     reason: "Modify a workspace file",
-    receivedAt: 1_000,
     ...extra,
   };
 }
@@ -106,15 +104,15 @@ test("a finished tool call clears its request from anywhere in the queue", () =>
   const second = permission("session-a", "request-second");
   const queues = enqueuePermission(enqueuePermission({}, first), second);
 
-  // The host answers an expired request itself, so a queued card that was
-  // never shown still has to leave the queue on `tool_end`.
-  const afterExpiry = removePermissionForToolCall(
+  // A cancelled request that was never shown still has to leave the queue on
+  // `tool_end`.
+  const afterCancellation = removePermissionForToolCall(
     queues,
     "session-a",
     "tool-request-second",
   );
-  assert.equal(headPermission(afterExpiry, "session-a"), first);
-  assert.equal(queuedPermissionCount(afterExpiry, "session-a"), 0);
+  assert.equal(headPermission(afterCancellation, "session-a"), first);
+  assert.equal(queuedPermissionCount(afterCancellation, "session-a"), 0);
   assert.equal(
     removePermissionForToolCall(queues, "session-a", "tool-unknown"),
     queues,
@@ -173,8 +171,26 @@ test("asktool card is a stepwise, non-expiring composer question surface", () =>
   assert.match(askCardSource, /draft\.skipped/);
   assert.doesNotMatch(askCardSource, /permissionSecondsLeft|setInterval/);
   assert.match(messageStyleSource, /\.asktool-options[\s\S]*?overflow-y:\s*auto/);
-  assert.match(messageStyleSource, /\.asktool-options[\s\S]*?max-height:\s*min\(320px,\s*36dvh\)/);
+  assert.match(messageStyleSource, /\.asktool-options[\s\S]*?max-height:\s*min\(208px,\s*24dvh\)/);
   assert.match(messageStyleSource, /\.asktool-options[\s\S]*?overscroll-behavior-y:\s*contain/);
+  // A long question prompt scrolls inside the question body. Header actions
+  // stay outside that scroller so Decline, Skip, and Next/Submit remain
+  // reachable (issue #1531). The cap matches the option list.
+  const questionBody = messageStyleSource.match(
+    /\n\.asktool-question-body \{([^}]*)\}/,
+  )?.[1];
+  assert.ok(questionBody);
+  assert.match(questionBody, /max-height:\s*min\(208px,\s*24vh\)/);
+  assert.match(questionBody, /max-height:\s*min\(208px,\s*24dvh\)/);
+  assert.match(questionBody, /overflow-x:\s*hidden/);
+  assert.match(questionBody, /overflow-y:\s*auto/);
+  assert.match(questionBody, /overscroll-behavior-y:\s*contain/);
+  assert.doesNotMatch(questionBody, /scrollbar-gutter/);
+  assert.match(questionBody, /overflow-wrap:\s*anywhere/);
+  assert.match(
+    askCardSource,
+    /className="asktool-card-header-actions"[\s\S]*className="asktool-question-body"/,
+  );
   // The card is a dock surface, not an in-flow tile: it paints the composer
   // plate with its shadow and its rows are inlaid on that plate (issue #360).
   assert.match(
@@ -193,11 +209,28 @@ test("asktool card is a stepwise, non-expiring composer question surface", () =>
   );
 });
 
-test("permission countdown uses its absolute receipt time", () => {
-  assert.equal(permissionSecondsLeft(1_000, 1_000), 120);
-  assert.equal(permissionSecondsLeft(1_000, 61_001), 60);
-  assert.equal(permissionSecondsLeft(1_000, 121_000), 0);
-  assert.equal(permissionSecondsLeft(1_000, 180_000), 0);
+test("asktool question body opens at the top when the question index changes", () => {
+  // Next, Skip, and the step indicators only call setIndex. The question
+  // body is one scroller for the whole request, so a later long prompt keeps
+  // the previous scrollTop unless that body remounts with the index or the
+  // offset is cleared when index changes (#1531).
+  const bodyTag = askCardSource.match(
+    /<span\b[^>]*className="asktool-question-body"[^>]*>/,
+  )?.[0];
+  assert.ok(bodyTag);
+  const remountsOnIndex = /\bkey=\{index\}/.test(bodyTag);
+  const clearsScrollOnIndex =
+    /scrollTop\s*=\s*0/.test(askCardSource) &&
+    /\[\s*index\s*\]/.test(askCardSource);
+  assert.ok(
+    remountsOnIndex || clearsScrollOnIndex,
+    "question body keeps scrollTop across index changes",
+  );
+});
+
+test("permission approval stays pending until an explicit decision", () => {
+  assert.doesNotMatch(cardSource, /setInterval|permissionSecondsLeft|role="timer"/);
+  assert.doesNotMatch(eventsSource, /receivedAt/);
 });
 
 test("permission approval is an inline transcript card, never a global dialog", () => {
@@ -225,7 +258,7 @@ test("permission approval is an inline transcript card, never a global dialog", 
   assert.match(cardSource, /requestAnimationFrame/);
   assert.match(cardSource, /showToast/);
   assert.doesNotMatch(cardSource, /<section[^>]*aria-live=/);
-  assert.match(cardSource, /permissionSecondsLeft\(permission\.receivedAt\)/);
+  assert.doesNotMatch(cardSource, /permissionSecondsLeft|permission\.receivedAt/);
   assert.match(browserSource, /blocking overlay/);
   assert.doesNotMatch(browserSource, /permission dialog/);
 });

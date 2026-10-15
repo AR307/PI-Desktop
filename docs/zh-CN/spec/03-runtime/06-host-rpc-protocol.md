@@ -154,8 +154,9 @@ type HandshakeResult = {
 9. 版本 11 撤回 A2A 协议栈（ADR 0165 / D326）。`a2a.*` 方法和通知
    已移除，握手不再声明 `a2a`；v10 主机或客户端必须在 UI 交互前拒绝。
 
-协议 v11 与 host-core 存储架构 v14 配对。v14 增加插件会话来源 sidecar
-和软删除字段；架构版本是内部持久性不变量，而不是额外的 JSON-RPC 字段，
+协议 v11 与 host-core 存储架构 v23 配对。v14 增加插件会话来源 sidecar
+和软删除字段；v23 增加 `sessions.title_source`，持久记录默认、手动和插件生成标题的归属。
+架构版本是内部持久性不变量，而不是额外的 JSON-RPC 字段，
 检查点架构仍然由主机拥有。
 
 ## 4. 方法目录(MVP)
@@ -225,22 +226,30 @@ type ToolBudgetHealth = {
 ### 会议
 - `session.list`
 - `session.create` — 接受可选的 `thinkingLevel`； missing/null 默认值
-至 `off`
-- `session.fork` — 接受 `sessionId`，呼叫者提供的可选显示
-  `title`，以及可选的 `throughMessageId`；创造
-  来自源当前活动规范的一个独立会话
-  转录本，在提供时在选定的消息处被截断。
-  孩子继承 project/provider/model/mode/thinking 并且
-  权限配置，接收新的 message/tool-call id，并启动
-  无需轮流、修订、通知、工件、资助或临时数据。
-  缺少源返回 `NOT_FOUND`； Electron 拒绝活动源
-  `AGENT_BUSY` 在转发之前并标准化主机的持久化
-  运行转向 `CONFLICT` 回退到 `AGENT_BUSY`；来源不明或
-  `throughMessageId` 返回 `NOT_FOUND`
+至 `off`。可选的 `isolated: true`（ADR 0329）同时要求 `projectPath`，并在返回前为新会话
+创建专属 git worktree；无法创建时会话会被删除，调用以 `WORKTREE_*` 错误（§7）失败。
+- `session.fork` — accepts `sessionId`, an optional caller-provided display
+  `title`, and optional `throughMessageId`; creates
+  one independent session from the source's current active canonical
+  transcript, truncated inclusively at the selected message when supplied.
+  The child inherits project/provider/model/mode/thinking and
+  permission configuration, receives new message/tool-call ids, and starts
+  without turns, revisions, notifications, artifacts, grants, or scratch data.
+  Missing sources or anchors return `NOT_FOUND`. While a Desktop source runs,
+  only a completed assistant prefix containing no indexed messages owned by a
+  running turn is allowed. This check and publication share the host RPC lock.
+  Whole-session, non-assistant, streaming/error, or live-turn anchors return
+  `CONFLICT`, normalized by Electron to `AGENT_BUSY`. The source turn continues
+  without sharing runtime state with the child.
 - `session.get`
-- `session.delete`
+- `session.delete` — 对隔离会话还会删除其 worktree 和分支（丢弃未合并的工作）
 - `session.getScratchPath` — 会话的 scratch 目录（D114），按需创建
-- `session.rename`
+- `session.rename` — 在主机边界裁剪并校验标题，接受 1–80 个 Unicode 码点；成功后将标题来源
+  标记为 `manual`，但不更新 `updated_at`、转录内容、消息数或历史通知标题快照。
+- `session.deriveTitle` — `{ id, title }`：应用确定性的首条提示兜底标题，返回
+  `{ updated: boolean }`。标题按同样的 1–80 码点规则校验，且只在存储标题仍是可识别占位
+  标题、标题来源为 `default` 时写入；写入后仍保留该来源，因此标题插件还能替换派生文本，
+  并且不更新 `updated_at`、转录内容或消息数。
 - `session.configure` — 以原子方式持久保存 `mode`、`providerId`、`modelId`，
   以及可选的 `thinkingLevel` 用于下一个 pi 回合； omitting/null
   `thinkingLevel` 保留当前值；返回无效模式或级别
@@ -322,6 +331,9 @@ ids 和非负 `tokensBefore`；它不会插入 message/search 行
 - `plugin.session.importBatch` — 有界的 `skip` 或全有或全无 `fail` 批量导入
 - `plugin.session.list` / `plugin.session.get` / `plugin.session.listMessages` —
   只读取调用插件自己导入且仍处于活动状态的会话
+- `plugin.session.autoTitleContext` — 通过 Electron 的 `session.autoTitle` 权限校验后，
+  仅返回活动且标题来源为 `default` 的会话首条用户提示（≤1,000 字符）和首条助手回复（≤500 字符）
+- `plugin.session.setAutoTitle` — 仅在预期标题和 `default` 来源仍匹配时更新标题；返回 `{ updated }`
 - `plugin.session.rename` — 重命名自己拥有的活动导入会话
 - `plugin.session.delete` — `trash` 隐藏并保留转录本；`purge` 删除并允许重新导入
 - `plugin.usage.listTurns` — 未删除会话的已完成 turn 事实页（标识符与 token
@@ -333,6 +345,20 @@ ids 和非负 `tokensBefore`；它不会插入 message/search 行
 主机会拒绝未知角色、非 RFC3339 或非单调时间戳，以及超大或过深的 payload；
 工具值会清理主机保留键。每个插件每 60 秒最多 10 次单条导入、5 次批量导入和
 20 次删除。P2/P3 方法不在协议 v11 中。
+
+**会话 Todo 清单**
+- `todos.get({ sessionId })` 返回活动 Desktop 会话已提交的完整清单快照：
+  `{ sessionId, todos, revision, updatedAt }`。未知或软删除会话返回 `NOT_FOUND`；
+  原生 Pi 会话和空 id 返回 `INVALID_ARGUMENT`。
+- `tools.execute` 的 `toolName: "TodoWrite"` 只接受 `{ todos }`，并替换整个有序清单。
+  主机会裁剪内容、将 priority 默认设为 `medium`，把超长 Unicode 内容限制在 500 个字符并
+  返回警告，把后续 `in_progress` 降级为 `pending`，并拒绝超过 50 项或格式错误的值。
+  所属 session 和运行中的 turn 来自可信传输字段，不来自工具参数。
+- TodoWrite 只允许 Agent 会话自己的运行 turn。Plan/Goal、委托、插件和 MCP 调用会返回工具错误，
+  不会修改存储。成功替换即使 `todos` 为空也会推进 revision，并且只在事务提交后发出
+  `todos.changed`；事件负载与 `todos.get` 返回的完整快照一致。
+- SQLite 只由 host-core 拥有。渲染器通过 Electron Main IPC 接收快照，按 session id 保存并忽略
+  更旧或相同 revision。远程 RACP 会话在这条垂直切片中保持 local-only，因为 RACP v1 尚无 Todo 快照操作。
 
 ### Plan 和 Goal 状态和批准
 
@@ -384,6 +410,43 @@ off | minimal | low | medium | high | xhigh | max
 可能会返回 `thinking`；主机存储将其映射到规范内容块，而不是
 而不是将其附加到答案 `content` 中。
 
+### 会话 worktree（ADR 0329）
+
+新增的 `worktree.*` 方法为增量 RPC，不升协议版本。失败使用代码 1025 及 `WORKTREE_*`
+字符串代码。
+
+- `worktree.probe({ projectPath })` → `{ available, uncommittedChanges }`；项目无法承载
+  隔离会话时（非 git、无提交、分离 `HEAD`、缺少 git 或低于 2.29、远程主机项目——
+  `WORKTREE_REMOTE_UNSUPPORTED` 等）返回
+  `{ available: false, errorCode, message }`。`session.create` 对远程主机项目的 `isolated: true` 以同一代码拒绝，
+  不会创建任何会话。
+- `worktree.preview({ sessionId })` → `{ preview }`，包含将要合入的提交、文件及
+  `previewToken`。令牌覆盖会话 `HEAD`、项目分支最新提交、冲突状态，以及所有未提交和未跟踪文件的完整内容。
+- `worktree.merge({ sessionId, previewToken })` → `{ outcome }`。令牌不再匹配（会话或项目分支有变化）为
+  `WORKTREE_CHANGED_SINCE_PREVIEW`；项目有未提交改动为 `WORKTREE_PROJECT_DIRTY`；冲突为
+  `WORKTREE_CONFLICT`，worktree 保持冲突状态，项目不受影响。项目检出必须仍在会话的所属分支上、worktree
+  必须仍在自己的分支上，每次写入前都会重新检查（`WORKTREE_OWNER_BRANCH_CHANGED`、
+  `WORKTREE_SESSION_BRANCH_CHANGED`）；快进绑定到检查过的那个提交，完成后再核对。执行期间宿主持有会话的工具：
+  最多等待正在运行的工具五秒，超时返回 `WORKTREE_BUSY`，新的工具调用排队等到结束。
+- `worktree.behind({ sessionId })` → `{ commits }`，即会话尚未包含的项目分支提交数。
+- `worktree.behindAll()` → `{ counts, statusesChanged }`：以会话 id 为键给出每个隔离会话的同一计数
+  （读不到的会话省略），每次并发检查少量会话。处于冲突状态的会话会先检查是否已解决；
+  `statusesChanged` 提示渲染层刷新会话列表。渲染层在后台读取，用于侧边栏标记。
+- `worktree.sync({ sessionId })` → `{ outcome }`（`synced` 及 `commits`，或 `upToDate`）：
+  “从项目同步”先提交会话中待提交的工作，再把项目分支合入会话 worktree，与合并一样持有会话工具并检查自身分支。
+  不改动项目检出；冲突为 `WORKTREE_CONFLICT`，留在 worktree 中，并像合并冲突一样标记会话。
+- `worktree.pendingWork({ sessionId })` → `{ pending }`，即删除会丢弃的未合并工作。
+- `worktree.setupLog({ sessionId })` → `{ setupStatus, log }`。
+- `worktree.location({ sessionId })` → `{ path }`；仅供 Electron Main 的“在文件夹中显示”
+  使用，绝不转发给渲染器。
+- `worktree.setupCommand.get({ projectPath })` → `{ command }`；
+  `worktree.setupCommand.set({ projectPath, command })` → `{ ok }`（未知项目为
+  `NOT_FOUND`）。该命令在每个新 worktree 中运行一次。
+- `worktree.delegate.create({ sessionId, delegationId })` → `{ worktree }` 和
+  `worktree.delegate.settle({ sessionId, delegationId, merge })` → `{ settlement }`——仅供
+  agent-runtime 为隔离会话中的 `Write`/`Edit` 子代理使用（03-tools-and-permissions §10.2）。两者使用
+  10 分钟的传输期限（`WORKTREE_DELEGATE_RPC_TIMEOUT_MS`），因为提交和合并前可能要等待会话的工具。
+
 ### 工具
 - `tools.list`
 - `tools.execute`
@@ -401,7 +464,7 @@ off | minimal | low | medium | high | xhigh | max
 在命令启动后重试命令，并在之前获取超时的子命令
 释放执行槽。
 
-`session.appendMessage` 通过消息 ID 是幂等的。若该 id 已属于另一会话，则在写 JSONL 之前改写为 `{sessionId}:{id}`，之后重放原始 id 为无操作（D444）。Electron 主进程可以在 host-core 重启时把消息留在应用自有 outbox 里；握手成功后按顺序冲洗，并把 `UNIQUE constraint failed: messages.id` 当作确认而不是停整队。带 `PERMISSION_DENIED:` 前缀的追加同样丢弃以免毒消息卡住 FIFO（D597）。进行中检查点从不经过发件箱：检查点只对存活的主机有意义，在最终行之后重放它是错误的。
+`session.appendMessage` 通过消息 ID 是幂等的。若该 id 已属于另一会话，则在写 JSONL 之前改写为 `{sessionId}:{id}`，之后重放原始 id 为无操作（D444）。Electron 主进程可以在 host-core 重启时把消息留在应用自有 outbox 里；握手成功后按顺序冲洗，并把 `UNIQUE constraint failed: messages.id` 当作确认而不是停整队。带 `PERMISSION_DENIED:` 前缀的追加同样丢弃以免毒消息卡住 FIFO（D597）。无法归类的追加会在同一 Host 代内按有界退避重试，连续失败后隔离到应用自有的死信文件而不是长期占用队头，因此单条被拒追加不会拖垮所有会话的写入（D656）。进行中检查点从不经过发件箱：检查点只对存活的主机有意义，在最终行之后重放它是错误的。
 
 ### 权限
 - `permissions.evaluate`
@@ -551,6 +614,9 @@ type ToolsExecuteParams = {
   expectedCommandShellDialect?: "powershell" | "cmd" | "posix"
   /** Bash only: host default 60000; accepted override 1000..21600000. */
   timeoutMs?: number
+  /** Isolated `Write`/`Edit` delegate chain id; re-roots the call to that
+   * delegate's worktree (ADR 0329). Omitted for every other call. */
+  delegationId?: string
 }
 ```
 
@@ -579,7 +645,7 @@ type ToolsExecuteParams = {
 对于`Read`/`Glob`/`Grep`/`Write`/`Edit`，主机分类显式路径
 在工作区之外并在低风险自动允许规则之前从头开始。
 `auto` 执行它，而 `ask` 和 `accept-edits` 发出
-`permissions.request`；拒绝、超时或取消返回 `TOOL_DENIED`
+`permissions.request`；拒绝或取消返回 `TOOL_DENIED`
 而不执行该操作。相对 `..` 和符号链接转义使用
 相同的分类。 Bash 的工作目录和隐式递归遍历
 不继承这个异常。
@@ -841,7 +907,6 @@ params: {
   risk: "low" | "medium" | "high"
   argsPreview: unknown
   reason: string
-  timeoutMs: 120000
 }
 ```
 
@@ -855,12 +920,11 @@ params: {
 }
 ```
 
-超时行为 (**D005**)：120 秒后未解决 → 拒绝。
+本地权限行为（**D636 / ADR 0310**）：未解决的请求会一直保持待处理，直到明确决定、取消或主机/进程关闭。`tools.execute` 的传输不设置截止时间；批准后仍执行工具自身的超时限制。
 
 `permissions.pending` 把待处理请求作为 Host 状态返回（D374/D375）：
 `{ requests: PendingPermission[] }`，最早的在前，可按 `sessionId` 过滤。每一项包含与
-`permissions.request` 通知相同的字段，外加 `createdAt`、`expiresAt` 和 `remainingMs`；
-已超时的请求不会出现。在通知发出之后才接入的客户端读取此列表，并通过不变的
+`permissions.request` 通知相同的字段，外加 `createdAt`；请求解决前会一直列出。在通知发出之后才接入的客户端读取此列表，并通过不变的
 `permissions.resolve` 作答；通知路径本身不变。
 
 ## 7. 错误代码
@@ -900,6 +964,7 @@ JSON-RPC 错误携带一个数字 `code` 以及 `data.errorCode`，后者是来�
 | 1022 | PLUGIN_MARKET_NOT_FOUND | 平台没有该插件或该版本 |
 | 1023 | PLUGIN_MARKET_RATE_LIMITED | 下载接口要求客户端等待后重试 |
 | 1024 | PLUGIN_MARKET_NO_SOURCE | 没有任何分发目标能提供该包 |
+| 1025 | WORKTREE_* | 所有隔离会话 worktree 失败（`WORKTREE_NOT_GIT`、`WORKTREE_CONFLICT`、`WORKTREE_PROJECT_DIRTY`、`WORKTREE_MISSING` 等）共用此槽位，以字符串代码区分 |
 | -32029 | HOST_OVERLOADED | RPC 调度程序容量已耗尽 |
 | -32601 | — | 未知方法 |
 | -32700 | — | 无法解析的请求行 |
@@ -951,7 +1016,7 @@ JSON-RPC 错误携带一个数字 `code` 以及 `data.errorCode`，后者是来�
 1. Electron 生成主机并完成握手
 2.health方法返回ok
 3. 拒绝刀具路径返回 `TOOL_DENIED`
-4.超时路径120s后返回拒绝决策
+4. 未解决的权限请求会一直保持待处理，直到明确决定或取消
 5.将选定的工作空间从A切换到B不会改变工具根
    会话 A 发出的呼叫的
 6. 协议 v4 `session.endTurn` creates/returns 恰好有一个通知

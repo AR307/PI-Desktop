@@ -4,11 +4,11 @@ import type {
   AgentQueueChangedEvent,
   AgentPromptAttachment,
   AppError,
-  SessionSummary,
   UiMessage,
   QueuedTurnSummary,
 } from "@pi-desktop/shared";
 import { api } from "../../lib/api";
+import { isRemoteSession, sessionAllows } from "../../lib/remote-session-safety";
 import {
   enqueueQueuedPrompt,
   isPendingQueuedPrompt,
@@ -18,13 +18,17 @@ import {
   removeQueuedPrompt,
   reorderQueuedPrompt,
   type QueuedPrompt,
-  type QueuedPromptDirection,
 } from "../../lib/queued-prompts";
 import type {
   ComposerDraftSnapshot,
   ComposerPrefill,
 } from "../../lib/composer-smart-stop";
 import { optimisticUserMessage } from "../../lib/session-transcript";
+import {
+  isDefaultSessionTitle,
+  promptFallbackSessionTitle,
+  untitledTaskTitle,
+} from "../../lib/session-title-utils";
 import type { AppState } from "../app-state";
 import {
   type SessionRuntime,
@@ -40,9 +44,6 @@ export type QueueSliceDependencies = StoreAccess & {
   runtime: SessionRuntime;
   promptAttachmentsFromDraft: PromptAttachmentConverter;
   withoutRecordKey: <T>(record: Record<string, T>, key: string) => Record<string, T>;
-  promptFallbackSessionTitle: (content: string, emptyTitle: string) => string;
-  untitledTaskTitle: () => string;
-  isDefaultSessionTitle: (title?: string | null) => boolean;
   viewingSessionIdForPrompt: (
     state: Pick<AppState, "page" | "activeSessionId">,
     sessionId: string,
@@ -58,9 +59,6 @@ export function createQueueSlice({
   runtime,
   promptAttachmentsFromDraft,
   withoutRecordKey,
-  promptFallbackSessionTitle,
-  untitledTaskTitle,
-  isDefaultSessionTitle,
   viewingSessionIdForPrompt,
   messageErrorFromUnknown,
   assistantErrorMessage,
@@ -146,6 +144,7 @@ export function createQueueSlice({
     enqueuePrompt: async (content, draft, requestedSessionId) => {
       const sessionId = requestedSessionId ?? get().activeSessionId;
       if (!sessionId) return false;
+      if (isRemoteSession(get().sessions.find((session) => session.id === sessionId)) || sessionId.startsWith("remote:")) return false;
       const queuedDraft: ComposerDraftSnapshot = draft
         ? {
             text: draft.text,
@@ -297,30 +296,14 @@ export function createQueueSlice({
           promptId,
         ),
       }));
-      let prioritized = false;
       try {
+        // The Host delivers promoted input into the active turn, or keeps it
+        // queued when that turn can no longer accept steering.
         await api.prioritizeQueuedPrompt(promptId);
-        prioritized = true;
-        // Send now keeps its graceful stop: the active turn reaches its
-        // boundary before the promoted row starts.
-        if (get().runningSessions[sessionId] &&
-            queuedPromptForSession(get().queuedPrompts, sessionId, promptId)) {
-          const result = await api.stop(sessionId);
-          if (!result.requested) {
-            await get().refreshQueuedPrompts(sessionId);
-            if (queuedPromptForSession(get().queuedPrompts, sessionId, promptId)) {
-              get().showToast(i18n.t("chat.queuedPromptStopFailed"), { variant: "info" });
-            }
-          }
-        }
       } catch (error) {
         await get().refreshQueuedPrompts(sessionId);
         const detail = error instanceof Error ? error.message : String(error);
-        const stillQueued = queuedPromptForSession(get().queuedPrompts, sessionId, promptId);
-        get().showToast(
-          prioritized && stillQueued ? `${i18n.t("chat.queuedPromptStopFailed")} ${detail}` : detail,
-          { variant: "error" },
-        );
+        get().showToast(detail, { variant: "error" });
       }
     },
 
@@ -340,6 +323,7 @@ export function createQueueSlice({
     steerPrompt: async (content, draft) => {
       const state = get();
       const sessionId = state.activeSessionId;
+      if (!sessionAllows(state.sessions.find((session) => session.id === sessionId), "canSteer")) return false;
       const expectedTurnId = sessionId ? state.agentStatuses[sessionId]?.currentTurnId : undefined;
       if (
         !sessionId || !expectedTurnId || !state.runningSessions[sessionId] ||
@@ -372,8 +356,12 @@ export function createQueueSlice({
       }
     },
 
-    sendPrompt: async (content, draft, requestedSessionId) => {
+    sendPrompt: async (content, draft, requestedSessionId, onAccepted) => {
       let sessionId = requestedSessionId ?? get().activeSessionId;
+      const target = get().sessions.find((session) => session.id === sessionId) ?? (sessionId ? { id: sessionId } : undefined);
+      if (!sessionAllows(target, "canPrompt")) return false;
+      if (draft?.fileReferences.length && !sessionAllows(target, "canAttach")) return false;
+      if (isRemoteSession(target) && sessionId && get().runningSessions[sessionId]) return false;
       const submissionKey = sessionId ? `session:${sessionId}` : "draft";
       if (pendingSubmissions.has(submissionKey)) return false;
       pendingSubmissions.add(submissionKey);
@@ -406,6 +394,7 @@ export function createQueueSlice({
             return false;
           }
           const accepted = await get().enqueuePrompt(content, draft, sessionId);
+          if (accepted) onAccepted?.(sessionId);
           return accepted;
         }
         const startedIn = sessionId;
@@ -440,20 +429,30 @@ export function createQueueSlice({
           submission.draft.fileReferences,
         );
         runtime.insertOptimisticUserMessage(startedIn, optimisticMessage);
-        try {
-          const current = get().sessions.find((session) => session.id === sessionId);
-          if (isDefaultSessionTitle(current?.title)) {
-            const nextTitle = promptFallbackSessionTitle(
-              content,
-              untitledTaskTitle(),
-            );
+        const current = get().sessions.find((session) => session.id === sessionId);
+        // Keeps the session readable without any plugin: the owning host derives
+        // a short title from this prompt but leaves it replaceable, so an
+        // installed title plugin can still upgrade it after the first turn. A
+        // remote session derives on its own host: the backend router forwards
+        // this same call to the owning `pi-host`, whose `session/deriveTitle`
+        // refuses the write once the session was renamed, so a remote session
+        // must not be excluded here. A native Pi session owns its title outside
+        // this host, so it keeps whatever that surface shows.
+        if (
+          isDefaultSessionTitle(current?.title) &&
+          current?.source !== "pi-native"
+        ) {
+          const nextTitle = promptFallbackSessionTitle(content, untitledTaskTitle());
+          if (!isDefaultSessionTitle(nextTitle)) {
             api
-              .renameSession(sessionId, nextTitle)
+              .deriveSessionTitle(sessionId, nextTitle)
               .then(() => get().refreshSessions())
               .catch(() => {
                 // Non-fatal title fallback.
               });
           }
+        }
+        try {
           if (get().pendingPlans[sessionId]?.status === "pending") {
             runtime.submittedComposerDrafts.delete(startedIn);
             runtime.retractOptimisticUserMessage(startedIn, optimisticMessage);
@@ -473,13 +472,17 @@ export function createQueueSlice({
             sessionId,
             content,
             messageId: optimisticMessage.id,
-            viewingSessionId: viewingSessionIdForPrompt(get(), sessionId),
+            viewingSessionId: isRemoteSession(current) ? null : viewingSessionIdForPrompt(get(), sessionId),
             attachments: draft ? promptAttachmentsFromDraft(draft.fileReferences) : [],
           });
           const submitted = runtime.submittedComposerDrafts.get(startedIn);
           if (submitted?.abortResolution && (await submitted.abortResolution)) {
             return false;
           }
+          if (current?.source !== "pi-native" && current?.source !== "remote") {
+            get().rememberModel(current ?? {});
+          }
+          onAccepted?.(startedIn);
           return true;
         } catch (error) {
           runtime.submittedComposerDrafts.delete(startedIn);

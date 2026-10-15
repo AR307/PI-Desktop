@@ -42,7 +42,7 @@ test("settings owns the project archive destination", () => {
   assert.match(settingsSearchSource, /titleKey: "settings\.projectArchive"/);
   assert.match(settingsPageSource, /projects: <IconArchive/);
   assert.match(settingsPageSource, /tab === "projects" && <ProjectsPage/);
-  const navOrder = ["general", "agent", "import", "projects", "about"].map(
+  const navOrder = ["general", "agent", "projects", "about"].map(
     (id) => settingsSearchSource.indexOf(`id: "${id}"`),
   );
   assert.ok(navOrder.every((index) => index >= 0));
@@ -104,8 +104,10 @@ test("project archive is a toolbar over a list, with no page-level prose", () =>
   assert.match(projectsPageSource, /project\.clearSearch/);
   assert.match(projectsPageSource, /projects-result-count[^]*aria-live="polite"/);
   assert.match(projectsPageSource, /project\.resultCount/);
-  assert.match(projectsPageSource, /"settings-segment projects-sort"/);
-  assert.match(projectsPageSource, /aria-pressed=\{sort === mode\}/);
+  assert.match(projectsPageSource, /<SegmentedControl\s+value=\{sort\}/);
+  assert.match(projectsPageSource, /className="projects-sort"/);
+  assert.match(projectsPageSource, /itemClassName="projects-sort-btn"/);
+  assert.match(projectsPageSource, /role="group"/);
   assert.match(projectsPageSource, /project\.sortRecent/);
   assert.match(projectsPageSource, /project\.sortName/);
 
@@ -138,7 +140,7 @@ test("the index row carries identity and the selected row is its own card header
   assert.match(projectsIndexSource, /projects-glyph/);
   assert.match(projectsIndexSource, /projects-name-text/);
   assert.match(projectsIndexSource, /projects-name-path/);
-  assert.match(projectsIndexSource, /shortenPath\(project\.path\)/);
+  assert.match(projectsIndexSource, /shortenPath\(project\.remote\?\.path \?\? project\.path\)/);
   // Detail reads right to left, capped by a disclosure indicator that turns
   // down once the row owns an open card.
   assert.match(projectsIndexSource, /projects-row-meta/);

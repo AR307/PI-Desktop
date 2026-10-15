@@ -7,6 +7,8 @@ import type { PluginRuntime } from "../plugin-runtime";
 import type { UserMcpRuntime } from "../user-mcp";
 import type { RuntimeState } from "./context";
 import type { FinishTurn } from "./plans";
+import { getActiveRemoteHostsBoot } from "../bootstrap/remote-hosts";
+import { createRemoteWorkspaceToolRelay, type RemoteWorkspaceToolRequest } from "../remote/remote-workspace-tools";
 
 export type HostRuntimeDependencies = {
   runtimeState: RuntimeState;
@@ -41,6 +43,7 @@ export type HostRuntimeDependencies = {
   importLegacyScheduled: () => Promise<unknown>;
   superviseRestart: (kind: "host" | "sidecar") => Promise<void>;
   isQuitting: () => boolean;
+  ensureSystemProxyRelay: () => Promise<string>;
 };
 
 export function createHostRuntime({
@@ -66,16 +69,31 @@ export function createHostRuntime({
   importLegacyScheduled,
   superviseRestart,
   isQuitting,
+  ensureSystemProxyRelay,
 }: HostRuntimeDependencies): {
   wireHost: (host: HostProcess) => void;
   startHost: () => Promise<void>;
 } {
   const wireHost = (h: HostProcess) => {
+  const remoteTools = createRemoteWorkspaceToolRelay(h, {
+    getBoot: getActiveRemoteHostsBoot,
+    isCurrent: () => runtimeState.host === h,
+    isTurnDispatchable: (sessionId, turnId) => isTurnDispatchable(sessionId, turnId),
+    log: (message, error) => logger.app("diagnostics", "warn", message, { data: String(error) }),
+  });
 
   h.onNotification((method, params) => {
     // Notifications from a previous host generation must never reach the
     // current plugin/renderer bridge after a restart.
     if (runtimeState.host !== h) return;
+    if (method === "tools.remoteExecute") {
+      void remoteTools.execute(params as RemoteWorkspaceToolRequest);
+      return;
+    }
+    if (method === "tools.remoteAbort") {
+      remoteTools.cancel(params as { sessionId: string; toolCallId: string });
+      return;
+    }
     // An install reports itself, so the dialog that shows it can follow the
     // phases, the mirror being tried and the bytes that have arrived. Nothing
     // here decides anything: the request's own answer is still the outcome.
@@ -133,6 +151,9 @@ export function createHostRuntime({
             ...(asking?.parentToolCallId
               ? { parentToolCallId: asking.parentToolCallId }
               : {}),
+            ...(asking?.nestedParentToolCallId
+              ? { nestedParentToolCallId: asking.nestedParentToolCallId }
+              : {}),
           },
         },
       };
@@ -160,14 +181,16 @@ export function createHostRuntime({
         let payload: Record<string, unknown>;
         if (q.toolName.startsWith("mcp_")) {
           try {
-            const result = await userMcp.callTool(q.toolName, q.args, projectPath);
+            const result = await userMcp.callTool(q.toolName, q.args, projectPath, q.sessionId);
             payload = { executionId: q.executionId, ok: true, content: result ?? null };
           } catch (e) {
             payload = {
               executionId: q.executionId,
               ok: false,
               errorCode:
-                (e as { errorCode?: string })?.errorCode ?? "TOOL_FAILED",
+                (e as { code?: string; errorCode?: string })?.code === "TOOL_ABORTED"
+                  ? "TOOL_ABORTED"
+                  : (e as { errorCode?: string })?.errorCode ?? "TOOL_FAILED",
               content: { error: e instanceof Error ? e.message : String(e) },
             };
           }
@@ -269,7 +292,7 @@ export function createHostRuntime({
             payload = {
               executionId: q.executionId,
               ok: false,
-              errorCode: code === "PERMISSION_DENIED" ? "PERMISSION_DENIED" : "TOOL_FAILED",
+              errorCode: code === "PERMISSION_DENIED" || code === "TOOL_ABORTED" ? code : "TOOL_FAILED",
               content: { error: e instanceof Error ? e.message : String(e) },
             };
           }
@@ -302,6 +325,8 @@ export function createHostRuntime({
       );
     } else if (method === "plans.changed") {
       sendToRenderer(IPC.event.plansChanged, params);
+    } else if (method === "todos.changed") {
+      sendToRenderer(IPC.event.todosChanged, params);
     } else if (method === "configSync.changed") {
       sendToRenderer(IPC.event.configSyncChanged, params);
     } else if (method === "configSync.progress") {
@@ -312,6 +337,7 @@ export function createHostRuntime({
     }
   });
   h.onExit(({ code, signal, intentional }) => {
+    remoteTools.dispose();
     if (runtimeState.host !== h) return;
     logger.flushChild("host");
     runtimeState.host = null;
@@ -355,11 +381,15 @@ export function createHostRuntime({
   const startHost = async (): Promise<void> => {
 
   assertLinuxGlibcSupported();
+  const systemProxyRelayUrl = await ensureSystemProxyRelay();
   const h = new HostProcess(dataDir, (text) => logger.child("host", text));
   wireHost(h);
   runtimeState.host = h;
   try {
     await h.handshake();
+    await h.call("network.configureSystemProxyRelay", {
+      url: systemProxyRelayUrl,
+    });
     logger.app("runtime", "info", "host-core handshake ok", {
       data: { generation: h.generation },
     });

@@ -1,5 +1,11 @@
 # 03. AI-Assisted Development Workflow
 
+Current workflow authority: root `AGENTS.md` (Policy-Sync 2026-09-20.1).
+Use a dedicated request worktree, incorporate current `origin/main`, and run
+task-candidate E2E there. Do not merge into local main for validation. Remote
+publishing and cleanup follow the user's authorized delivery scope. The old
+local-main workflow recorded in R4/R7 below is historical and superseded.
+
 > Scope: AI agents and human collaborators working on PI-Desktop
 > Status: Accepted
 > Cross-references: [00-baseline](../00-baseline.md) · [decisions-log](../08-meta/decisions-log.md) · [acceptance-criteria](02-acceptance-criteria.md) · [e2e-test-plan](04-e2e-test-plan.md) · [change-checklist](05-change-checklist.md) · [ADR index](../../adr/README.md)
@@ -35,7 +41,7 @@ The rules below govern every change to the PI-Desktop codebase and documentation
 - Document the scenario in `06-delivery/04-e2e-test-plan.md` — even before the automated test exists.
 - Internal-only changes (logging format, internal variable rename) do not require e2e doc updates.
 
-### R4 — Request branch + worktree + merge gate
+### R4 — Historical request workflow (superseded by AGENTS.md §§5, 16)
 
 > **Every development request starts from current `origin/main` in a
 > dedicated branch and worktree. Opening or updating a pull request
@@ -185,7 +191,31 @@ an unambiguous pull request number for this repository.
 - When both an issue and a pull request are linked, R6 applies to the pull
   request and R5 still applies to the issue after the merged outcome.
 
-### R7 — Code-bearing changes require relevant E2E after main integration
+#### R6.1 — Temporary pull-request type restriction
+
+> **While this subsection is in force, outside contributions are limited to
+> `perf` and `fix` pull requests; maintainer-planned work keeps every type.**
+
+- Effective 2026-09-26 until a maintainer removes this subsection.
+- The restriction governs outside contributions. Maintainers — accounts with
+  write access to this repository, plus the branches and automated agent work
+  they direct — keep every change type, including `feat`.
+- An outside pull request of any other change type — `feat`, `refactor`,
+  `docs`, `test`, `chore`, `build`, or `ci` — is not a landing candidate.
+  Comment with this policy in the pull request's language, then close it
+  without merging, and do not reimplement it as a replacement while the
+  restriction is in force. The type is read from the pull request's title and
+  commits; relabelling other work as `fix` or `perf` does not qualify it.
+- Feature intent goes to a feature request issue, not to a pull request.
+- `fix` and `perf` pull requests still carry the full R6 bar: the real root
+  cause, the smallest coherent change, and no harm blockers.
+- Closing a pull request whose type is out of scope does not violate R6's "do
+  not discard contributor work" clause; that clause protects an in-scope
+  root-cause fix.
+- Removing this subsection lifts the restriction. It is not a permanent
+  narrowing of the contribution scope.
+
+### R7 — Historical local-main E2E workflow (superseded by AGENTS.md §16)
 
 > **Every code-bearing change must pass relevant E2E on a candidate that
 > already contains the latest `origin/main`, before its request branch is
@@ -633,4 +663,7 @@ This workflow spec itself is accepted when:
       on in the issue language and closed when conclusive.
 - [ ] Linked GitHub pull requests land only when they fix the reported root
       cause with a minimal diff; contributor work is not discarded for nits.
+- [ ] Outside contributions are limited to `perf` and `fix` pull requests while
+      the temporary type restriction in R6.1 is in force.
+
 - [ ] All indexes updated (NAV, delivery README, spec README, docs README, BOARD).

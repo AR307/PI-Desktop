@@ -1,4 +1,5 @@
 use super::*;
+use crate::providers::model::{MirrorCodingImageRoute, MirrorCodingProvider};
 use serde_json::json;
 use std::collections::BTreeMap;
 
@@ -7,6 +8,277 @@ fn test_context() -> (tempfile::TempDir, Database, SecretStore) {
     let db = Database::open(&dir.path().join("pi.sqlite")).unwrap();
     let secrets = SecretStore::open(dir.path()).unwrap();
     (dir, db, secrets)
+}
+
+#[test]
+fn mirrorcoding_sync_persists_group_and_model_bindings() {
+    let (_dir, db, secrets) = test_context();
+    sync_mirrorcoding(
+        &db,
+        MirrorCodingProviderSync {
+            account_id: Some(901),
+            groups: vec![MirrorCodingGroupSync {
+                metadata: MirrorCodingProvider {
+                    client: Default::default(),
+                    scope: Some("group".into()),
+                    account_id: 901,
+                    group_id: "group-1".into(),
+                    group_name: "Group 1".into(),
+                    description: "Fixture group".into(),
+                    ratio: Some(0.06),
+                    dynamic_billing: false,
+                    routes: BTreeMap::from([("gpt-5".into(), "openai".into())]),
+                    image_routes: Some(BTreeMap::from([(
+                        "gpt-image-1".into(),
+                        MirrorCodingImageRoute {
+                            generation: "image-generation".into(),
+                            reference: Some("image-edit".into()),
+                        },
+                    )])),
+                    image_capabilities: Some(BTreeMap::from([(
+                        "gpt-image-1".into(),
+                        json!({
+                            "generationPath": "/v1/images/generations",
+                            "referencePath": "/v1/images/edits",
+                            "maxCount": 1,
+                            "supportsChat": false,
+                        }),
+                    )])),
+                    image_models: Some(BTreeMap::from([(
+                        "gpt-image-1".into(),
+                        json!({
+                            "generation_path": "/v1/images/generations",
+                            "reference_path": "/v1/images/edits",
+                            "max_count": 1,
+                            "supports_chat": false,
+                        }),
+                    )])),
+                    groups: None,
+                },
+                models: vec![ModelBinding {
+                    id: "gpt-5".into(),
+                    alias: None,
+                    context_window_source: Some("catalog".into()),
+                    context_window: 128_000,
+                    max_tokens: 8_192,
+                    max_tokens_source: Some("catalog".into()),
+                    thinking_protocol: None,
+                    thinking_levels: vec!["off".into(), "medium".into()],
+                    default_thinking_level: Some("medium".into()),
+                    supports_images: None,
+                    supports_documents: None,
+                    available_for_subagents: None,
+                    native_web_search: None,
+                    mirror_coding_group_id: Some("group-1".into()),
+                    temperature: None,
+                    api_style: None,
+                }],
+            }],
+        },
+    )
+    .unwrap();
+
+    let providers = list_providers(&db, &secrets, true).unwrap();
+    assert_eq!(providers.len(), 2);
+    let account = providers
+        .iter()
+        .find(|provider| {
+            provider
+                .mirror_coding
+                .as_ref()
+                .and_then(|meta| meta.scope.as_deref())
+                == Some("account")
+        })
+        .unwrap();
+    assert_eq!(account.auth_kind, "mirrorcoding");
+    assert_eq!(account.models[0].id, "gpt-5");
+    assert_eq!(
+        account.models[0].mirror_coding_group_id.as_deref(),
+        Some("group-1")
+    );
+    assert_eq!(
+        account
+            .mirror_coding
+            .as_ref()
+            .unwrap()
+            .groups
+            .as_ref()
+            .unwrap()
+            .len(),
+        1
+    );
+    assert_eq!(
+        account
+            .mirror_coding
+            .as_ref()
+            .unwrap()
+            .image_models
+            .as_ref()
+            .unwrap()["gpt-image-1"]["reference_path"],
+        "/v1/images/edits"
+    );
+}
+
+#[test]
+fn mirrorcoding_account_model_settings_project_to_groups_and_survive_refresh() {
+    let (_dir, db, secrets) = test_context();
+    let catalog = json!({
+        "accountId": 901,
+        "groups": [
+            {
+                "metadata": {
+                    "scope": "group", "accountId": 901, "groupId": "cn-fast",
+                    "groupName": "Fast", "description": "Fast group", "ratio": 0.06,
+                    "dynamicBilling": false, "routes": {"gpt-5": "openai"}
+                },
+                "models": [{"id": "gpt-5", "contextWindow": 128000,
+                    "maxTokens": 8192, "thinkingLevels": ["off", "medium"],
+                    "defaultThinkingLevel": "medium", "mirrorCodingGroupId": "cn-fast"}]
+            },
+            {
+                "metadata": {
+                    "scope": "group", "accountId": 901, "groupId": "premium",
+                    "groupName": "Premium", "description": "Premium group", "ratio": 1.2,
+                    "dynamicBilling": false, "routes": {"gpt-5": "openai-response"}
+                },
+                "models": [{"id": "gpt-5", "contextWindow": 128000,
+                    "maxTokens": 8192, "thinkingLevels": ["off", "medium"],
+                    "defaultThinkingLevel": "medium", "mirrorCodingGroupId": "premium"}]
+            }
+        ]
+    });
+    let sync = || {
+        sync_mirrorcoding(
+            &db,
+            serde_json::from_value::<MirrorCodingProviderSync>(catalog.clone()).unwrap(),
+        )
+        .unwrap();
+    };
+    sync();
+    let before = list_providers(&db, &secrets, true).unwrap();
+    let account = before
+        .iter()
+        .find(|provider| {
+            provider.mirror_coding.as_ref().unwrap().scope.as_deref() == Some("account")
+        })
+        .unwrap();
+    let mut edited = account.models.clone();
+    edited[0].context_window = 200_000;
+    edited[0].max_tokens = 12_000;
+    edited[0].temperature = Some(0.7);
+    edited[0].mirror_coding_group_id = Some("premium".into());
+    let input: ProviderUpdateInput = serde_json::from_value(json!({
+        "id": account.id,
+        "models": edited,
+    }))
+    .unwrap();
+    update_provider(&db, &secrets, input).unwrap();
+    let updated = list_providers(&db, &secrets, true).unwrap();
+    for group in updated.iter().filter(|provider| {
+        provider.mirror_coding.as_ref().unwrap().scope.as_deref() != Some("account")
+    }) {
+        assert_eq!(group.models[0].context_window, 200_000);
+        assert_eq!(group.models[0].max_tokens, 12_000);
+        assert_eq!(group.models[0].temperature, Some(0.7));
+        assert_eq!(
+            group.models[0].mirror_coding_group_id.as_deref(),
+            Some(group.mirror_coding.as_ref().unwrap().group_id.as_str())
+        );
+    }
+    sync();
+    let refreshed = list_providers(&db, &secrets, true).unwrap();
+    let account = refreshed
+        .iter()
+        .find(|provider| {
+            provider.mirror_coding.as_ref().unwrap().scope.as_deref() == Some("account")
+        })
+        .unwrap();
+    assert_eq!(
+        account.models[0].mirror_coding_group_id.as_deref(),
+        Some("premium")
+    );
+    assert_eq!(account.models[0].temperature, Some(0.7));
+    assert_eq!(account.models[0].context_window, 200_000);
+}
+
+#[test]
+fn switching_provider_to_no_auth_clears_its_api_key() {
+    let (_dir, db, secrets) = test_context();
+    let provider = create_provider(
+        &db,
+        &secrets,
+        ProviderCreateInput {
+            name: "Custom gateway".into(),
+            vendor_key: Some("custom".into()),
+            provider_type: Some("openai_compatible".into()),
+            protocol: Some("openai_compatible".into()),
+            base_url: Some("http://127.0.0.1:11434/v1".into()),
+            auth_kind: Some("api_key_and_base_url".into()),
+            models: None,
+            default_model_id: Some("local-chat".into()),
+            secret_value: Some("fixture-api-key".into()),
+            api_style: Some("chat_completions".into()),
+            oauth_account_label: None,
+            headers: None,
+            context_window: None,
+            max_output_tokens: None,
+            temperature: None,
+            supports_reasoning: None,
+            supported_thinking_levels: None,
+        },
+    )
+    .unwrap();
+    let api_key_ref = secret_ref_for_provider(&provider.id);
+    assert!(provider.has_secret);
+    assert!(secrets.has(&api_key_ref));
+    let oauth_ref = secret_ref_for_provider_oauth(&provider.id);
+    secrets.set(&oauth_ref, "fixture-oauth-credential").unwrap();
+
+    let updated = update_provider(
+        &db,
+        &secrets,
+        ProviderUpdateInput {
+            id: provider.id.clone(),
+            name: None,
+            vendor_key: None,
+            provider_type: None,
+            protocol: None,
+            base_url: None,
+            auth_kind: Some("none".into()),
+            models: None,
+            default_model_id: None,
+            secret_value: None,
+            api_style: None,
+            oauth_account_label: None,
+            headers: None,
+            context_window: None,
+            max_output_tokens: None,
+            temperature: None,
+            supports_reasoning: None,
+            supported_thinking_levels: None,
+            enabled: None,
+        },
+    )
+    .unwrap()
+    .unwrap();
+
+    assert_eq!(updated.auth_kind, "none");
+    assert!(updated.has_secret);
+    assert!(updated.has_oauth);
+    assert!(!secrets.has(&api_key_ref));
+    assert_eq!(
+        secrets.get(&oauth_ref).unwrap().as_deref(),
+        Some("fixture-oauth-credential")
+    );
+    let stored_secret_ref: Option<String> = db
+        .conn()
+        .query_row(
+            "SELECT secret_ref FROM providers WHERE id = ?1",
+            params![provider.id],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(stored_secret_ref, None);
 }
 
 #[test]
@@ -163,27 +435,37 @@ fn model_bindings_roundtrip_and_legacy_model_migrates_on_read() {
                     id: "reasoning-model".into(),
                     alias: Some("pro".into()),
                     context_window_source: None,
+                    max_tokens_source: None,
                     context_window: 256_000,
                     max_tokens: 16_000,
                     thinking_levels: vec!["high".into(), "medium".into()],
                     default_thinking_level: Some("medium".into()),
+                    thinking_protocol: Some("adaptive".into()),
                     supports_images: Some(true),
                     supports_documents: None,
                     available_for_subagents: Some(true),
                     native_web_search: None,
+                    mirror_coding_group_id: None,
+                    temperature: None,
+                    api_style: None,
                 },
                 ModelBinding {
                     id: "plain-model".into(),
                     alias: None,
                     context_window_source: None,
+                    max_tokens_source: None,
                     context_window: 128_000,
                     max_tokens: 8_192,
                     thinking_levels: vec![],
                     default_thinking_level: None,
+                    thinking_protocol: None,
                     supports_images: None,
                     supports_documents: Some(false),
                     available_for_subagents: None,
                     native_web_search: None,
+                    mirror_coding_group_id: None,
+                    temperature: None,
+                    api_style: None,
                 },
             ]),
             default_model_id: None,
@@ -283,14 +565,19 @@ fn binding_with_alias(id: &str, alias: Option<&str>) -> ModelBinding {
         id: id.into(),
         alias: alias.map(str::to_string),
         context_window_source: None,
+        max_tokens_source: None,
         context_window: DEFAULT_CONTEXT_WINDOW,
         max_tokens: DEFAULT_MAX_TOKENS,
         thinking_levels: Vec::new(),
         default_thinking_level: None,
+        thinking_protocol: None,
         supports_images: None,
         supports_documents: None,
         available_for_subagents: None,
         native_web_search: None,
+        mirror_coding_group_id: None,
+        temperature: None,
+        api_style: None,
     }
 }
 
@@ -306,6 +593,22 @@ fn normalize_model_bindings_trims_aliases_and_drops_blank_ones() {
     assert_eq!(normalized[1].alias, None);
     assert_eq!(normalized[2].alias, None);
     assert_eq!(normalized[3].alias, None);
+}
+
+#[test]
+fn normalize_model_bindings_preserves_known_thinking_protocols_only() {
+    let normalized = normalize_model_bindings(&[
+        ModelBinding {
+            thinking_protocol: Some("adaptive".into()),
+            ..binding_with_alias("adaptive-model", None)
+        },
+        ModelBinding {
+            thinking_protocol: Some("unsupported".into()),
+            ..binding_with_alias("legacy-model", None)
+        },
+    ]);
+    assert_eq!(normalized[0].thinking_protocol.as_deref(), Some("adaptive"));
+    assert_eq!(normalized[1].thinking_protocol, None);
 }
 
 #[test]
@@ -868,7 +1171,9 @@ fn discovered_models_are_cached_without_overwriting_user_rows() {
     .unwrap();
 
     let models = list_models(&db, Some(&provider.id)).unwrap();
-    assert_eq!(models.len(), 3);
+    // The second answer names model-a and the user's row only, so the model it
+    // stopped publishing goes with the answer it belonged to.
+    assert_eq!(models.len(), 2);
     let alpha = models
         .iter()
         .find(|model| model.model_id == "model-a")
@@ -876,7 +1181,7 @@ fn discovered_models_are_cached_without_overwriting_user_rows() {
     assert_eq!(alpha.display_name, "Alpha updated");
     assert_eq!(alpha.capabilities, vec!["text", "reasoning"]);
     assert_eq!(alpha.context_window, Some(256_000));
-    assert!(models.iter().any(|model| model.model_id == "model-b"));
+    assert!(!models.iter().any(|model| model.model_id == "model-b"));
     let custom = models
         .iter()
         .find(|model| model.model_id == "user-model")
@@ -884,6 +1189,273 @@ fn discovered_models_are_cached_without_overwriting_user_rows() {
     assert_eq!(custom.display_name, "Custom label");
     assert_eq!(custom.source, "user");
     assert_eq!(custom.capabilities, vec!["tools"]);
+}
+
+/// A model the user deleted and saved is no longer part of the configuration,
+/// so the parameters recorded for it go with it: keeping the row handed the
+/// deleted model's context window back to the next add of the same id, and kept
+/// it in the picker's cache-first paint.
+#[test]
+fn deleting_a_binding_and_saving_forgets_its_cached_parameters() {
+    let (_dir, db, secrets) = test_context();
+    let provider = create_provider(
+        &db,
+        &secrets,
+        ProviderCreateInput {
+            name: "Catalog".into(),
+            vendor_key: None,
+            provider_type: None,
+            protocol: None,
+            base_url: Some("http://localhost:11434/v1".into()),
+            auth_kind: Some("none".into()),
+            models: Some(vec![
+                binding_with_limits("model-a", 128_000, 8_192),
+                binding_with_limits("model-b", 32_000, 4_096),
+            ]),
+            default_model_id: Some("model-a".into()),
+            secret_value: None,
+            api_style: Some("chat_completions".into()),
+            oauth_account_label: None,
+            headers: None,
+            context_window: None,
+            max_output_tokens: None,
+            temperature: None,
+            supports_reasoning: None,
+            supported_thinking_levels: None,
+        },
+    )
+    .unwrap();
+    cache_discovered_models(
+        &db,
+        &provider.id,
+        &[
+            DiscoveredModelInput {
+                model_id: "model-a".into(),
+                display_name: "Alpha".into(),
+                capabilities: vec!["text".into()],
+                context_window: Some(128_000),
+            },
+            // The service spells it differently from the binding that drops it.
+            DiscoveredModelInput {
+                model_id: "MODEL-B".into(),
+                display_name: "Beta".into(),
+                capabilities: vec!["text".into()],
+                context_window: Some(32_000),
+            },
+            DiscoveredModelInput {
+                model_id: "model-c".into(),
+                display_name: "Gamma".into(),
+                capabilities: vec!["text".into()],
+                context_window: Some(64_000),
+            },
+        ],
+    )
+    .unwrap();
+    assert_eq!(list_models(&db, Some(&provider.id)).unwrap().len(), 3);
+
+    update_provider(
+        &db,
+        &secrets,
+        ProviderUpdateInput {
+            id: provider.id.clone(),
+            name: None,
+            vendor_key: None,
+            provider_type: None,
+            protocol: None,
+            base_url: None,
+            auth_kind: None,
+            models: Some(vec![binding_with_limits("model-a", 128_000, 8_192)]),
+            default_model_id: None,
+            secret_value: None,
+            api_style: None,
+            oauth_account_label: None,
+            headers: None,
+            context_window: None,
+            max_output_tokens: None,
+            temperature: None,
+            supports_reasoning: None,
+            supported_thinking_levels: None,
+            enabled: None,
+        },
+    )
+    .unwrap()
+    .unwrap();
+
+    let cached = list_models(&db, Some(&provider.id)).unwrap();
+    assert_eq!(
+        cached
+            .iter()
+            .map(|model| model.model_id.as_str())
+            .collect::<Vec<_>>(),
+        vec!["model-a", "model-c"]
+    );
+}
+
+/// The cache is the service's answer, so an answer that no longer publishes a
+/// model drops that model's row — while a row the user owns survives it: a
+/// hand-typed id and a configured binding are the user's configuration, not the
+/// service's answer.
+#[test]
+fn a_probe_answer_forgets_models_it_no_longer_publishes() {
+    let (_dir, db, secrets) = test_context();
+    let provider = create_provider(
+        &db,
+        &secrets,
+        ProviderCreateInput {
+            name: "Catalog".into(),
+            vendor_key: None,
+            provider_type: None,
+            protocol: None,
+            base_url: Some("http://localhost:11434/v1".into()),
+            auth_kind: Some("none".into()),
+            models: Some(vec![binding_with_limits("custom-model", 8_000, 1_024)]),
+            default_model_id: Some("custom-model".into()),
+            secret_value: None,
+            api_style: Some("chat_completions".into()),
+            oauth_account_label: None,
+            headers: None,
+            context_window: None,
+            max_output_tokens: None,
+            temperature: None,
+            supports_reasoning: None,
+            supported_thinking_levels: None,
+        },
+    )
+    .unwrap();
+    // A hand-typed id the service never published, recorded as the user's own.
+    db.conn()
+        .execute(
+            "INSERT INTO models (
+                    provider_id, model_id, display_name, source,
+                    capabilities_json, updated_at
+                 ) VALUES (?1, 'pinned-model', 'Pinned', 'user', '[]', ?2)",
+            params![provider.id, now_ms()],
+        )
+        .unwrap();
+    let answer = |discovered: &[&str]| -> Vec<DiscoveredModelInput> {
+        discovered
+            .iter()
+            .map(|id| DiscoveredModelInput {
+                model_id: (*id).to_string(),
+                display_name: (*id).to_string(),
+                capabilities: vec!["text".into()],
+                context_window: Some(64_000),
+            })
+            .collect()
+    };
+
+    // This answer publishes the hand-typed id too, so its row is discovered.
+    cache_discovered_models(
+        &db,
+        &provider.id,
+        &answer(&["model-a", "model-b", "custom-model"]),
+    )
+    .unwrap();
+    assert_eq!(list_models(&db, Some(&provider.id)).unwrap().len(), 4);
+
+    // The endpoint stopped publishing model-b.
+    cache_discovered_models(&db, &provider.id, &answer(&["model-a"])).unwrap();
+
+    let mut cached: Vec<String> = list_models(&db, Some(&provider.id))
+        .unwrap()
+        .into_iter()
+        .map(|model| model.model_id)
+        .collect();
+    cached.sort();
+    assert_eq!(
+        cached,
+        vec!["custom-model", "model-a", "pinned-model"],
+        "the unpublished model goes with the answer; the user's rows stay"
+    );
+}
+
+/// The discovered answer belongs to the endpoint that produced it: saving a new
+/// address drops the previous one's answer, while the models the user configured
+/// stay exactly as saved.
+#[test]
+fn changing_the_endpoint_forgets_the_discovered_answer() {
+    let (_dir, db, secrets) = test_context();
+    let provider = create_provider(
+        &db,
+        &secrets,
+        ProviderCreateInput {
+            name: "Relay".into(),
+            vendor_key: None,
+            provider_type: None,
+            protocol: None,
+            base_url: Some("http://localhost:11434/v1".into()),
+            auth_kind: Some("none".into()),
+            models: Some(vec![binding_with_limits("model-a", 128_000, 8_192)]),
+            default_model_id: Some("model-a".into()),
+            secret_value: None,
+            api_style: Some("chat_completions".into()),
+            oauth_account_label: None,
+            headers: None,
+            context_window: None,
+            max_output_tokens: None,
+            temperature: None,
+            supports_reasoning: None,
+            supported_thinking_levels: None,
+        },
+    )
+    .unwrap();
+    cache_discovered_models(
+        &db,
+        &provider.id,
+        &[
+            DiscoveredModelInput {
+                model_id: "model-a".into(),
+                display_name: "Alpha".into(),
+                capabilities: vec!["text".into()],
+                context_window: Some(128_000),
+            },
+            DiscoveredModelInput {
+                model_id: "model-b".into(),
+                display_name: "Beta".into(),
+                capabilities: vec!["text".into()],
+                context_window: Some(32_000),
+            },
+        ],
+    )
+    .unwrap();
+    assert_eq!(list_models(&db, Some(&provider.id)).unwrap().len(), 2);
+
+    // A URL-only edit: the model list is untouched, so only the endpoint rule can
+    // be what drops the old answer.
+    update_provider(
+        &db,
+        &secrets,
+        ProviderUpdateInput {
+            id: provider.id.clone(),
+            name: None,
+            vendor_key: None,
+            provider_type: None,
+            protocol: None,
+            base_url: Some("http://localhost:9000/v1".into()),
+            auth_kind: None,
+            models: None,
+            default_model_id: None,
+            secret_value: None,
+            api_style: None,
+            oauth_account_label: None,
+            headers: None,
+            context_window: None,
+            max_output_tokens: None,
+            temperature: None,
+            supports_reasoning: None,
+            supported_thinking_levels: None,
+            enabled: None,
+        },
+    )
+    .unwrap()
+    .unwrap();
+
+    let cached: Vec<String> = list_models(&db, Some(&provider.id))
+        .unwrap()
+        .into_iter()
+        .map(|model| model.model_id)
+        .collect();
+    assert_eq!(cached, vec!["model-a"]);
 }
 
 #[test]
@@ -1179,14 +1751,19 @@ fn binding_with_limits(id: &str, context_window: u32, max_tokens: u32) -> ModelB
         id: id.into(),
         alias: None,
         context_window_source: None,
+        max_tokens_source: None,
         context_window,
         max_tokens,
         thinking_levels: Vec::new(),
         default_thinking_level: None,
+        thinking_protocol: None,
         supports_images: None,
         supports_documents: None,
         available_for_subagents: None,
         native_web_search: None,
+        mirror_coding_group_id: None,
+        temperature: None,
+        api_style: None,
     }
 }
 

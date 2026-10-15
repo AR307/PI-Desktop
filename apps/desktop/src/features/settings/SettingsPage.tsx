@@ -20,7 +20,6 @@ import {
   IconBookOpen,
   IconBot,
   IconChevronLeft,
-  IconDownload,
   IconFileText,
   IconGlobe,
   IconInfo,
@@ -31,8 +30,10 @@ import {
   IconSliders,
   IconSparkles,
   IconCloudDown,
+  IconUser,
+  IconMic,
 } from "../../components/icons";
-import { Badge, Button, cx } from "../../components/ui";
+import { Badge, Button, cx, SegmentedControl, SettingsToggle } from "../../components/ui";
 import { ModelConfigPage } from "../../components/settings/ModelConfigPage";
 import { KeyboardShortcutsSection } from "../../components/settings/KeyboardShortcutsSection";
 import { FontFamilyRow } from "../../components/settings/FontFamilyRow";
@@ -47,6 +48,7 @@ import { AgentSkillsPage } from "../../components/settings/AgentSkillsPage";
 import { AgentMcpPage } from "../../components/settings/AgentMcpPage";
 import { AgentSubagentsPage } from "../../components/settings/AgentSubagentsPage";
 import { RemoteHostsPage } from "../../components/settings/RemoteHostsPage";
+import { VoiceSettingsSection } from "./voice/VoiceSettingsSection";
 import {
   CommandShellRow,
   ContextUsageDisplayRow,
@@ -56,11 +58,11 @@ import {
   SettingsRow,
 } from "./primitives";
 import { AgentInstructionsSection, UpdatesRow } from "./agent-sections";
-import { ImportSection } from "./import-page";
-import { PromptEnhancementCard } from "./prompt-enhancement-card";
 import { CloseBehaviorSection, DeveloperSection } from "./developer-sections";
 import { PluginScenicThemesDestination } from "../../components/settings/PluginScenicThemesDestination";
 import { ConfigSyncPage } from "../../components/settings/ConfigSyncPage";
+import { MirrorCodingAccountPage } from "../account/MirrorCodingAccountPage";
+import { StorageSettingsSection } from "./StorageSettingsSection";
 
 type SettingsTab = ReturnType<typeof useAppStore.getState>["settingsTab"];
 
@@ -88,11 +90,18 @@ export function SettingsPage() {
   const refreshProviders = useAppStore((s) => s.refreshProviders);
   const platform = (window.piDesktop?.platform ?? "darwin") as ShortcutPlatform;
 
-  // Developer-only destinations (Cloud sync and Remote Hosts) exist only
-  // while developer mode is on; the rail, page, and search drop them together.
+  // Experimental feature surfaces remain available in development builds only.
+  const includeDevelopmentOnly = import.meta.env.DEV;
   const developerMode = settings?.developerMode === true;
-  const navEntries = useMemo(() => visibleSettingsNav(developerMode), [developerMode]);
-  const tabHidden = isSettingsDestinationHidden(tab, developerMode);
+  const navEntries = useMemo(
+    () => visibleSettingsNav(developerMode, includeDevelopmentOnly),
+    [developerMode, includeDevelopmentOnly],
+  );
+  const tabHidden = isSettingsDestinationHidden(
+    tab,
+    developerMode,
+    includeDevelopmentOnly,
+  );
 
   const [query, setQuery] = useState("");
   const [recoveringSettings, setRecoveringSettings] = useState(!settings);
@@ -111,7 +120,12 @@ export function SettingsPage() {
     if (activeExtension) setActiveExtension(null);
   }
   const contentRef = useRef<HTMLDivElement>(null);
+  const settingsSearchRef = useRef<HTMLInputElement>(null);
   const destination = activeExtension ? `extension:${activeExtension.ref}` : `builtin:${tab}`;
+
+  useLayoutEffect(() => {
+    settingsSearchRef.current?.focus({ preventScroll: true });
+  }, []);
 
   useLayoutEffect(() => {
     // Reset before paint and before the search-anchor effect positions its row.
@@ -171,7 +185,7 @@ export function SettingsPage() {
     const tryFind = (attempt: number) => {
       if (cancelled) return;
       const titles = document.querySelectorAll<HTMLElement>(
-        ".settings-content .settings-row-title, .settings-content .settings-card-heading",
+        ".settings-content .settings-row-title, .settings-content .settings-card-heading, .settings-content .about-update-title",
       );
       const match = [...titles].find(
         (node) => node.textContent?.trim() === target,
@@ -218,6 +232,7 @@ export function SettingsPage() {
   const navItems: NavItem[] = useMemo(() => {
     const iconFor: Record<SettingsTab, ReactNode> = {
       // Semantic Lucide glyphs for the settings destinations.
+      account: <IconUser size={14} />,
       general: <IconSliders size={14} />,
       ai: <IconSparkles size={14} />,
       shortcuts: <IconKeyboard size={14} />,
@@ -226,10 +241,10 @@ export function SettingsPage() {
       skills: <IconBookOpen size={14} />,
       mcp: <IconServer size={14} />,
       subagents: <IconBot size={14} />,
-      import: <IconDownload size={14} />,
       projects: <IconArchive size={14} />,
       sync: <IconCloudDown size={14} />,
       remoteHosts: <IconGlobe size={14} />,
+      voice: <IconMic size={14} />,
       about: <IconInfo size={14} />,
     };
     return navEntries.map((entry) => ({
@@ -280,6 +295,7 @@ export function SettingsPage() {
           <div className="settings-search-wrap no-drag">
             <IconSearch size={14} />
             <input
+              ref={settingsSearchRef}
               className="settings-search"
               value={query}
               onChange={(e) => setQuery(e.target.value)}
@@ -393,6 +409,8 @@ export function SettingsPage() {
             </div>
           ) : null}
 
+          {tab === "account" && <MirrorCodingAccountPage />}
+
           {tab === "general" && settings && (
             <div className="settings-stack">
               <SettingsCard title={t("settings.appearance")}>
@@ -403,6 +421,33 @@ export function SettingsPage() {
               </SettingsCard>
 
               <NetworkProxySection settings={settings} saveSettings={saveSettings} />
+
+              <StorageSettingsSection />
+
+              <SettingsCard title={t("settings.power")}>
+                <SettingsRow
+                  title={t("settings.keepAwakeWhileRunning")}
+                  description={t("settings.keepAwakeWhileRunningDesc")}
+                >
+                  <SettingsToggle
+                    checked={settings.keepAwakeWhileRunning === true}
+                    label={t("settings.keepAwakeWhileRunning")}
+                    onChange={() => void saveSettings({
+                      keepAwakeWhileRunning: settings.keepAwakeWhileRunning !== true,
+                    })}
+                  />
+                </SettingsRow>
+                <SettingsRow
+                  title={t("settings.preventScreenSleep")}
+                  description={t("settings.preventScreenSleepDesc")}
+                >
+                  <SettingsToggle
+                    checked={settings.preventScreenSleep === true}
+                    label={t("settings.preventScreenSleep")}
+                    onChange={() => void saveSettings({ preventScreenSleep: !settings.preventScreenSleep })}
+                  />
+                </SettingsRow>
+              </SettingsCard>
 
               {platform !== "darwin" && <CloseBehaviorSection />}
             </div>
@@ -438,30 +483,17 @@ export function SettingsPage() {
 
               <SettingsCard title={t("settings.defaultsTitle")}>
                 <SettingsRow title={t("settings.mode")} description={t("settings.modeDesc")}>
-                  <div
-                    className="settings-segment"
+                  <SegmentedControl
+                    value={settings.defaultMode ?? "agent"}
+                    onChange={(value) => void saveSettings({ defaultMode: value })}
+                    options={[
+                      { value: "agent", label: t("settings.modeAgent") },
+                      { value: "plan", label: t("settings.modePlan") },
+                      { value: "goal", label: t("settings.modeGoal") },
+                    ]}
+                    label={t("settings.mode")}
                     role="group"
-                    aria-label={t("settings.mode")}
-                  >
-                    {([
-                      ["agent", "settings.modeAgent"],
-                      ["plan", "settings.modePlan"],
-                      ["goal", "settings.modeGoal"],
-                    ] as const).map(([value, labelKey]) => (
-                      <button
-                        key={value}
-                        type="button"
-                        className={cx(
-                          "settings-segment-item",
-                          settings.defaultMode === value && "active",
-                        )}
-                        aria-pressed={settings.defaultMode === value}
-                        onClick={() => void saveSettings({ defaultMode: value })}
-                      >
-                        {t(labelKey)}
-                      </button>
-                    ))}
-                  </div>
+                  />
                 </SettingsRow>
                 <CommandShellRow settings={settings} saveSettings={saveSettings} />
                 <LinkOpenTargetRow settings={settings} saveSettings={saveSettings} />
@@ -474,62 +506,31 @@ export function SettingsPage() {
                   title={t("settings.enterToSend")}
                   description={t("settings.enterToSendDesc")}
                 >
-                  <button
-                    type="button"
-                    className={cx("settings-toggle", settings.enterToSend && "on")}
-                    role="switch"
-                    aria-checked={settings.enterToSend}
-                    aria-label={t("settings.enterToSend")}
-                    onClick={() =>
-                      void saveSettings({ enterToSend: !settings.enterToSend })
-                    }
-                  >
-                    <span className="settings-toggle-thumb" />
-                  </button>
+                  <SettingsToggle
+                    checked={settings.enterToSend}
+                    label={t("settings.enterToSend")}
+                    onChange={() => void saveSettings({ enterToSend: !settings.enterToSend })}
+                  />
                 </SettingsRow>
                 <SettingsRow
                   title={t("settings.infiniteProviderRetry")}
                   description={t("settings.infiniteProviderRetryDesc")}
                 >
-                  <button
-                    type="button"
-                    className={cx(
-                      "settings-toggle",
-                      settings.infiniteProviderRetry === true && "on",
-                    )}
-                    role="switch"
-                    aria-checked={settings.infiniteProviderRetry === true}
-                    aria-label={t("settings.infiniteProviderRetry")}
-                    onClick={() =>
-                      void saveSettings({
-                        infiniteProviderRetry: settings.infiniteProviderRetry !== true,
-                      })
-                    }
-                  >
-                    <span className="settings-toggle-thumb" />
-                  </button>
+                  <SettingsToggle
+                    checked={settings.infiniteProviderRetry === true}
+                    label={t("settings.infiniteProviderRetry")}
+                    onChange={() => void saveSettings({ infiniteProviderRetry: settings.infiniteProviderRetry !== true })}
+                  />
                 </SettingsRow>
                 <SettingsRow
                   title={t("settings.smoothStreaming")}
                   description={t("settings.smoothStreamingDesc")}
                 >
-                  <button
-                    type="button"
-                    className={cx(
-                      "settings-toggle",
-                      settings.smoothStreaming !== false && "on",
-                    )}
-                    role="switch"
-                    aria-checked={settings.smoothStreaming !== false}
-                    aria-label={t("settings.smoothStreaming")}
-                    onClick={() =>
-                      void saveSettings({
-                        smoothStreaming: !(settings.smoothStreaming !== false),
-                      })
-                    }
-                  >
-                    <span className="settings-toggle-thumb" />
-                  </button>
+                  <SettingsToggle
+                    checked={settings.smoothStreaming !== false}
+                    label={t("settings.smoothStreaming")}
+                    onChange={() => void saveSettings({ smoothStreaming: !(settings.smoothStreaming !== false) })}
+                  />
                 </SettingsRow>
                 <LargePasteThresholdRow
                   settings={settings}
@@ -537,11 +538,15 @@ export function SettingsPage() {
                 />
               </SettingsCard>
 
-              <PromptEnhancementCard
-                settings={settings}
-                saveSettings={saveSettings}
-              />
             </div>
+          )}
+
+          {tab === "voice" && !tabHidden && settings && (
+            <VoiceSettingsSection
+              t={t}
+              settings={settings}
+              saveSettings={saveSettings}
+            />
           )}
 
           {tab === "shortcuts" && settings && (
@@ -564,7 +569,6 @@ export function SettingsPage() {
 
           {tab === "instructions" && <AgentInstructionsSection />}
 
-          {tab === "import" && <ImportSection />}
 
           {tab === "projects" && <ProjectsPage />}
 
@@ -574,17 +578,23 @@ export function SettingsPage() {
 
           {tab === "about" && (
             <div className="settings-stack">
+              <div className="settings-about-hero">
+                <div className="settings-about-hero-name">
+                  {version?.name || "PI-Desktop"}
+                </div>
+                <div className="settings-about-hero-version">
+                  {t("settings.aboutVersion", { version: version?.version ?? "" })}
+                </div>
+                <div className="settings-about-hero-meta">
+                  protocol {version?.protocolVersion} · host {version?.hostVersion}
+                </div>
+              </div>
+              <UpdatesRow
+                currentVersion={version?.version}
+                settings={settings ?? null}
+                saveSettings={saveSettings}
+              />
               <SettingsCard>
-                <SettingsRow title={t("settings.application")}>
-                  <div className="settings-about-meta">
-                    <div className="font-medium">
-                      {version?.name || "PI-Desktop"} {version?.version}
-                    </div>
-                    <div className="font-mono text-xs-plus text-text-muted">
-                      protocol {version?.protocolVersion} · host {version?.hostVersion}
-                    </div>
-                  </div>
-                </SettingsRow>
                 <SettingsRow title={t("settings.logs")}>
                   <Button variant="secondary" onClick={() => void api.openLogs()}>
                     {t("settings.openLogs")}
@@ -601,7 +611,6 @@ export function SettingsPage() {
                     {t("settings.openFeedback")}
                   </Button>
                 </SettingsRow>
-                <UpdatesRow currentVersion={version?.version} />
               </SettingsCard>
 
               {settings && (

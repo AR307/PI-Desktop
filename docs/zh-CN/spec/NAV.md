@@ -22,6 +22,7 @@
 - [04-documentation-site.md](/zh-CN/spec/02-architecture/04-documentation-site)
 - [03-repo-structure.md](/zh-CN/spec/02-architecture/03-repo-structure)
 - [05-remote-agent-control.md](/zh-CN/spec/02-architecture/05-remote-agent-control)
+- [06-pi-runtime-dependency-boundary.md](/zh-CN/spec/02-architecture/06-pi-runtime-dependency-boundary)
 
 ## 3. 运行时
 - [README.md](/zh-CN/spec/03-runtime/README)
@@ -45,6 +46,8 @@
 - [18-line-anchored-edit-contract.md](/zh-CN/spec/03-runtime/18-line-anchored-edit-contract)
 - [19-remote-agent-control-protocol.md](/zh-CN/spec/03-runtime/19-remote-agent-control-protocol)
 - [20-speech.md](/zh-CN/spec/03-runtime/20-speech)
+- [live-voice.md](/zh-CN/spec/03-runtime/live-voice)
+- [live-work-session.md](/zh-CN/spec/03-runtime/live-work-session)
 - [21-image-generation.md](/zh-CN/spec/03-runtime/21-image-generation)
 - [22-config-sync.md](/zh-CN/spec/03-runtime/22-config-sync)
 - [svg-attachment-input.md](/zh-CN/spec/03-runtime/svg-attachment-input)
@@ -105,3 +108,11 @@
 
 ## ADR
 - [../adr/README.md](/adr/README)
+
+- [MirrorCoding 账号与模型路由](/zh-CN/spec/03-runtime/21-mirrorcoding-account)
+
+- [图片生成](/zh-CN/spec/03-runtime/22-image-generation)
+
+- [安卓伴侣与限定范围的桌面同步](/zh-CN/spec/03-runtime/23-mobile-companion)
+
+- [Ultra 协作](/zh-CN/spec/03-runtime/ultra-collaboration)

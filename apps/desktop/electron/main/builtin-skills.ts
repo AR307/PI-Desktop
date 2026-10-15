@@ -2,6 +2,8 @@ import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { parseSkillFrontmatter } from "@pi-desktop/plugin-sdk";
 import type { PluginSkillDef } from "@pi-desktop/agent-runtime";
+import type { LoadedSkillDocument } from "./skill-document";
+import { getModuleDirectory } from "./module-path";
 
 /**
  * Skills PI-Desktop ships itself.
@@ -20,7 +22,7 @@ const IMAGE_GENERATION_SKILL_FILE = "image-generation.md";
 
 /** electron-builder copies `resources/skills` to `<resources>/skills`. */
 function resolveBuiltinSkillPath(fileName: string): string | null {
-  const moduleDir = typeof __dirname === "string" ? __dirname : import.meta.dirname;
+  const moduleDir = getModuleDirectory(import.meta.url);
   const candidates = [
     join(process.resourcesPath || "", "skills", fileName),
     join(moduleDir, "../../resources/skills", fileName),
@@ -67,11 +69,11 @@ export function isPluginWorkspace(
 }
 
 /** Front matter carries the skill's title and applicability line. */
-function readBuiltinSkill(fileName: string): string | null {
+function readBuiltinSkill(fileName: string): { path: string; raw: string } | null {
   const path = resolveBuiltinSkillPath(fileName);
   if (!path) return null;
   try {
-    return readFileSync(path, "utf8");
+    return { path, raw: readFileSync(path, "utf8") };
   } catch {
     return null;
   }
@@ -81,7 +83,24 @@ export type BuiltinSkillInput = {
   workspacePath?: string | null;
   /** Directories of currently loaded plugins, used to detect a dev workspace. */
   pluginPaths?: string[];
+  /** User-disabled ids are withheld from the agent and composer catalog. */
+  disabledIds?: readonly string[];
 };
+
+const BUILTIN_SKILL_FILES = [
+  [IMAGE_GENERATION_SKILL_ID, IMAGE_GENERATION_SKILL_FILE],
+  [PLUGIN_DEV_SKILL_ID, PLUGIN_DEV_SKILL_FILE],
+] as const;
+
+/** All bundled skill entries, including ones whose applicability is conditional. */
+export function builtinSkillCatalog(): PluginSkillDef[] {
+  return BUILTIN_SKILL_FILES.flatMap(([id, file]) => {
+    const raw = readBuiltinSkill(file);
+    if (!raw?.raw.trim()) return [];
+    const parsed = parseSkillFrontmatter(raw.raw);
+    return parsed.body ? [{ id, name: parsed.name ?? id, description: parsed.description }] : [];
+  });
+}
 
 /**
  * Catalog entries for the built-in skills that apply to the given session, read
@@ -90,30 +109,40 @@ export type BuiltinSkillInput = {
 export function builtinSkills(input: BuiltinSkillInput): PluginSkillDef[] {
   const ids = [IMAGE_GENERATION_SKILL_ID];
   if (isPluginWorkspace(input.workspacePath, input.pluginPaths)) ids.push(PLUGIN_DEV_SKILL_ID);
-  return ids.flatMap((id) => {
-    const file = id === IMAGE_GENERATION_SKILL_ID ? IMAGE_GENERATION_SKILL_FILE : PLUGIN_DEV_SKILL_FILE;
-    const raw = readBuiltinSkill(file);
-    if (!raw?.trim()) return [];
-    const parsed = parseSkillFrontmatter(raw);
-    return parsed.body ? [{ id, name: parsed.name ?? id, description: parsed.description }] : [];
-  });
+  const activeIds = new Set(ids);
+  const disabled = new Set(input.disabledIds ?? []);
+  return builtinSkillCatalog().filter(
+    (skill) => activeIds.has(skill.id) && !disabled.has(skill.id),
+  );
+}
+
+/** Refuse a stale on-demand load after a bundled skill has been switched off. */
+export async function assertBuiltinSkillEnabled(
+  id: string,
+  loadDisabledIds: () => Promise<string[]>,
+): Promise<void> {
+  if (id !== IMAGE_GENERATION_SKILL_ID && id !== PLUGIN_DEV_SKILL_ID) return;
+  if ((await loadDisabledIds()).includes(id)) {
+    throw new Error(`Built-in skill "${id}" is disabled in Settings`);
+  }
 }
 
 /**
  * Load a built-in skill body for the `Skill` tool. Returns null for any id the
  * host does not ship, which is the caller's cue to try the plugin registry.
  */
-export function loadBuiltinSkillBody(
-  id: string,
-): { id: string; name: string; body: string } | null {
+export function loadBuiltinSkillBody(id: string): LoadedSkillDocument | null {
   if (id !== PLUGIN_DEV_SKILL_ID && id !== IMAGE_GENERATION_SKILL_ID) return null;
-  const raw = readBuiltinSkill(id === IMAGE_GENERATION_SKILL_ID ? IMAGE_GENERATION_SKILL_FILE : PLUGIN_DEV_SKILL_FILE);
-  if (!raw?.trim()) return null;
-  const parsed = parseSkillFrontmatter(raw);
+  const raw = readBuiltinSkill(
+    id === IMAGE_GENERATION_SKILL_ID ? IMAGE_GENERATION_SKILL_FILE : PLUGIN_DEV_SKILL_FILE,
+  );
+  if (!raw?.raw.trim()) return null;
+  const parsed = parseSkillFrontmatter(raw.raw);
   if (!parsed.body) return null;
   return {
     id,
     name: parsed.name ?? id,
     body: parsed.body,
+    location: raw.path,
   };
 }

@@ -1,5 +1,5 @@
+import { SUBAGENT_REPORT_SUBJECT } from "@pi-desktop/shared";
 import { mkdir } from "node:fs/promises";
-import { join } from "node:path";
 
 import { AgentHost, type ApprovalPort } from "@pi-desktop/agent-host";
 import {
@@ -14,13 +14,14 @@ import {
   listPendingToolRequests,
 } from "@pi-desktop/host-runtime";
 import { DeviceTokenAuthenticator, RacpServer, bindRacpWebSocket, type RacpHostOperations, type WsBinding } from "@pi-desktop/racp";
-import { APP_VERSION, type AgentEventEnvelope } from "@pi-desktop/shared";
+import { APP_VERSION, type AgentEventEnvelope, type PlanProposal } from "@pi-desktop/shared";
 
 import type { PiHostConfig } from "./config.js";
 import { FileCredentialStore, loadOrCreateHostId } from "./credentials.js";
 import { createHostOperations } from "./host-operations.js";
 import { createLogger, type HostLogger } from "./logger.js";
 import { TerminalService, loadPty } from "./terminal.js";
+import { prepareAdminDirectory, startAdminSocket } from "./admin-socket.js";
 
 export type PiHostApp = {
   hostId: string;
@@ -46,6 +47,7 @@ const APPROVAL_REQUEST_TIMEOUT_MS = 30 * 60 * 1000;
  */
 export async function startPiHost(config: PiHostConfig, options: { log?: HostLogger } = {}): Promise<PiHostApp> {
   await mkdir(config.dataDir, { recursive: true, mode: 0o700 });
+  if (process.platform !== "win32") await prepareAdminDirectory(config.dataDir);
   const log = options.log ?? createLogger({ dataDir: config.dataDir, minLevel: config.logLevel });
   const hostId = await loadOrCreateHostId(config.dataDir);
   const store = new FileCredentialStore(config.dataDir);
@@ -83,6 +85,11 @@ export async function startPiHost(config: PiHostConfig, options: { log?: HostLog
       return void result;
     },
     listPendingTools: (sessionId) => listPendingToolRequests(getHost, sessionId),
+    async listPendingContracts(sessionId) {
+      const host = getHost();
+      if (!host) throw new Error("host unavailable");
+      return (await host.call<{ plans: PlanProposal[] }>("plans.pending", { sessionId })).plans;
+    },
   };
   const agentHost = new AgentHost({
     runtime,
@@ -182,7 +189,7 @@ export async function startPiHost(config: PiHostConfig, options: { log?: HostLog
         throw new Error("extension model configuration is not available on a headless host");
       },
       queuePush: async (params) =>
-        agentHost.startTurn({ subject: "extension", roles: ["controller"] }, {
+        agentHost.startTurn({ subject: params.notification === "subagent-report" ? SUBAGENT_REPORT_SUBJECT : "extension", roles: ["controller"] }, {
           sessionId: String(params.sessionId ?? ""),
           admission: "queue",
           input: { text: String(params.content ?? "") },
@@ -207,10 +214,22 @@ export async function startPiHost(config: PiHostConfig, options: { log?: HostLog
     },
   });
 
-  await startHost();
-  await startSidecar();
-  await agentHost.start();
-  await plans.drainApprovedPlanExecutions().catch((error: unknown) => log("warn", "queued approved plan drain failed", { error: String(error) }));
+  // Claim the owner-only channel before spawning the sole SQLite writer.
+  const admin = process.platform === "win32" ? undefined : await startAdminSocket({ dataDir: config.dataDir, getHost, log });
+  try {
+    await startHost();
+    await startSidecar();
+    await agentHost.start();
+    await plans.drainApprovedPlanExecutions().catch((error: unknown) => log("warn", "queued approved plan drain failed", { error: String(error) }));
+  } catch (error) {
+    state.stopping = true;
+    await admin?.close();
+    plans.dispose();
+    await runtime.dispose();
+    await state.sidecar?.dispose();
+    await state.host?.dispose();
+    throw error;
+  }
 
   const pty = loadPty();
   const terminal = pty
@@ -250,6 +269,11 @@ export async function startPiHost(config: PiHostConfig, options: { log?: HostLog
     binding = await bindRacpWebSocket({ server: server, authenticator, host: config.host, port: config.port, log });
   } catch (error) {
     state.stopping = true;
+    await admin?.close();
+    server.close();
+    await terminal?.closeAll();
+    plans.dispose();
+    await runtime.dispose();
     await state.sidecar?.dispose();
     await state.host?.dispose();
     throw error;
@@ -269,6 +293,7 @@ export async function startPiHost(config: PiHostConfig, options: { log?: HostLog
       if (state.stopping) return;
       state.stopping = true;
       log("info", "pi-host stopping");
+      await admin?.close();
       server.close();
       await binding.close();
       await terminal?.closeAll();

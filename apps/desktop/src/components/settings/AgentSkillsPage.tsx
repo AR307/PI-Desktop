@@ -3,6 +3,7 @@ import { useTranslation } from "react-i18next";
 import {
   GLOBAL_SCOPE,
   type AgentCapabilityLevel,
+  type BuiltinSkillRecord,
   type UserSkillRecord,
 } from "@pi-desktop/shared";
 import { api } from "../../lib/api";
@@ -43,6 +44,8 @@ import {
   IconTrash,
 } from "../icons";
 import { SkillMarketPanel } from "./SkillMarketPanel";
+import { AgentSkillImportPanel } from "../../features/settings/imports/AgentSkillImportPanel";
+import { ImportToggleButton } from "../../features/settings/import-workbench";
 
 import { TooltipButton } from "../ui";
 const GLOBAL_SKILLS_PATH = "~/.agents/skills";
@@ -58,18 +61,20 @@ type SkillEditorState = {
 };
 
 type SkillCollection = {
+  builtins: BuiltinSkillRecord[];
   global: UserSkillRecord[];
   project: UserSkillRecord[];
 };
 
-const EMPTY_SKILL_COLLECTION: SkillCollection = { global: [], project: [] };
+const EMPTY_SKILL_COLLECTION: SkillCollection = { builtins: [], global: [], project: [] };
 
 export function AgentSkillsPage() {
   const { t } = useTranslation();
   const showToast = useAppStore((state) => state.showToast);
   const { selectedProjectPath, setSelectedProjectPath, options } = useAgentProjects();
   const fetchSkills = useCallback(async (): Promise<SkillCollection> => {
-    const [global, project] = await Promise.all([
+    const [builtins, global, project] = await Promise.all([
+      api.listBuiltinSkills(),
       api.listUserSkills({
         level: "global",
         ...(selectedProjectPath ? { projectPath: selectedProjectPath } : {}),
@@ -78,10 +83,14 @@ export function AgentSkillsPage() {
         ? api.listUserSkills({ level: "project", projectPath: selectedProjectPath })
         : Promise.resolve({ skills: [] as UserSkillRecord[] }),
     ]);
-    return { global: global.skills ?? [], project: project.skills ?? [] };
+    return {
+      builtins: builtins.builtins ?? [],
+      global: global.skills ?? [],
+      project: project.skills ?? [],
+    };
   }, [selectedProjectPath]);
   const {
-    data: { global: globalSkills, project: projectSkills },
+    data: { builtins: builtinSkills, global: globalSkills, project: projectSkills },
     setData: setSkills,
     loading,
     refreshing,
@@ -90,6 +99,7 @@ export function AgentSkillsPage() {
     showToast(error instanceof Error ? error.message : String(error), { variant: "error" }),
   );
   const [filter, setFilter] = useState<CapabilityFilter>("all");
+  const [importOpen, setImportOpen] = useState(false);
   const [search, setSearch] = useState("");
   const [busyId, setBusyId] = useState<string | null>(null);
   const [menuFor, setMenuFor] = useState<string | null>(null);
@@ -99,6 +109,14 @@ export function AgentSkillsPage() {
   const { armed, setArmed } = useArmedDelete();
 
   const rowKey = (level: AgentCapabilityLevel, id: string) => `${level}:${id}`;
+  const builtinRowKey = (id: string) => `builtin:${id}`;
+
+  const patchBuiltin = (id: string, patch: Partial<BuiltinSkillRecord>) => {
+    setSkills((current) => ({
+      ...current,
+      builtins: current.builtins.map((row) => (row.id === id ? { ...row, ...patch } : row)),
+    }));
+  };
 
   const patchRow = (
     level: AgentCapabilityLevel,
@@ -136,6 +154,28 @@ export function AgentSkillsPage() {
       );
     } catch (error) {
       patchRow(level, skill.id, { enabled: skill.enabled });
+      showToast(error instanceof Error ? error.message : String(error), { variant: "error" });
+    } finally {
+      setBusyId(null);
+    }
+  };
+
+  const toggleBuiltin = async (skill: BuiltinSkillRecord) => {
+    const key = builtinRowKey(skill.id);
+    if (busyId === key) return;
+    const next = !skill.enabled;
+    setBusyId(key);
+    patchBuiltin(skill.id, { enabled: next });
+    try {
+      await api.setBuiltinSkillEnabled(skill.id, next);
+      showToast(
+        t(next ? "settings.capabilityEnabled" : "settings.capabilityDisabled", {
+          name: skill.name || skill.id,
+        }),
+        { variant: "success" },
+      );
+    } catch (error) {
+      patchBuiltin(skill.id, { enabled: skill.enabled });
       showToast(error instanceof Error ? error.message : String(error), { variant: "error" });
     } finally {
       setBusyId(null);
@@ -259,6 +299,19 @@ export function AgentSkillsPage() {
             variant: "success",
           });
         }
+        if (result.imported?.length) {
+          showToast(t("settings.skillBatchImported", { count: result.imported.length }), {
+            variant: "success",
+          });
+        }
+        if (result.failed?.length) {
+          const first = result.failed[0];
+          const folder = first.path.split(/[\\/]/).filter(Boolean).at(-1) ?? first.path;
+          showToast(t("settings.skillBatchFailed", {
+            count: result.failed.length,
+            first: `${folder}: ${first.error}`,
+          }), { variant: "error" });
+        }
       }
     } catch (error) {
       showToast(error instanceof Error ? error.message : String(error), { variant: "error" });
@@ -270,15 +323,18 @@ export function AgentSkillsPage() {
   const visible = useMemo(() => {
     const match = (skill: UserSkillRecord) =>
       matchesCapabilitySearch(search, skill.name, skill.id, skill.description);
+    const matchBuiltin = (skill: BuiltinSkillRecord) =>
+      matchesCapabilitySearch(search, skill.name, skill.id, skill.description);
     return {
+      builtins: builtinSkills.filter(matchBuiltin),
       global: globalSkills.filter(match),
       project: projectSkills.filter(match),
     };
-  }, [globalSkills, projectSkills, search]);
+  }, [builtinSkills, globalSkills, projectSkills, search]);
 
   const counts = {
-    all: visible.global.length + visible.project.length,
-    global: visible.global.length,
+    all: visible.builtins.length + visible.global.length + visible.project.length,
+    global: visible.builtins.length + visible.global.length,
     project: visible.project.length,
   };
 
@@ -448,6 +504,34 @@ export function AgentSkillsPage() {
     );
   };
 
+  const renderBuiltinRow = (skill: BuiltinSkillRecord) => {
+    const key = builtinRowKey(skill.id);
+    const name = skill.name || skill.id;
+    const busy = busyId === key;
+    return (
+      <CapabilityRow
+        key={key}
+        glyph={<IconBookOpen size={16} />}
+        name={name}
+        off={!skill.enabled}
+        badges={
+          <span className="agent-capability-badge is-level">
+            {t("settings.builtin")}
+          </span>
+        }
+        description={skill.description || t("settings.noCapabilityDescription")}
+        actions={
+          <CapabilityToggle
+            checked={skill.enabled}
+            busy={busy}
+            label={t("settings.toggleCapability", { name })}
+            onChange={() => void toggleBuiltin(skill)}
+          />
+        }
+      />
+    );
+  };
+
   const showGlobal = filter !== "project";
   const showProject = filter !== "global";
   const newSkillTitle =
@@ -528,6 +612,13 @@ export function AgentSkillsPage() {
           }
           actions={
             <>
+              <ImportToggleButton
+                open={importOpen}
+                controls="agent-skills-import-panel"
+                label={t("settings.importSkillFromTools")}
+                disabled={targetLevel === "project" && !selectedProjectPath}
+                onClick={() => setImportOpen((current) => !current)}
+              />
               <CapabilityButton variant="primary" title={newSkillTitle} onClick={openCreate}>
                 <IconPlus size={14} />
                 {t("settings.newSkill")}
@@ -538,6 +629,26 @@ export function AgentSkillsPage() {
         />
       }
     >
+      <section
+        id="agent-skills-import-panel"
+        className="settings-card-block import-inline-section"
+        hidden={!importOpen}
+      >
+        <div className="settings-card-heading-line">
+          <h3 className="settings-card-heading">
+            {t("settings.importAgentSkillsTitle")}
+          </h3>
+        </div>
+        <div className="import-inline-workbench">
+          <AgentSkillImportPanel
+            key={`${targetLevel}:${targetLevel === "project" ? selectedProjectPath ?? "" : ""}`}
+            level={targetLevel}
+            projectPath={targetLevel === "project" ? selectedProjectPath ?? undefined : undefined}
+            onImported={load}
+          />
+        </div>
+      </section>
+
       <CapabilityPanel
         loading={loading}
         refreshing={refreshing}
@@ -552,6 +663,11 @@ export function AgentSkillsPage() {
           <>
             {showGlobal ? (
               <>
+                <CapabilityGroupHeader
+                  label={t("settings.builtinSkills")}
+                  count={visible.builtins.length}
+                />
+                {visible.builtins.map(renderBuiltinRow)}
                 <CapabilityGroupHeader
                   label={t("settings.globalLevel")}
                   path={GLOBAL_SKILLS_PATH}

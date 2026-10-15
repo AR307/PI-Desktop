@@ -84,6 +84,9 @@ provider 配置由引导步骤经 SSH 通道写入，是 Host 本地配置，绝
 Host 只绑定 loopback；只有绑定地址与对端地址都是 loopback且出示有效设备 token
 时才接受明文 `ws://`，因为 SSH 通道已提供机密性，SSH 登录也已证明对该机器的
 shell 访问。非 loopback 绑定仍要求 TLS 与设备 token。首版无法引导没有 GitHub 出网能力的机器。
+已配对 Host 的版本落后于桌面时，桌面会复用同一套经校验的 SSH 引导把它升级到桌面版本，并在原处重新配对（ADR 0327）；
+就绪检查比对的是桌面期望的版本，而不是配对时记录的版本，连接后还会核对远端是否提供远程工作区所需的服务。
+自动升级每个桌面版本每台 Host 只尝试一次，失败后冷却，用户手动重连可再试，升级无效时仍显示原来的升级提示。
 
 ### 4.3 自托管 Gateway（不排期）
 
@@ -141,8 +144,8 @@ Host   -> turn terminal event, next queued turn starts
 远程审批使用与桌面相同的决策词汇：工具审批为 `allow-once`、
 `allow-session`、`deny`；Plan/Goal 审批为带显式权限模式的 `approve` 或
 `reject`；asktool 输入支持逐题回答或跳过。修改持久模式使用远端 Host profile
-的 `session/configure`，与本地一样仅限空闲时。审批寿命由 Host 策略决定：本地
-默认仍是 120 秒后拒绝，有远程订阅者接入时默认 30 分钟（D375），有界且可由运维调整。
+的 `session/configure`，与本地一样仅限空闲时。审批寿命由 Host 策略决定：本地桌面权限确认
+没有自动截止时间；有远程订阅者接入时，远程审批记录默认 30 分钟（D375），有界且可由运维调整。
 
 ## 6. 传输档案
 

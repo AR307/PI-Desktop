@@ -71,22 +71,19 @@ test("stream rendering avoids duplicate frame state and coalesces following", ()
   // commit that reveals it, or the reveal shows one empty frame (ADR 0137).
   assert.match(
     transcript,
-    /const renderedMessages =\s*readingWindow \|\| firstCommit \|\| paneRevealed \? messages : deferredMessages/,
+    /const renderedProjection =\s*readingWindow \|\| firstCommit \|\| paneRevealed \? projection : deferredProjection/,
   );
-  assert.match(transcript, /const \{ entries, visible \} = useMemo/);
-  assert.match(
-    transcript,
-    /buildTranscriptEntries\(renderedMessages, renderedCompactions\)/,
-  );
+  assert.match(transcript, /getTranscriptProjection\(messages, compactions\)/);
+  assert.match(transcript, /useDeferredValue\(projection\)/);
+  assert.doesNotMatch(transcript, /buildTranscriptEntries\(renderedMessages/);
   assert.match(transcript, /const TranscriptHistory = memo/);
   assert.match(transcript, /const TranscriptTail = memo/);
   assert.match(transcript, /function transcriptEntryEqual/);
-  // Memoized on `entries`: a re-render that changed no message must hand
-  // `TranscriptHistory` the same array so its comparator bails on identity
-  // instead of deep-walking every mounted row (D261).
+  // The incremental projection preserves the history array across tail updates;
+  // runtime work-count tests cover its behavior, not only this wiring.
   assert.match(
     transcript,
-    /const allHistoryEntries = useMemo\(\(\) => entries\.slice\(0, -1\), \[entries\]\)/,
+    /history: allHistoryEntries \} = renderedProjection/,
   );
   assert.match(transcript, /<TranscriptHistory entries=\{historyEntries\}/);
   assert.match(transcript, /<TranscriptTail[\s\S]*?entry=\{tailEntry\}/);
@@ -95,12 +92,12 @@ test("stream rendering avoids duplicate frame state and coalesces following", ()
 });
 
 test("expanded live tool output stays local to the changed row", () => {
-  // Only the last detailed-mode tool opens automatically. Collapsed rows skip
-  // the payload walk so a Bash burst does not rerender every sibling.
+  // No row opens itself, so only a row the user opened walks its payload and a
+  // Bash burst does not rerender every sibling.
   assert.match(transcript, /const ToolRow = memo\(function ToolRow/);
   assert.match(transcript, /function toolRowPropsEqual\(/);
   assert.match(transcript, /if \(previous.variant !== "topology"\) return true;/);
-  assert.match(transcript, /const autoOpenLatest =\s*!compact && isLast && itemIndex === items.length - 1/);
+  assert.doesNotMatch(transcript, /autoOpenLatest/);
   assert.match(transcript, /if \(variant !== "topology" && open && hasDetails && disclosure\.parentVisible/);
   assert.match(transcript, /const blocks = variant !== "topology" && open && hasDetails \? presentation\.current\?\.blocks : null/);
 });
@@ -117,9 +114,9 @@ test("tool errors stay local to their rows instead of failing the activity group
   assert.doesNotMatch(toolRow, /const hasFailure = items.some/);
   assert.doesNotMatch(toolRow, /processingFailedAfter/);
   assert.doesNotMatch(toolRow, /tool-activity-group[\s\S]*?failed/);
-  // Failures remain visible in the row header; automatic open is last-tool
-  // ownership, not error ownership.
-  assert.match(toolRow, /const disclosure = useAutomaticDisclosure\(\s*autoOpen && !failed && status !== "denied",\s*revealRequest,\s*disclosureKey\("tool"/);
+  // Failures remain visible in the row header; no row opens its payload on its
+  // own, failed or not.
+  assert.match(toolRow, /const disclosure = useAutomaticDisclosure\(\s*false,\s*revealRequest,\s*disclosureKey\("tool", message\.id\),\s*\);/);
   assert.match(transcript, /bodyEvents: \{ onPointerDownCapture: claim, onFocusCapture: claim \}/);
   assert.match(toolRow, /status === "error"\s*\? t\("chat.toolFailed"\)/);
 });
@@ -167,7 +164,7 @@ test("layout clamps after send cannot release transcript follow as a gesture", (
   assert.match(transcript, /if \(gesturing && transition\.releasedFollow\) \{/);
 });
 
-test("session activation pins the latest record before the first paint", () => {
+test("session activation pins a first visit and honors a runtime reading bookmark", () => {
   assert.match(
     chatSurface,
     /const activeSessionId = useAppStore\(\(state\) => state\.activeSessionId\);/,
@@ -176,17 +173,16 @@ test("session activation pins the latest record before the first paint", () => {
   assert.match(pane, /sessionId=\{sessionId\}/);
   assert.doesNotMatch(chatSurface, /SessionLoadingSkeleton/);
 
-  // A pane belongs to one session for its lifetime, so activation is its own
-  // first layout: settle at the newest turn with no cross-session state to
-  // unwind, before the first paint.
+  // Cold first visits still settle before paint; an evicted reading bookmark
+  // takes priority over initialization. Chromium covers the actual lifecycle.
   const activationEffect = transcript.match(
-    /useLayoutEffect\(\(\) => \{([\s\S]*?)\n  \}, \[cancelFollowScroll, releaseDisclosureAnchor, scrollToBottom\]\);/,
+    /useLayoutEffect\(\(\) => \{([\s\S]*?)\n  \}, \[cancelFollowScroll, releaseDisclosureAnchor, savedReadingPosition, scrollToBottom\]\);/,
   )?.[1];
   assert.ok(activationEffect);
   assert.match(activationEffect, /cancelFollowScroll\(\)/);
-  assert.match(activationEffect, /pinnedRef\.current = true/);
-  assert.match(activationEffect, /setShowJump\(false\)/);
-  assert.match(activationEffect, /scrollToBottom\(\)/);
+  assert.match(activationEffect, /pinnedRef\.current = savedReadingPosition\?\.pinned \?\? true/);
+  assert.match(activationEffect, /setShowJump\(!pinnedRef\.current\)/);
+  assert.match(activationEffect, /if \(pinnedRef\.current\) scrollToBottom\(\)/);
   assert.doesNotMatch(activationEffect, /smooth/);
 });
 

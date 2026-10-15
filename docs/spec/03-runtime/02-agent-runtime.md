@@ -41,6 +41,16 @@ crates/host-core (tool execution + permissions)
 - executes builtin/plugin tools
 - returns normalized tool results
 
+The Node runtime normalizes text and image content from host tool results,
+including MCP `content` blocks and bare plugin content-block arrays. Well-formed
+image blocks are passed to vision-capable models and retained when tool history
+is restored; malformed image entries are ignored without failing the tool call.
+Embedded MCP text resources contribute their `resource.text`, and MCP resource
+links contribute a one-line `[resource link]` reference, to the model-visible
+text alongside sibling text blocks; binary resources are not inlined. When no
+text block is available, the JSON fallback likewise keeps image `data` and
+resource `blob` bytes out of the model-visible text.
+
 ## 4. Runtime API (package-level)
 
 ```ts
@@ -60,7 +70,9 @@ loop evaluates it after `turn_end`, once the current assistant response and
 tool batch have completed, and emits a normal `agent_end` before another model
 request. It does not cancel an active provider stream or running tool. An idle
 runtime returns `{ requested: false }`; immediate `abort()` remains the
-separate cancellation path.
+separate cancellation path. `abort()` resolves only after the named active
+operation has completed its cancellation cleanup, so the same runtime can
+accept a follow-up prompt as soon as the abort request returns.
 
 ### 4.0 Active-turn steering
 
@@ -76,8 +88,11 @@ when another input arrives before the initial user message has been consumed.
 An admission after pi's last queue poll suppresses the terminal event and
 continues once pi has released the run, with the same turn identity and without
 a second public `agent_start`. Existing context/provider recovery takes
-precedence over that continuation. Steering also wakes a parent that is idle
-waiting for background delegates; it does not cancel those delegates.
+precedence over that continuation. Background delegates never hold a turn open
+(D628), so steering has no implicit delegate wait to wake and never cancels
+delegates. Steering interrupts an explicit TaskWait, which returns interrupted
+with current delegation states and asks the parent to handle new user input
+before waiting again.
 
 Abort, graceful stop, fatal errors and terminal settlement close admission.
 Accepted but unconsumed input remains transcript/context history and is removed
@@ -85,29 +100,35 @@ from pi's steering queue so it cannot execute independently on a later turn.
 An ordinary follow-up stays in the separate Host-owned FIFO until durable turn
 finalization. A steering failure must not terminate the active run.
 
-### 4.1 Session title summarization
+### 4.1 Session title generation
 
-The renderer applies a short first-prompt fallback immediately so sending a
-prompt never waits on title generation. After the first turn emits `agent_end`,
-Electron main resolves the session's effective provider/model and invokes the
-runtime's `summarizeSessionTitle` one-shot path with thinking disabled. The
-runtime supplies the initial user prompt and an optional assistant reply,
-returns only sanitized title text, and treats an empty/failing completion as a
-non-fatal result. The renderer persists a successful title through the existing
-`session.rename` path.
+The core keeps new sessions readable without any model call. Sending the first
+prompt into a session whose stored title is still a recognized placeholder asks
+the host for a deterministic fallback title through `session/deriveTitle`. The
+renderer collapses whitespace and caps its request at 48 characters; host-core
+accepts it only while the stored title is still a placeholder with the `default`
+source, so the fallback never replaces a manual rename or an earlier automatic
+title, and the write does not change `updated_at`.
 
-The renderer also persists a `manualTitle` marker in its local session metadata.
-Automatic summarization is skipped for that marker and for any persisted title
-that is neither a recognized default nor the deterministic first-prompt
-fallback, which protects manual and already-summarized titles after restart.
-No host RPC or storage schema change is required.
+That fallback keeps the source `default`: the derived text is not a user choice,
+so the session stays eligible for automatic replacement. An optional standalone
+plugin may subscribe to `session:turnEnded`; with the dedicated
+`session.autoTitle` permission it can read only the first user prompt and first
+assistant reply for a session whose title is still default, then use
+`agent.complete` with its configured prompt, model, and thinking level.
+
+The plugin writes through a host compare-and-set that succeeds only while the
+exact title it read is still current. Manual renames and another generated
+title therefore win concurrent updates. Host-core owns the title source in
+schema v23; this state survives renderer restart and does not expose a general
+transcript-read API. The core runs no title completion of its own.
 
 ## 5. Prompt flow
 
 1. load the durable session and reject a missing session
 2. resolve that session's mode/provider/model and project binding (app/current
    workspace defaults are legacy fallback only)
-3. resolve the complete models.dev metadata record for the exact provider/API
+3. resolve the complete Pi catalog metadata record for the exact provider/API
    URL and model and clamp the durable session thinking level to its nearest
    supported value; an ID absent from the snapshot uses the explicit generic
    fallback
@@ -119,6 +140,11 @@ No host RPC or storage schema change is required.
    the durable user message. Only an image that is within the 10 MB inline
    bound for a vision model is read into memory; larger images use streamed
    hashing/copying and the existing safe path fallback
+   A `pi-desktop://session/<id>` link in the draft is resolved in the same step
+   into a bounded excerpt attachment: the same project only, the current
+   conversation dropped before any read, and the runtime quotes it to the model
+   as one `<session_reference name="…" session="…">` block ahead of the user's
+   own words
 7. snapshot the effective shell ID and dialect for the turn
 8. start pi turn with the resolved session configuration and effective
    thinking level; HTTP 429 setup and stream failures use the runtime-owned
@@ -160,7 +186,7 @@ disabled for this path so the runtime can share one budget across both phases.
 
 `PROVIDER_RATE_LIMITED` receives at most ten retries after the initial
 attempt, for eleven provider attempts total. A setup 429 is retried inside the
-provider stream adapter. A mid-stream 429 removes the failed assistant from
+provider stream adapter. A mid-stream 429 with no substantive content removes the failed assistant from
 the next model context and calls `continue()` in the same turn. Both phases
 claim the same counter, so a setup 429 followed by a stream 429 cannot reset or
 multiply the budget. The captured response status is applied before classifying
@@ -172,7 +198,7 @@ session and builtin subagents use the same controller and policy.
 error, lifecycle `error`, `turn_end`, `agent_end`, or duplicate assistant
 bubble reaches the UI. A normalized `status` event identifies the retry
 backoff so the user can tell that the turn is still active. The visible
-assistant message id is reused when a retry starts, replacing any partial
+assistant message id is reused when an output-free retry starts, retaining no substantive
 content in one bubble. End events are emitted once by the final successful or
 exhausted attempt. An abort during the wait cancels the timer and prevents the
 next provider request.
@@ -242,7 +268,7 @@ must remain valid without enabling retries; non-boolean writes stay invalid.
 Each retry is abortable and reports its current backoff through the normalized
 status event. The `retrying` activity carries the classified error code, the
 bounded/redacted provider message, and the HTTP status when known. The main
-session, builtin subagents, and one-shot composer enhancement use the same
+session, builtin subagents, and plugin one-shot completions use the same
 codes, budget size, and precedence.
 
 When the retry budget is exhausted, the final assistant error and lifecycle
@@ -268,48 +294,44 @@ the previous dispatcher and closes it gracefully, and it reproduces the
 configured route, so another session's in-flight request finishes on the pool it
 started on and a proxy is never silently dropped.
 
-### 5e. Silent-turn recovery
+### 5e. Response completion and explicit continuation
 
-An ordinary turn that ends with no tool call and no visible assistant text is invisible
-to the user: reasoning is never rendered, so a conclusion written only there
-did not arrive. 15 of 255 recorded sessions ended a turn that way, and the
-user's only recourse was typing "继续".
+A normal response is complete when it contains visible text or a legal tool
+round. Only a normally terminated response with no nonblank text, thinking,
+redacted thinking or tool activity is empty. Heartbeats, start events and empty
+blocks do not count. An empty response retries once per user submission using
+the same model, group and parameters. A second empty response is persisted as
+EMPTY_MODEL_RESPONSE with a visible error; it is not retried indefinitely.
 
-The runtime detects it at `message_end`: the stop was neither an error nor an
-abort, the message requested no tools (no `toolCall` content part), and the
-visible text is blank after trimming. Reasoning content does not exempt a turn
-— a thinking-only turn is exactly the case that needs recovery.
+The runtime classifies cancellation and provider failures before examining
+content. Explicit length/max_tokens termination becomes MODEL_OUTPUT_TRUNCATED.
+A normally ended thinking-only response becomes MODEL_THINKING_ONLY. A missing
+required protocol terminator or broken stream keeps its underlying failure code.
+Unknown stop reasons and unavailable usage fields are not invented or inferred
+from elapsed time or character count.
 
-Recovery mirrors §5d and is bounded the same way: at most one re-run per run.
-The silent assistant is dropped from the model context (`continue()`
-refuses a transcript ending in an assistant message, and an empty one is not
-worth resending), a short no-output instruction is appended to the system
-prompt for that one continuation, and the bubble id is reused so a recovered
-turn leaves no empty row behind. The silent attempt's `turn_end` and
-`agent_end` are suppressed; the re-run emits the single terminal lifecycle.
+Once a request produces text, thinking or tool content, no automatic replay is
+allowed, including under infinite retry. Output-free temporary failures still
+use section 5d budgets and Retry-After. Neither a lower reasoning level nor an
+alternative model, group or protocol is selected to conceal an interrupted turn.
+Legal tool-result continuations and approved Plan/Goal progress steps are not
+failed-request replays and keep their existing behavior.
 
-Recovery is armed inside `message_end` and carried out once the loop is idle,
-so it belongs to every entry point that drives the loop — a user prompt and an
-approved plan or goal execution alike. Each entry point clears the recovery
-state before it starts and runs the pending recovery after `waitForIdle`,
-through one shared implementation of each half. The shared drain also handles
-recoveries armed by a recovery attempt before it returns, so a chained failure
-cannot leave lifecycle suppression active with no recovery or terminal event.
-Skipping either half ends the run with its lifecycle still suppressed and no
-recovery attempted, which reaches the user as a session that stopped mid-work
-with no error and no retry action. §5d overflow and provider-stream retry ride
-the same contract, and a suppression flag left behind would swallow the
-*next* run's terminal events.
+The desktop and mobile Continue action appends a new user turn; it is not
+regenerate and does not truncate history. Partial text/thinking remain visible,
+including after restart. Existing message meta stores normalized diagnostics and
+minimal adapter-native text/thinking replay blocks. Only valid native metadata is
+passed through pi's converter: no fabricated thinking signature, no promoted
+system instruction and no incomplete tool execution. Completed tool results are
+preserved. Unsigned partial thinking is display-only. Mobile Continue preserves
+an unsent draft even when delivery confirmation is delayed by reconnection.
 
-The one-shot instruction rides on the agent's system prompt rather than the
-`prepareNextTurn` hook, because that hook only shapes turns inside a live run
-and this run has already ended. It is removed afterwards unless a path-scoped
-instruction reload rewrote the prompt meanwhile, in which case the newer
-rebuild wins.
-
-If the re-run is silent too, the turn ends as a visible assistant error with
-retriable `EMPTY_MODEL_RESPONSE`, which gives the transcript its normal retry
-action. No empty assistant message is persisted in either case.
+One-shot completions and delegates use the same outcome classification. The
+runtime's existing lifecycle drain runs pending empty retries after idle, at
+most once, without leaving suppression flags active. Diagnostics record the
+actual wire path, protocol, model, group, reasoning/output parameters, reported
+stop reasons, content counters, available usage and attempts; never credentials,
+full prompts or raw response bodies. See ADR response-completion-recovery.
 
 A Host-ledger completion notice (ADR 0239, D446) is the narrow exception:
 its prompt already permits no acknowledgement. Main resolves the queued message
@@ -372,16 +394,14 @@ The complete visible transcript and the model context are separate views of
 the same session. A durable checkpoint summarizes older model context while
 the renderer continues to show every original user, assistant, and tool row.
 
-PI-Desktop reuses pi-agent-core's `convertToLlm`, `estimateContextTokens`,
-`prepareCompaction`, and `compact` primitives, and applies the same session
-context projection pi used to export as `buildSessionContext` (slice from the
-newest compaction, then `compactionSummary` before the retained tail). pi 0.85
-moved that helper off the public package export and made the remaining
-internal builder async for custom-entry projectors; the desktop runtime keeps
-a synchronous local copy because it synthesizes only message and compaction
-entries. The desktop runtime owns when they run and how the result crosses the
-Rust storage boundary; OpenCode DCP is an AGPL-3.0 behavioral reference only,
-not a linked or copied dependency.
+PI-Desktop uses pi-agent-core for the agent loop and stable agent/event/tool
+types, and pi-ai for provider-facing requests and message estimation. The
+runtime owns its context projection, LLM-message conversion, token-estimation
+adapter, compaction cut-point selection, and summary generation because the
+older experimental pi-agent-core harness APIs have been removed. These helpers
+preserve the existing session/checkpoint behavior while keeping the Rust host
+as the only durable session owner; OpenCode DCP remains an AGPL-3.0 behavioral
+reference only, not a linked or copied dependency.
 
 Compaction follows Codex's mechanism (ADR 0064, amended by D623): it remains
 inline at turn boundaries, and the model can request it through `new_context`.
@@ -425,11 +445,10 @@ emits `compaction_end`. The blocking path composes the two back to back.
 
 **What survives a checkpoint.** A successful checkpoint leaves the model context
 as the summary plus, at most, one **user** message; assistant and tool messages
-are dropped from model context and remain in the visible transcript. pi's
-`prepareCompaction` still chooses the cut point, so its turn-boundary and
-split-turn handling are preserved, but the runtime then folds the split-turn
-prefix and the recent tail back into the summary input, so the summary covers
-the whole compacted range and nothing crosses the boundary uncovered.
+are dropped from model context and remain in the visible transcript. The
+runtime-owned preparation chooses the cut point and preserves turn-boundary
+and split-turn handling, then folds the split-turn prefix and recent tail back
+into the summary input so the summary covers the whole compacted range.
 
 A **retained-tail fallback** is the exception, because no summary covers its
 range: it keeps the real recent window — the newest contiguous messages of the
@@ -503,8 +522,8 @@ The hard boundary is the model context window minus request headroom. Automatic
 compaction starts at 90% of `hardLimit`; this deterministic margin is not
 configurable. Headroom is the maximum of a 16,384-token reserve floor, model
 maximum output capped at 25% of the context window, and a 5% safety margin. The
-reserve floor is itself capped at half the window. The cut-point target passed
-to pi is derived from the model window as 20% of the hard budget clamped to
+reserve floor is itself capped at half the window. The cut-point target used by
+the runtime-owned preparation is derived from the model window as 20% of the hard budget clamped to
 8,000–64,000 tokens, then capped at half the hard budget; it decides where the
 boundary falls, not what survives it. The active-user retention limit is
 20,000 tokens, capped at half the hard budget so retention alone cannot fill a
@@ -514,13 +533,15 @@ recovery notice leave, so recovery cannot install a checkpoint the guard
 rejects. None of these values are configurable.
 
 **Estimate calibration (D606).** Every threshold above is compared against one
-number, corrected against observed request usage. pi's `estimateContextTokens`
-anchors on the last assistant usage and estimates everything after it as
-`chars / 4`: that constant under-counts CJK text, and with no anchor left it
-omits system/tool overhead. The budget also computes the output-cap estimator
+number, corrected against observed request usage. The runtime estimator anchors
+on the last assistant usage and delegates provider-message estimation to
+pi-ai, whose 1.1.0 text estimate is 3.5 characters per token; text truncation
+converts token budgets with the same ratio. Desktop-only rows keep the existing
+character heuristic. With no usage
+anchor, the budget also computes the output-cap estimator
 over non-system conversation messages plus the current system prompt and active
-tool schemas. System-transcript rows are metadata snapshots of that same prompt
-and are excluded from this component, so the request estimate counts the prompt
+tool schemas. System-transcript rows are chronological updates, already covered by that
+folded prompt/tool floor, and are excluded from this component, so the request estimate counts the prompt
 and schemas exactly once. The budget uses the larger of this full-request
 estimate and the calibrated message estimate. This is a hard floor before the
 first calibration sample and prevents counting overhead twice after an
@@ -574,8 +595,11 @@ fallback cannot be prepared, persisted, or kept below the safe budget, the user
 row and an assistant error remain durable and no provider request starts.
 Provider-reported context overflow is the last recovery layer: omit the failed
 assistant from model context, compact once, and retry once. A second overflow
-remains terminal. Bedrock's `prompt is too long: N tokens > M maximum` form
-maps to this path.
+remains terminal and is reported as `CONTEXT_TOO_LARGE`: the error classifier
+recognizes every overflow wording pi-ai's `isContextOverflow` recognizes, so a
+provider such as DashScope/Qwen or z.ai is not recovered as an overflow and then
+reported as a generic `PROVIDER_ERROR`. Bedrock's
+`prompt is too long: N tokens > M maximum` form maps to this path.
 
 Automatic protection is always enabled and is not user-configurable. The
 runtime still accepts a construction-time override that disables it, used by
@@ -650,6 +674,25 @@ submitted Markdown bytes in a new immutable
 structured title/question in `plan_approvals`, and moves the live state to
 `awaiting_approval`.
 
+Plan/Goal requests retain Write/Edit declarations and, when subagents are
+configured, the Task/TaskWait/TaskList/TaskStop declarations. They are marked
+unavailable in the active mode. The execution allowlist remains unchanged:
+prohibited calls are blocked before extension call hooks and handlers, and a
+handler retained across a mode change rechecks that mode before executing.
+The model receives an ordinary error tool result with the original call id;
+no editing, delegation, fake user message or transcript deletion occurs.
+Other deferred/plugin tools keep their existing visibility rules. See
+[the declaration/permission decision](../../adr/plan-tool-declarations-and-execution-denials.md).
+
+Plan/Goal entry remains available without a project workspace. A submission
+requires a persisted session workspace for its approval artifact.
+`PLAN_WORKSPACE_REQUIRED` from submission is a recoverable tool error: it
+explains how to bind a workspace and directs the agent to present the proposal
+in chat without retrying until a workspace is bound. It does not terminate the
+model loop, create an approval, or authorize execution. Successful submission
+still terminates for approval; other submission failures retain their existing
+termination behavior.
+
 Approval has only `approve` and `reject`. Approval commits `mode = agent`, the
 explicit permission mode, an execution ID, and `execution_state = queued` on
 the same `plan_approvals` row in one host transaction. The
@@ -662,6 +705,17 @@ checkpoints, and the Agent must call `SubmitPlan`
 once with a new complete Markdown snapshot to create a new artifact. If approval
 already committed and a queued/running execution is interrupted, durable mode
 remains Agent and the execution is not replayed.
+
+
+Historical SubmitPlan/SubmitGoal rows render read-only contract cards with an
+expandable exact Markdown snapshot, authoritative approval status, an artifact
+opener, and a superseded badge when a later submission of the same kind exists.
+The live approval bar remains the only approval surface. Host history metadata
+and planning events reconcile by proposal identity/revision, so delayed pending
+tool echoes cannot undo approval. Plans remain readable after continued chat,
+compaction, session reselection, and host restart; deleting an artifact does not
+remove the stored Markdown. Hosts without approval metadata show snapshot text
+with unavailable status rather than presenting a stale pending result as truth.
 
 Manual mode and configuration selection may be staged by the renderer while a
 turn runs, but host persistence remains idle-only. Selecting Agent is an
@@ -696,7 +750,7 @@ criterion-by-criterion report of what was met and the evidence observed.
   not a catalog/binding capability: the runtime keeps agent bookkeeping at
   `off` and uses the low-level provider stream so no thinking override is
   synthesized (ADR 0194 / ADR 0295).
-- The bundled models.dev release snapshot is authoritative for published
+- The bundled Pi catalog release snapshot is authoritative for published
   reasoning support, thinking-level mapping, limits, input/output modalities,
   pricing, and other model metadata. pi-ai remains responsible for request
   serialization and adapter compatibility.
@@ -704,7 +758,7 @@ criterion-by-criterion report of what was met and the evidence observed.
   limits, or other model metadata. The explicit attachment capability fields
   are the exception: `supportsImages` and `supportsDocuments` are effective
   binding overrides for the endpoint.
-- Unsupported requested levels use the selected models.dev model's
+- Unsupported requested levels use the selected Pi catalog model's
   nearest-supported-level rule: scan upward first, then downward. A
   non-reasoning provider always resolves to `off`.
 - Vision support starts from the same published model record. An absent or
@@ -722,20 +776,29 @@ criterion-by-criterion report of what was met and the evidence observed.
   deltas every 16ms, and flushes before tool/terminal/abort/error/retry
   boundaries. `message_end` is the authoritative snapshot (D412).
 - Restored assistant history reconstructs separate text and thinking blocks
-  before the next turn.
+  before the next turn. Assistant transport identity is `model.provider` /
+  `model.id` (same as live requests), not the account row id — including when
+  `seedDelegateMessages` rebuilds a Task(resume) history — so same-model
+  Completions reasoning stays in `reasoning_content` under a vendorKey binding.
 - Restored history also reconstructs tool call/result pairs from persisted
   tool rows (`toolCallId`/`toolArgs`/`toolResult`), so a recreated runtime
   keeps its full working context — file contents read, command output —
   instead of collapsing to bare chat text (D127). An interrupted tool row
   restores as an errored result; a tool row whose assistant row was lost
   gets a synthesized call-only assistant carrier so call/result pairs stay
-  well-formed for every provider API.
-- Vision runtimes hydrate persisted image refs only from the session-bound
-  attachment, scratch, and project roots. Images within the 10 MB inline
-  safety bound become transient pi-ai image blocks; oversized or unavailable
-  images become safe `@path` fallbacks. Oversized history hydration copies
-  files without first loading their contents into memory. Base64 is never
-  restored into durable UI messages or transcript records.
+  well-formed for every provider API. A model system record saved while a
+  call ran restores between that call and its result without ending the
+  assistant's calls, so the call stays on the assistant that made it, as in
+  the live request.
+Vision runtimes hydrate persisted image refs only from the session-bound
+attachment, scratch, and project roots. Each image remains subject to the 10 MB
+safety bound, and restored history has a 30 MB aggregate raw-byte budget.
+The newest refs are considered first; all eligible images remain image blocks
+when the history fits, while over-budget or oversized images become safe
+`@path` fallbacks. An image whose message names it inline (`inlinePath`) is
+spliced back into the prompt at that position, so a restored turn keeps the
+order the user wrote. Reads are bounded by the admitted file size. Base64 is
+transient and never restored into durable UI messages or transcript records.
 - Failed assistant messages remain durable diagnostic transcript entries but
   are never restored into pi model context on a later turn.
 - A tool-call id is unique in every request. The transcript is an append-only
@@ -835,7 +898,9 @@ core set rather than the on-demand catalog of §7.1:
   (`"provider/modelId"`) that overrides the delegate's model for that run.
   Resolution priority: Task.model parameter → definition frontmatter pin →
   session model. The parent agent sees a model summary in the system prompt
-  listing all models marked `availableForSubagents` in provider settings. If
+  listing all models marked `availableForSubagents` in provider settings, plus
+  MirrorCoding account chat models (they have no API secret, so the generic
+  opt-in path never resolved them). If
   the delegation catalog is empty, the prompt tells the model to omit `model`
   and use the definition pin, or inherit the session model when unpinned; an
   explicit key that exactly names the current session provider/model is treated as the same inheritance case. Other
@@ -866,19 +931,27 @@ core set rather than the on-demand catalog of §7.1:
   Settled delegations return immediately, so re-reading a report by id is
   cheap. The joined result is bounded to `MAX_TASKWAIT_RESULT_CHARS` (50k); if
   the bound omits finished reports, those reports remain undelivered and the
-  runtime sends them on the idle resume (or they can be re-read by id).
-  `timeoutSeconds` defaults to 600 and is clamped to 900: the wait blocks the
-  turn, so the ceiling is what bounds how long a session can look hung. Expiry
-  is not a failure and does not stop the delegates (D328) — the wait returns a
-  heartbeat (agent, status, elapsed, turns, last tool) plus any finished
-  reports. The runtime keeps the parent turn open and delivers remaining
-  reports when they finish, even if the parent already stopped calling tools.
-  Only `TaskStop` or user Stop aborts a delegate.
+  runtime delivers them at a later turn boundary or through the wake turn
+  (D628) — or they can be re-read by id. `timeoutSeconds` defaults to 600 and
+  is clamped to 900: the wait blocks the turn, so the ceiling is what bounds
+  how long a session can look hung. Expiry is not a failure and does not stop
+  the delegates (D328) — the wait returns a heartbeat (agent, status, elapsed,
+  turns, last tool) plus any finished reports. Unfinished delegates keep
+  running detached after the turn ends, and their reports arrive through the
+  boundary delivery or the wake turn (D628). Only `TaskStop` or runtime
+  disposal aborts a delegate.
 - `TaskList()` — reports every delegation of the session with status and a
   running heartbeat.
 - `TaskStop(delegationIds?)` — stops running delegations (defaults to all);
   waits for each abort to settle, then persists `status: "stopped"` with
   `completedAt` on `details.stopped[]`. Stopped delegations read as `stopped`.
+
+**Explicit desktop cancellation.** A running delegate can be stopped from its
+card or detail panel. The subagent group header also offers session-wide stop-all.
+These controls call the same cancellation routine as `TaskStop` without a model
+round trip. Cancellation is cooperative: the UI shows a pending state until
+termination is confirmed, preserving partial output and existing parent Stop
+semantics. A completed delegate is not relabeled by a late stop request.
 
 **Live settlement.** When a delegate settles, the runtime refreshes its original
 `Task` transcript row with the terminal delegation summary (`status`,
@@ -898,11 +971,12 @@ No new event type or storage schema is required.
 process with the definition's system prompt, its (possibly pinned)
 provider/model, its declared tools, and the same host connection. A pinned or
 explicitly selected delegation model uses the exact provider/model binding
-saved in Settings for its effective thinking capability; models.dev supplies
+saved in Settings for its effective thinking capability; Pi catalog supplies
 the baseline only. It runs under
 the same bounded provider retry policy as the parent. A delegate has no turn
-limit: it ends when it finishes, when the parent calls `TaskStop`, when the user
-Stops, or when a terminal parent error aborts it (ADR 0253). A document that
+limit: it ends when it finishes, when the parent calls `TaskStop`, or when the
+runtime is disposed — user Stop and terminal parent errors no longer abort it
+(D628 amends ADR 0253). A document that
 still declares `maxTurns` loads normally and the key is ignored like any other
 unrecognized frontmatter key. `maxTokens` is an optional per-definition
 output cap (maximum 200000); omitted, `none`, or `0` follows the model's
@@ -920,37 +994,74 @@ keyboard-focus, and reduced-motion checks require project-provided browser
 tests or other tooling. Its statuses are `completed`, `failed`,
 `aborted`, `timed_out` and the registry-only `stopped`;
 the terminal ones surface through `TaskWait`, whose text is
-the report (bounded to `MAX_SUBAGENT_REPORT_CHARS`, 12k) and whose details
+the report (bounded to `MAX_SUBAGENT_REPORT_CHARS`, 12k; when exceeded, persisted to session scratch with a pointer notice per ADR 0062) and whose details
 carry `delegationId`, `agent`, `modelId`, `thinkingLevel`, `status`, `startedAt`,
-`completedAt` when settled, `turns`, `toolCalls` and, on failure or timeout,
-`error`. The same effective model and thinking fields are included in the
+`completedAt` when settled, `turns`, `toolCalls`, and `scratchReportPath` when
+the full report was spilled to scratch; on failure or timeout they carry
+`error` (including resume ID hints on `SUBAGENT_OUTPUT_TRUNCATED`). The same effective model and thinking fields are included in the
 immediate `Task` result and in lifecycle snapshots so live and restored
 delegation views do not re-derive them from definitions or parent settings.
 `startedAt` and `completedAt` are runtime timestamps in milliseconds and are the source of
 truth for renderer delegation duration; the immediate `Task` tool-call
 duration only covers starting the background work.
 
-**Delegate lifetime (D328).** The runtime does not idle-timeout or
-duration-timeout a delegate. `idle-timeout` / `max-duration` frontmatter still
-parses so old documents load, but those values are not armed. A delegate runs
-until it finishes, fails, is `TaskStop`'d, or the user Stops / the runtime is
-disposed. The parent agent judges whether to cancel via `TaskStop`; a one-line
-heartbeat (who, status, elapsed, turns, last tool) is what it has to go on while
-the delegate is running.
+**Delegate lifetime (D328, amended by D628).** The runtime does not
+idle-timeout or duration-timeout a delegate. `idle-timeout` / `max-duration`
+frontmatter still parses so old documents load, but those values are not
+armed. A delegate runs until it finishes, fails, is `TaskStop`'d, or the
+runtime is disposed. The parent agent judges whether to cancel via `TaskStop`;
+a one-line heartbeat (who, status, elapsed, turns, last tool) is what it has
+to go on while the delegate is running.
 
-When the parent stops calling tools while delegates are still running, the
-runtime swallows that `agent_end`, keeps the durable turn open, waits for the
-delegates, and prompts the parent with their reports. Every terminal result
-resolves the parent wait before best-effort transcript publication; a failed
-`SubagentRun` initialization returns a tool error and never leaves a running
-record. User Stop and runtime disposal also abort the parent wait signal, so
-they can end the parent turn even if a delegate ignores its abort. Ending the
-parent loop does not otherwise abort delegates.
+**Detached delegation and wake (D628, amends D328/D352).** When the parent
+stops calling tools while delegates are still running, the turn ends normally:
+`turn_end` / `agent_end` are emitted, the session reads idle —
+`AgentStatus.isRunning` excludes running delegates, and the optional
+`AgentStatus.backgroundDelegations` count carries them for status surfaces —
+and the delegates keep working in the background. Reports that settled during
+the turn and were never read through `TaskWait` are injected at that turn's
+boundary: the runtime holds the turn open only for that bounded continuation
+(one delivery shot per record, joined under `MAX_TASKWAIT_RESULT_CHARS`, with
+a heartbeat for still-running delegates). Turn epochs no longer gate delivery;
+a report that settled in an earlier turn is delivered at the next boundary.
 
-Fatal provider/stream errors (including exhausted HTTP 429) and parent aborts
-retain their existing `failed` and `aborted` outcomes. A terminal parent error
-also aborts leftover delegates, skips the resume prompt, and returns the
-session to idle so Continue is not `AGENT_BUSY` (D352).
+A report that settles while the session is idle queues one wake turn through
+the host-owned queue (`session.queuePush`, D386). The queued content is the
+stable `Subagent reports ready:` marker line plus the settled delegation ids —
+report bodies stay out of the queue — and one queued wake serves every
+settlement until a turn consumes it (the push is idempotent on the settled
+ids). The durable queue identifies an internal wake by the host-owned
+`runtime:subagent-report` principal, not the marker text. It stays out of
+user queue projections and is neither persisted nor emitted as a user bubble.
+At prompt preflight the runtime consumes the internal notification flag and
+expands the prompt with every undelivered report plus a heartbeat before the
+model reads it. Reports are marked delivered only after the preflight passes,
+so a compaction or context-budget failure leaves them claimable by the next
+wake. Stopped and aborted runs are never auto-delivered; their chains stay
+resumable instead. New prompts adopt running delegates rather than aborting
+them, and `MAX_SUBAGENT_CONCURRENCY` counts every running delegate.
+
+Every terminal result resolves the parent wait before best-effort transcript
+publication; a failed `SubagentRun` initialization returns a tool error and
+never leaves a running record. User Stop ends only the parent turn. A terminal
+parent error (including exhausted HTTP 429) likewise detaches the delegates
+and returns the session to idle — Continue is admitted because `isRunning` no
+longer counts delegates (amends D352). Only explicit delegate cancellation
+(`TaskStop`, the per-worker stop button, or the Subagent group stop-all button)
+and runtime disposal abort a delegate. These controls use the same runtime
+cancellation path. Cards show actual worker state; pending cancellation is not
+reported as stopped. Disposal settles it as `aborted`, which remains resumable.
+Delegates do not survive an app restart: a run the app closed while it worked
+rebuilds from the transcript as an `interrupted`, resumable chain, and the
+wake applies only while the app runs.
+
+If an assistant response
+ends at the provider's output-token limit (`stopReason: "length"` or
+`"max_tokens"`) after emitting report text, the delegate instead settles as
+`failed` with `SUBAGENT_OUTPUT_TRUNCATED` and `outputTruncated: true`; its
+bounded partial report remains under the failure explanation for diagnosis. A
+later delegate turn that ends normally clears the marker and can complete.
+A terminal parent error leaves independent delegates running; TaskStop and runtime disposal own their cancellation.
 
 **Resumable delegations (ADR 0279).** `Task` accepts an optional `resume`
 parameter carrying the `delegationId` of a settled delegation in the same
@@ -973,10 +1084,12 @@ name normalized on rebuild — so resumability survives a sidecar restart.
 Chain identity (`delegateSessionId`) stays internal; the parent only
 ever passes a `delegationId`, and the reverse map resolves it.
 
-Only `completed` and `failed` chains are resumable; `stopped` and `aborted` runs
-are terminal and revive only by starting a new delegation, and a run the app
-closed while it still worked rebuilds as `interrupted`, which is not resumable
-either. A chain whose read-only tool output exceeds `MAX_RESUMABLE_READ_LINES`
+Every settled chain is resumable (D628): `completed`, `failed`, `timed_out`,
+`stopped`, `aborted`, and the restart-rebuilt `interrupted` all continue
+through `Task.resume`, which replays the chain's persisted transcript. Only a
+chain whose latest run is still live refuses to resume, and `TaskList` marks
+stopped/aborted records as `(resumable)`.
+A chain whose read-only tool output exceeds `MAX_RESUMABLE_READ_LINES`
 (50000) leaves the reusable list without an in-chain trim, so a resume never
 silently drops history. The registry keeps at most
 `MAX_RESUMABLE_CHAINS_PER_AGENT` (2) reusable chains per definition name and
@@ -1013,7 +1126,7 @@ multi-turn conversation under its latest `Task` card, with no separate
 "resumed" marker.
 
 **Model pins.** `model: <provider>/<model>` in the frontmatter is resolved once
-per launch in Electron main, where credentials and the models.dev snapshot live, against
+per launch in Electron main, where credentials and the Pi catalog snapshot live, against
 provider id, vendor key or display name, and capped at
 `MAX_SUBAGENT_PROVIDERS` (8) distinct providers. An unresolvable pin is omitted
 from the binding map on purpose; the runtime turns the missing entry into a tool
@@ -1074,7 +1187,9 @@ When a summary cannot be generated or installed below the hard limit, the run
 degrades: it keeps the original task brief plus the most recent message(s),
 discards the rest of its history, continues, and records that it was degraded,
 so the report and lifecycle details say the delegate lost history rather than
-presenting a complete answer. When even that does not fit, the run fails with
+presenting a complete answer. Empty or whitespace-only extracted summary text
+(including a thinking-only or output-limited reply with no text blocks) counts
+as "cannot be generated" — it must not install an empty successful checkpoint. When even that does not fit, the run fails with
 `SUBAGENT_CONTEXT_OVERFLOW` (not retriable) naming what the parent can change —
 narrow the task, delegate to a model with a larger window, read less at once —
 instead of forwarding the provider's overflow text.
@@ -1109,6 +1224,20 @@ stops calling tools while delegates still run, the runtime keeps the durable
 turn open and delivers the reports when they finish. User Stop, `TaskStop`,
 runtime dispose, or a parent fatal error (D352) abort a still-running
 delegate.
+
+**Isolated worktrees (ADR 0329).** In an isolated session, a delegate whose
+tools include `Write` or `Edit` gets its own worktree before its first turn
+(`worktree.delegate.create`, keyed by the delegation chain id, so a resumed
+delegate reuses it), and its `tools.execute` calls carry that id as
+`delegationId`. When the run ends the runtime calls
+`worktree.delegate.settle` before publishing the report: a completed run is
+merged back into the session worktree, a failed or stopped run keeps its
+changes, and the outcome (merged, no changes, conflict with files, not merged
+with reason, or kept) is appended to the report so the parent knows whether to
+resume the delegate. Host-core briefly holds the session's own tools while it
+commits and merges in the session worktree, waiting at most a few seconds for
+tools already running. Read-only and Bash-only delegates, and every delegate
+of a non-isolated session, are unchanged.
 
 ### 5f.1 Delegate permission scope (ADR 0089)
 
@@ -1185,10 +1314,10 @@ MVP UI always includes at least:
 
 Runtime responsibilities:
 - resolve `(providerId, modelId)`
-- resolve and serialize the complete models.dev record, or label an absent ID
+- resolve and serialize the complete Pi catalog record, or label an absent ID
   with the unknown generic fallback
 - resolve model reasoning capability and effective thinking level from the
-  models.dev record
+  Pi catalog record
 - fetch secrets via host (never cache raw secrets in logs)
 - translate vendor failures into provider AppError codes
 - stream tokens/events to orchestrator
@@ -1196,22 +1325,22 @@ Runtime responsibilities:
 
 Local models are supported through OpenAI-compatible endpoints (Ollama, LM Studio, vLLM, etc.).
 
-### 6.1 One-shot Composer enhancement
+### 6.1 Plugin-owned Composer transforms
 
-Composer enhancement uses the same resolved provider binding and retry
-classification as an agent request, but creates a separate completion context
-with exactly one user message and the static enhancement system prompt. It
-does not instantiate a session agent, include transcript history, expose tools,
-or persist a turn. The renderer receives only the trimmed text result; API
-keys and vendor refresh credentials remain in Electron main. OpenCode Go
-one-shots reuse the conversation id as `x-opencode-session` when a session is
-present; otherwise the runtime synthesizes a per-call id so the gateway
-accepts the request.
+Composer text transforms are contributed by explicitly installed plugins
+through the permission-gated `composer.transform` capability. The host sends
+the selected draft and optional model key to the plugin, without transcript
+history or attachment data. A plugin may use the generic `agent.complete`
+capability to request a one-shot completion; that path creates a separate
+completion context and does not instantiate a session agent, expose tools, or
+persist a turn. API keys and vendor refresh credentials remain in Electron
+main. OpenCode Go one-shots reuse the conversation id as `x-opencode-session`
+when a session is present; otherwise the runtime synthesizes a per-call id.
 
 ### 6.2 OpenCode session routing headers
 
-Chat, subagent, context-compaction summary, prompt-enhancement, and plugin
-one-shot completions whose provider is `apiStyle: opencode_go`, whose
+Chat, subagent, context-compaction summary, plugin-owned prompt-enhancement,
+and other plugin one-shot completions whose provider is `apiStyle: opencode_go`, whose
 `vendorKey` is `opencode` or `opencode-go`, whose pi-ai provider id is one of
 those values, or whose base URL host is `opencode.ai` send:
 
@@ -1224,7 +1353,9 @@ Caller-supplied headers override the client and User-Agent defaults. An empty
 session header is restored from the conversation id so OpenCode Go cannot
 return `MissingSessionID`. A provider-row `headers` map is applied after this
 merge (headers plus a fetch wrapper) so custom values win over the OpenCode
-default and over adapter last-writes. Reserved keys cannot smash
+default and over adapter last-writes. The Google adapters take the merged
+`headers` without the wrapper, because they reject any other `fetch`
+(issue #1072). Reserved keys cannot smash
 `x-opencode-session`. This is an agent-runtime concern, matching the
 official Pi coding-agent attribution layer; pi-ai's `sessionId` stream option
 does not emit `x-opencode-session`.
@@ -1235,6 +1366,56 @@ function, so agent-runtime applies the header merge to the model collection it
 hands to compaction. That request carries the session's conversation id rather
 than the per-call id the harness would otherwise mint, so a summary reaches the
 same gateway backend as the conversation it summarizes.
+
+The same seam restores the conversation key itself. pi-agent-core asks for
+`cacheRetention: "none"` on a summary, and the Responses-shaped adapters read
+that as "no `prompt_cache_key`", so the summary alone drops the identity every
+other turn sends; a gateway fronting a Codex backend rejects such a request with
+400 `invalid_responses_request`. For `openai-responses` and
+`openai-codex-responses` the summary payload therefore carries the session id as
+`prompt_cache_key` (clamped to the adapter's 64-character limit) unless the
+adapter or a caller already set one. Every other wire API keeps its payload
+exactly as the adapter built it, apart from the unrecognized-endpoint key of
+§6.3, and the key is added on a copy, so a caller's
+payload hook keeps its own object and its return value still wins.
+
+### 6.3 Session identity for endpoints the adapters leave anonymous (issue #1634)
+
+pi-ai supplies a conversation id by itself only where a vendor published one:
+the Responses adapters send `session_id` and `x-client-request-id` on each
+request, and the Chat Completions and Anthropic Messages adapters send their
+session headers only while `compat.sendSessionAffinityHeaders` is set, which
+defaults to OpenRouter. The Chat Completions body key is narrower still,
+gated on `api.openai.com`. A provider row the user pointed at their own gateway
+or relay would therefore send every session of one credential with nothing
+reliable to tell them apart: reverse proxies commonly discard `session_id`
+because its name contains an underscore, while many gateways do not recognize
+`x-client-request-id` as a stable session key.
+
+Agent-runtime stamps that identity itself for a row whose base URL host is not
+a published vendor host (`NAMED_ENDPOINT_PRESETS`), on the
+`openai-completions`, `anthropic-messages`, and `openai-responses` wire APIs,
+and not on the OpenCode path that already carries its own session header
+(§6.2):
+
+- For Completions and Anthropic, the built model's `compat` gains
+  `sendSessionAffinityHeaders: true` with
+  `sessionAffinityFormat: "openai"`, so the adapter writes `x-session-affinity`
+  and `x-client-request-id` beside `session_id`. That default is spread under
+  the row's own `compat`, so an explicit catalog entry still wins.
+- A custom Responses endpoint keeps the adapter's existing `session_id`,
+  `x-client-request-id`, and `prompt_cache_key`; agent-runtime adds the stable
+  `x-session-affinity` alias through stream options so a reverse proxy can
+  route the session after dropping underscore headers.
+- A Chat Completions request body that carries no `prompt_cache_key` gains the
+  session id as one, clamped to the adapter's 64-character limit. The key rides
+  a copy of the payload and is appended after every other payload hook, so an
+  extension that rewrites the payload cannot drop it.
+
+The identity reaches session turns, subagent turns, context-compaction
+summaries, and plugin one-shots that were handed a session id. A published
+vendor host keeps its current request bytes, and a caller with no session id
+gains no affinity header or body key.
 
 
 ## 7. System prompt composition
@@ -1247,6 +1428,64 @@ same gateway backend as the conversation it summarizes.
 + [project instruction chain, when present]
 + [optional user custom instructions]
 ```
+
+### 7.0.0 Chronological system state (issue #1285)
+
+The Pi agent loop owns `toolsAdded` / `toolsRemoved` declarations, including
+same-name schema replacement. Desktop never moves an update ahead of the user
+or ToolSearch result that preceded it. Instruction composition uses independent
+`runtime`, `skills` (loading instructions), `skill:<exact-id>` (one catalog
+entry each), and `context` sections. Refreshing an idle skill catalog appends only
+changed entries, uses null to revoke removed entries, and updates the executable
+catalog. Unchanged entries and loading instructions are not repeated. Restoring
+an older aggregate `skills` section upgrades it once at the continuation
+boundary; checkpoints retain the effective per-entry state. Bodies remain
+on-demand and permission-checked. Different plugin tool schemas/permissions
+invalidate idle reuse even when their names are unchanged.
+
+The host-owned activation state for bundled skills is read when a session
+catalog is built. A disabled built-in is omitted from the prompt and slash
+catalog, and a stale direct load through `Skill` is refused. This switch governs
+the skill document only; associated agent tools keep their independent
+registration and activation behavior.
+
+Before model dispatch, Desktop acknowledges new system records through Host's
+existing transcript writer. Restart replays these provider-neutral records in
+order. An old history without records receives the current declaration at its
+continuation boundary; Desktop does not invent historical instructions. Explicit
+compaction saves the effective system state once before summary and retained
+tail; it does not replay old tool deltas or preserve removed tools.
+
+Mid-conversation instructions, tool additions and full tool changes are separate
+capabilities. Desktop accepts catalog opt-ins only for the same published model,
+wire API and effective endpoint (including path and port). Unknown models,
+changed bindings and unverified relays use Pi's conservative request projection.
+Partial support keeps instruction updates but folds tools as required; removals
+and redefinitions use the adapter's supported fallback. Model switching never
+rewrites the canonical journal. Cache savings depend on the actual provider;
+unsupported routes may still rebuild the request prefix.
+
+Published model limits, prices and modalities remain owned by models.dev. Its
+runtime projection separately carries Pi's exact published transcript capability
+flags and original binding. An enriched metadata source does not grant native
+support by itself, and account overrides never replace that original binding.
+
+The pinned Pi patch declares mid-conversation system support for
+`deepseek-flash` on its published `openai-completions` binding at
+`https://api.deepseek.com`. Skill changes on this binding append system updates
+without rewriting the previous request prefix. This does not enable native tool
+additions or changes, and does not apply to unverified gateways, aliases or APIs.
+The declaration comes from the patched Pi catalog, not provider settings or a
+second Desktop model catalog.
+
+When restoring assistant history, map the current local account ID to the Pi
+model's provider identity and retain recorded model IDs. A different recorded
+account or model remains distinct. Legacy rows without identity retain the
+current-model fallback. Same-model Completions reasoning stays in its native
+reasoning field, never appended to visible answer text because of an account
+UUID/vendor-name mismatch. The same rule applies when `seedDelegateMessages`
+rebuilds a Task(resume) history: tag restored assistants and synthetic
+tool-call carriers with `model.provider` / `model.id`, not the account row id.
 
 ### 7.0.1 User custom system prompt files (issue #542)
 
@@ -1316,14 +1555,14 @@ grammar and validated against another fails every call.
 
 ### 7.1 Active tool context and on-demand loading (D185, ADR 0048)
 
-The sidecar builds one complete tool registry, but it does not serialize every
-registered schema into every provider request. Each new user prompt starts with
-the mode's core set plus any deferred tools that can be restored from successful
-activation evidence still present in the effective session context:
+The sidecar builds one complete tool registry. By default, each provider request
+declares the mode's core set plus activated deferred tools. The verified Flash
+binding uses the fixed-declaration policy below, while preserving the same
+execution activation rules:
 
 - Agent: `Read`, `Bash`, `Edit`, and `Write` (matching pi's coding-agent core)
 - Agent: `Skill` whenever the skill catalog is non-empty (D404, ADR 0230) — the
-  `# Skills` section and a user-typed `/skill-id` both ask the model to call
+  `# Skills` section and a user-typed `/skill:<skill-id>` both ask the model to call
   it, and a tool that is missing from the schema cannot be called at all
 - Agent: `Task`, `TaskWait`, `TaskList`, and `TaskStop` as well, whenever the
   subagent catalog is non-empty (§5f) — a capability the model has to go
@@ -1347,20 +1586,42 @@ The sidecar activates up to four matches, records their names in the canonical
 schemas. Providers with native deferred-tool search receive the definitions at
 that load point; other providers receive the active definitions normally.
 
-At the start of each new user prompt, the sidecar clears the in-memory deferred
-activation set and rebuilds it from the effective context. Successful
-`ToolSearch` results contribute their canonical `details.addedToolNames`.
-For compatibility, historical `details.activated` and top-level
-`addedToolNames` markers are also accepted. Successful results from deferred
-tools contribute that tool's name. Only names still present in the current
-mode's deferred catalog are restored. Failed rows, interrupted or
-missing-result placeholders, and assistant/user prose never activate a tool.
-The tool registry, host permission path, tool timeout, and workspace containment
-rules remain unchanged. `ToolSearch` is local to the sidecar and does not cross
-the host RPC boundary. Its activation marker is retained in the persisted tool
-result, so a runtime restart or a new prompt can reuse an eligible capability
-while that evidence remains in the effective context; a fresh search is still
-required after the evidence is compacted away or otherwise absent.
+Deferred activation is sticky for the live runtime. At restoration, recorded
+system messages (including a compaction checkpoint) define the active baseline
+for ordinary on-demand histories. Only successful results after the latest
+system record can add activation; older results must not resurrect removed
+tools. Legacy histories without system records use successful results throughout
+their effective context. ToolSearch accepts canonical `details.addedToolNames`
+and historical `details.activated` / top-level `addedToolNames`; successful
+results from deferred tools also restore their names. Failed results,
+missing-result placeholders and assistant/user prose never activate tools.
+Only names in the current mode's deferred catalog are eligible.
+
+For the exact official `deepseek-flash` Chat Completions binding with verified
+mid-conversation system support, the runtime instead declares the complete
+catalog in deterministic name order on the first request. ToolSearch changes
+activation without changing the declared schemas. A visible schema does not
+permit execution: inactive deferred calls are rejected before extension hooks
+and the Host; activated calls still require the existing mode and Host checks.
+ToolSearch remains local and never grants approval or bypasses permissions.
+
+Fixed declarations persist separately from activation. A version-1
+`tool_activation` section records active names and a fingerprint of the account,
+model, API, endpoint, schema catalog and deferred set. Activation changes append
+at the continuation boundary, and the existing system journal/checkpoint saves
+both declarations and activation. Restore only validated activation for a
+matching fingerprint, plus successful ToolSearch results newer than that state;
+never activate tools merely because the full snapshot declared them. Malformed,
+unknown-version and mismatched activation state fail closed. A catalog/schema,
+mode, account, model or route change creates a new epoch and requires new
+activation. Removal immediately removes the tool from executable registration.
+
+If the full catalog exceeds 128 functions or its prompt/schema estimate cannot
+leave the normal retained-tail budget below the compaction threshold, retain
+on-demand declarations and emit a diagnostic explaining that ToolSearch cache
+stability is not guaranteed. Do not truncate tools. Other models and unverified
+routes retain the existing Pi projection. First-request schema overhead increases;
+cache stability does not imply that short conversations become cheaper.
 
 For user-visible HTML deliverables, the default system prompt asks the agent to
 activate `BrowserPreview` once after creating the page or making its first
@@ -1457,9 +1718,17 @@ tool continues with the runtime's base/root chain rather than waiting for the
 general host RPC timeout. A failed resolution never leaves a previously
 resolved sibling-directory chain active.
 
-All discovery stays within the session project root. Empty, unreadable, and
-out-of-root files are skipped. The combined UTF-8 content is capped at 32 KiB
-and source paths are labelled under `# Project instructions`.
+All discovery stays within the session project root. A target path outside the
+project root, or the root path itself, resolves to the root's own chain instead
+of an empty result. File tools on attachments or other locations therefore
+keep the root chain (which may itself be empty). Empty, unreadable, and
+out-of-root files are skipped. The global file and the combined project
+entries have independent 32 KiB UTF-8 budgets, so an oversized global file
+never removes project instructions. A file that exceeds its remaining budget is
+cut on a UTF-8 character boundary and followed by a
+`[PI-Desktop truncated <source>: loaded the first <n> of <total> bytes; ...]`
+notice; project files after a truncated one are not loaded. Source paths are
+labelled under `# Project instructions`.
 The sidecar never reads workspace instructions directly. A changed root chain
 recreates an idle runtime on its next prompt; nested instructions are resolved
 again when a relevant file tool runs. The resolver's timeout and fallback
@@ -1469,6 +1738,15 @@ Settings provides dedicated management for the fixed global path. The Projects
 view project-list menu provides an `AGENTS.md` editor for its corresponding
 registered project root. Its IPC does not accept arbitrary renderer file paths.
 Saves affect the next prompt without restarting the application.
+
+For an isolated session (ADR 0329) the launch metadata carries a separate
+`workspaceRoot`, its git worktree: the instruction chain and its path
+resolution are rooted there, so the agent follows the worktree's own
+`AGENTS.md` files. `projectPath` stays the project identity for memory,
+skills, plugins, MCP servers, subagent definitions, the custom system prompt,
+and group context. The system prompt adds a short isolated-workspace note
+(work only in the worktree, use the `PI_PORT` block, leave branch changes and
+merging to the user, and how to resolve a merge conflict).
 
 ## 8. Concurrency
 
@@ -1503,6 +1781,9 @@ does not dispose, abort, or re-root a runtime belonging to another session.
   estimate visible thinking plus answer output at four Unicode code points per
   token and persist it as `responseOutputTokens` so stopped-turn throughput is
   still available and visibly approximate
+- preserve request-to-first-response wait and streamed thinking/answer duration
+  on assistant messages when available; stopped streams retain the elapsed
+  streamed duration captured before cancellation
 - renderer smart-stop transcript undo and structured Composer restoration are
   reconciliation after abort; they do not change runtime cancellation or roll
   back completed tool effects
@@ -1537,7 +1818,7 @@ with the original v3 `SessionManager`, Pi `ModelRuntime`, `SettingsManager`, and
 leaf, compaction, model/thinking changes, and context-bearing custom messages;
 it is never reconstructed from renderer `UiMessage` rows.
 
-The 0.87.1 SDK also applies append-only `context_edit` entries to this model
+The Pi 1.1.0 SDK also applies append-only `context_edit` entries to this model
 projection. An edit can omit or replace an earlier message for later provider
 requests without rewriting its raw JSONL entry or the visible native history.
 Native Pi extensions use the SDK's boundary hooks; all entries they append,
@@ -1589,11 +1870,16 @@ browseable.
 
 ### Provider certificate trust (issue #714)
 
-The desktop sidecar starts with Node's `--use-system-ca`, retaining bundled
-roots and inherited `NODE_EXTRA_CA_CERTS`. It uses the OS trust store without
-turning off chain or hostname validation. Restart after updating local trust
-or the extra-CA startup environment. Headless pi-host launch behavior and
-System/Direct/Custom proxy routing are unchanged.
+The desktop sidecar's effective trust set is the union of Node's bundled
+roots, the inherited `NODE_EXTRA_CA_CERTS` set, and the OS trust store, with
+chain and hostname validation on. On Windows and Linux the launcher passes
+Node's `--use-system-ca` to obtain the system roots. On macOS the Electron
+build applies that flag by replacing the bundled roots instead of adding them
+and its system enumeration misses public anchors (issue #1187), so the
+launcher omits the flag and the sidecar merges the three sets into the default
+CA set itself at startup (`agent-runtime system-ca`). Restart after updating
+local trust or the extra-CA startup environment. Headless pi-host launch
+behavior and System/Direct/Custom proxy routing are unchanged.
 
 Explicit certificate verification errors are terminal for both setup and
 stream recovery in main sessions and built-in delegates. Their structured
@@ -1601,3 +1887,36 @@ cause survives adapter message flattening, remains on the final error row,
 and never triggers a provider transport rebuild. Protocol errors such as
 `EPROTO` keep their existing retry behavior. See
 [certificate trust ADR](../../adr/provider-system-certificates.md).
+
+## Pi 1.1.0 execution boundary
+
+Published model metadata and account entitlement come from one account-scoped
+Pi Models collection. Effective binding projection is shared by launch, delegates
+and compaction. Dispatch thinking normalization uses the resolved physical Pi
+model; native null/unsupported mappings remain unavailable without mutating
+saved preferences. Agent bookkeeping and omitted request reasoning are distinct.
+
+Every physical stream attempt has an operation identity before dispatch. Usage
+survives stream/result projection and events through Host/remote/renderer paths;
+retries and images retain physical account/model attribution. Nested immediate
+parent and owning Task remain distinct. The migration does not add coding-agent
+AgentSession, Codemode or virtual routing. See the coding-agent design review for
+future adoption conditions.
+
+
+## Subagent return receipt
+
+Each settled subagent run invokes the runtime-owned ReturnToParent completion
+operation once. The chat displays a top-level expandable tool row: "Subagent
+completed" for success, "Subagent failed" for failed/timed-out runs and "Subagent
+stopped" for cancellations. The report, agent, actual model/provider/group,
+reasoning and requested Fast state remain available in the result details.
+The operation adds no model call or token usage and never creates user input.
+
+Parent-turn handoff, background execution, user Stop, worker Stop, delivery
+coalescing and automatic parent integration retain their existing semantics.
+The receipt is separate from the original Task card and visible by default;
+only its details are collapsed. Replayed events and reload do not duplicate it.
+Resume yields another receipt for the new run. Mobile receives the same durable
+message. Restoration sends the report through the settled Task result and skips
+the receipt rather than fabricating a provider-facing tool call.

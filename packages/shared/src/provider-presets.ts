@@ -204,6 +204,14 @@ export const NAMED_ENDPOINT_PRESETS: readonly NamedEndpointPreset[] = [
     aliases: ["minimax-openai", "minimax-compatible"],
   },
   {
+    id: "stepfun-plan",
+    vendorKey: "stepfun-step-plan",
+    name: "StepFun Plan",
+    baseUrl: "https://api.stepfun.com/step_plan/v1",
+    apiStyle: "anthropic_messages",
+    labelKey: "settings.presetStepfunPlan",
+  },
+  {
     id: "xiaomi",
     vendorKey: "xiaomi",
     name: "Xiaomi",
@@ -220,6 +228,132 @@ export const NAMED_ENDPOINT_PRESETS: readonly NamedEndpointPreset[] = [
     apiStyle: "anthropic_messages",
     labelKey: "settings.presetKimiCoding",
     aliases: ["kimi-coding", "kimi"],
+  },
+  {
+    id: "ant-ling",
+    vendorKey: "ant-ling",
+    name: "Ant Ling",
+    baseUrl: "https://api.ant-ling.com/v1",
+    apiStyle: "chat_completions",
+    labelKey: "settings.presetAntLing",
+  },
+  {
+    id: "baseten",
+    vendorKey: "baseten",
+    name: "Baseten",
+    baseUrl: "https://inference.baseten.co/v1",
+    apiStyle: "chat_completions",
+    labelKey: "settings.presetBaseten",
+  },
+  {
+    id: "cerebras",
+    vendorKey: "cerebras",
+    name: "Cerebras",
+    baseUrl: "https://api.cerebras.ai/v1",
+    apiStyle: "chat_completions",
+    labelKey: "settings.presetCerebras",
+  },
+  {
+    id: "huggingface",
+    vendorKey: "huggingface",
+    name: "Hugging Face",
+    baseUrl: "https://router.huggingface.co/v1",
+    apiStyle: "chat_completions",
+    labelKey: "settings.presetHuggingface",
+    aliases: ["hugging-face", "hf"],
+  },
+  {
+    id: "meta",
+    vendorKey: "meta",
+    name: "Meta",
+    baseUrl: "https://api.meta.ai/v1",
+    apiStyle: "responses",
+    labelKey: "settings.presetMeta",
+  },
+  {
+    id: "minimax",
+    vendorKey: "minimax",
+    name: "MiniMax (International)",
+    baseUrl: "https://api.minimax.io/anthropic/v1",
+    apiStyle: "anthropic_messages",
+    labelKey: "settings.presetMinimaxIntl",
+  },
+  {
+    id: "moonshotai",
+    vendorKey: "moonshotai",
+    name: "Moonshot AI (International)",
+    baseUrl: "https://api.moonshot.ai/v1",
+    apiStyle: "chat_completions",
+    labelKey: "settings.presetMoonshotIntl",
+  },
+  {
+    id: "nvidia",
+    vendorKey: "nvidia",
+    name: "NVIDIA",
+    baseUrl: "https://integrate.api.nvidia.com/v1",
+    apiStyle: "chat_completions",
+    labelKey: "settings.presetNvidia",
+    aliases: ["nim"],
+  },
+  {
+    id: "opencode",
+    vendorKey: "opencode",
+    name: "OpenCode Zen",
+    baseUrl: "https://opencode.ai/zen/v1",
+    apiStyle: "chat_completions",
+    labelKey: "settings.presetOpenCodeZen",
+    aliases: ["opencode-zen"],
+  },
+  {
+    id: "vercel",
+    vendorKey: "vercel",
+    name: "Vercel AI Gateway",
+    baseUrl: "https://ai-gateway.vercel.sh/v1",
+    apiStyle: "chat_completions",
+    labelKey: "settings.presetVercelGateway",
+    aliases: ["vercel-ai-gateway"],
+  },
+  {
+    id: "alibaba-token-plan",
+    vendorKey: "alibaba-token-plan",
+    name: "Qwen Token Plan",
+    baseUrl: "https://token-plan.ap-southeast-1.maas.aliyuncs.com/compatible-mode/v1",
+    apiStyle: "chat_completions",
+    labelKey: "settings.presetAlibabaTokenPlan",
+    aliases: ["qwen-token-plan", "qwen-token-plan-individual"],
+  },
+  {
+    id: "alibaba-token-plan-cn",
+    vendorKey: "alibaba-token-plan-cn",
+    name: "Qwen Token Plan (China)",
+    baseUrl: "https://token-plan.cn-beijing.maas.aliyuncs.com/compatible-mode/v1",
+    apiStyle: "chat_completions",
+    labelKey: "settings.presetAlibabaTokenPlanCn",
+    aliases: ["qwen-token-plan-cn"],
+  },
+  {
+    id: "xiaomi-token-plan-cn",
+    vendorKey: "xiaomi-token-plan-cn",
+    name: "Xiaomi Token Plan (China)",
+    baseUrl: "https://token-plan-cn.xiaomimimo.com/v1",
+    apiStyle: "chat_completions",
+    labelKey: "settings.presetXiaomiTokenPlanCn",
+  },
+  {
+    id: "xiaomi-token-plan-ams",
+    vendorKey: "xiaomi-token-plan-ams",
+    name: "Xiaomi Token Plan (Europe)",
+    baseUrl: "https://token-plan-ams.xiaomimimo.com/v1",
+    apiStyle: "chat_completions",
+    labelKey: "settings.presetXiaomiTokenPlanAms",
+  },
+  {
+    id: "xiaomi-token-plan-sgp",
+    vendorKey: "xiaomi-token-plan-sgp",
+    name: "Xiaomi Token Plan (Singapore)",
+    baseUrl: "https://token-plan-sgp.xiaomimimo.com/v1",
+    apiStyle: "chat_completions",
+    labelKey: "settings.presetXiaomiTokenPlanSgp",
   },
 ];
 
@@ -238,6 +372,31 @@ export function normalizeEndpointUrl(value: string | undefined): string | undefi
 
 function normalizedVendorKey(value: string | undefined): string {
   return (value ?? "").trim().toLowerCase().replace(/_/g, "-");
+}
+
+function endpointHost(value: string | undefined): string | undefined {
+  const normalized = normalizeEndpointUrl(value);
+  if (!normalized) return undefined;
+  try {
+    return new URL(normalized).host.toLowerCase();
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Whether a configured base URL addresses a vendor's own published endpoint.
+ *
+ * Matching is by host, not by the full canonical URL: an OpenAI-compatible
+ * vendor is routinely configured with a path the preset record does not spell
+ * out (`/v1`, a Coding-Plan suffix, a regional host) and that is still the
+ * vendor's host. A row pointed anywhere else belongs to the user — a
+ * self-hosted gateway or a relay — and the runtime decides its request shape.
+ */
+export function addressesPublishedVendorHost(baseUrl: string | undefined): boolean {
+  const host = endpointHost(baseUrl);
+  if (!host) return false;
+  return NAMED_ENDPOINT_PRESETS.some((preset) => endpointHost(preset.baseUrl) === host);
 }
 
 function presetByUrl(url: string): NamedEndpointPreset | undefined {

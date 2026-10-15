@@ -1,9 +1,10 @@
 import { useEffect, useRef, useState } from "react";
+import { useBlockingOverlay } from "../lib/blocking-overlay";
 import { portalToBody } from "../lib/portal-visibility";
 import { useTranslation } from "react-i18next";
 import { ErrorCodes } from "@pi-desktop/shared";
 import { useAppStore } from "../stores/app-store";
-import { Button, TooltipButton } from "./ui";
+import { OverlayBackdrop, Button, TooltipButton } from "./ui";
 import { IconCircleAlert, IconClose, IconStop, IconTrash } from "./icons";
 
 /**
@@ -28,6 +29,7 @@ export function ProjectDeleteDialog({
   onDeleted: () => void | Promise<void>;
   onError: (error: unknown) => void;
 }) {
+  useBlockingOverlay();
   const { t } = useTranslation();
   const deleteProject = useAppStore((s) => s.deleteProject);
   const abortSession = useAppStore((s) => s.abortSession);
@@ -105,7 +107,7 @@ export function ProjectDeleteDialog({
   };
 
   const dialog = (
-    <div
+    <OverlayBackdrop
       className="overlay project-instructions-dialog-overlay"
       role="presentation"
       onClick={(event) => {
@@ -180,7 +182,7 @@ export function ProjectDeleteDialog({
           </Button>
         </div>
       </div>
-    </div>
+    </OverlayBackdrop>
   );
 
   return typeof document === "undefined" ? dialog : portalToBody(dialog);

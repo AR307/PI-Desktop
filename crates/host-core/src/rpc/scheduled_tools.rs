@@ -20,13 +20,14 @@ pub fn definitions() -> Vec<Value> {
     let fields = json!({
         "title":{"type":"string","minLength":1,"maxLength":80},
         "prompt":{"type":"string","minLength":1,"maxLength":64000},
-        "cadence":{"type":"string","enum":["manual","hourly","daily","weekly"]},
+        "cadence":{"type":"string","enum":["manual","hourly","interval","daily","weekly"]},
         "enabled":{"type":"boolean"},
         "schedule":{"type":"object","additionalProperties":false,"required":["hour","minute","weekday"],"properties":{
             "hour":{"type":"integer","minimum":0,"maximum":23},
             "minute":{"type":"integer","minimum":0,"maximum":59},
             "weekday":{"type":"integer","minimum":0,"maximum":6},
-            "weekdays":{"type":"array","minItems":1,"maxItems":7,"uniqueItems":true,"items":{"type":"integer","minimum":0,"maximum":6}}
+            "weekdays":{"type":"array","minItems":1,"maxItems":7,"uniqueItems":true,"items":{"type":"integer","minimum":0,"maximum":6}},
+            "intervalMinutes":{"type":"integer","minimum":5,"maximum":1440}
         }}
     });
     ["ScheduledTaskList", "ScheduledTaskCreate", "ScheduledTaskUpdate", "ScheduledTaskDelete"].into_iter().map(|name| {
@@ -42,7 +43,9 @@ fn invalid(message: &str) -> JsonRpcError {
 }
 
 fn execute_inner(st: &AppState, p: &ToolsExecuteParams) -> Result<Value, JsonRpcError> {
-    let session = sessions::get_session(&st.db, &p.session_id)
+    // The index row answers both questions this needs — does the session exist,
+    // and what is its project? — so no transcript is materialized here.
+    let summary = sessions::session_summary(&st.db, &p.session_id)
         .map_err(|e| rpc_err(1000, e.to_string(), "INTERNAL"))?
         .ok_or_else(|| rpc_err(1007, "session not found", "SESSION_NOT_FOUND"))?;
     if sessions::session_mode(&st.db, &p.session_id)
@@ -56,7 +59,7 @@ fn execute_inner(st: &AppState, p: &ToolsExecuteParams) -> Result<Value, JsonRpc
             "TOOL_DISABLED_IN_PLAN",
         ));
     }
-    let workspace = session.summary.project_path;
+    let workspace = summary.project_path;
     let args = p
         .args
         .as_object()
@@ -110,7 +113,7 @@ fn execute_inner(st: &AppState, p: &ToolsExecuteParams) -> Result<Value, JsonRpc
     let cadence = match args.get("cadence") {
         Some(value) => value
             .as_str()
-            .filter(|v| matches!(*v, "manual" | "hourly" | "daily" | "weekly"))
+            .filter(|v| matches!(*v, "manual" | "hourly" | "interval" | "daily" | "weekly"))
             .ok_or_else(|| invalid("invalid cadence"))?,
         None => existing
             .as_ref()
@@ -207,6 +210,23 @@ mod tests {
     use super::*;
     use std::sync::Arc;
     use tokio::sync::{mpsc, Mutex};
+
+    #[test]
+    fn tool_schema_offers_the_interval_cadence_and_its_value() {
+        let definitions = definitions();
+        let create = definitions
+            .iter()
+            .find(|item| item["name"] == "ScheduledTaskCreate")
+            .expect("the create tool is defined");
+        assert_eq!(
+            create["parameters"]["properties"]["cadence"]["enum"],
+            json!(["manual", "hourly", "interval", "daily", "weekly"])
+        );
+        assert_eq!(
+            create["parameters"]["properties"]["schedule"]["properties"]["intervalMinutes"],
+            json!({"type":"integer","minimum":5,"maximum":1440})
+        );
+    }
 
     #[cfg(windows)]
     #[tokio::test]

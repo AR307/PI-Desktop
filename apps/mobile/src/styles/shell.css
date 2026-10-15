@@ -1,0 +1,87 @@
+/* App shell: screens, headers, the tab bar, banners and toasts. */
+.mobile-shell {
+  position: relative;
+  height: 100dvh;
+  max-width: 820px;
+  margin: 0 auto;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  padding-left: var(--m-safe-left);
+  padding-right: var(--m-safe-right);
+}
+.screen { position: relative; flex: 1; min-height: 0; display: flex; flex-direction: column; }
+.screen-scroll { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; -webkit-overflow-scrolling: touch; padding: 0 var(--m-gutter) calc(var(--m-space-8) + var(--m-tabbar) + var(--m-safe-bottom)); }
+
+/* Compact header that takes over when the large title scrolls away. */
+.screen-header {
+  position: relative;
+  z-index: 5;
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: var(--m-space-1);
+  min-height: calc(var(--m-header) + var(--m-safe-top));
+  padding: var(--m-safe-top) calc(var(--m-gutter) - 10px) 0;
+  background: var(--m-bg);
+  transition: background var(--m-dur) var(--m-ease-standard), box-shadow var(--m-dur) var(--m-ease-standard);
+}
+.screen-header.scrolled { background: var(--m-chrome); box-shadow: 0 1px 0 var(--m-separator); }
+@supports (backdrop-filter: blur(1px)) { .screen-header.scrolled { backdrop-filter: saturate(170%) blur(18px); } }
+.screen-header-title { flex: 1; min-width: 0; padding: 0 var(--m-space-2); font-size: var(--m-text-headline); font-weight: 650; text-align: center; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; opacity: 0; transform: translateY(4px); transition: opacity var(--m-dur) var(--m-ease-out), transform var(--m-dur) var(--m-ease-out); }
+.screen-header.scrolled .screen-header-title { opacity: 1; transform: none; }
+.screen-header-actions { display: flex; align-items: center; min-width: var(--m-control); justify-content: flex-end; }
+.screen-header-leading { display: flex; align-items: center; min-width: var(--m-control); }
+
+.large-title { display: flex; align-items: flex-end; justify-content: space-between; gap: var(--m-space-3); padding: var(--m-space-1) 0 var(--m-space-4); }
+.large-title h1 { font-size: var(--m-text-large); line-height: 1.15; font-weight: 700; letter-spacing: -0.01em; }
+.large-title p { margin-top: var(--m-space-1); color: var(--m-text-3); font-size: var(--m-text-subhead); }
+.title-sentinel { height: 1px; margin-bottom: -1px; }
+
+/* Tab bar */
+.tab-bar {
+  position: absolute;
+  z-index: 20;
+  left: 0; right: 0; bottom: 0;
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  padding: 6px max(var(--m-space-2), var(--m-safe-left)) calc(6px + var(--m-safe-bottom));
+  background: var(--m-chrome);
+  box-shadow: 0 -1px 0 var(--m-separator);
+  view-transition-name: tab-bar;
+}
+@supports (backdrop-filter: blur(1px)) { .tab-bar { backdrop-filter: saturate(170%) blur(20px); } }
+.tab-item { position: relative; min-height: 50px; padding: 4px 0 2px; flex-direction: column; gap: 3px; border-radius: var(--m-radius-md); background: transparent; color: var(--m-text-3); font-size: var(--m-text-caption); font-weight: 600; }
+.tab-item[aria-current="page"] { color: var(--m-text); }
+.tab-icon { position: relative; display: grid; place-items: center; width: 52px; height: 28px; border-radius: var(--m-radius-full); transition: background var(--m-dur) var(--m-ease-out); }
+.tab-item[aria-current="page"] .tab-icon { background: var(--m-surface-strong); animation: scale-in var(--m-dur) var(--m-ease-out); }
+.tab-badge { position: absolute; top: -3px; left: calc(50% + 6px); min-width: 17px; height: 17px; padding: 0 5px; display: grid; place-items: center; border-radius: var(--m-radius-full); background: var(--m-danger); color: #fff; font-size: 10px; font-weight: 700; line-height: 1; box-shadow: 0 0 0 2px var(--m-bg); animation: scale-in var(--m-dur) var(--m-ease-out); }
+::view-transition-group(tab-bar) { animation-duration: var(--m-dur); }
+
+/* Banners sit in the flow under a header; toasts float over content. */
+.banner { display: flex; align-items: flex-start; gap: var(--m-space-3); margin: 0 0 var(--m-space-4); padding: var(--m-space-3) var(--m-space-4); border-radius: var(--m-radius-md); background: var(--m-surface); font-size: var(--m-text-subhead); line-height: 1.45; animation: rise-in var(--m-dur) var(--m-ease-out) both; }
+.banner-icon { flex: none; margin-top: 1px; color: var(--m-text-2); }
+.banner-body { flex: 1; min-width: 0; display: grid; gap: 2px; }
+.banner-body strong { font-size: var(--m-text-callout); }
+.banner-body span { color: var(--m-text-3); }
+.banner-actions { display: flex; gap: var(--m-space-2); margin-top: var(--m-space-2); }
+.banner-actions button { min-height: 34px; padding: 0 var(--m-space-3); font-size: var(--m-text-footnote); }
+.banner.warning { background: var(--m-warning-soft); }
+.banner.warning .banner-icon { color: var(--m-warning); }
+.banner.error { background: var(--m-danger-soft); }
+.banner.error .banner-icon { color: var(--m-danger); }
+
+.toast-layer { position: absolute; z-index: 60; top: calc(var(--m-safe-top) + 8px); left: var(--m-gutter); right: var(--m-gutter); display: grid; gap: var(--m-space-2); pointer-events: none; }
+.toast { pointer-events: auto; display: flex; align-items: center; gap: var(--m-space-3); width: 100%; min-height: 56px; padding: 10px 12px 10px 14px; border-radius: var(--m-radius-lg); background: var(--m-raised); box-shadow: var(--m-shadow-float), 0 0 0 0.5px var(--m-border); text-align: left; font-weight: 400; animation: drop-in var(--m-dur-slow) var(--m-ease-spring) both; touch-action: pan-x; }
+.toast.leaving { animation: fade-out var(--m-dur) var(--m-ease-in) both; }
+.toast-body { flex: 1; min-width: 0; display: grid; grid-template-columns: minmax(0, 1fr); gap: 1px; }
+.toast-body strong { font-size: var(--m-text-callout); font-weight: 650; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.toast-body span { font-size: var(--m-text-footnote); color: var(--m-text-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.toast-press { display: grid; justify-items: stretch; min-height: 0; padding: 0; border-radius: 0; background: transparent; text-align: left; font-weight: 400; }
+.toast-press:active:not(:disabled) { transform: none; }
+.toast-icon { flex: none; display: grid; place-items: center; width: 34px; height: 34px; border-radius: var(--m-radius-full); background: var(--m-surface-strong); color: var(--m-text-2); }
+.toast-icon.needsAction { background: var(--m-warning-soft); color: var(--m-warning); }
+.toast-icon.completed { background: var(--m-success-soft); color: var(--m-success); }
+.toast-icon.failed, .toast.error .toast-icon { background: var(--m-danger-soft); color: var(--m-danger); }
+.toast.error { background: color-mix(in oklab, var(--m-danger) 16%, var(--m-raised)); }
+.toast .icon-button { width: 36px; height: 36px; }

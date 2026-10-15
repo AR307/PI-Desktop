@@ -33,8 +33,9 @@ User skills are a single markdown file capped at 128 KiB. Inlining sibling
    `isPublicHostname`, `isPublicIpLiteral`). Skill market wraps it as
    `isSafeSkillSourceUrl`. Future MCP market imports the same module.
 2. Main-process fetches go through `createPublicHttpsClient`: HTTPS only,
-   DNS classification of every resolved address, `redirect: "manual"` with
-   per-hop re-validation, and retries only for non-policy failures.
+   route-aware DNS classification, direct-route address pinning when a mixed
+   DNS answer contains rejected addresses (ADR 0321), `redirect: "manual"`
+   with per-hop re-validation, and retries only for non-policy failures.
 3. The renderer never fetches catalog or document URLs. Install remains
    `skills.create`. Host-core stays unaware of the market.
 4. Scanned and catalog ids are sanitized to host `valid_capability_id` before

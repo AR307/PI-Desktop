@@ -21,12 +21,14 @@ test("theme changes synchronize the native non-macOS window background", () => {
   );
   assert.match(
     apiSource,
-    /setWindowBackgroundColor:\s*\(theme:\s*"light" \| "dark",\s*color\?:\s*string\)[\s\S]*?IPC\.invoke\.windowSetBackgroundColor/,
+    /setWindowBackgroundColor:\s*\(theme:\s*"light" \| "dark",\s*color\?:\s*string,\s*cornerRadius\?:\s*number\)[\s\S]*?IPC\.invoke\.windowSetBackgroundColor/,
   );
   assert.match(
     mainSource,
-    /handle\(IPC\.invoke\.windowSetBackgroundColor,[\s\S]*?!isWindowBackgroundColor\(requested\)[\s\S]*?mainWindow\.setBackgroundColor\(color\)/,
+    /handleWithEvent\(IPC\.invoke\.windowSetBackgroundColor,[\s\S]*?registrar\.assertMainWindowSender\(event\)[\s\S]*?!isWindowBackgroundColor\(requested\)[\s\S]*?applyMainWindowBackground\([\s\S]*?mainWindow,[\s\S]*?process\.platform,[\s\S]*?color,[\s\S]*?windows11NativeCorners,[\s\S]*?builtinWindowBackground\(theme\)/,
   );
+  assert.match(mainSource, /mainWindowBackgroundOptions\([\s\S]*?process\.platform,[\s\S]*?initialWindowBackground,[\s\S]*?windows11NativeCorners/);
+  assert.match(mainSource, /applyMainWindowBackground\([\s\S]*?window,[\s\S]*?process\.platform,[\s\S]*?initialWindowBackground,[\s\S]*?windows11NativeCorners/);
   // A malformed colour is refused; an omitted one falls back to the host
   // palette, which is what restores the default after a theme switch.
   assert.match(mainSource, /isWindowBackgroundColor\(requested\)\s*\n?\s*\? requested/);
@@ -53,7 +55,7 @@ test("theme changes synchronize the native non-macOS window background", () => {
   );
   assert.ok(
     appSource.includes(
-      "setWindowBackgroundColor(resolvedTheme, pluginTheme?.windowBackground?.[resolvedTheme])",
+      "pluginTheme?.windowCornerRadius",
     ),
   );
 });

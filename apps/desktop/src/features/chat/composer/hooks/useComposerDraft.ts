@@ -13,18 +13,21 @@ import {
   rewriteIdeographicCommaTrigger,
 } from "@pi-desktop/shared";
 import { useAppStore } from "../../../../stores/app-store";
+import { sessionAllows } from "../../../../lib/remote-session-safety";
 import { api } from "../../../../lib/api";
 import type { ComposerDraftSnapshot } from "../../../../lib/composer-smart-stop";
 import {
   HOME_DRAFT_KEY,
   captureComposerDraft,
   deleteComposerDraft,
+  draftFileReference,
   draftKeyForSession,
   draftOwnerSessionId,
   flushScheduledHomeDraftAdopt,
   pruneComposerDrafts,
   readComposerDraft,
   readComposerDraftRevision,
+  sameDraftFileReference,
   snapshotComposerDraft,
   writeComposerDraft,
   markComposerDraftEdited,
@@ -34,6 +37,8 @@ import {
   createFileReference,
   isEditableTextReference,
   isPersistedScratchReference,
+  isPluginMark,
+  nextChipToken,
   paintEditorValue,
   readEditorValue,
   setEditorCaret,
@@ -42,7 +47,7 @@ import {
 import type { ComposerPrefill } from "../model";
 import { useComposerImagePreview, type ComposerImagePreviewController } from "./useComposerImagePreview";
 
-import { detachImageTokens, isImageReference } from "../image-attachments";
+import { attachImageTokens } from "../image-attachments";
 
 type ComposerSession = { id: string };
 
@@ -76,10 +81,12 @@ export type ComposerDraftController = {
   paintCurrentDraft: (element: HTMLElement, nextValue: string) => void;
   commitEditorDom: () => void;
   insertNewlineInEditor: () => void;
+  /** Set the draft; `focus` false leaves focus where it is (plugin writes). */
   applyEditorDraft: (
     nextText: string,
     nextReferences: ComposerFileReference[],
     caret: number,
+    focus?: boolean,
   ) => void;
   snapshotReferences: (sourceSessionId: string) => ComposerDraftSnapshot["fileReferences"];
   draftSnapshot: (text: string) => ComposerDraftSnapshot;
@@ -105,7 +112,7 @@ type UseComposerDraftOptions = {
   clearComposerPrefill: () => void;
   prefill?: ComposerPrefill | null;
   t: TFunction;
-  invalidatePromptEnhancement: () => void;
+  invalidateComposerTransforms: () => void;
   inputBlocked: boolean;
 };
 
@@ -123,19 +130,25 @@ export function useComposerDraft({
   clearComposerPrefill,
   prefill,
   t,
-  invalidatePromptEnhancement,
+  invalidateComposerTransforms,
   inputBlocked,
 }: UseComposerDraftOptions): ComposerDraftController {
   const draftKey = draftKeyForSession(activeSessionId);
   const referenceSessionId = activeSessionId ?? "";
   const initialDraft = readComposerDraft(draftKey);
-  const [value, setValue] = useState(() => initialDraft?.text ?? "");
-  const [fileReferences, setFileReferences] = useState<ComposerFileReference[]>(() =>
-    (initialDraft?.fileReferences ?? []).map((fileReference) =>
+  // Images are inline chips, so a draft cached by an older build regains one
+  // token per attachment instead of dropping its chip.
+  const [initialDraftState] = useState(() => {
+    const references = (initialDraft?.fileReferences ?? []).map((fileReference) =>
       createFileReferenceFromSnapshot(fileReference, referenceSessionId),
-    ),
+    );
+    return attachImageTokens(initialDraft?.text ?? "", references, nextChipToken);
+  });
+  const [value, setValue] = useState(initialDraftState.text);
+  const [fileReferences, setFileReferences] = useState<ComposerFileReference[]>(
+    initialDraftState.references,
   );
-  const [cursor, setCursor] = useState(() => initialDraft?.text.length ?? 0);
+  const [cursor, setCursor] = useState(initialDraftState.text.length);
   // `onSelect` fires on every caret move; avoid re-rendering for an unchanged
   // cursor so autocomplete trigger detection stays quiet.
   const updateCursor = (next: number) =>
@@ -178,12 +191,8 @@ export function useComposerDraft({
     const next = typeof action === "function" ? action(current) : action;
     const currentOwned = current.filter((reference) => reference.sessionId === referenceSessionId);
     const nextOwned = next.filter((reference) => reference.sessionId === referenceSessionId);
-    const changed = currentOwned.length !== nextOwned.length || currentOwned.some((reference, index) => {
-      const nextReference = nextOwned[index];
-      return !nextReference || reference.path !== nextReference.path ||
-        reference.name !== nextReference.name || reference.kind !== nextReference.kind ||
-        reference.mimeType !== nextReference.mimeType || reference.token !== nextReference.token;
-    });
+    const changed = currentOwned.length !== nextOwned.length || currentOwned.some((reference, index) =>
+      !sameDraftFileReference(reference, nextOwned[index]));
     if (changed) markComposerDraftEdited(draftKeyRef.current);
     fileReferencesRef.current = next;
     setFileReferences(next);
@@ -235,6 +244,17 @@ export function useComposerDraft({
   const imagePreview = useComposerImagePreview({ references: fileReferences, value, sessionId: referenceSessionId, editorRef: ref });
   const removeChipByTokenRef = useRef<(token: string) => void>(() => {});
   const expandTextReferenceRef = useRef<(token: string) => void>(() => {});
+  const openImageReferenceRef = useRef<(token: string) => void>(() => {});
+  openImageReferenceRef.current = (token) => {
+    const reference = referenceByTokenRef.current.get(token);
+    if (reference) imagePreview.open(reference);
+  };
+  const openSessionReferenceRef = useRef<(token: string) => void>(() => {});
+  openSessionReferenceRef.current = (token) => {
+    const reference = referenceByTokenRef.current.get(token);
+    if (!reference || reference.kind !== "session") return;
+    void useAppStore.getState().selectSession(reference.path).catch(() => undefined);
+  };
   const pendingEditorCaretRef = useRef<number | null>(
     initialDraft?.text ? initialDraft.text.length : null,
   );
@@ -258,9 +278,14 @@ export function useComposerDraft({
       element,
       nextValue,
       referenceByTokenRef.current,
-      (name) => t("chat.removeFileReference", { name }),
+      (reference) =>
+        t(isPluginMark(reference) ? "chat.removePluginMark" : "chat.removeFileReference", {
+          name: reference.name,
+        }),
       (token) => removeChipByTokenRef.current(token),
       (token) => expandTextReferenceRef.current(token),
+      (token) => openImageReferenceRef.current(token),
+      (token) => openSessionReferenceRef.current(token),
     );
     editorValueRef.current = nextValue;
   };
@@ -268,17 +293,6 @@ export function useComposerDraft({
   useLayoutEffect(() => {
     const element = ref.current;
     if (!element) return;
-    if (fileReferences.some((reference) => isImageReference(reference) && reference.token)) {
-      const detached = detachImageTokens(value, fileReferences, pendingEditorCaretRef.current ?? cursor);
-      valueRef.current = detached.text;
-      fileReferencesRef.current = detached.references;
-      pendingEditorCaretRef.current = detached.caret;
-      editorValueRef.current = null;
-      setValue(detached.text);
-      setCursor(detached.caret);
-      setFileReferences(detached.references);
-      return;
-    }
     if (editorValueRef.current === value) return;
     paintCurrentDraft(element, value);
     const pendingCaret = pendingEditorCaretRef.current;
@@ -313,7 +327,7 @@ export function useComposerDraft({
     if (index === -1) return;
     const next = source.slice(0, index) + source.slice(index + 1);
     markComposerDraftEdited(draftKeyRef.current);
-    invalidatePromptEnhancement();
+    invalidateComposerTransforms();
     // Leave the DOM value stale so the layout effect removes the chip.
     pendingEditorCaretRef.current = index;
     setValue(next);
@@ -331,7 +345,7 @@ export function useComposerDraft({
         ? rewriteIdeographicCommaTrigger(source)
         : source;
     markComposerDraftEdited(draftKeyRef.current);
-    invalidatePromptEnhancement();
+    invalidateComposerTransforms();
     if (nextValue === source) {
       editorValueRef.current = nextValue;
     } else {
@@ -353,7 +367,7 @@ export function useComposerDraft({
     const nextValue = readEditorValue(element);
     const { start } = editorSelectionRange(element);
     markComposerDraftEdited(draftKeyRef.current);
-    invalidatePromptEnhancement();
+    invalidateComposerTransforms();
     editorValueRef.current = nextValue;
     valueRef.current = nextValue;
     setValue(nextValue);
@@ -383,18 +397,18 @@ export function useComposerDraft({
   useEffect(() => {
     const previousKey = draftKeyRef.current;
     if (previousKey !== draftKey) {
-      invalidatePromptEnhancement();
+      invalidateComposerTransforms();
       persistDraft(previousKey);
       if (previousKey === HOME_DRAFT_KEY) flushScheduledHomeDraftAdopt(draftKey);
       draftKeyRef.current = draftKey;
       const nextDraft = readComposerDraft(draftKey);
-      setValue(nextDraft?.text ?? "");
-      setFileReferences(
-        nextDraft?.fileReferences.map((fileReference) =>
-          createFileReferenceFromSnapshot(fileReference, referenceSessionId),
-        ) ?? [],
+      const nextReferences = (nextDraft?.fileReferences ?? []).map((fileReference) =>
+        createFileReferenceFromSnapshot(fileReference, referenceSessionId),
       );
-      setCursor(nextDraft?.text.length ?? 0);
+      const nextDraftState = attachImageTokens(nextDraft?.text ?? "", nextReferences, nextChipToken);
+      setValue(nextDraftState.text);
+      setFileReferences(nextDraftState.references);
+      setCursor(nextDraftState.text.length);
       return;
     }
     // Current drafts are serialized lazily on switch, unmount, blur, or a
@@ -460,14 +474,18 @@ export function useComposerDraft({
     if (previousWorkspacePathRef.current === workspacePath) return;
     previousWorkspacePathRef.current = workspacePath;
     const current = fileReferencesRef.current;
-    const kept = current.filter((fileReference) =>
-      isPersistedScratchReference(fileReference.path),
-    );
+    // Plugin marks carry their text, not a workspace path, and a session
+    // reference names a conversation rather than a file in this project.
+    const survives = (fileReference: ComposerFileReference) =>
+      Boolean(fileReference.plugin) ||
+      fileReference.kind === "session" ||
+      isPersistedScratchReference(fileReference.path);
+    const kept = current.filter(survives);
     if (kept.length === current.length) return;
     markComposerDraftEdited(draftKeyRef.current);
     const droppedTokens = new Set(
       current
-        .filter((fileReference) => !isPersistedScratchReference(fileReference.path))
+        .filter((fileReference) => !survives(fileReference))
         .flatMap((fileReference) =>
           fileReference.token ? [fileReference.token] : [],
         ),
@@ -498,14 +516,16 @@ export function useComposerDraft({
   useEffect(() => {
     if (!composerPrefill || composerPrefill.sessionId !== activeSessionId) return;
     markComposerDraftEdited(draftKeyForSession(composerPrefill.sessionId));
-    setValue(composerPrefill.text);
+    const prefilledReferences = composerPrefill.fileReferences.map((fileReference) =>
+      createFileReferenceFromSnapshot(fileReference, composerPrefill.sessionId),
+    );
+    const prefilled = attachImageTokens(composerPrefill.text, prefilledReferences, nextChipToken);
+    setValue(prefilled.text);
     setFileReferences((current) => [
       ...current.filter(
         (fileReference) => fileReference.sessionId !== composerPrefill.sessionId,
       ),
-      ...composerPrefill.fileReferences.map((fileReference) =>
-        createFileReferenceFromSnapshot(fileReference, composerPrefill.sessionId),
-      ),
+      ...prefilled.references,
     ]);
     clearComposerPrefill();
     requestAnimationFrame(() => {
@@ -533,18 +553,21 @@ export function useComposerDraft({
     nextText: string,
     nextReferences: ComposerFileReference[],
     caret: number,
+    focus = true,
   ) => {
-    const detached = detachImageTokens(nextText, nextReferences, caret);
-    nextText = detached.text;
-    nextReferences = detached.references;
-    caret = detached.caret;
+    const entered = attachImageTokens(nextText, nextReferences, nextChipToken);
+    nextText = entered.text;
+    nextReferences = entered.references;
     markComposerDraftEdited(draftKeyRef.current);
     // A token may now refer to a different attachment even when text is equal.
     editorValueRef.current = null;
-    pendingEditorCaretRef.current = caret;
+    // A caret placed in an unfocused editor would focus it, so a write that
+    // leaves focus alone places none.
+    pendingEditorCaretRef.current = focus || document.activeElement === ref.current ? caret : null;
     setValue(nextText);
     setCursor(caret);
     setFileReferences(nextReferences);
+    if (!focus) return;
     requestAnimationFrame(() => {
       const element = ref.current;
       if (!element) return;
@@ -561,7 +584,9 @@ export function useComposerDraft({
     if (!readEditorValue(editor).includes(token)) return;
     const sourceSessionId = reference.sessionId;
     try {
-      const result = await api.fsRead(reference.path, reference.mimeType);
+      const state = useAppStore.getState();
+      if (!sessionAllows(state.sessions.find((item) => item.id === sourceSessionId), "canAttach")) return;
+      const result = await api.fsRead(reference.path, reference.mimeType, sourceSessionId);
       if (result.kind !== "text" || result.content === undefined) {
         const message =
           result.kind === "tooLarge"
@@ -591,7 +616,7 @@ export function useComposerDraft({
       const nextReferences = fileReferencesRef.current.filter(
         (fileReference) => fileReference.token !== token,
       );
-      invalidatePromptEnhancement();
+      invalidateComposerTransforms();
       applyEditorDraft(nextText, nextReferences, index + result.content.length);
     } catch (error) {
       useAppStore.getState().showToast(
@@ -605,13 +630,7 @@ export function useComposerDraft({
   const snapshotReferences = (sourceSessionId: string) =>
     fileReferencesRef.current
       .filter((fileReference) => fileReference.sessionId === sourceSessionId)
-      .map(({ path, name, kind, mimeType, token }) => ({
-        path,
-        name,
-        kind,
-        ...(mimeType ? { mimeType } : {}),
-        ...(token ? { token } : {}),
-      }));
+      .map(draftFileReference);
 
   const clearDraftForKey = (
     key: string,
@@ -628,14 +647,10 @@ export function useComposerDraft({
         : readComposerDraft(key);
       if (!current || current.text.trim() !== submitted.text ||
         current.fileReferences.length !== submitted.fileReferences.length ||
-        current.fileReferences.some((reference, index) => {
-          const expected = submitted.fileReferences[index];
-          return reference.path !== expected.path || reference.name !== expected.name ||
-            reference.kind !== expected.kind || reference.mimeType !== expected.mimeType ||
-            reference.token !== expected.token;
-        })) return;
+        current.fileReferences.some((reference, index) =>
+          !sameDraftFileReference(reference, submitted.fileReferences[index]))) return;
     }
-    invalidatePromptEnhancement();
+    invalidateComposerTransforms();
     deleteComposerDraft(key);
     if (currentKey !== key) return;
     deletedReferencesRef.current.clear();
@@ -665,14 +680,16 @@ export function useComposerDraft({
     if (fileReferencesRef.current.some((reference) => reference.sessionId === (currentActiveSessionId ?? ""))) return;
     markComposerDraftEdited(key);
     const sessionId = currentActiveSessionId ?? "";
-    setValue(snapshot.text);
+    const restoredReferences = snapshot.fileReferences.map((fileReference) =>
+      createFileReferenceFromSnapshot(fileReference, sessionId),
+    );
+    const restored = attachImageTokens(snapshot.text, restoredReferences, nextChipToken);
+    setValue(restored.text);
     setFileReferences((current) => [
       ...current.filter((fileReference) => fileReference.sessionId !== sessionId),
-      ...snapshot.fileReferences.map((fileReference) =>
-        createFileReferenceFromSnapshot(fileReference, sessionId),
-      ),
+      ...restored.references,
     ]);
-    setCursor(snapshot.text.length);
+    setCursor(restored.text.length);
   };
 
   const draftSnapshot = (text: string): ComposerDraftSnapshot => ({
@@ -682,20 +699,14 @@ export function useComposerDraft({
         (fileReference) =>
           !fileReference.token || text.includes(fileReference.token),
       )
-      .map(({ path, name, kind, mimeType, token }) => ({
-        path,
-        name,
-        kind,
-        ...(mimeType ? { mimeType } : {}),
-        ...(token ? { token } : {}),
-      })),
+      .map(draftFileReference),
   });
 
   return {
     imagePreview,
     removeImage: (id) => {
       if (inputBlocked) return;
-      invalidatePromptEnhancement();
+      invalidateComposerTransforms();
       setDraftFileReferences((current) => current.filter((reference) => reference.id !== id));
       ref.current?.focus();
     },

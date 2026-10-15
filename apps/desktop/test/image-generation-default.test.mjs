@@ -8,12 +8,14 @@
  * choice stops being *runnable*.
  *
  * "Runnable" is the strict rule the picker row and the runtime apply: enabled
- * provider, non-OAuth, base URL, a usable credential and one of the provider's
- * configured models matched exactly. `providerOffersModel` is deliberately
- * looser — it answers whether a row *names* a model for the summary line — so
- * the assertions here must not accept it as proof that a default can run.
+ * provider, base URL, a usable credential and a model the provider serves —
+ * either one it configures, or the image model a signed-in vendor account
+ * answers with. `providerOffersModel` is deliberately looser — it answers
+ * whether a row *names* a model for the summary line — so the assertions here
+ * must not accept it as proof that a default can run.
  */
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
 import { register } from "node:module";
 import test from "node:test";
 
@@ -21,6 +23,8 @@ import test from "node:test";
 register(new URL("./helpers/ts-import-hooks.mjs", import.meta.url));
 const {
   imageGenerationBindingAvailable,
+  imageGenerationPickerCandidates,
+  isImageGenerationPickerCandidate,
   planImageGenerationDefaults,
   resolvesImageGenerationDefault,
 } = await import("../src/components/settings/image-generation-default.ts");
@@ -371,4 +375,102 @@ test("unchecking every image model on the active provider clears the settings ch
   );
   assert.equal(plan.imageGeneration, null);
   assert.deepEqual(plan.imageGenerationModels, [binding("y", "img-y")]);
+});
+
+/** The provider row a ChatGPT (Codex) login creates: OAuth only, no API key. */
+const codexAccount = (over = {}) => provider("codex", [], {
+  vendorKey: "openai-codex",
+  authKind: "oauth",
+  hasSecret: false,
+  hasOauth: true,
+  baseUrl: "https://chatgpt.com/backend-api",
+  ...over,
+});
+
+test("a signed-in Codex account runs its image model and never one of its chat models", () => {
+  const signedIn = codexAccount({ models: [{ id: "gpt-6.1-sol" }] });
+  assert.equal(imageGenerationBindingAvailable(signedIn, "gpt-image-2"), true);
+  // Being OAuth does not turn a chat model into an image model.
+  assert.equal(imageGenerationBindingAvailable(signedIn, "gpt-6.1-sol"), false);
+  // Signed out, disabled, or another vendor's OAuth row still cannot generate.
+  assert.equal(imageGenerationBindingAvailable(codexAccount({ hasOauth: false }), "gpt-image-2"), false);
+  assert.equal(imageGenerationBindingAvailable(codexAccount({ enabled: false }), "gpt-image-2"), false);
+  assert.equal(imageGenerationBindingAvailable(
+    provider("a", [], { vendorKey: "anthropic", authKind: "oauth", hasOauth: true }),
+    "gpt-image-2",
+  ), false);
+});
+
+test("the Codex image model is offered as a candidate without being stored as a model", async () => {
+  const { vendorAccountImageCandidates } = await import("@pi-desktop/shared");
+  assert.deepEqual(
+    vendorAccountImageCandidates([codexAccount(), provider("x", ["img-x"])]),
+    [
+      { providerId: "codex", modelId: "gpt-image-2.5" },
+      { providerId: "codex", modelId: "gpt-image-2" },
+    ],
+  );
+  // A chosen Codex binding survives a provider save, because the row can run it.
+  const plan = planImageGenerationDefaults(
+    { imageGeneration: binding("codex", "gpt-image-2") },
+    "codex",
+    ["gpt-image-2"],
+    [codexAccount()],
+  );
+  assert.deepEqual(plan.imageGeneration, binding("codex", "gpt-image-2"));
+});
+
+/**
+ * The picker's own list is the only list a selection may be validated against.
+ * The row drew from the stored candidates plus a signed-in vendor account's
+ * image model, while the settings page checked the stored candidates alone, so
+ * choosing the ChatGPT (Codex) model did nothing at all.
+ */
+test("the picker offers every candidate it accepts, vendor accounts included", () => {
+  const candidates = imageGenerationPickerCandidates(
+    undefined,
+    null,
+    [codexAccount(), provider("x", [])],
+  );
+  assert.deepEqual(candidates, [
+    binding("codex", "gpt-image-2.5"),
+    binding("codex", "gpt-image-2"),
+  ]);
+  assert.equal(isImageGenerationPickerCandidate(candidates, "codex", "gpt-image-2.5"), true);
+  assert.equal(isImageGenerationPickerCandidate(candidates, "codex", "GPT-IMAGE-2.5"), true);
+  // Nothing the row never offered may be accepted: another provider, another
+  // model, or the account's chat model.
+  assert.equal(isImageGenerationPickerCandidate(candidates, "x", "gpt-image-2.5"), false);
+  assert.equal(isImageGenerationPickerCandidate(candidates, "codex", "gpt-image-3"), false);
+  assert.equal(isImageGenerationPickerCandidate(candidates, "codex", "gpt-6.1-sol"), false);
+  // A signed-out account, or another vendor's login, offers no image model.
+  assert.deepEqual(
+    imageGenerationPickerCandidates(undefined, null, [
+      codexAccount({ hasOauth: false }),
+      provider("a", [], { vendorKey: "anthropic", authKind: "oauth", hasOauth: true }),
+    ]),
+    [],
+  );
+  // A stored candidate list outranks the legacy single-binding fallback in
+  // both directions: it is offered, while the cleared default is not restored.
+  assert.deepEqual(
+    imageGenerationPickerCandidates([binding("x", "img-x")], binding("y", "img-y"), []),
+    [binding("x", "img-x")],
+  );
+  assert.deepEqual(
+    imageGenerationPickerCandidates(undefined, binding("y", "img-y"), []),
+    [binding("y", "img-y")],
+  );
+});
+
+test("the settings row and the settings page compose one candidate list", async () => {
+  const read = (rel) => readFile(new URL(rel, import.meta.url), "utf8");
+  const [row, page] = await Promise.all([
+    read("../src/components/settings/ImageGenerationModelRow.tsx"),
+    read("../src/components/settings/ModelConfigPage.tsx"),
+  ]);
+  // Rendering the options and validating the choice must read the same helper.
+  assert.match(row, /imageGenerationPickerCandidates\(/);
+  assert.match(page, /imageGenerationPickerCandidates\(/);
+  assert.match(page, /isImageGenerationPickerCandidate\(/);
 });

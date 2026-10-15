@@ -40,6 +40,7 @@ export type ProviderPublic = {
   maxOutputTokens?: number;
   /** Sampling temperature override (provider default when absent). */
   temperature?: number;
+  mirrorCoding?: import("./mirrorcoding.js").MirrorCodingProvider;
   /**
    * Owning plugin id when the row came from `contributes.providers`. Absent for
    * a row the user created. A plugin-owned row is read-only in Settings: the
@@ -87,6 +88,7 @@ export type ProviderCreateInput = {
   maxOutputTokens?: number;
   /** Sampling temperature override; on update, 0 clears the override. */
   temperature?: number;
+  mirrorCoding?: import("./mirrorcoding.js").MirrorCodingProvider;
 };
 
 export type ProviderUpdateInput = Partial<ProviderCreateInput> & {
@@ -165,7 +167,7 @@ export type OAuthLoginEvent = {
   /** The flow resolved a prompt on its own — e.g. the callback beat the paste box. */
   | { kind: "promptCancelled"; promptId: string }
   | { kind: "done"; providerId: string; accountLabel?: string }
-  | { kind: "error"; message: string }
+  | { kind: "error"; message: string; code?: "PLUGIN_OAUTH_FAILED" }
   | { kind: "cancelled" }
 );
 

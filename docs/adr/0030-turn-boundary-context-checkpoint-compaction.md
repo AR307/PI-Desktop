@@ -18,10 +18,11 @@ not protect the next provider request inside that loop. The observed Bedrock
 failure reached 1,077,172 tokens against a 1,000,000-token provider maximum,
 so the provider rejected the request before PI-Desktop had a recovery point.
 
-pi-agent-core already supplies session-context reconstruction, token
-estimation, cut-point selection, summary generation, retained-tail handling,
-and compaction records. It does not define PI-Desktop's renderer lifecycle,
-Rust-owned persistence, provider-headroom policy, or long-loop guard.
+At the time of this decision, pi-agent-core supplied session-context
+reconstruction, token estimation, cut-point selection, summary generation,
+retained-tail handling, and compaction records. Those harness exports were
+experimental and have since been removed; the desktop runtime now owns those
+helpers. pi-agent-core still supplies the agent loop and stable agent types.
 
 OpenCode Dynamic Context Pruning (DCP), inspected at commit
 `85b6f5ceba144fee9e65eb28dc36cab1b960e418`, demonstrates useful behavioral
@@ -32,8 +33,9 @@ incompatible runtime and licensing boundary to PI-Desktop.
 
 ## Decision
 
-PI-Desktop uses pi-agent-core's public compaction primitives and independently
-implements the desktop-specific controller.
+PI-Desktop owns its context projection, estimation, compaction preparation and
+summary generation, and independently implements the desktop-specific
+controller. pi-agent-core supplies the agent loop and stable agent types.
 
 - The controller runs after every `turn_end` and before pi starts another
   provider request. `turn_end` is a model/tool-turn boundary; only `agent_end`
@@ -144,6 +146,15 @@ Rejected because context management must not destroy user history, revision
 families, fork inputs, searchability, or diagnostics.
 
 ## References
+
+### Implementation note (2026-10-03)
+
+The accepted ownership boundary is unchanged, but pi-agent-core removed its
+experimental harness/compaction exports. Agent Runtime now owns the context
+projection, conversion, estimation, cut-point preparation, and summary request
+adapter; pi-agent-core remains the agent loop and stable type dependency. Rust
+host-core still owns durable checkpoints and session storage. See
+`docs/spec/02-architecture/06-pi-runtime-dependency-boundary.md`.
 
 - `docs/spec/03-runtime/01-ipc-protocol.md`
 - `docs/spec/03-runtime/02-agent-runtime.md`

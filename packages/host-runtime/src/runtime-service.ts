@@ -1,3 +1,4 @@
+import { SUBAGENT_REPORT_SUBJECT } from "@pi-desktop/shared";
 import { randomUUID } from "node:crypto";
 
 import type { RuntimePort, TurnStartRequest, TurnSteerRequest } from "@pi-desktop/agent-host";
@@ -182,6 +183,7 @@ export class RuntimeService implements RuntimePort {
             reason: permission.reason,
             ...(asking?.agentName ? { agentName: asking.agentName } : {}),
             ...(asking?.parentToolCallId ? { parentToolCallId: asking.parentToolCallId } : {}),
+            ...(asking?.nestedParentToolCallId ? { nestedParentToolCallId: asking.nestedParentToolCallId } : {}),
           },
         },
       });
@@ -337,17 +339,19 @@ export class RuntimeService implements RuntimePort {
       status: "complete",
       ...(command ? { command } : {}),
     };
-    try {
-      await host.call("session.appendMessage", { sessionId, message: userMessage, turnId });
-    } catch (error) {
-      await this.finishTurn(sessionId, "error", errorCodeOf(error), { turnId });
-      // A turn whose user message could not be appended must not be started:
-      // running it would execute a prompt the transcript does not contain.
-      throw error;
+    const notification = request.principal.subject === SUBAGENT_REPORT_SUBJECT;
+    if (!notification) {
+      try {
+        await host.call("session.appendMessage", { sessionId, message: userMessage, turnId });
+      } catch (error) {
+        await this.finishTurn(sessionId, "error", errorCodeOf(error), { turnId });
+        // A turn whose user message could not be appended must not be started:
+        // running it would execute a prompt the transcript does not contain.
+        throw error;
+      }
+      this.emit({ sessionId, turnId, ts: this.now(), event: { type: "message_start", message: userMessage } });
+      this.emit({ sessionId, turnId, ts: this.now(), event: { type: "message_end", message: userMessage } });
     }
-    this.emit({ sessionId, turnId, ts: this.now(), event: { type: "message_start", message: userMessage } });
-    this.emit({ sessionId, turnId, ts: this.now(), event: { type: "message_end", message: userMessage } });
-
     let result: { accepted: boolean; turnId: string };
     try {
       result = await sidecar.call<{ accepted: boolean; turnId: string }>("agent.prompt", {
@@ -358,7 +362,8 @@ export class RuntimeService implements RuntimePort {
         content,
         ...(sessionMessage ? { sessionMessage: sessionMessage.origin } : {}),
         attachments: [],
-        userMessageId: userMessage.id,
+        userMessageId: notification ? undefined : userMessage.id,
+        ...(notification ? { delegationNotification: true } : {}),
         // Per-turn permission ceiling override (R1 leftover; spec §7.3). Only
         // forwarded when the effective mode differs from the session's stored
         // mode — a widening request has already been refused upstream so any
@@ -643,7 +648,10 @@ export class RuntimeService implements RuntimePort {
     await this.events.flushCheckpoint(sessionId);
     if (this.activeTurns.get(sessionId) !== crashedTurnId) return;
     this.events.settleCheckpoint(sessionId);
-    await this.finishTurn(sessionId, "aborted", "PLAN_APPROVAL_INTERRUPTED", {
+    // The sidecar handle's exit info carries no stderr tail, so this path
+    // cannot classify a heap exhaustion; it still names the failure honestly
+    // instead of borrowing plan-approval vocabulary (issue #1077).
+    await this.finishTurn(sessionId, "aborted", ErrorCodes.AGENT_SIDECAR_CRASHED, {
       turnId: crashedTurnId,
       recoverInflight: true,
     });

@@ -1,7 +1,7 @@
 # PI-Desktop Spec
 
-> Frozen baseline: `0.4.16` · current app line: `0.14.x`
-> Updated: `2026-09-10`
+> Frozen baseline: `0.4.20` · current app line: `0.14.x`
+> Updated: `2026-10-02`
 > Language: **English-first**
 > Stack: Electron + **Rust host core** + pi Agent Harness + user-installable plugins
 
@@ -96,7 +96,8 @@ docs/spec/
    checkpoints, `plan_approvals` execution fields, startup interruption, shell
    identity, and host-owned session collaboration. v11 withdraws the A2A method
    domain added in v10.
-10. Permission timeout 120s deny; Bash timeout 60s by default
+10. Local permission approvals have no automatic deadline; Bash timeout 60s by
+    default
 11. Local user-installable plugins (market later)
-12. Tag releases = macOS arm64 and Intel x64, Windows x64, and Linux x64 (D126/D285)
+12. Tag releases = macOS arm64 and Intel x64, Windows x64, and Linux x64 and arm64 (D126/D285, D638/ADR 0318)
 13. Universal provider/model coverage (native + OpenAI-compatible + custom)

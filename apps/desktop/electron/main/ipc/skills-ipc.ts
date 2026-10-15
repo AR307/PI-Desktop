@@ -1,13 +1,13 @@
-import { dialog, shell } from "electron";
-import { ErrorCodes, IPC, type ActivationScope, type AgentCapabilityMove, type AgentCapabilityQuery, type UserSkillRecord, type UserSubagentRecord } from "@pi-desktop/shared";
+import { app, dialog, shell } from "electron";
+import { importSkillFolders, readLastSkillImportDirectory, writeLastSkillImportDirectory } from "../skill-folder-import";
+import { ErrorCodes, IPC, type ActivationScope, type AgentCapabilityMove, type AgentCapabilityQuery, type BuiltinSkillRecord, type UserSkillRecord, type UserSubagentRecord } from "@pi-desktop/shared";
 import { loadSubagentDefinitions, type UserSubagentDocument } from "@pi-desktop/agent-runtime";
+import { builtinSkillCatalog } from "../builtin-skills";
 import type { HostProcess } from "../host-process";
 import type { Logger } from "../logger";
-import {
-  fetchSkillMarketDocument,
-  searchSkillMarket,
-  type SkillMarketDocument,
-  type SkillMarketSearchResult,
+import type {
+  SkillMarketDocument,
+  SkillMarketSearchResult,
 } from "../skill-market-catalog";
 import {
   skillMarketFailureDetail,
@@ -23,6 +23,8 @@ export type SkillsIpcDependencies = {
   activeUserSubagentDocuments: (projectPath: string | undefined) => Promise<UserSubagentDocument[]>;
   /** Handles whose shipped definition the user turned off (builtin activation). */
   disabledBuiltinSubagents: () => Promise<string[]>;
+  /** User-disabled bundled skill IDs, read from host-owned activation state. */
+  disabledBuiltinSkills: () => Promise<string[]>;
   stripWinLongPrefix: (path: string) => string;
   sendToRenderer: (channel: string, payload?: unknown) => void;
   searchSkillMarket: (query: string, sources: { id: string; name: string; url: string }[]) => Promise<SkillMarketSearchResult>;
@@ -37,6 +39,7 @@ export function registerSkillsIpc({
   optionalWorkspaceRoot,
   activeUserSubagentDocuments,
   disabledBuiltinSubagents,
+  disabledBuiltinSkills,
   stripWinLongPrefix,
   sendToRenderer,
   searchSkillMarket,
@@ -151,6 +154,38 @@ export function registerSkillsIpc({
     return host.call("skills.list", query);
   });
 
+  handle(IPC.invoke.skillBuiltinList, async () => {
+    if (!host) throw new Error("host unavailable");
+    const disabled = await disabledBuiltinSkills();
+    const off = new Set(disabled);
+    const builtins: BuiltinSkillRecord[] = builtinSkillCatalog().map((skill) => ({
+      id: skill.id,
+      name: skill.name,
+      ...(skill.description ? { description: skill.description } : {}),
+      enabled: !off.has(skill.id),
+    }));
+    return { builtins };
+  });
+
+  handle(
+    IPC.invoke.skillBuiltinSetEnabled,
+    async (payload: { id?: unknown; enabled?: unknown } = {}) => {
+      if (!host) throw new Error("host unavailable");
+      if (typeof payload.id !== "string" || typeof payload.enabled !== "boolean") {
+        throw new Error("invalid builtin skill activation request");
+      }
+      if (!builtinSkillCatalog().some((skill) => skill.id === payload.id)) {
+        throw new Error("unknown builtin skill");
+      }
+      const result = await host.call("skills.setBuiltinEnabled", {
+        id: payload.id,
+        enabled: payload.enabled,
+      });
+      sendToRenderer(IPC.event.pluginChanged, { reason: "skill" });
+      return result;
+    },
+  );
+
   handle(IPC.invoke.skillCreate, async (skill: Record<string, unknown>) => {
     if (!host) throw new Error("host unavailable");
     const res = await host.call("skills.create", { skill });
@@ -159,11 +194,9 @@ export function registerSkillsIpc({
   });
 
   /**
-   * Import exactly one Skill from a native picker. The default single-file
-   * picker is kept so existing callers keep working; a caller may also ask for
-   * a directory picker (Claude-style `<name>/SKILL.md` skills) or pass
-   * `mode: "link"` for a symlink import instead of a copy. The value is
-   * forwarded to `skills.import` intact so host-core still owns the policy.
+   * File import stays single-select. Folder import selects multiple
+   * `<name>/SKILL.md` packages, then delegates validation and copying to
+   * host-core one folder at a time.
    */
   handle(
     IPC.invoke.skillImport,
@@ -173,23 +206,44 @@ export function registerSkillsIpc({
         mode?: "copy" | "link";
       } = {},
     ) => {
-      if (!host) throw new Error("host unavailable");
+      const currentHost = host;
+      if (!currentHost) throw new Error("host unavailable");
       const { sourceKind, mode, ...rest } = query;
-      const picked =
-        sourceKind === "dir"
-          ? await dialog.showOpenDialog({
-              title: "Import skill",
-              properties: ["openDirectory"],
-            })
-          : await dialog.showOpenDialog({
-              title: "Import skill",
-              properties: ["openFile"],
-              filters: [{ name: "Markdown", extensions: ["md", "markdown"] }],
+      if (sourceKind === "dir") {
+        const dataDir = process.env.PI_DESKTOP_DATA_DIR ?? app.getPath("userData");
+        const lastDirectory = readLastSkillImportDirectory(dataDir);
+        const picked = await dialog.showOpenDialog({
+          title: "Import skill",
+          properties: ["openDirectory", "multiSelections"],
+          ...(lastDirectory ? { defaultPath: lastDirectory } : {}),
+        });
+        if (picked.canceled || !picked.filePaths.length) return { canceled: true };
+        const { lastImportedPath, ...result } = await importSkillFolders<UserSkillRecord>(
+          picked.filePaths,
+          { ...(mode ? { mode } : {}), ...rest },
+          (params) => currentHost.call<{ skill: UserSkillRecord }>("skills.import", params),
+        );
+        if (lastImportedPath) {
+          try {
+            writeLastSkillImportDirectory(dataDir, lastImportedPath);
+          } catch {
+            logger.app("diagnostics", "warn", "last skill import directory could not be saved", {
+              event: "skillImport.preferenceFailed",
+              data: { kind: "storage" },
             });
+          }
+          sendToRenderer(IPC.event.pluginChanged, { reason: "skill" });
+        }
+        return result;
+      }
+      const picked = await dialog.showOpenDialog({
+        title: "Import skill",
+        properties: ["openFile"],
+        filters: [{ name: "Markdown", extensions: ["md", "markdown"] }],
+      });
       if (picked.canceled || !picked.filePaths[0]) return { canceled: true };
-      const res = await host.call("skills.import", {
+      const res = await currentHost.call("skills.import", {
         path: picked.filePaths[0],
-        ...(sourceKind === "dir" ? { shape: "dir" } : {}),
         ...(mode ? { mode } : {}),
         ...rest,
       });

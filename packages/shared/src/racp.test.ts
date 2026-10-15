@@ -16,6 +16,8 @@ import {
   RacpEventEnvelopeSchema,
   RacpInitializeResultSchema,
   RacpSessionSnapshotSchema,
+  RacpSessionChangesPageSchema,
+  WorkspaceFilesRequestSchema,
   allowedDecisionsAreCoherent,
   effectiveRemotePermissionMode,
   eventEnvelopeSequencingIsValid,
@@ -144,6 +146,26 @@ describe("RACP schemas", () => {
   it("keeps every named schema in the generated fixture bundle", () => {
     const bundle = JSON.stringify(RACP_SCHEMAS, null, 2) + "\n";
     expect(bundle).toMatchFileSnapshot("../fixtures/racp.schema.json");
+  });
+
+  it("accepts a reconnect page containing changed messages and deletion tombstones", () => {
+    const page = {
+      sessionId: session.id,
+      afterRevision: 100,
+      revision: 103,
+      hasMore: true,
+      changes: [
+        { revision: 101, kind: "delete", messageId: "removed" },
+        { revision: 103, kind: "upsert", messageId: "reply", sequence: 4,
+          item: { id: "reply", turnId: "turn_1", itemType: "message", status: "completed",
+            createdAt: session.updatedAt, content: { role: "assistant", content: "Updated reply" } } },
+      ],
+    };
+    expect(Value.Check(RacpSessionChangesPageSchema, page)).toBe(true);
+    expect(Value.Check(RacpSessionChangesPageSchema, { ...page, revision: -1 })).toBe(false);
+    expect(Value.Check(RacpSessionChangesPageSchema, {
+      ...page, changes: [{ revision: 103, kind: "upsert", messageId: "reply", sequence: 4 }],
+    })).toBe(false);
   });
 });
 
@@ -362,5 +384,15 @@ describe("versions and errors", () => {
       applyCeilingToPairedDevices: false,
       approvalLifetimeMs: 1800000,
     });
+  });
+});
+
+describe("SSH repository instruction file contract", () => {
+  it("accepts the additive operation and preserves existing file operations", () => {
+    for (const operation of ["instructions", "list", "read", "index", "resolve", "image", "diff"]) {
+      expect(Value.Check(WorkspaceFilesRequestSchema, { path: "/repo", operation })).toBe(true);
+    }
+    expect(Value.Check(WorkspaceFilesRequestSchema, { path: "/repo", operation: "instructions", globalHome: true })).toBe(false);
+    expect(Value.Check(WorkspaceFilesRequestSchema, { path: "/repo", operation: "unknown" })).toBe(false);
   });
 });

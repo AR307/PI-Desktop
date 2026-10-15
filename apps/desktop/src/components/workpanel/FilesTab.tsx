@@ -12,7 +12,7 @@ import { useAppStore } from "../../stores/app-store";
 import { api } from "../../lib/api";
 import { Markdown } from "../Markdown";
 import { fileDirOf } from "../../lib/chat-links";
-import { cx } from "../ui";
+import { Button, cx } from "../ui";
 import { TooltipButton } from "../ui";
 import {
   ensureLang,
@@ -74,6 +74,13 @@ function isMarkdownPath(path: string): boolean {
   return /\.(?:md|markdown)$/i.test(path);
 }
 
+function isMp4(path: string, mimeType?: string): boolean {
+  return /\.mp4$/i.test(path) || (
+    /(?:^|[\\/])attachments[\\/][0-9a-f]{64}$/i.test(path) &&
+    mimeType?.toLowerCase() === "video/mp4"
+  );
+}
+
 function formatSize(size: number): string {
   if (size < 1024) return `${size} B`;
   if (size < 1024 * 1024) return `${(size / 1024).toFixed(1)} KB`;
@@ -119,7 +126,7 @@ function HighlightedText({ path, content }: { path: string; content: string }) {
     <pre className="file-viewer-code">
       {tokens
         ? tokens.tokens.map((row, i) => (
-            <div className="file-viewer-line" key={i}>
+            <div className="file-viewer-line" data-line={i + 1} key={i}>
               {row.length === 0
                 ? "\n"
                 : row.map((token, j) => (
@@ -130,7 +137,7 @@ function HighlightedText({ path, content }: { path: string; content: string }) {
             </div>
           ))
         : visible.split("\n").map((line, i) => (
-            <div className="file-viewer-line" key={i}>
+            <div className="file-viewer-line" data-line={i + 1} key={i}>
               {line || "\n"}
             </div>
           ))}
@@ -149,13 +156,22 @@ export function FilesTab() {
   const { t } = useTranslation();
   const workspace = useAppStore((s) => s.workspace);
   const fileRequest = useAppStore((s) => s.workPanelFileRequest);
+  const showToast = useAppStore((s) => s.showToast);
+  const sessionId = useAppStore((state) => state.activeSessionId);
+  const remote = workspace?.remote;
   const root = workspace?.path ?? null;
+  const scopeRef = useRef({ root, sessionId });
+  scopeRef.current = { root, sessionId };
 
   const [dirs, setDirs] = useState<Record<string, DirState>>({});
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [selected, setSelected] = useState<string | null>(null);
+  const [selectedMimeType, setSelectedMimeType] = useState<string | undefined>();
+  const [selectedLine, setSelectedLine] = useState<number | undefined>();
   const [file, setFile] = useState<FsReadResult | null>(null);
   const [fileError, setFileError] = useState(false);
+  const viewerBodyRef = useRef<HTMLDivElement>(null);
+  const fileGeneration = useRef(0);
 
   // Workspace switches reset all browsing state. Guarded so it only fires on
   // an actual root change: an unconditional [root] effect also runs on the
@@ -168,6 +184,8 @@ export function FilesTab() {
     setDirs({});
     setExpanded(new Set());
     setSelected(null);
+    setSelectedMimeType(undefined);
+    setSelectedLine(undefined);
     setFile(null);
     setFileError(false);
   }, [root]);
@@ -176,13 +194,15 @@ export function FilesTab() {
     async (rel: string) => {
       if (!root) return;
       try {
-        const res = await api.fsList(rel);
+        const res = await api.fsList(rel, sessionId);
+        if (scopeRef.current.root !== root || scopeRef.current.sessionId !== sessionId) return;
         setDirs((prev) => ({ ...prev, [rel]: { entries: res.entries } }));
       } catch {
+        if (scopeRef.current.root !== root || scopeRef.current.sessionId !== sessionId) return;
         setDirs((prev) => ({ ...prev, [rel]: { entries: [], error: true } }));
       }
     },
-    [root],
+    [root, sessionId],
   );
 
   useEffect(() => {
@@ -205,16 +225,45 @@ export function FilesTab() {
     [dirs, loadDir],
   );
 
-  const openFile = useCallback(async (rel: string, mimeType?: string) => {
-    setSelected(rel);
-    setFile(null);
-    setFileError(false);
+  const openFile = useCallback(
+    async (rel: string, mimeType?: string, position?: { line?: number; column?: number }) => {
+      const request = ++fileGeneration.current;
+      setSelected(rel);
+      setSelectedMimeType(mimeType);
+      setSelectedLine(position?.line);
+      setFile(null);
+      setFileError(false);
+      try {
+        const result = await api.fsRead(rel, mimeType, sessionId);
+        if (request !== fileGeneration.current || scopeRef.current.root !== root || scopeRef.current.sessionId !== sessionId) return;
+        setFile(result);
+      } catch {
+        if (request !== fileGeneration.current || scopeRef.current.root !== root || scopeRef.current.sessionId !== sessionId) return;
+        setFileError(true);
+      }
+    },
+    [root, sessionId],
+  );
+
+  useEffect(() => {
+    if (!file || selectedLine == null) return;
+    const frame = requestAnimationFrame(() => {
+      const lineNode = viewerBodyRef.current?.querySelector(
+        `[data-line="${selectedLine}"]`,
+      );
+      lineNode?.scrollIntoView({ block: "center" });
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [file, selectedLine]);
+
+  const openMp4 = useCallback(async () => {
+    if (!selected || remote) return;
     try {
-      setFile(await api.fsRead(rel, mimeType));
+      await api.fsOpen(selected, selectedMimeType, sessionId);
     } catch {
-      setFileError(true);
+      showToast(t("panel.files.openFailed"), { variant: "error" });
     }
-  }, []);
+  }, [selected, selectedMimeType, sessionId, showToast, t]);
 
   // Chat-initiated previews: open the file and expand its ancestor folders
   // so "back" lands on a tree that reveals it. Attachment blobs and absolute
@@ -240,7 +289,10 @@ export function FilesTab() {
       setExpanded((prev) => new Set([...prev, ...ancestors]));
       for (const dir of ancestors) void loadDir(dir);
     }
-    void openFile(path, fileRequest.mimeType);
+    void openFile(path, fileRequest.mimeType, {
+      line: fileRequest.line,
+      column: fileRequest.column,
+    });
   }, [fileRequest, root, loadDir, openFile]);
 
   const renderDir = (rel: string, depth: number): React.ReactNode => {
@@ -316,6 +368,8 @@ export function FilesTab() {
             ariaLabel={t("panel.files.back")}
             onClick={() => {
               setSelected(null);
+              setSelectedMimeType(undefined);
+              setSelectedLine(undefined);
               setFile(null);
             }}
           >
@@ -325,22 +379,25 @@ export function FilesTab() {
             {selected}
           </span>
           {file && <span className="file-viewer-size">{formatSize(file.size)}</span>}
-          <TooltipButton
+          {!remote ? <TooltipButton
             type="button"
             className="icon-btn icon-btn-square"
             tooltip={t("panel.files.reveal")}
             ariaLabel={t("panel.files.reveal")}
-            onClick={() => void api.fsReveal(selected)}
+            onClick={() => void api.fsReveal(selected, sessionId)}
           >
             <IconExternal size={14} />
-          </TooltipButton>
+          </TooltipButton> : null}
         </div>
-        <div className="file-viewer-body">
+        <div className="file-viewer-body" ref={viewerBodyRef}>
           {fileError ? (
             <WorkTabEmpty icon={IconFileText} title={t("panel.files.error")} />
           ) : !file ? (
             <div className="file-tree-note">{t("panel.files.loading")}</div>
-          ) : file.kind === "text" && isMarkdownPath(selected) ? (
+          ) :
+          file.kind === "text" &&
+          isMarkdownPath(selected) &&
+          selectedLine === undefined ? (
             <div className="file-viewer-markdown prose-chat">
               <Markdown source={file.content ?? ""} baseDir={fileDirOf(selected)} />
             </div>
@@ -358,7 +415,13 @@ export function FilesTab() {
                   ? t("panel.files.tooLarge")
                   : t("panel.files.binary")
               }
-            />
+            >
+              {!remote && isMp4(selected, selectedMimeType) && (
+                <Button type="button" onClick={() => void openMp4()}>
+                  {t("chat.openFile")}
+                </Button>
+              )}
+            </WorkTabEmpty>
           )}
         </div>
       </div>

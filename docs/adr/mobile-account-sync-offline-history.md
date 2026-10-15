@@ -1,0 +1,70 @@
+# ADR: Account discovery and persistent mobile history
+
+- Date: 2026-10-06
+- Status: Accepted by the implementation request
+- Supersedes storage/recovery decisions in mobile-transcript-cache-and-delta-sync.md
+
+## Context
+
+The old 500-row tail and process-local event cursor required another snapshot
+after desktop restart. Single-computer grants could not discover another opted-in
+computer. These are separate authorization and history ownership concerns.
+
+## Decision
+
+Keep execution and transcript authority in Rust/AgentHost. Add a Rust-owned
+revision and per-message latest change index with deletion tombstones. Store no
+duplicate message body. Page queries carry their captured revision; only applied
+global change pages advance the phone's durable sync position. Live RACP cursors
+remain responsible for transient streaming and are not durable database versions.
+
+Keep individual loaded messages and directory indexes in account/computer/session
+scoped IndexedDB stores. Read pages locally before contacting desktop. Preserve
+downloaded attachment bytes in the same private account boundary. Do not replace
+history with snapshots after a missed replay window. The new client requires the
+new sync contract rather than retaining the obsolete full-refresh branch.
+
+MC account grants authorize one phone to discover opted-in computers. Local
+desktop opt-in remains an independent access check. Existing narrower grants
+remain narrower. Online revocation recalculates the union of remaining scopes;
+an offline phone learns revocation only when it reconnects.
+
+The MC handoff closes peers on permission narrowing even if a narrower grant
+remains. Mobile directory ownership therefore disposes that relay, refreshes
+account metadata and opens a new connection with the remaining scopes. Offline
+computers are cached directory entries, not reconnecting transports. Ordinary
+network interruptions still use the existing RACP reconnect policy. Desktop
+sharing publication reuses the existing retry timer and persisted pending flag;
+there is no additional command queue or server-owned transcript storage.
+
+Use Android DownloadManager and the system package installer for updates from
+AR307/Mirrorcoding-APP, preserving application identity and signing. No cloud
+transcript database, background agent, offline command queue or web hot update is
+introduced.
+
+## Consequences
+
+### Failed delta reads (2026-10-12)
+
+Commit and publish each delta page together instead of publishing only after the
+entire multi-page read succeeds. Otherwise a later failure leaves the visible
+transcript stale while the saved revision has advanced, and the next cache flush
+can overwrite the earlier committed content. Session-scoped read errors preserve
+live events and expose a read-only retry; no model replay or full-snapshot recovery
+path is added. The existing desktop transcript identity fix remains authoritative
+for invalid Windows layout offsets; a phone-only update cannot repair them.
+
+### Upstream 0.18 integration (2026-10-12)
+
+The fork and upstream independently allocated schema v22. The integrated host
+uses v24 rather than reusing either meaning. The existing v23 title-source
+migration is idempotent; v24 creates missing mobile index structures and the
+upstream session-list index without resetting mobile revisions or touching
+transcript bodies. Tests exercise fork v22, upstream v22/v23, and older v21
+databases with retained user history. This extends the existing Rust-owned
+persistence layer and introduces no parallel storage authority.
+
+Loaded history can grow with usage; it is read in pages and storage errors are
+visible. MC must implement the account-grant increment before real pairing can
+use it. The first updater APK needs manual installation. Native installation,
+controlled relay behavior and production MC behavior require separate evidence.

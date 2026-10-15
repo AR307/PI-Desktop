@@ -9,7 +9,6 @@ import {
   draftMatchesExisting,
   providerCreateInputFromDraft,
   isModelConfigImportSource,
-  type ActivationScope,
   type ModelConfigImportDraft,
   type Mode,
   type SessionThinkingLevel,
@@ -27,8 +26,10 @@ import type { Logger } from "../logger";
 import type { PersistenceOutbox } from "../persistence-outbox";
 import type { PluginRuntime } from "../plugin-runtime";
 import { readSessionCollaboration } from "../services/session-collaboration";
+import { configureSession } from "../services/session-configuration";
 import { searchSessionsAcrossSources } from "../services/session-search";
 import type { IpcRegistrar } from "./types";
+import { getActiveRemoteHostsBoot } from "../bootstrap/remote-hosts.js";
 
 type RuntimeSession = {
   id?: string;
@@ -37,11 +38,6 @@ type RuntimeSession = {
   modelId?: string;
   thinkingLevel?: SessionThinkingLevel;
   [key: string]: unknown;
-};
-
-type ImportableModelConfig = ModelConfigImportDraft & {
-  id?: string;
-  secretValue?: string;
 };
 
 let scannedImportSessions = new Map<string, ExternalSessionSummary>();
@@ -140,6 +136,15 @@ export function registerSessionIpc({
     if (!host) throw new Error("host unavailable");
     return host.call("search.context", input);
   });
+  handle(IPC.invoke.todosGet, async (input: { sessionId?: unknown } = {}) => {
+    if (!host) throw new Error("host unavailable");
+    if (typeof input.sessionId !== "string" || !input.sessionId.trim()) {
+      throw Object.assign(new Error("sessionId is required"), {
+        errorCode: ErrorCodes.INVALID_ARGUMENT,
+      });
+    }
+    return host.call("todos.get", { sessionId: input.sessionId });
+  });
   handle(IPC.invoke.sessionList, async () => {
     if (!host) throw new Error("host unavailable");
     const [result, native, { providers, defaults }] = await Promise.all([
@@ -157,6 +162,7 @@ export function registerSessionIpc({
           source: "desktop",
         })),
         ...native.sessions,
+        ...(getActiveRemoteHostsBoot()?.sessionSummaries() ?? []),
       ].sort((a, b) => String(b.updatedAt).localeCompare(String(a.updatedAt))),
     };
   });
@@ -210,7 +216,7 @@ export function registerSessionIpc({
           errorCode: ErrorCodes.INVALID_ARGUMENT,
         });
       }
-      if (activeTurns.has(sessionId)) {
+      if (activeTurns.has(sessionId) && !String(input.throughMessageId ?? "").trim()) {
         throw Object.assign(new Error("Cannot fork a running session"), {
           errorCode: ErrorCodes.AGENT_BUSY,
         });
@@ -353,6 +359,15 @@ export function registerSessionIpc({
     if (!host) throw new Error("host unavailable");
     return host.call("session.rename", { id, title });
   });
+  handle(IPC.invoke.sessionDeriveTitle, async (id: string, title: string) => {
+    if (id.startsWith("native-pi:")) {
+      throw Object.assign(new Error("Native Pi session title derivation is not supported"), {
+        errorCode: ErrorCodes.INVALID_ARGUMENT,
+      });
+    }
+    if (!host) throw new Error("host unavailable");
+    return host.call("session.deriveTitle", { id, title });
+  });
   handle(
     IPC.invoke.sessionMoveProject,
     async (input: { sessionId?: string; projectPath?: string } = {}) => {
@@ -427,6 +442,7 @@ export function registerSessionIpc({
       const sessionId = String(input?.sessionId || "");
       if (!sessionId) throw new Error("sessionId required");
       rejectNativeMutation(sessionId, "transcript replacement");
+      await persistenceOutbox.prepareSessionReplacement(sessionId, () => host);
       // Drop the live pi-agent so the next prompt reseeds from the truncated
       // transcript instead of replaying the discarded branch in memory.
       if (sidecar) {
@@ -530,6 +546,8 @@ export function registerSessionIpc({
       id: string,
       config: {
         mode: Mode;
+        ultra?: boolean;
+        fast?: boolean;
         providerId?: string;
         modelId?: string;
         thinkingLevel?: SessionThinkingLevel;
@@ -538,10 +556,7 @@ export function registerSessionIpc({
     ) => {
       rejectNativeMutation(id, "configuration");
       if (!host) throw new Error("host unavailable");
-      const result = await host.call<{ session?: RuntimeSession | null }>(
-        "session.configure",
-        { id, ...config },
-      );
+      const result = await configureSession(host, id, config);
       if (!result.session) return result;
       const { providers, defaults } = await sessionCapabilityContext();
       const session = enrichSession(result.session, providers, defaults);

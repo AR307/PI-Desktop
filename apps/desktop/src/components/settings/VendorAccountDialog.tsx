@@ -6,7 +6,8 @@
  * entitlements, so this dialog shows what the account can actually run rather
  * than every model the vendor publishes. Choosing among those rows is
  * `ModelSelectionPanes`, the same picker the AI service dialog renders, so an
- * account is not a reduced version of a service.
+ * account is not a reduced version of a service: the account's own list and the
+ * models it may run are both on screen from the first paint (D625).
  */
 import { useEffect, useState } from "react";
 import {
@@ -16,9 +17,10 @@ import {
 } from "@pi-desktop/shared";
 import { useTranslation } from "react-i18next";
 import { pairsToRecord, recordToPairs } from "../extensions/KeyValueRows";
-import { Button, Field, Input, portalOverlay } from "../ui";
+import { OverlayBackdrop, Button, Field, Input, portalOverlay } from "../ui";
 import { ProviderHeadersEditor } from "./ProviderHeadersEditor";
 import { useProviderModels } from "./useProviderModels";
+import { useProbeFeedback } from "./useProbeFeedback";
 import { ModelSelectionPanes, useModelSelection } from "./ModelSelectionPanes";
 
 export type VendorAccountForm = {
@@ -66,6 +68,8 @@ export function VendorAccountDialog({
     },
     provider,
   );
+  // The vendored account's own answer is announced once, like the service form's.
+  useProbeFeedback(discovery, true);
   const selection = useModelSelection(discovery, models, setModels);
 
   useEffect(() => {
@@ -99,7 +103,7 @@ export function VendorAccountDialog({
   };
 
   return portalOverlay(
-    <div
+    <OverlayBackdrop
       className="overlay vendor-account-overlay"
       role="presentation"
       onClick={() => {
@@ -158,7 +162,7 @@ export function VendorAccountDialog({
       </div>
 
       {advancedOpen ? (
-        <div
+        <OverlayBackdrop
           className="overlay provider-advanced-overlay"
           role="presentation"
           onClick={(event) => {
@@ -187,8 +191,8 @@ export function VendorAccountDialog({
               </div>
             </div>
           </div>
-        </div>
+        </OverlayBackdrop>
       ) : null}
-    </div>
+    </OverlayBackdrop>
   );
 }

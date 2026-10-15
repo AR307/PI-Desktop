@@ -8,7 +8,8 @@
  * "error") and the rejected-promise paths.
  */
 
-import { isCertificateVerificationError } from "@pi-desktop/shared";
+import { isContextOverflow, type AssistantMessage } from "@earendil-works/pi-ai";
+import { ErrorCodes, isCertificateVerificationError } from "@pi-desktop/shared";
 import { readLocalRequestErrorDetails } from "./local-request-errors.js";
 
 export type ClassifiedAgentError = {
@@ -30,8 +31,43 @@ const NETWORK_PATTERN =
 const CONTEXT_PATTERN =
   /context[ _-]?length|maximum context|context window|too many tokens|prompt is too long|input token count|exceeds the (?:maximum|model)|token limit/i;
 
+/**
+ * Rate limiting worded without a 429. Probed before overflow wording: Bedrock
+ * reports its tokens-per-minute throttle as "Throttling error: Too many tokens,
+ * please wait before trying again.", which `CONTEXT_PATTERN` would otherwise
+ * read as an overflow (pi-ai's `isContextOverflow` excludes it the same way).
+ */
+const RATE_LIMIT_PATTERN = /rate.?limit|too many requests|quota|overloaded|throttl/i;
+
+/**
+ * Whether a provider message reports a context overflow.
+ *
+ * The runtime decides overflow *recovery* with pi-ai's `isContextOverflow`, so
+ * the classifier asks the same question first; otherwise a provider whose
+ * wording only pi-ai knows (DashScope/Qwen "Range of input length", z.ai
+ * "Prompt exceeds max length", xAI "maximum prompt length", Groq, llama.cpp,
+ * Bedrock "Input is too long for requested model") is recovered as an overflow
+ * but reported, and retried by delegates, as a generic provider error.
+ * `CONTEXT_PATTERN` keeps the wording this classifier already accepted. Only
+ * the message text is consulted: no provider id, usage, or context window, so
+ * pi-ai's silent-overflow and provider-specific bodyless checks stay with the
+ * runtime, which has those facts.
+ */
+function isContextOverflowMessage(message: string): boolean {
+  const probe = {
+    role: "assistant",
+    stopReason: "error",
+    errorMessage: message,
+  } as AssistantMessage;
+  return isContextOverflow(probe) || CONTEXT_PATTERN.test(message);
+}
+
 const STREAM_TERMINATION_PATTERN =
-  /\bterminated\b|stream ended without finish_reason|premature(?:ly)?\s+(?:closed|ended)|(?:stream|response).*(?:closed|interrupted)/i;
+  /\bterminated\b|stream ended (?:without|before)|premature(?:ly)?\s+(?:closed|ended)|(?:stream|response).*(?:closed|interrupted)/i;
+
+/** An adapter refusing a request option, e.g. "Custom fetch is not supported
+ * by the Google Generative AI adapter" (issue #1072). */
+const UNSUPPORTED_ADAPTER_OPTION_PATTERN = /is not supported by the .{0,60}adapter/i;
 
 function redactSensitiveErrorText(message: string): string {
   return message
@@ -89,6 +125,9 @@ function hasNetworkCause(err: unknown, message: string): boolean {
 function extractErrorCode(err: unknown): string | number | undefined {
   let current: any = err;
   for (let depth = 0; depth < 4 && current; depth += 1) {
+    if (typeof current.errorCode === "string" && /^[A-Za-z0-9_.:-]{1,64}$/.test(current.errorCode)) {
+      return current.errorCode;
+    }
     if (typeof current.code === "number") {
       return Number.isSafeInteger(current.code) ? current.code : undefined;
     }
@@ -427,6 +466,9 @@ export function classifyAgentError(err: unknown): ClassifiedAgentError {
   ) {
     return result("TURN_ABORTED", false);
   }
+  if (envelope?.errorCode === "PI_FAST_UNAVAILABLE" || /\bpi_fast_unavailable\b/i.test(rawMessage)) return result("PI_FAST_UNAVAILABLE", false);
+  if (/\b(?:invalid_service_tier|model_or_group_unavailable)\b/i.test(rawMessage)) return result("PROVIDER_ERROR", false);
+  if (status === 402) return result("PROVIDER_ERROR", false);
   if (/CONTEXT_COMPACTION_FAILED/i.test(rawMessage)) {
     return result("CONTEXT_COMPACTION_FAILED", false);
   }
@@ -444,6 +486,26 @@ export function classifyAgentError(err: unknown): ClassifiedAgentError {
     );
   }
 
+  if (
+    providerCode === ErrorCodes.HOST_OVERLOADED ||
+    /host RPC capacity is exhausted|HOST_OVERLOADED/i.test(rawMessage)
+  ) {
+    return result(ErrorCodes.HOST_OVERLOADED, true, { origin: "host" });
+  }
+  if (
+    providerCode === ErrorCodes.HOST_UNAVAILABLE ||
+    /host RPC unavailable|host-core is unavailable|host RPC timeout/i.test(rawMessage)
+  ) {
+    return result(ErrorCodes.HOST_UNAVAILABLE, true, { origin: "host" });
+  }
+
+  // The adapter itself refuses how the request was built, so re-sending it
+  // produces the identical failure. Probed before the status table so a status
+  // some layer attached to the same message cannot re-arm the retry budget.
+  if (UNSUPPORTED_ADAPTER_OPTION_PATTERN.test(rawMessage)) {
+    return result("PROVIDER_ERROR", false);
+  }
+
   if (status !== undefined) {
     if (status === 401 || status === 403) return result("PROVIDER_UNAUTHORIZED", false);
     if (status === 408) return result("TIMEOUT", true);
@@ -452,7 +514,7 @@ export function classifyAgentError(err: unknown): ClassifiedAgentError {
     if (status === 404) return result("MODEL_NOT_CONFIGURED", false);
     if (status >= 500) return result("PROVIDER_ERROR", true);
     if (status === 400 || status === 422) {
-      if (CONTEXT_PATTERN.test(rawMessage)) return result("CONTEXT_TOO_LARGE", false);
+      if (isContextOverflowMessage(rawMessage)) return result("CONTEXT_TOO_LARGE", false);
       // Malformed request (wrong apiStyle, bad params) — retrying won't help.
       return result("PROVIDER_ERROR", false);
     }
@@ -462,10 +524,10 @@ export function classifyAgentError(err: unknown): ClassifiedAgentError {
   if (/invalid[ _]api[ _]key|api key not valid|unauthorized|authentication|permission denied/i.test(rawMessage)) {
     return result("PROVIDER_UNAUTHORIZED", false);
   }
-  if (/rate.?limit|too many requests|quota|overloaded/i.test(rawMessage)) {
+  if (RATE_LIMIT_PATTERN.test(rawMessage)) {
     return result("PROVIDER_RATE_LIMITED", true);
   }
-  if (CONTEXT_PATTERN.test(rawMessage)) {
+  if (isContextOverflowMessage(rawMessage)) {
     return result("CONTEXT_TOO_LARGE", false);
   }
   if (/model.{0,20}(not found|does not exist|unknown)|unknown model/i.test(rawMessage)) {

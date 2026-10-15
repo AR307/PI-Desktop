@@ -2,6 +2,14 @@ use super::*;
 use tempfile::tempdir;
 
 #[test]
+fn canonical_windows_project_paths_use_the_registered_drive_spelling() {
+    assert_eq!(normalize_project_path(r"\\?\C:\Users\fixture\project\"), "C:/Users/fixture/project");
+    assert_eq!(normalize_project_path("//?/D:/project/"), "D:/project");
+    assert_eq!(normalize_project_path(r"C:\"), "C:/");
+    assert_eq!(normalize_project_path("/srv/project/"), "/srv/project");
+}
+
+#[test]
 fn front_matter_and_body_round_trip() {
     let (fields, body) =
         parse_front_matter("---\nname: Review\ndescription: Check code\n---\n\nDo it.\n");
@@ -319,6 +327,26 @@ fn copy_directory_tree_overwrites_stale_files_and_can_skip_the_document() {
     let whole = dir.path().join("whole");
     copy_directory_tree(&from, &whole, false).unwrap();
     assert_eq!(fs::read_to_string(whole.join("SKILL.md")).unwrap(), "doc");
+}
+
+#[cfg(unix)]
+#[test]
+fn copy_directory_tree_ignores_symlinks() {
+    let dir = tempdir().unwrap();
+    let from = dir.path().join("from");
+    let to = dir.path().join("to");
+    let outside = dir.path().join("outside");
+    fs::create_dir_all(&from).unwrap();
+    fs::create_dir_all(&outside).unwrap();
+    fs::write(outside.join("secret.txt"), "secret").unwrap();
+    std::os::unix::fs::symlink(outside.join("secret.txt"), from.join("linked.txt")).unwrap();
+    std::os::unix::fs::symlink(&outside, from.join("linked_dir")).unwrap();
+    fs::write(from.join("normal.txt"), "normal").unwrap();
+
+    copy_directory_tree(&from, &to, false).unwrap();
+    assert_eq!(fs::read_to_string(to.join("normal.txt")).unwrap(), "normal");
+    assert!(!to.join("linked.txt").exists());
+    assert!(!to.join("linked_dir").exists());
 }
 
 #[test]

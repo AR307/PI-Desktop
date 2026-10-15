@@ -118,6 +118,62 @@ fn capability_state_is_not_written_into_skill_documents() {
 }
 
 #[test]
+fn builtin_activation_defaults_on_persists_and_is_separate_from_scanned_skills() {
+    let app = tempdir().unwrap();
+    let agents = tempdir().unwrap();
+    let mut registry = UserSkillRegistry::new(app.path());
+    assert!(registry.disabled_builtins().is_empty());
+
+    registry
+        .set_builtin_enabled("pi-desktop/imagegen", false)
+        .unwrap();
+    assert_eq!(
+        registry.disabled_builtins(),
+        vec!["pi-desktop/imagegen".to_string()]
+    );
+
+    test_support::with_global_agents(agents.path(), || {
+        registry.list(CapabilityLevel::Global, None).unwrap();
+    });
+    let mut reopened = UserSkillRegistry::new(app.path());
+    test_support::with_global_agents(agents.path(), || {
+        reopened.list(CapabilityLevel::Global, None).unwrap();
+    });
+    assert_eq!(
+        reopened.disabled_builtins(),
+        vec!["pi-desktop/imagegen".to_string()]
+    );
+    assert!(app
+        .path()
+        .join("agent-capabilities/skill-builtins.json")
+        .is_file());
+
+    reopened
+        .set_builtin_enabled("pi-desktop/imagegen", true)
+        .unwrap();
+    assert!(reopened.disabled_builtins().is_empty());
+}
+
+#[test]
+fn builtin_activation_rejects_invalid_ids() {
+    let app = tempdir().unwrap();
+    let mut registry = UserSkillRegistry::new(app.path());
+    for id in [
+        "",
+        "imagegen",
+        "PI-Desktop/imagegen",
+        "pi-desktop/",
+        "pi-desktop/imagegen/extra",
+    ] {
+        assert!(
+            registry.set_builtin_enabled(id, false).is_err(),
+            "accepted {id:?}"
+        );
+    }
+    assert!(registry.disabled_builtins().is_empty());
+}
+
+#[test]
 fn import_uses_parent_directory_when_name_is_not_ascii() {
     let app = tempdir().unwrap();
     let source_dir = app.path().join("incoming/code-review");
@@ -236,7 +292,10 @@ fn a_global_skill_moves_into_a_project() {
 
         assert_eq!(moved.id, "review");
         assert_eq!(moved.level.as_deref(), Some("project"));
-        assert_eq!(moved.project_path.as_deref(), Some(project_path.as_str()));
+        assert_eq!(
+            moved.project_path.as_deref(),
+            Some(crate::agent_capabilities::normalize_project_path(&project_path).as_str())
+        );
         assert!(!home.path().join("skills/review.md").exists());
         let target = project.path().join(".agents/skills/review.md");
         assert_eq!(
@@ -727,9 +786,15 @@ fn imports_a_directory_with_skill_md_in_link_mode() {
     let mut registry = UserSkillRegistry::new(app.path());
     let mut payload = input("Ignored", "project", Some(app.path().to_str().unwrap()));
     payload.mode = Some("link".into());
-    let record = registry
-        .import(source_dir.to_str().unwrap(), payload)
-        .unwrap();
+    let record = match registry.import(source_dir.to_str().unwrap(), payload) {
+        Ok(record) => record,
+        Err(err) if cfg!(windows) && format!("{err:#}").contains("1314") => {
+            // Unprivileged Windows environments without Developer Mode enabled
+            // cannot create filesystem symlinks (os error 1314).
+            return;
+        }
+        Err(err) => panic!("import failed unexpectedly: {err:#}"),
+    };
     let normalized_project =
         crate::agent_capabilities::normalize_project_path(app.path().to_str().unwrap());
     let expected_root = crate::agent_capabilities::capability_dir(
@@ -763,7 +828,15 @@ fn imports_a_file_in_link_mode() {
     let mut registry = UserSkillRegistry::new(app.path());
     let mut payload = input("Ignored", "project", Some(app.path().to_str().unwrap()));
     payload.mode = Some("link".into());
-    let record = registry.import(source.to_str().unwrap(), payload).unwrap();
+    let record = match registry.import(source.to_str().unwrap(), payload) {
+        Ok(record) => record,
+        Err(err) if cfg!(windows) && format!("{err:#}").contains("1314") => {
+            // Unprivileged Windows environments without Developer Mode enabled
+            // cannot create filesystem symlinks (os error 1314).
+            return;
+        }
+        Err(err) => panic!("import failed unexpectedly: {err:#}"),
+    };
     let normalized_project =
         crate::agent_capabilities::normalize_project_path(app.path().to_str().unwrap());
     let expected = crate::agent_capabilities::capability_dir(

@@ -31,7 +31,10 @@ import {
 import { createRequire } from "node:module";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import path from "node:path";
-import { resolveReleaseDocumentCheck } from "./release-version-check.mjs";
+import {
+  isModelsDevProviderCatalog,
+  resolveReleaseDocumentCheck,
+} from "./release-version-check.mjs";
 
 const root = fileURLToPath(new URL("..", import.meta.url));
 const read = (relPath) => readFileSync(path.join(root, relPath), "utf8");
@@ -79,25 +82,30 @@ for (const [relPath, pattern, label] of [
   }
 }
 
-// 2. Bundled models.dev snapshot.
-const modelsDevCatalogPath = "apps/desktop/resources/models.dev/api.json";
+// 2. Bundled model catalog used by packaged builds.
+const modelsCatalogPath = "apps/desktop/resources/models.dev/api.json";
 try {
-  const catalog = JSON.parse(read(modelsDevCatalogPath));
-  if (
-    !catalog ||
-    Array.isArray(catalog) ||
-    typeof catalog !== "object" ||
-    !Object.values(catalog).some(
-      (provider) => provider && typeof provider === "object" && provider.models,
-    )
-  ) {
-    fail(modelsDevCatalogPath, "contains no provider model records");
+  const catalog = JSON.parse(read(modelsCatalogPath));
+  if (!isModelsDevProviderCatalog(catalog)) {
+    fail(modelsCatalogPath, "contains no provider model records");
   }
 } catch (error) {
-  fail(modelsDevCatalogPath, `could not parse bundled catalog: ${error.message}`);
+  fail(modelsCatalogPath, `could not parse model catalog: ${error.message}`);
 }
 
-// 3. Shipped-locale in-app changelog. Compile the source catalog in a temporary
+// 3. Settings-only operation metadata. Runtime chat metadata is supplied by Pi.
+const operationMetadataPath = "apps/desktop/electron/main/settings-operation-metadata.json";
+try {
+  const catalog = JSON.parse(read(operationMetadataPath));
+  if (!Array.isArray(catalog) || catalog.length === 0 || catalog.some(model =>
+    !model.vendor || !model.id || !model.modalities?.output?.length ||
+    (model.modalities.input?.includes("text") && model.modalities.output.every(value => value === "text")) || model.cost || model.api || model.baseUrl || model.auth
+  )) fail(operationMetadataPath, "expected display-only non-chat metadata");
+} catch (error) {
+  fail(operationMetadataPath, `could not parse settings metadata: ${error.message}`);
+}
+
+// 4. Shipped-locale in-app changelog. Compile the source catalog in a temporary
 // directory so this preflight does not depend on a prior workspace build or on
 // Node's experimental TypeScript module resolution.
 async function loadChangelogCatalog() {
@@ -105,15 +113,13 @@ async function loadChangelogCatalog() {
   const typescript = require("typescript");
   const tempDir = mkdtempSync(path.join(root, ".release-changelog-"));
   writeFileSync(path.join(tempDir, "package.json"), '{"type":"module"}\n', "utf8");
-  const sources = [
-    "packages/shared/src/changelog.ts",
-    "packages/shared/src/changelog-de.ts",
-    "packages/shared/src/changelog-es.ts",
-    "packages/shared/src/changelog-fr.ts",
-    "packages/shared/src/changelog-ko.ts",
-    "packages/shared/src/changelog-pt-BR.ts",
-    "packages/shared/src/changelog-tr.ts",
-  ];
+  // Derive the module list from the directory: a new shipped locale or a
+  // further split of the catalog must not silently fall out of this preflight.
+  const changelogSrcDir = "packages/shared/src";
+  const sources = readdirSync(path.join(root, changelogSrcDir))
+    .filter((name) => /^changelog(-[A-Za-z-]+)?\.ts$/.test(name))
+    .sort()
+    .map((name) => `${changelogSrcDir}/${name}`);
   try {
     for (const relPath of sources) {
       const output = typescript.transpileModule(read(relPath), {
@@ -186,7 +192,7 @@ if (catalogs) {
   }
 }
 
-// 3. Catalog test pins the newest version.
+// 5. Catalog test pins the newest version.
 if (!read("packages/shared/src/changelog.test.ts").includes(`"${documentVersion}"`)) {
   fail(
     "packages/shared/src/changelog.test.ts",
@@ -194,7 +200,7 @@ if (!read("packages/shared/src/changelog.test.ts").includes(`"${documentVersion}
   );
 }
 
-// 4. READMEs declare the current release line.
+// 6. READMEs declare the current release line.
 for (const relPath of ["README.md", "README.zh-CN.md"]) {
   if (!read(relPath).includes(releaseLine)) {
     fail(relPath, `status section does not mention the ${releaseLine} release line`);
