@@ -12,10 +12,14 @@ const storageDirectory = fileURLToPath(new URL("../electron/main/storage/", impo
 const result = await build({
   stdin: { contents: ['files', 'preferences', 'bootstrap', 'ipc'].map((name) => `export * from "./${name}";`).join("\n") + '\nexport { IPC } from "@pi-desktop/shared";\nexport { catalogs } from "@pi-desktop/i18n";', resolveDir: storageDirectory, loader: "ts" },
   bundle: true, platform: "node", format: "esm", write: false,
+  alias: { "original-fs": "node:fs" },
   plugins: [{ name: "external-storage-boundaries", setup(builder) {
     builder.onResolve({ filter: /^@pi-desktop\/shared$/ }, () => ({ path: fileURLToPath(new URL("../../../packages/shared/src/protocol.ts", import.meta.url)) }));
     builder.onResolve({ filter: /^@pi-desktop\/i18n$/ }, () => ({ path: fileURLToPath(new URL("../../../packages/i18n/src/index.ts", import.meta.url)) }));
-    builder.onResolve({ filter: /^(electron|node:child_process)$|host-process$/ }, (args) => ({ path: args.path, namespace: "storage-test-boundary" }));
+    builder.onResolve({ filter: /^(electron|node:child_process)$|host-process$/ }, (args) => {
+      if (args.path === "node:child_process" && args.importer.endsWith("link-types.ts")) return { path: args.path, external: true };
+      return { path: args.path, namespace: "storage-test-boundary" };
+    });
     builder.onLoad({ filter: /.*/, namespace: "storage-test-boundary" }, (args) => {
       if (args.path === "electron") return { contents: "export const app = globalThis.__storageHarness.app; export const dialog = globalThis.__storageHarness.dialog; export const BrowserWindow = globalThis.__storageHarness.BrowserWindow;" };
       if (args.path === "node:child_process") return { contents: "export function execFile(command, args, options, callback) { globalThis.__storageHarness.execFile(command, args, options, callback); }" };

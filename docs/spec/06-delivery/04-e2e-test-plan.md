@@ -44,6 +44,26 @@
 - **Preconditions:** Dedicated request worktree, current remote-main base, shared
   compatible host toolchain, built host-core and desktop, isolated temporary data
   and Chromium profiles. No user's running desktop, provider, or network is used.
+- **First-install / new-directory regression:** Run
+  `node scripts/e2e-storage-directory.mjs` with `PI_DESKTOP_HOST_BIN` pointing
+  to the candidate Host. The production storage controls and preload invoke real
+  Main handlers through native mouse clicks, schedule cold maintenance, and reopen
+  the migrated Electron profile and Host. Cover an absent data root with missing
+  parents and an existing conversation with attachments, settings and project
+  memory. The chosen destination initially does not exist. Set
+  `PI_STORAGE_E2E_SOURCE_ROOT` to a temporary folder on a different drive for
+  cross-volume coverage. Verify browser localStorage, conversation/attachment
+  reads, project-memory lookup, original backups and the displayed new path.
+  Only native picker selection and relaunch dispatch are scripted; each startup
+  phase is a separate real Electron process. Keep screenshots and synthetic
+  profiles under `.artifacts/` for inspection rather than deleting them.
+- **Electron filesystem regression:** Run `node scripts/e2e-storage-files.mjs`
+  in real Electron, not `ELECTRON_RUN_AS_NODE`. Seed valid and opaque `.asar`
+  files, live and dangling file/directory links, Unicode paths, and a destination
+  collision. Expect byte-preserving copies, relocated internal links, unchanged
+  external targets, and path-specific errors without mutating originals. The
+  existing-profile Settings journey also includes an archive and a dangling
+  dependency junction, then verifies history and browser state after reopening.
 - **Steps:** Through the production Settings page, choose/cancel a destination,
   confirm/retry migration, and confirm cache/backup cleanup. Seed a real host with
   sessions, queued attachments, project metadata, credentials and a local installed
@@ -59,8 +79,20 @@
   survive migration/restart. Cache cleanup preserves durable state; backup cleanup
   retains active data and the stable bootstrap pointer. Filesystem regression tests
   reject unsafe targets, redirecting links, wrong ownership and active-root overlap.
+- **Windows junction spelling:** The filesystem suite includes a Node-created
+  junction whose target ends with a separator. Copying it in Electron must
+  preserve the target without a false symbolic-link verification failure.
+- **Installation lock and cleanup retry:** `e2e-storage-backup-lock.mjs` holds a
+  real Electron single-instance lock while retrying cleanup with the old data
+  already absent. Verify the lock, bootstrap pointer and current history remain.
+  The Settings directory suite additionally confirms cleanup, cold-restarts and
+  reopens the active Host; backup controls disappear and current attachments and
+  browser state remain readable. These retry fixtures are not full-payload
+  deletion tests and retain their synthetic profiles.
 - **Coverage:** `pnpm test:e2e:storage` runs `e2e-storage-settings.mjs`,
-  `e2e-storage-migration.mjs`, and `e2e-storage-bootstrap.mjs`. The first uses the
+  `e2e-storage-migration.mjs`, `e2e-storage-bootstrap.mjs`,
+  `e2e-storage-directory.mjs`, `e2e-storage-files.mjs`, and
+  `e2e-storage-backup-lock.mjs`. The first uses the
   production renderer/API with only preload mocked; the latter suites run real
   host/Electron processes and production maintenance. The bootstrap harness
   intercepts relaunch to inspect its result, then explicitly starts another isolated
