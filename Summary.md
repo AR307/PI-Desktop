@@ -1471,3 +1471,16 @@ Captured native windows and the Android login screen were visually checked.
 - This is an Android-only release: workspace versions are 0.20.3, versionCode is
   9, and the signing identity is unchanged. The desktop stays at published
   0.20.2. See docs/releases/0.20.3.md for validation and publication.
+
+## 2026-10-15 - Android 0.20.4: in-app update fixes
+
+- A phone that had downloaded and installed 0.20.2 was offered "Install update"
+  for 0.20.3. That button reopened the stale 0.20.2 APK, because the updater
+  treated any once-successful DownloadManager job as downloaded. Downloads now
+  carry their APK URL and versionCode. They are discarded once installed,
+  superseded, or written before this release.
+- The login screen shows the update section again before sign-in.
+- The native update E2E builds three consecutive QA APKs and covers both
+  release cases. It failed on the pre-fix code and passes on the fix.
+- Android-only release; the desktop stays at published 0.20.2. Phones holding a
+  stale record need one manual install of 0.20.4. See docs/releases/0.20.4.md.

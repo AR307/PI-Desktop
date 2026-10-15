@@ -2,6 +2,14 @@ import type { ChangelogEntry } from "./changelog.js";
 
 export const enEntries: ChangelogEntry[] = [
   {
+    "version": "0.20.4",
+    "date": "2026-10-15",
+    "highlights": [
+      "Android: in-app updates no longer reopen an APK downloaded for an earlier release; each new release is downloaded and installed.",
+      "Android: check for, download and install updates from the login screen before signing in."
+    ]
+  },
+  {
     "version": "0.20.3",
     "date": "2026-10-15",
     "highlights": [

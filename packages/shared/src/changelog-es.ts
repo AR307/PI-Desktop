@@ -2,6 +2,14 @@ import type { ChangelogEntry } from "./changelog.js";
 
 export const esEntries: ChangelogEntry[] = [
   {
+    "version": "0.20.4",
+    "date": "2026-10-15",
+    "highlights": [
+      "Android: las actualizaciones dentro de la app ya no reabren un APK descargado para una versión anterior; cada nueva versión se descarga e instala.",
+      "Android: busca, descarga e instala actualizaciones desde la pantalla de inicio de sesión antes de entrar."
+    ]
+  },
+  {
     "version": "0.20.3",
     "date": "2026-10-15",
     "highlights": [

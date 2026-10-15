@@ -1,4 +1,4 @@
-## Unreleased - Android in-app update fixes
+## v0.20.4 (Android) - In-app update fixes
 
 - An APK downloaded for an earlier update was offered for installation again
   once a newer release appeared, so the newer version could not be downloaded.

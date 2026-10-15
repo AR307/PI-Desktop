@@ -2,6 +2,14 @@ import type { ChangelogEntry } from "./changelog.js";
 
 export const koEntries: ChangelogEntry[] = [
   {
+    "version": "0.20.4",
+    "date": "2026-10-15",
+    "highlights": [
+      "Android: 앱 내 업데이트가 이전 버전용으로 받은 APK를 다시 열지 않으며, 새 버전마다 새로 내려받아 설치합니다.",
+      "Android: 로그인하기 전에 로그인 화면에서 업데이트를 확인하고 내려받아 설치할 수 있습니다."
+    ]
+  },
+  {
     "version": "0.20.3",
     "date": "2026-10-15",
     "highlights": [

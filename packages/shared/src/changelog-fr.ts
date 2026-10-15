@@ -2,6 +2,14 @@ import type { ChangelogEntry } from "./changelog.js";
 
 export const frEntries: ChangelogEntry[] = [
   {
+    "version": "0.20.4",
+    "date": "2026-10-15",
+    "highlights": [
+      "Android : les mises à jour intégrées ne rouvrent plus un APK téléchargé pour une version précédente ; chaque nouvelle version est téléchargée puis installée.",
+      "Android : recherchez, téléchargez et installez les mises à jour depuis l’écran de connexion, avant de vous connecter."
+    ]
+  },
+  {
     "version": "0.20.3",
     "date": "2026-10-15",
     "highlights": [

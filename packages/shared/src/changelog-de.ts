@@ -2,6 +2,14 @@ import type { ChangelogEntry } from "./changelog.js";
 
 export const deEntries: ChangelogEntry[] = [
   {
+    "version": "0.20.4",
+    "date": "2026-10-15",
+    "highlights": [
+      "Android: In-App-Updates öffnen kein für eine frühere Version heruntergeladenes APK mehr; jede neue Version wird heruntergeladen und installiert.",
+      "Android: Updates lassen sich vor der Anmeldung auf dem Anmeldebildschirm prüfen, herunterladen und installieren."
+    ]
+  },
+  {
     "version": "0.20.3",
     "date": "2026-10-15",
     "highlights": [

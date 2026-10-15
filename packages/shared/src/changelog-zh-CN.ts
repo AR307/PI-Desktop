@@ -2,6 +2,14 @@ import type { ChangelogEntry } from "./changelog.js";
 
 export const zhCNEntries: ChangelogEntry[] = [
   {
+    "version": "0.20.4",
+    "date": "2026-10-15",
+    "highlights": [
+      "Android 手机端：应用内更新不再重复打开为旧版本下载的安装包，每个新版本都会重新下载并安装。",
+      "Android 手机端：登录前可在登录页检查、下载并安装更新。"
+    ]
+  },
+  {
     "version": "0.20.3",
     "date": "2026-10-15",
     "highlights": [

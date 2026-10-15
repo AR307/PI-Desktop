@@ -2,6 +2,14 @@ import type { ChangelogEntry } from "./changelog.js";
 
 export const ptBREntries: ChangelogEntry[] = [
   {
+    "version": "0.20.4",
+    "date": "2026-10-15",
+    "highlights": [
+      "Android: as atualizações no app não reabrem mais um APK baixado para uma versão anterior; cada nova versão é baixada e instalada.",
+      "Android: verifique, baixe e instale atualizações na tela de login antes de entrar."
+    ]
+  },
+  {
     "version": "0.20.3",
     "date": "2026-10-15",
     "highlights": [

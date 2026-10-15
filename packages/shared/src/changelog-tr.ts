@@ -2,6 +2,14 @@ import type { ChangelogEntry } from "./changelog.js";
 
 export const trEntries: ChangelogEntry[] = [
   {
+    "version": "0.20.4",
+    "date": "2026-10-15",
+    "highlights": [
+      "Android: Uygulama içi güncellemeler artık önceki bir sürüm için indirilen APK'yı yeniden açmaz; her yeni sürüm indirilip kurulur.",
+      "Android: Oturum açmadan önce giriş ekranından güncellemeleri denetleyin, indirin ve kurun."
+    ]
+  },
+  {
     "version": "0.20.3",
     "date": "2026-10-15",
     "highlights": [
