@@ -85,7 +85,11 @@ shows them as an in-app toast when visible, in the Activity inbox and as Android
 notifications when backgrounded. A foreground service keeps the relay connected
 in the background: Smart (default) follows running work plus a two-minute grace,
 Always stays connected, and Off never does. Notification permission is requested
-from Me or Activity, never at launch. A swiped-away app receives nothing until
+from Me or Activity, never at launch. Vendor ROMs that freeze background apps
+(ColorOS, OriginOS, HyperOS, EMUI/MagicOS) hold notifications until the app is
+opened again. The app detects such late deliveries, names the vendor's
+background switch, and can ask Android for the battery exemption
+(`REQUEST_IGNORE_BATTERY_OPTIMIZATIONS`, distributed outside Google Play). A swiped-away app receives nothing until
 reopened; see [the ADR](../../docs/adr/mobile-attention-push.md).
 
 Conversation controls update only the current shared session. The phone can

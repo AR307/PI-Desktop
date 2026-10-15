@@ -1,3 +1,15 @@
+## Unreleased - Background notifications on vendor Android ROMs
+
+- ColorOS, OriginOS, HyperOS and EMUI/MagicOS can freeze PI Mobile in the
+  background despite its foreground service. Notifications then wait until the
+  app is opened again. The app now detects attention it received minutes late
+  while kept alive, and tells the user which switch to turn on for their phone.
+- On phones known to freeze background apps, Activity explains the setting up
+  front. Notices and Me can ask Android for the battery exemption and open the
+  app settings.
+- Returning from a system dialog now refreshes notification and battery
+  state.
+
 ## Unreleased - Android companion redesign and session notifications
 
 - Reorganize the Android companion into Sessions, Activity and Me tabs.

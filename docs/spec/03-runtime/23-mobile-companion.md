@@ -243,6 +243,23 @@ foreground and stops when it returns. A swiped-away or force-stopped app
 receives nothing until it is opened again. See
 [architecture decision](../../adr/mobile-attention-push.md).
 
+Several Android vendors freeze background apps despite a foreground service
+until the user allows background activity: ColorOS (OPPO, OnePlus, realme),
+OriginOS (vivo, iQOO), HyperOS (Xiaomi, Redmi, POCO) and EMUI/MagicOS
+(Huawei, Honor). A frozen app keeps its socket open, so its attention arrives
+only when it is opened again. To detect this, the phone measures each
+computer's clock offset with `connection/ping` after subscribing. It records a
+held-back delivery when an attention reaches it 90 s or more after the event,
+on the phone's clock, and the event occurred after the app left the
+foreground with keep-alive running. The attention must be handled either while
+the app is still hidden or within 20 s of its return. Sessions and Activity then show a notice
+naming the vendor's switch, with Android's battery exemption request (while
+the app is still optimized) and app settings. On vendors known to freeze,
+Activity shows that guidance once up front. Each notice stays until the user
+dismisses it, and a later held-back delivery shows the notice again. Returning
+to the app, including from a system dialog over it, re-reads notification
+permission and battery state.
+
 ## History-read failures
 
 A failed durable delta page does not discard already applied pages or buffered

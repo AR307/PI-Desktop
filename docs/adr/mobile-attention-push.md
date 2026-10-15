@@ -90,3 +90,28 @@ WebView. Many target devices ship without Google Play services.
   client, ticket refresh and scope handling outside the WebView. Rejected.
 - **Background polling.** It still needs a live process and wakes the radio
   on a timer. Rejected.
+
+## Amendment (2026-10-15): vendor background freezers
+
+On an OPPO phone, background attention arrived only once the app was opened.
+The keep-alive notification stayed visible, its task count never changed, and
+the held-back toasts appeared on return. Stock Android 15 with the screen off
+and Doze forced delivered normally. The platform freezer (`am freeze` on the
+app and its WebView renderer) reproduced the vendor symptoms exactly. So the
+vendor freezer, not the relay, holds the app. No app-side mechanism overrides
+it without the user's background permission or a vendor push channel.
+
+Decision:
+
+- Name the cause and the fix to the user. The phone measures each computer's
+  clock offset with `connection/ping`. It treats an attention as held back when
+  that attention arrives 90 s or more late, the app was kept alive, and the
+  attention is handled while the app is hidden or right after it returns.
+- Sessions and Activity then show a notice with the vendor-specific switch.
+  Phones from vendors known to freeze background apps get the same guidance
+  once, up front, in Activity.
+- The app may ask Android for the battery-optimization exemption through
+  the system dialog (`REQUEST_IGNORE_BATTERY_OPTIMIZATIONS`). It never
+  silently changes power settings.
+- Vendor push channels (OPPO, vivo, Xiaomi, HMS) and FCM remain the way to
+  reach a frozen app without user action; they still need MC work.
