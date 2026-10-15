@@ -9,6 +9,7 @@ public class MainActivity extends BridgeActivity {
     public void onCreate(Bundle savedInstanceState) {
         registerPlugin(MobileAppearancePlugin.class);
         registerPlugin(MobileUpdatePlugin.class);
+        registerPlugin(MobileNotificationsPlugin.class);
         super.onCreate(savedInstanceState);
         // BridgeActivity installs its NoActionBar theme in super.onCreate.
         // Creating the decor earlier locks in the launch theme's native title bar.

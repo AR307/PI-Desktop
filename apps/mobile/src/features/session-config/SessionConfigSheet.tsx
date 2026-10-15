@@ -3,8 +3,8 @@ import { useTranslation } from "react-i18next";
 import { Check, ChevronRight, Image as ImageIcon, MessageSquare, SlidersHorizontal, Sparkles, Target } from "lucide-react";
 import type { ImageGenerationCapability, MobileModelChoice, MobileTaskMode, SessionThinkingLevel } from "@pi-desktop/shared";
 import { ultraReasoningPrefix } from "@pi-desktop/shared";
-import type { MobileController, MobileView } from "../state/controller";
-import { Surface } from "./Surface";
+import type { MobileController, MobileView } from "../../state/controller";
+import { Surface } from "../../ui/Sheet";
 
 type Panel = "mode" | "model";
 

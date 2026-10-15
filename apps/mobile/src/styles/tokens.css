@@ -1,0 +1,129 @@
+/*
+  Mobile design tokens. Colors come from the desktop's canonical tokens so the
+  phone reads as the same product; this layer adds the mobile type ramp,
+  spacing, radii, elevation and motion, plus static fallbacks for WebViews
+  that predate color-mix() (Chromium < 111), where the desktop tokens would
+  otherwise resolve to nothing.
+*/
+@import "../../../desktop/src/styles/tokens.css";
+
+:root {
+  --m-font: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", Roboto, "PingFang SC", "HarmonyOS Sans SC", "MiSans", "Noto Sans CJK SC", "Microsoft YaHei", system-ui, sans-serif;
+  --m-mono: ui-monospace, "SF Mono", "JetBrains Mono", "Cascadia Mono", Menlo, Consolas, monospace;
+
+  --m-text-large: 30px;
+  --m-text-title: 20px;
+  --m-text-headline: 16px;
+  --m-text-body: 15px;
+  --m-text-callout: 14px;
+  --m-text-subhead: 13px;
+  --m-text-footnote: 12px;
+  --m-text-caption: 11px;
+
+  --m-space-1: 4px;
+  --m-space-2: 8px;
+  --m-space-3: 12px;
+  --m-space-4: 16px;
+  --m-space-5: 20px;
+  --m-space-6: 24px;
+  --m-space-8: 32px;
+  --m-gutter: clamp(16px, 4.6vw, 22px);
+
+  --m-radius-xs: 8px;
+  --m-radius-sm: 10px;
+  --m-radius-md: 14px;
+  --m-radius-lg: 20px;
+  --m-radius-xl: 26px;
+  --m-radius-full: 999px;
+
+  --m-control: 44px;
+  --m-header: 52px;
+  --m-tabbar: 58px;
+
+  --m-ease-out: cubic-bezier(0.22, 1, 0.36, 1);
+  --m-ease-spring: cubic-bezier(0.32, 0.72, 0, 1);
+  --m-ease-in: cubic-bezier(0.4, 0, 1, 1);
+  --m-ease-standard: cubic-bezier(0.2, 0, 0, 1);
+  --m-dur-fast: 120ms;
+  --m-dur: 200ms;
+  --m-dur-slow: 320ms;
+
+  --m-safe-top: var(--safe-area-inset-top, env(safe-area-inset-top, 0px));
+  --m-safe-bottom: var(--safe-area-inset-bottom, env(safe-area-inset-bottom, 0px));
+  --m-safe-left: var(--safe-area-inset-left, env(safe-area-inset-left, 0px));
+  --m-safe-right: var(--safe-area-inset-right, env(safe-area-inset-right, 0px));
+
+  --m-bg: var(--ds-bg-primary);
+  --m-surface: var(--ds-tile);
+  --m-surface-hover: var(--ds-tile-hover);
+  --m-surface-strong: var(--ds-tile-deep);
+  --m-raised: var(--ds-bg-elevated-opaque);
+  --m-separator: var(--ds-border-subtle);
+  --m-border: var(--ds-border-default);
+  --m-border-strong: var(--ds-border-strong);
+  --m-text: var(--ds-text-primary);
+  --m-text-2: var(--ds-text-secondary);
+  --m-text-3: var(--ds-text-muted);
+  --m-text-4: var(--ds-text-faint);
+  --m-accent: var(--ds-accent);
+  --m-on-accent: var(--ds-bg-primary);
+  --m-success: var(--ds-success);
+  --m-warning: var(--ds-warning);
+  --m-danger: var(--ds-error);
+  --m-scrim: var(--ds-scrim);
+  --m-chrome: color-mix(in oklab, var(--ds-bg-primary) 84%, transparent);
+  --m-warning-soft: color-mix(in oklab, var(--ds-warning) 13%, transparent);
+  --m-success-soft: color-mix(in oklab, var(--ds-success) 13%, transparent);
+  --m-danger-soft: color-mix(in oklab, var(--ds-error) 13%, transparent);
+  --m-shadow-float: 0 10px 30px rgba(0, 0, 0, 0.38), 0 1px 3px rgba(0, 0, 0, 0.3);
+  --m-shadow-soft: 0 2px 10px rgba(0, 0, 0, 0.22);
+}
+
+:root[data-theme="light"] {
+  --m-shadow-float: 0 10px 30px rgba(15, 17, 20, 0.12), 0 1px 3px rgba(15, 17, 20, 0.08);
+  --m-shadow-soft: 0 2px 10px rgba(15, 17, 20, 0.07);
+}
+
+@supports not (color: color-mix(in oklab, white, black)) {
+  :root, :root[data-theme="dark"] {
+    --ds-bg-elevated: rgba(33, 33, 33, 0.96);
+    --ds-bg-hover: rgba(255, 255, 255, 0.06);
+    --ds-bg-active: rgba(255, 255, 255, 0.1);
+    --ds-bg-composer: rgba(33, 33, 33, 0.96);
+    --ds-bg-chip: rgba(255, 255, 255, 0.06);
+    --ds-text-secondary: rgba(255, 255, 255, 0.7);
+    --ds-text-muted: rgba(255, 255, 255, 0.52);
+    --ds-text-faint: rgba(255, 255, 255, 0.38);
+    --ds-border-default: rgba(255, 255, 255, 0.08);
+    --ds-border-subtle: rgba(255, 255, 255, 0.05);
+    --ds-border-strong: rgba(255, 255, 255, 0.14);
+    --ds-tile: rgba(255, 255, 255, 0.035);
+    --ds-tile-hover: rgba(255, 255, 255, 0.06);
+    --ds-tile-deep: rgba(255, 255, 255, 0.08);
+    --ds-field-inset-bg: rgba(255, 255, 255, 0.05);
+    --ds-placeholder-ink: rgba(255, 255, 255, 0.42);
+    --ds-scrim: rgba(0, 0, 0, 0.45);
+    --m-chrome: rgba(24, 24, 24, 0.94);
+    --m-warning-soft: rgba(255, 133, 73, 0.13);
+    --m-success-soft: rgba(64, 201, 119, 0.13);
+    --m-danger-soft: rgba(255, 103, 100, 0.13);
+  }
+  :root[data-theme="light"] {
+    --ds-bg-elevated: rgba(255, 255, 255, 0.7);
+    --ds-bg-hover: rgba(26, 28, 31, 0.05);
+    --ds-bg-active: rgba(26, 28, 31, 0.08);
+    --ds-bg-chip: rgba(26, 28, 31, 0.04);
+    --ds-text-secondary: rgba(26, 28, 31, 0.74);
+    --ds-border-default: rgba(26, 28, 31, 0.08);
+    --ds-border-subtle: rgba(26, 28, 31, 0.05);
+    --ds-border-strong: rgba(26, 28, 31, 0.12);
+    --ds-tile: rgba(26, 28, 31, 0.035);
+    --ds-tile-hover: rgba(26, 28, 31, 0.06);
+    --ds-tile-deep: rgba(26, 28, 31, 0.08);
+    --ds-scrim: rgba(26, 28, 31, 0.28);
+    --m-chrome: rgba(255, 255, 255, 0.94);
+    --m-warning-soft: rgba(226, 85, 7, 0.1);
+    --m-success-soft: rgba(0, 162, 64, 0.1);
+    --m-danger-soft: rgba(224, 46, 42, 0.1);
+  }
+}

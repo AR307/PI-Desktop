@@ -5,6 +5,18 @@
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
     <meta name="theme-color" content="#181818" />
     <title>PI Mobile</title>
+    <script>
+      // Apply the saved theme and language before first paint so light mode never flashes dark.
+      (function () {
+        var root = document.documentElement;
+        var theme = null, language = null;
+        try { theme = localStorage.getItem("pi.mobile.theme"); language = localStorage.getItem("pi.mobile.language"); } catch (error) {}
+        var dark = theme === "dark" || (theme !== "light" && window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches);
+        root.dataset.theme = dark ? "dark" : "light";
+        document.querySelector('meta[name="theme-color"]').setAttribute("content", dark ? "#181818" : "#ffffff");
+        root.lang = (language || navigator.language || "en").toLowerCase().indexOf("zh") === 0 ? "zh-CN" : "en";
+      })();
+    </script>
   </head>
   <body>
     <div id="root"></div>

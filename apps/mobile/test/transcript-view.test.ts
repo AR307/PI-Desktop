@@ -16,6 +16,32 @@ function message(id: string, overrides: Partial<UiMessage> = {}): UiMessage {
 }
 
 describe("transcript view projection", () => {
+  it("hides completed empty assistant rows and labels each sender run once", () => {
+    const rows = [
+      message("01", { role: "user", content: "Run the tests" }),
+      message("02", { content: "", status: "complete" }),
+      message("03", { role: "tool", toolName: "Bash", toolCallId: "call-1", content: "" }),
+      message("04", { content: "", status: "streaming" }),
+      message("05", { content: "", status: "error", error: { code: "MODEL_OUTPUT_TRUNCATED", message: "cut" } }),
+      message("06", { content: "Done." }),
+      message("07", { content: "And more." }),
+    ];
+    const entries = buildTranscriptEntries(rows).filter((entry) => entry.kind === "message");
+    expect(entries.map((entry) => entry.message.id)).toEqual(["01", "03", "04", "05", "06", "07"]);
+    expect(entries.map((entry) => entry.grouped)).toEqual([false, false, false, true, true, true]);
+  });
+
+  it("never shows internal model instruction rows", () => {
+    const rows = [
+      message("01", { role: "user", content: "Hello" }),
+      message("02", { role: "system", content: "", modelSystem: { version: 1, beforeMessageId: "01", messageJson: "{}" } }),
+      message("03", { content: "Hi." }),
+      message("04", { role: "system", content: "Model switched" }),
+    ];
+    const entries = buildTranscriptEntries(rows).filter((entry) => entry.kind === "message");
+    expect(entries.map((entry) => entry.message.id)).toEqual(["01", "03", "04"]);
+  });
+
   it("shows the accepted child model, group and native reasoning", () => {
     const task = message("01", { role: "tool", toolName: "Task", toolCallId: "task-1", toolResult: { details: { modelId: "child", groupId: "group-b", thinkingLevel: "max" } } });
     const reply = message("02", { parentToolCallId: "task-1", agentName: "explorer" });

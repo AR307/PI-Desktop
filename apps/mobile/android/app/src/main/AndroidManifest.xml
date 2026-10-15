@@ -26,6 +26,13 @@
 
         </activity>
 
+        <!-- Keeps relay connections reachable while shared desktop work runs; stops with the task. -->
+        <service
+            android:name=".RelayKeepAliveService"
+            android:exported="false"
+            android:foregroundServiceType="remoteMessaging|dataSync"
+            android:stopWithTask="true" />
+
         <provider
             android:name="androidx.core.content.FileProvider"
             android:authorities="${applicationId}.fileprovider"
@@ -41,4 +48,8 @@
 
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_REMOTE_MESSAGING" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
 </manifest>

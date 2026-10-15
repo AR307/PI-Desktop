@@ -1,5 +1,5 @@
 import type { RacpClientState } from "@pi-desktop/racp/client";
-import type { MobileDirectoryPage, MobileGrant, RacpEventEnvelope } from "@pi-desktop/shared";
+import type { MobileAttention, MobileDirectoryPage, MobileGrant, MobileSession, MobileSessionActivity, RacpEventEnvelope } from "@pi-desktop/shared";
 import type { MobileAccount, MobileDevice } from "../services/account";
 import { readDirectory, saveDirectory } from "../services/account-cache";
 import { clearDesktopCache } from "../services/mobile-db";
@@ -17,6 +17,8 @@ type DirectoryObserver = {
   restored(desktopId: string): Promise<void>;
   accountChanged(): void;
   removing(desktopId: string, sessionIds?: string[]): Promise<void>;
+  /** A shared session needs the user, finished, failed or stopped waiting. */
+  attention(desktopId: string, session: MobileSession, attention: MobileAttention): void;
   error(error: unknown): void;
 };
 
@@ -41,6 +43,8 @@ export class MobileDirectories {
   private relays = new Map<string, MobileRelay>();
   private jobs = new Map<string, Promise<void>>();
   private refreshAgain = new Set<string>();
+  /** Pushed session rows per computer; a listing read across a push is read again. */
+  private activityRevisions = new Map<string, number>();
   private generation = 0;
   constructor(private account: MobileAccount, private observer: DirectoryObserver) {}
   relay(id: string) { return this.relays.get(id); }
@@ -126,6 +130,7 @@ export class MobileDirectories {
         },
         directoryChanged: () => { void this.refresh(id).catch((error: unknown) => { if (this.relays.get(id) === relay) this.observer.error(error); }); },
         accountChanged: this.observer.accountChanged,
+        activity: (activity) => { if (this.relays.get(id) === relay) void this.applyActivity(id, relay!, activity).catch((error: unknown) => this.observer.error(error)); },
         unavailable: (reason) => {
           if (this.relays.get(id) !== relay) return;
           this.relays.delete(id);
@@ -163,11 +168,13 @@ export class MobileDirectories {
         this.refreshAgain.delete(id);
         const before = this.rows.get(id);
         if (!before) return;
+        const pushed = this.activityRevisions.get(id) ?? 0;
         const directory = await relay.directory();
         if (this.relays.get(id) !== relay || this.account.session?.account.id !== accountId) return;
-        // A grant/discovery update replaced the row while the request was running.
-        // Read again under the current authorization before committing metadata.
-        if (before !== this.rows.get(id)) { this.refreshAgain.add(id); continue; }
+        // A grant/discovery update replaced the row while the request was running,
+        // or a pushed status is newer than this listing. Read again before
+        // committing so neither authorization nor live status goes backwards.
+        if (before !== this.rows.get(id) || pushed !== (this.activityRevisions.get(id) ?? 0)) { this.refreshAgain.add(id); continue; }
         if (!before.grants.some((grant) => grant.scope.kind === "account")) {
           const permitted = (session: MobileDirectoryPage["sessions"][number]) => before.grants.some((grant) =>
             grant.scope.kind === "session" ? grant.scope.id === session.id : grant.scope.id === session.projectId);
@@ -190,11 +197,35 @@ export class MobileDirectories {
     return job;
   }
 
+  /**
+   * Merge one pushed session row in place. A session the phone has not listed
+   * yet (new, or moved into a shared project) is placed by the authoritative
+   * listing instead; its attention is still delivered because the desktop has
+   * already checked this phone's share for the push.
+   */
+  async applyActivity(id: string, relay: MobileRelay, activity: MobileSessionActivity): Promise<void> {
+    const row = this.rows.get(id);
+    const accountId = this.account.session?.account.id;
+    if (!row || !accountId || activity.desktopDeviceId !== id || this.relays.get(id) !== relay) return;
+    this.activityRevisions.set(id, (this.activityRevisions.get(id) ?? 0) + 1);
+    const index = row.sessions.findIndex((session) => session.id === activity.session.id);
+    let session = activity.session;
+    if (index < 0) void this.refresh(id).catch((error: unknown) => { if (this.relays.get(id) === relay) this.observer.error(error); });
+    else {
+      const previous = row.sessions[index]!;
+      session = { ...previous, ...activity.session, projectId: previous.projectId, ...(previous.archived !== undefined ? { archived: previous.archived } : {}) };
+      row.sessions = row.sessions.map((candidate, position) => position === index ? session : candidate);
+      this.emit();
+    }
+    if (activity.attention) this.observer.attention(id, session, activity.attention);
+    if (index >= 0) await saveDirectory(accountId, row, () => this.rows.get(id) === row && this.relays.get(id) === relay);
+  }
+
   async close(): Promise<void> {
     this.generation++;
     const relays = [...this.relays.values()];
     this.relays.clear(); this.rows.clear(); this.jobs.clear();
-    this.refreshAgain.clear();
+    this.refreshAgain.clear(); this.activityRevisions.clear();
     await Promise.all(relays.map((relay) => relay.close()));
     this.emit();
   }

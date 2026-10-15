@@ -1,6 +1,6 @@
 import { RacpClient, type ClientTransport, type RacpClientState } from "@pi-desktop/racp/client";
-import { APP_VERSION } from "@pi-desktop/shared";
-import type { MobileDirectoryPage, MobileSessionChangesPage, MobileSessionHistoryPage, MobileModelCatalog, MobileSession, MobileSessionConfiguration, MobileSessionSnapshot, MobileSessionState, RacpCursor, RacpEventEnvelope, MobileSessionConfigureInput, UiMessage } from "@pi-desktop/shared";
+import { APP_VERSION, MOBILE_SESSION_ACTIVITY_NOTIFICATION } from "@pi-desktop/shared";
+import type { MobileDirectoryPage, MobileSessionActivity, MobileSessionChangesPage, MobileSessionHistoryPage, MobileModelCatalog, MobileSession, MobileSessionConfiguration, MobileSessionSnapshot, MobileSessionState, RacpCursor, RacpEventEnvelope, MobileSessionConfigureInput, UiMessage } from "@pi-desktop/shared";
 import type { MobileAccount } from "./account";
 import { AccountError } from "./account";
 
@@ -16,8 +16,23 @@ export type RelayObserver = {
   error(error: unknown): void;
   directoryChanged?(): void;
   accountChanged?(): void;
+  /** A shared session's refreshed row, with attention when the user is needed. */
+  activity?(activity: MobileSessionActivity): void;
   unavailable(reason: RelayUnavailableReason): void;
 };
+
+const ATTENTION_KINDS = new Set(["approval", "input", "completed", "failed", "resolved"]);
+
+/** Accept only well-formed pushes; a malformed frame must not reach the inbox or notifications. */
+export function parseSessionActivity(value: unknown): MobileSessionActivity | undefined {
+  if (!value || typeof value !== "object") return undefined;
+  const row = value as Partial<MobileSessionActivity>;
+  const session = row.session as Partial<MobileSession> | undefined;
+  if (typeof row.desktopDeviceId !== "string" || !session || typeof session.id !== "string" || typeof session.title !== "string") return undefined;
+  const attention = row.attention;
+  if (attention !== undefined && (typeof attention !== "object" || typeof attention.id !== "string" || !ATTENTION_KINDS.has(attention.kind) || typeof attention.occurredAt !== "string")) return undefined;
+  return row as MobileSessionActivity;
+}
 
 /**
  * Cached sessions attach with live state and durable changes. Only an uncached
@@ -90,9 +105,13 @@ export class MobileRelay {
         if (event.sequence !== undefined && this.subscriptionId) void this.request("events/ack", { subscriptionId: this.subscriptionId, sequence: event.sequence }).catch(observer.error);
       }, onStateChange: observer.state, onReconnected: async () => { this.subscriptionId = undefined; await observer.restored(); },
       onSubscriptionClosed: () => { void observer.restored().catch(observer.error); },
-      onNotification: (method) => {
+      onNotification: (method, params) => {
         if (method === "mobile.directoryChanged") observer.directoryChanged?.();
         else if (method === "mobile.devicesChanged" || method === "mobile.grantsChanged") observer.accountChanged?.();
+        else if (method === MOBILE_SESSION_ACTIVITY_NOTIFICATION) {
+          const activity = parseSessionActivity(params);
+          if (activity) observer.activity?.(activity);
+        }
       },
     });
   }
@@ -123,7 +142,8 @@ export class MobileRelay {
     } while (cursor);
     return result;
   }
-  watchDirectory() { return this.request("directory/subscribe", {}); }
+  /** Directory metadata plus live session status/attention; older desktops ignore `activity`. */
+  watchDirectory() { return this.request("directory/subscribe", { activity: true }); }
   async detach(): Promise<void> {
     if (!this.subscriptionId) return;
     const subscriptionId = this.subscriptionId;

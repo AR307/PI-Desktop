@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { App as NativeApp } from "@capacitor/app";
-import { createMobileUpdater, MOBILE_WEB_VERSION, type DownloadState, type MobileUpdateManifest } from "../services/mobile-update";
+import { createMobileUpdater, MOBILE_WEB_VERSION, type DownloadState, type MobileUpdateManifest } from "../../services/mobile-update";
 
 const updater = createMobileUpdater();
 const emptyDownload: DownloadState = { status: "idle", downloadedBytes: 0, totalBytes: 0 };

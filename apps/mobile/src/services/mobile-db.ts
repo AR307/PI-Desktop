@@ -1,7 +1,8 @@
 /** App-private, account-scoped storage. Credentials remain in native secure storage. */
 const DB_NAME = "pi.mobile.transcripts";
-const DB_VERSION = 2;
-export const MOBILE_STORES = ["accounts", "directories", "sessions", "messages", "attachments"] as const;
+/** v3 adds the `attention` inbox; earlier stores and their rows are kept as-is. */
+const DB_VERSION = 3;
+export const MOBILE_STORES = ["accounts", "directories", "sessions", "messages", "attachments", "attention"] as const;
 let database: Promise<IDBDatabase> | undefined;
 
 export function mobileDatabase(): Promise<IDBDatabase> {
@@ -17,7 +18,7 @@ export function mobileDatabase(): Promise<IDBDatabase> {
         store.createIndex("accountId", "accountId");
         if (name !== "accounts") store.createIndex("desktop", ["accountId", "desktopDeviceId"]);
         if (name === "messages") store.createIndex("order", ["sessionKey", "createdAt", "id"]);
-        if (name === "messages" || name === "attachments") store.createIndex("sessionKey", "sessionKey");
+        if (name === "messages" || name === "attachments" || name === "attention") store.createIndex("sessionKey", "sessionKey");
       }
     };
     opening.onsuccess = () => {

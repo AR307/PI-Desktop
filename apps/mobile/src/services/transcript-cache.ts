@@ -71,13 +71,14 @@ export class TranscriptCache {
     await done;
   }
 
+  /** Remove one session's history, attachments and attention once it leaves the share. */
   async clear(address: TranscriptAddress): Promise<void> {
     const db = await mobileDatabase();
-    const transaction = db.transaction(["sessions", "messages", "attachments"], "readwrite");
+    const transaction = db.transaction(["sessions", "messages", "attachments", "attention"], "readwrite");
     const done = dbDone(transaction);
     const key = cacheKey(address);
     transaction.objectStore("sessions").delete(key);
-    for (const name of ["messages", "attachments"]) {
+    for (const name of ["messages", "attachments", "attention"]) {
       const cursor = transaction.objectStore(name).index("sessionKey").openKeyCursor(key);
       cursor.onsuccess = () => {
         if (!cursor.result) return;

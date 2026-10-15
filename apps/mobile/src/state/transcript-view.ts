@@ -7,7 +7,8 @@ import { TRANSCRIPT_DISPLAY_TRUNCATION_MARKER, type MobileCompactionMark, type U
  * the grouping and truncation rules stay unit-testable.
  */
 export type TranscriptEntry =
-  | { kind: "message"; message: UiMessage }
+  /** `grouped`: continues a run from the same sender, so it renders without a label. */
+  | { kind: "message"; message: UiMessage; grouped: boolean }
   | { kind: "delegation"; id: string; agentName?: string; configuration: string; running: boolean; fast: boolean; messages: UiMessage[] }
   | { kind: "compaction"; id: string };
 
@@ -36,14 +37,27 @@ export function buildTranscriptEntries(
       group.messages.push(message);
       group.agentName ??= message.agentName;
       if (message.status === "streaming" || message.toolStatus === "running") group.running = true;
-    } else {
-      entries.push({ kind: "message", message });
+    } else if (!isSilentMessage(message)) {
+      const previous = entries.at(-1);
+      const grouped = previous?.kind === "message" && message.role !== "tool" && previous.message.role === message.role && (previous.message.agentName ?? "") === (message.agentName ?? "");
+      entries.push({ kind: "message", message, grouped });
     }
     for (const mark of marks.get(message.id) ?? []) {
       entries.push({ kind: "compaction", id: mark.id });
     }
   }
   return entries;
+}
+
+/**
+ * A row with nothing to read: internal model instructions, or a completed
+ * assistant row whose tool calls render as their own rows. Streaming, failed
+ * and recoverable rows always stay visible.
+ */
+export function isSilentMessage(message: UiMessage): boolean {
+  if (message.role === "system" && message.modelSystem) return true;
+  return message.role === "assistant" && message.status !== "streaming" && message.status !== "error" && !message.error
+    && !message.content.trim() && !message.thinking?.trim() && !message.attachments?.length && !message.imageGeneration;
 }
 
 /** Only accepted Task metadata describes the requested child tier. */

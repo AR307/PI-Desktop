@@ -1,10 +1,12 @@
 import { memo, useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { useTranslation } from "react-i18next";
-import { Bot, Download, ImagePlus, FileText, ChevronDown, LoaderCircle, Scissors, UnfoldVertical } from "lucide-react";
+import { Bot, ChevronDown, CircleCheck, CircleX, Download, FileText, ImagePlus, LoaderCircle, Scissors, UnfoldVertical, X } from "lucide-react";
 import type { ImageGenerationResult, MessageAttachment, UiMessage } from "@pi-desktop/shared";
 import { canContinueResponse, subagentReturnDetails, subagentReturnLabel } from "@pi-desktop/shared";
-import { useMobileStore } from "../state/store";
-import type { MobileController } from "../state/controller";
+import { useMobileStore } from "../../state/store";
+import { latestTopLevelMessageId } from "../../state/selectors";
+import type { MobileController } from "../../state/controller";
 import {
   buildDiffLines,
   delegationFastRequested,
@@ -14,16 +16,28 @@ import {
   messageHasTruncatedContent,
   toolPayloadFull,
   toolPayloadPreview,
-} from "../state/transcript-view";
-import { saveAttachment, type PickedAttachment } from "../services/attachments";
+} from "../../state/transcript-view";
+import { saveAttachment, type PickedAttachment } from "../../services/attachments";
+import { useBackDismiss } from "../../ui/useBackDismiss";
 import { Markdown } from "./Markdown";
-import { useBackDismiss } from "./useBackDismiss";
 
 function imageResult(value: unknown): ImageGenerationResult | undefined {
   if (!value || typeof value !== "object") return undefined;
   const row = value as { kind?: string; images?: unknown; content?: unknown; details?: unknown };
   if (row.kind === "image-generation" && Array.isArray(row.images)) return value as ImageGenerationResult;
   return imageResult(row.details) ?? imageResult(row.content);
+}
+
+/** Full-screen image viewer; Android Back closes it before leaving the conversation. */
+function ImageViewer({ url, name, close }: { url: string; name: string; close(): void }) {
+  const { t } = useTranslation("translation", { keyPrefix: "mobile" });
+  useBackDismiss(true, close);
+  return createPortal(<div className="image-lightbox" onClick={(event) => { if (event.target === event.currentTarget) close(); }}>
+    <section className="image-preview" role="dialog" aria-modal="true" aria-label={t("preview")}>
+      <button type="button" className="icon-button" aria-label={t("close")} onClick={close}><X size={20}/></button>
+      <img src={url} alt={name}/>
+    </section>
+  </div>, document.body);
 }
 
 function AttachmentCard({ controller, messageId, id, attachment, reference }: { controller: MobileController; messageId: string; id: string; attachment: MessageAttachment; reference(file: PickedAttachment): void }) {
@@ -33,7 +47,6 @@ function AttachmentCard({ controller, messageId, id, attachment, reference }: { 
   const [preview, setPreview] = useState(false);
   const alive = useRef(true);
   useEffect(() => { alive.current = true; return () => { alive.current = false; }; }, []);
-  useBackDismiss(preview, () => setPreview(false));
   useEffect(() => () => { if (value) URL.revokeObjectURL(value.url); }, [value]);
   const load = async () => {
     if (value) return value;
@@ -42,9 +55,14 @@ function AttachmentCard({ controller, messageId, id, attachment, reference }: { 
     finally { if (alive.current) setLoading(false); }
   };
   return <div className="attachment-card">
-    {value && attachment.kind === "image" ? <button className="image-preview-button" aria-label={t("preview")} onClick={() => setPreview(true)}><img src={value.url} alt={attachment.name}/></button> : <button className="attachment-preview" disabled={loading} onClick={() => void controller.action(async () => { await load(); })}>{loading ? <LoaderCircle className="spin" size={20}/> : <FileText size={20}/>}<span>{attachment.name}</span></button>}
-    <div className="attachment-actions"><button onClick={() => void controller.action(async () => { const file = await load(); await saveAttachment(file.blob, file.name); })}><Download size={15}/>{t("save")}</button>{attachment.kind === "image" && <button onClick={() => void controller.action(async () => { const file = await load(); reference({ id: crypto.randomUUID(), blob: file.blob, name: file.name, size: file.blob.size, mimeType: file.blob.type }); })}><ImagePlus size={15}/>{t("useReference")}</button>}</div>
-    {preview && value && <div className="modal-scrim"><section className="dialog image-preview" role="dialog" aria-modal="true" aria-label={t("preview")}><button onClick={() => setPreview(false)}>{t("close")}</button><img src={value.url} alt={attachment.name}/></section></div>}
+    {value && attachment.kind === "image"
+      ? <button type="button" className="image-preview-button" aria-label={t("preview")} onClick={() => setPreview(true)}><img src={value.url} alt={attachment.name}/></button>
+      : <button type="button" className="attachment-preview" disabled={loading} onClick={() => void controller.action(async () => { await load(); })}>{loading ? <LoaderCircle className="spin" size={20}/> : <FileText size={20}/>}<span>{attachment.name}</span></button>}
+    <div className="attachment-actions">
+      <button type="button" onClick={() => void controller.action(async () => { const file = await load(); await saveAttachment(file.blob, file.name); })}><Download size={15}/>{t("save")}</button>
+      {attachment.kind === "image" && <button type="button" onClick={() => void controller.action(async () => { const file = await load(); reference({ id: crypto.randomUUID(), blob: file.blob, name: file.name, size: file.blob.size, mimeType: file.blob.type }); })}><ImagePlus size={15}/>{t("useReference")}</button>}
+    </div>
+    {preview && value && <ImageViewer url={value.url} name={attachment.name} close={() => setPreview(false)}/>}
   </div>;
 }
 
@@ -52,7 +70,7 @@ function AttachmentCard({ controller, messageId, id, attachment, reference }: { 
 function LoadFullButton({ controller, messageId }: { controller: MobileController; messageId: string }) {
   const { t } = useTranslation("translation", { keyPrefix: "mobile" });
   const [loading, setLoading] = useState(false);
-  return <button className="load-full" disabled={loading} onClick={() => void controller.action(async () => {
+  return <button type="button" className="load-full" disabled={loading} onClick={() => void controller.action(async () => {
     setLoading(true);
     try { await controller.itemContent(messageId); } finally { setLoading(false); }
   })}>{loading ? <LoaderCircle size={14} className="spin"/> : <UnfoldVertical size={14}/>}{t("loadFull")}</button>;
@@ -74,8 +92,15 @@ function ToolPayload({ label, value }: { label: string; value: unknown }) {
   return <>
     <h4>{label}</h4>
     <pre>{expanded ? toolPayloadFull(value) : preview.text}</pre>
-    {preview.truncated && !expanded && <button className="load-full" onClick={() => setExpanded(true)}><UnfoldVertical size={14}/>{t("showMore")}</button>}
+    {preview.truncated && !expanded && <button type="button" className="load-full" onClick={() => setExpanded(true)}><UnfoldVertical size={14}/>{t("showMore")}</button>}
   </>;
+}
+
+function ToolStatus({ status }: { status: UiMessage["toolStatus"] }) {
+  const { t } = useTranslation("translation", { keyPrefix: "mobile" });
+  if (status === "running") return <span className="tool-status running" role="img" aria-label={t("toolRunning")}><LoaderCircle size={15} className="spin"/></span>;
+  if (status === "error") return <span className="tool-status error" role="img" aria-label={t("toolFailed")}><CircleX size={16}/></span>;
+  return <span className="tool-status success" role="img" aria-label={t("toolSucceeded")}><CircleCheck size={16}/></span>;
 }
 
 function ToolCard({ message, controller }: { message: UiMessage; controller: MobileController }) {
@@ -87,7 +112,10 @@ function ToolCard({ message, controller }: { message: UiMessage; controller: Mob
   useEffect(() => { if (running) setOpen(true); }, [running]);
   const diff = extractToolDiff(message.toolName, message.toolArgs);
   return <details className="tool-card" open={open} onToggle={(event) => setOpen((event.target as HTMLDetailsElement).open)}>
-    <summary><span>{running ? <LoaderCircle size={15} className="spin"/> : <ChevronDown size={15}/>} {returned ? translate(subagentReturnLabel(returned.status)) : message.toolName ?? t("tool")}</span><small>{delegationFastRequested(message) ? `${t("fastRequested")} · ` : ""}{returned ? "ReturnToParent" : message.toolStatus}</small></summary>
+    <summary>
+      <span><ToolStatus status={message.toolStatus}/><span>{returned ? translate(subagentReturnLabel(returned.status)) : message.toolName ?? t("tool")}</span></span>
+      <small>{delegationFastRequested(message) ? `${t("fastRequested")} · ` : ""}{returned ? "ReturnToParent" : ""}<ChevronDown size={15} className={open ? "rotate-180" : undefined}/></small>
+    </summary>
     {open && <>
       {returned && <><p className="muted">{[returned.agent, returned.modelKey ?? returned.modelId, returned.groupId, returned.thinkingLevel].filter(Boolean).join(" · ")}</p><Markdown>{returned.report}</Markdown></>}
       {message.toolName === "Task" && <p className="muted">{delegationConfiguration(message)}</p>}
@@ -102,31 +130,38 @@ function ThinkingCard({ text }: { text: string }) {
   const { t } = useTranslation("translation", { keyPrefix: "mobile" });
   const [open, setOpen] = useState(false);
   return <details className="thinking" open={open} onToggle={(event) => setOpen((event.target as HTMLDetailsElement).open)}>
-    <summary>{t("thinking")}</summary>
+    <summary>{t("thinking")}<ChevronDown size={14} className={open ? "rotate-180" : undefined}/></summary>
     {open && <Markdown>{text}</Markdown>}
   </details>;
 }
 
-export const Message = memo(function Message({ message, controller, reference }: { message: UiMessage; controller: MobileController; reference(file: PickedAttachment): void }) {
+export const Message = memo(function Message({ message, controller, reference, grouped = false }: { message: UiMessage; controller: MobileController; reference(file: PickedAttachment): void; grouped?: boolean }) {
   const { t } = useTranslation("translation", { keyPrefix: "mobile" });
   const { t: translate } = useTranslation();
   const continuationDisabled = useMobileStore(controller, view => view.busy || view.connection !== "connected" || Boolean(view.snapshot?.activeTurn) ||
     Boolean(view.uncertainMessageId) || view.snapshot?.session.capabilities.canPrompt !== true ||
     Boolean(view.snapshot?.pendingApprovals.length) || Boolean(view.snapshot?.pendingInputs.length));
-  const latestId = useMobileStore(controller, view => view.messages.filter(item => !item.parentToolCallId && item.role !== "tool").at(-1)?.id);
+  const latestId = useMobileStore(controller, view => latestTopLevelMessageId(view.messages));
   const generated = message.imageGeneration ?? imageResult(message.toolResult);
   const truncatedBody = isDisplayTruncated(message.content) || isDisplayTruncated(message.thinking);
-  return <article className={`message message-${message.role}`} data-message-id={message.id}>
+  return <article className={`message message-${message.role} ${grouped ? "grouped" : ""}`} data-message-id={message.id}>
     {message.role === "tool" ? <ToolCard message={message} controller={controller}/> : <>
-      <div className="message-label">{message.agentName ?? t(message.role === "user" ? "you" : "assistant")}{message.status === "streaming" && <span className="streaming-caret" aria-hidden="true"/>}</div>
+      {!grouped && <div className="message-label">
+        {message.role !== "user" && <span className="message-avatar" aria-hidden="true">{message.agentName ? <Bot size={13}/> : "π"}</span>}
+        {message.agentName ?? t(message.role === "user" ? "you" : "assistant")}
+        {message.status === "streaming" && <span className="streaming-caret" aria-hidden="true"/>}
+      </div>}
+      {grouped && message.status === "streaming" && !message.content && <span className="streaming-caret" aria-hidden="true"/>}
       {message.thinking && <ThinkingCard text={message.thinking}/>}
       {message.content && <Markdown>{message.content}</Markdown>}
       {truncatedBody && <LoadFullButton controller={controller} messageId={message.id}/>}
     </>}
     {message.attachments?.map((attachment) => <AttachmentCard key={attachment.ref} controller={controller} messageId={message.id} id={attachment.ref} attachment={attachment} reference={reference}/>)}
-    {generated && <section className="image-result"><p className="muted">{t("generatedWith")} {generated.model.displayName} · {generated.model.groupName}</p>{generated.images.map((image) => image.attachment ? <AttachmentCard key={image.id} controller={controller} messageId={message.id} id={image.id} attachment={image.attachment} reference={reference}/> : <div key={image.id} className="image-pending"><p>{image.error}</p><button onClick={() => void controller.retryImage(message.id, image.id)}>{t("retryDownload")}</button></div>)}</section>}
+    {generated && <section className="image-result"><p className="muted">{t("generatedWith")} {generated.model.displayName} · {generated.model.groupName}</p>{generated.images.map((image) => image.attachment
+      ? <AttachmentCard key={image.id} controller={controller} messageId={message.id} id={image.id} attachment={image.attachment} reference={reference}/>
+      : <div key={image.id} className="image-pending"><p>{image.error}</p><button type="button" onClick={() => void controller.retryImage(message.id, image.id)}>{t("retryDownload")}</button></div>)}</section>}
     {(message.error || generated?.error) && <p className="error-text">{message.error ? translate(`errors.${message.error.code}`, { defaultValue: message.error.message }) : generated?.error}</p>}
-    {latestId === message.id && canContinueResponse(message) && <button disabled={continuationDisabled} onClick={() => void controller.continueResponse(message.id, translate("chat.continueCurrentTaskPrompt"))}>{translate("errors.action.continue")}</button>}
+    {latestId === message.id && canContinueResponse(message) && <button type="button" disabled={continuationDisabled} onClick={() => void controller.continueResponse(message.id, translate("chat.continueCurrentTaskPrompt"))}>{translate("errors.action.continue")}</button>}
   </article>;
 });
 
