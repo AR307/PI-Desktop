@@ -25,6 +25,7 @@
     "test:e2e:storage": "node scripts/e2e-storage-settings.mjs && node scripts/e2e-storage-migration.mjs && node scripts/e2e-storage-bootstrap.mjs && node scripts/e2e-storage-directory.mjs && node scripts/e2e-storage-files.mjs && node scripts/e2e-storage-backup-lock.mjs",
     "test:e2e:asktool-card": "node scripts/e2e-asktool-card.mjs",
     "test:e2e:worktree-live": "node scripts/e2e-worktree-live.mjs",
+    "test:e2e:question-notification": "node scripts/e2e-question-notification.mjs",
     "test:e2e:scheduled": "node scripts/e2e-scheduled.mjs",
     "test:e2e:keep-awake": "node scripts/e2e-keep-awake.mjs",
     "test:e2e:live-voice": "node scripts/e2e-live-voice.mjs",

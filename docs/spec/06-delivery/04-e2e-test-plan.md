@@ -11096,6 +11096,15 @@ This test plan spec is accepted when:
   text never replaces that title. Background sessions retain the existing
   native notification policy. Exactly one soft chime plays for the ask; the
   toast and native banner do not double it.
+  Clicking the question toast (including from New task or Settings) opens its
+  originating conversation and project, shows the pending card, and permits
+  submitting an answer for that request. Enter and Space activate the focused
+  message button. Dismiss and text selection do not navigate. Identical prompt
+  text from two sessions preserves two independent navigation targets; ordinary
+  info toasts stay non-interactive. A history-read failure produces a visible
+  error and leaves both the original reminder and question pending. Retrying
+  from that same reminder after the read recovers opens the correct chat and
+  dismisses the reminder only after navigation succeeds.
 - **Specs linked**: `03-runtime/17-asktool-questions.md`,
   `04-ux/11-asktool-question-card.md`, ADR 0077
 - **Acceptance**: E (interactive tool output), C (inline card)
@@ -11103,6 +11112,9 @@ This test plan spec is accepted when:
 - **Automated coverage**: `pnpm test:e2e:asktool-card` mounts the production
   component in Electron and covers long-prompt scrolling, keyboard reachability,
   visible header actions, and scroll reset on Next.
+  `pnpm test:e2e:question-notification` exercises real renderer event handling,
+  toast creation, session/project navigation, and answer submission in isolated
+  Electron with only the IPC boundary stubbed, plus native keyboard input.
 - **Status**: Partially automated (component paths and long-prompt behavior are
   covered; full application journey pending)
 
