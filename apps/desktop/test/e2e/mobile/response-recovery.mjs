@@ -5,6 +5,7 @@ import { resolve, join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { execFileSync } from "node:child_process";
 import { mobileFixture } from "./fixture.mjs";
+import { changeAppearance, closeConversation, openSharedSession } from "./phone-ui.mjs";
 
 const require = createRequire(import.meta.url);
 const { _electron, chromium } = require(process.env.PI_TEST_PLAYWRIGHT ?? "playwright");
@@ -98,7 +99,7 @@ try {
   await phone.locator('.login-form button[type="submit"]').click();
   await phone.getByRole("button", { name: "Pair desktop", exact: true }).click();
   await phone.getByLabel("8-digit pairing code").fill(code); await phone.getByRole("button", { name: "Pair and sync", exact: true }).click();
-  await phone.locator(".grant-open").filter({ hasText: "Response recovery QA" }).click();
+  await phone.locator(".session-card").filter({ hasText: "Response recovery QA" }).click();
   await page.locator('[data-action="close-mobile-pairing"]').click();
   async function send(step) {
     steps = step === "empty" ? ["empty", "empty"] : [step]; const before = requests.length;
@@ -156,10 +157,9 @@ try {
   check("user Stop retains cancellation without replay", requests.length === beforeStop + 1 && (await view()).messages.filter(m => m.role === "assistant").at(-1).status === "aborted");
   await shot("stopped");
   await send("thinking");
-  await phone.getByRole("button", { name: "Account and appearance", exact: true }).click();
-  await phone.getByRole("button", { name: "Light", exact: true }).click();
-  await phone.getByLabel("Language", { exact: true }).selectOption("zh-CN");
-  await phone.keyboard.press("Escape");
+  await closeConversation(phone);
+  await changeAppearance(phone, { theme: "Light", language: "zh-CN" });
+  await openSharedSession(phone, "Response recovery QA");
   await phone.getByRole("button", { name: "继续", exact: true }).last().waitFor();
   await invoke("settings/set", { ...await invoke("settings/get"), theme: "light", language: "zh-CN" });
   await page.reload(); await page.locator(".app-shell:not(.app-shell-boot)").waitFor();

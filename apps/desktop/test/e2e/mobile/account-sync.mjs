@@ -5,6 +5,7 @@ import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { execFileSync } from "node:child_process";
 import { mobileFixture } from "./fixture.mjs";
+import { openTab } from "./phone-ui.mjs";
 import { accountAndroid } from "./account-android.mjs";
 import { syncFailureAcceptance } from "./sync-failure.mjs";
 
@@ -165,15 +166,14 @@ async function openPhone() {
   await phone.locator('[name="username"]').fill("mobileqa");
   await phone.locator('[name="password"]').fill("mobile-pass");
   await phone.locator('.login-form button[type="submit"]').click();
-  await phone.getByRole("heading", { name: "Shared work", exact: true }).waitFor();
+  await phone.getByRole("heading", { name: /^(Sessions|会话)$/ }).waitFor();
 }
 async function appearance(language, theme) {
-  await phone.getByRole("button", { name: /^(Account and appearance|账号与外观)$/ }).click();
+  await openTab(phone, /^(Me|我的)$/);
   await phone.getByLabel(/^(Language|语言)$/).selectOption("en");
   await phone.getByRole("group", { name: "Theme", exact: true }).getByRole("button", { name: theme, exact: true }).click();
   await phone.getByLabel("Language", { exact: true }).selectOption(language);
-  await phone.getByRole("dialog").getByRole("button", { name: /^(Close|关闭)$/ }).click();
-  await phone.locator(".surface").waitFor({ state: "hidden" });
+  await openTab(phone, /^(Sessions|会话)$/);
 }
 async function offline(enabled) {
   if (android) await android.offline(enabled);
@@ -186,9 +186,8 @@ async function restartPhone() {
 }
 async function openSession(device) {
   await phone.locator(".grant-open").filter({ hasText: device.name }).click();
-  await until(async () => (await view()).desktopId === device.deviceId, "computer opened");
-  if ((await view()).grant?.scope.kind !== "session") await phone.locator(".session-card").filter({ hasText: `${device.name} history` }).click();
-  await until(async () => (await view()).selectedId === device.session.id && !(await view()).loading, "history opened");
+  await phone.locator(".session-card").filter({ hasText: `${device.name} history` }).click();
+  await until(async () => (await view()).desktopId === device.deviceId && (await view()).selectedId === device.session.id && !(await view()).loading, "history opened");
 }
 async function backHome() {
   if ((await view()).selectedId) {
@@ -376,7 +375,7 @@ try {
   check("session pairing preserves the separate account grant", Boolean(accountGrant && sessionGrant?.scope.id === first.session.id));
   const broadDirectory = await phone.evaluate(async ({ accountId, desktopDeviceId }) => {
     const db = await new Promise((resolve, reject) => {
-      const request = indexedDB.open("pi.mobile.transcripts", 2);
+      const request = indexedDB.open("pi.mobile.transcripts");
       request.onsuccess = () => resolve(request.result); request.onerror = () => reject(request.error);
     });
     try {
@@ -408,7 +407,7 @@ try {
   // directory write was replaced. Keep the authoritative saved grants intact.
   await phone.evaluate(async directory => {
     const db = await new Promise((resolve, reject) => {
-      const request = indexedDB.open("pi.mobile.transcripts", 2);
+      const request = indexedDB.open("pi.mobile.transcripts");
       request.onsuccess = () => resolve(request.result); request.onerror = () => reject(request.error);
     });
     try {

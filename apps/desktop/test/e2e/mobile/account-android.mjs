@@ -4,6 +4,7 @@ import { promisify } from "node:util";
 import { writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { createRequire } from "node:module";
+import { presetAppearance } from "./phone-ui.mjs";
 
 const runFile = promisify(execFile);
 
@@ -57,11 +58,8 @@ export function accountAndroid({ root, output, fixture, playwright, check, until
       await launch(); await connect();
       check("actual Capacitor Android runtime", await phone.evaluate(() => window.Capacitor.isNativePlatform()));
       await until(async () => !(await phone.evaluate(() => window.__PI_MOBILE_CONTROLLER__.getSnapshot())).loading, "Android account restored");
-      await phone.getByRole("button", { name: /^(Account and appearance|账号与外观)$/ }).click();
-      await phone.getByLabel(/^(Language|语言)$/).selectOption("en");
-      await phone.getByRole("group", { name: "Theme", exact: true }).getByRole("button", { name: "Dark", exact: true }).click();
-      await phone.getByRole("dialog").getByRole("button", { name: "Close", exact: true }).click();
-      await phone.locator(".surface").waitFor({ state: "hidden" });
+      await presetAppearance(phone, { language: "en", theme: "dark" });
+      await until(async () => !(await phone.evaluate(() => window.__PI_MOBILE_CONTROLLER__.getSnapshot())).loading, "Android account restored after preferences");
       if (await phone.evaluate(() => window.__PI_MOBILE_CONTROLLER__.getSnapshot().signedIn)) {
         await phone.evaluate(() => window.__PI_MOBILE_CONTROLLER__.logout());
       }

@@ -5,6 +5,7 @@ import { promisify } from "node:util";
 import { mkdir, writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { mobileFixture } from "./fixture.mjs";
+import { changeAppearance, closeConversation, openSharedSession, openTab, presetAppearance } from "./phone-ui.mjs";
 
 const require = createRequire(import.meta.url);
 const { _electron, _android } = require(process.env.PI_TEST_PLAYWRIGHT ?? "playwright");
@@ -60,12 +61,16 @@ async function screenshot(name) {
   await writeFile(join(output, `${name}.png`), stdout);
   check(`${name}: no horizontal overflow`, await phone.evaluate(() => document.documentElement.scrollWidth <= innerWidth));
 }
-async function tapNative(text, resourceId) {
-  const xml = await until(async () => {
+/** Wait for a native (non-WebView) element by its text or description. */
+async function findNative(text, resourceId) {
+  return until(async () => {
     await adb("shell", "uiautomator", "dump", "/sdcard/pi-mobile-window.xml");
     const result = (await adb("shell", "cat", "/sdcard/pi-mobile-window.xml")).stdout;
     return result.match(/<node\b[^>]*>/g)?.find((node) => (!resourceId || node.includes(`resource-id="${resourceId}"`)) && (node.includes(`text="${text}"`) || node.includes(`content-desc="${text}"`)));
   }, `native control ${text}`, 20_000);
+}
+async function tapNative(text, resourceId) {
+  const xml = await findNative(text, resourceId);
   const bounds = xml.match(/bounds="\[(\d+),(\d+)\]\[(\d+),(\d+)\]"/);
   assert(bounds, `Native bounds for ${text}`);
   await adb("shell", "input", "tap", String(Math.floor((+bounds[1] + +bounds[3]) / 2)), String(Math.floor((+bounds[2] + +bounds[4]) / 2)));
@@ -81,6 +86,9 @@ try {
   const port = new URL(fixture.origin).port;
   await adb("reverse", `tcp:${port}`, `tcp:${port}`);
   await adb("install", "-r", join(root, "apps/mobile/android/app/build/outputs/apk/debug/app-debug.apk"));
+  // Every run starts from Android's first-request notification permission state.
+  await adb("shell", "pm", "revoke", appId, "android.permission.POST_NOTIFICATIONS").catch(() => undefined);
+  await adb("shell", "pm", "clear-permission-flags", appId, "android.permission.POST_NOTIFICATIONS", "user-set", "user-fixed").catch(() => undefined);
   const env = { ...process.env, PI_DESKTOP_DATA_DIR: join(output, "desktop-profile"), PI_DESKTOP_HOST_BIN: join(root, "target/debug/pi-desktop-host-core.exe"), PI_DESKTOP_MIRRORCODING_TEST_ORIGIN: fixture.origin };
   delete env.ELECTRON_RUN_AS_NODE;
   desktop = await _electron.launch({ executablePath: require("electron"), args: [join(root, "apps/desktop"), `--user-data-dir=${join(output, "electron-profile")}`], env, timeout: 60_000 });
@@ -101,12 +109,8 @@ try {
   // Each acceptance launch uses a separate fixture. Clear stale test login through
   // the application's account workflow, never Android data or native storage APIs.
   await until(async () => !(await view()).loading, "initial account load");
-  await phone.getByRole("button", { name: /^(Account and appearance|账号与外观)$/ }).click();
-  await phone.getByLabel(/^(Language|语言)$/).selectOption("en");
-  await phone.getByRole("group", { name: "Theme", exact: true }).getByRole("button", { name: "Light", exact: true }).click();
-  await phone.getByRole("dialog").getByRole("button", { name: "Close", exact: true }).click();
-  // The closing native dialog keeps the login fields inert until its animation ends.
-  await phone.locator(".surface").waitFor({ state: "hidden" });
+  await presetAppearance(phone, { language: "en", theme: "light" });
+  await until(async () => !(await view()).loading, "account load after preferences");
   if ((await view()).signedIn) await phone.evaluate(() => window.__PI_MOBILE_CONTROLLER__.logout());
   await phone.locator('[name="username"]').fill("mobileqa");
   await phone.locator('[name="password"]').fill("mobile-pass");
@@ -118,7 +122,7 @@ try {
   await until(async () => Date.now() >= (await view()).retryAt, "native login cooldown");
   await phone.locator('[name="password"]').fill("mobile-pass");
   await phone.locator(".login-form button[type=submit]").click();
-  await phone.getByRole("heading", { name: "Shared work", exact: true }).waitFor();
+  await phone.getByRole("heading", { name: "Sessions", exact: true }).waitFor();
   check("native password login and secure credential write");
   check("native login uses MC-declared RSA-OAEP-256 without plaintext", fixture.control.encryptedLogins === 1);
   await phone.getByRole("button", { name: "Pair desktop", exact: true }).click();
@@ -132,7 +136,7 @@ try {
   await phone.getByRole("button", { name: "Pair desktop", exact: true }).click();
   await phone.getByLabel("8-digit pairing code").fill(code);
   await phone.getByRole("button", { name: "Pair and sync", exact: true }).click();
-  await phone.locator(".grant-open").filter({ hasText: "Android acceptance" }).click();
+  await phone.locator(".session-card").filter({ hasText: "Android acceptance" }).click();
   await phone.locator(".composer textarea").waitFor();
   await screenshot("android-paired-light-en");
   await phone.locator(".conversation-controls .model-chip").click();
@@ -149,6 +153,35 @@ try {
   check("Android sends through MC relay to desktop and receives reply");
   check("Android Ultra persists and sends only native reasoning", (await invoke("session/get", { id: session.id })).session.ultra === true && fixture.chats.some(body => body.reasoning_effort === "high") && fixture.chats.every(body => body.reasoning_effort !== "ultra"));
   check("Android Fast setting persists and reaches actual request", (await invoke("session/get", { id: session.id })).session.fast === true && fixture.chats.some((body) => body.service_tier === "fast"));
+  // Attention on the real device: the permission prompt, the background
+  // keep-alive service, a posted system notification and its tap route.
+  await closeConversation(phone);
+  await openTab(phone, "Activity");
+  await phone.getByRole("button", { name: "Turn on", exact: true }).click();
+  await tapNative("Allow", "com.android.permissioncontroller:id/permission_allow_button");
+  await until(async () => (await view()).notifications.permission === "granted", "notification permission granted");
+  check("Activity banner requests Android notification permission");
+  await openSharedSession(phone, "Android acceptance");
+  await send("mobile-slow finish while the phone is in the background");
+  // The phone's own send counts as work before the desktop row reports it.
+  await until(async () => (await view()).notifications.activeTasks > 0, "keep-alive wanted for the sent prompt");
+  await adb("shell", "input", "keyevent", "3");
+  const keepAlive = async () => (await adb("shell", "dumpsys", "activity", "services", `${appId}/.RelayKeepAliveService`)).stdout;
+  await until(async () => /isForeground=true/.test(await keepAlive()), "keep-alive foreground service", 20_000);
+  await writeFile(join(output, "android-keep-alive-service.txt"), await keepAlive());
+  check("leaving the app right after sending starts the keep-alive foreground service");
+  fixture.releaseChats();
+  const posted = async () => (await adb("shell", "dumpsys", "notification", "--noredact")).stdout;
+  await until(async () => (await posted()).includes("Done · Android acceptance"), "background completion notification");
+  await writeFile(join(output, "android-notifications.txt"), await posted());
+  check("background completion posts an Android notification");
+  await adb("shell", "cmd", "statusbar", "expand-notifications");
+  await findNative("Done · Android acceptance");
+  await screenshot("android-notification-shade");
+  await tapNative("Done · Android acceptance");
+  await phone.locator(".conversation-heading strong").filter({ hasText: "Android acceptance" }).waitFor();
+  await until(async () => !/isForeground=true/.test(await keepAlive()), "keep-alive stops in the foreground", 20_000);
+  check("notification tap opens the conversation and the foreground stops keep-alive", (await view()).selectedId === session.id);
   // A trusted pointer click focuses the actual WebView input and opens the IME.
   await phone.locator(".composer textarea").click();
   await until(async () => /mInputShown=true|isInputViewShown=true/.test((await adb("shell", "dumpsys", "input_method")).stdout), "Android soft keyboard");
@@ -206,17 +239,17 @@ try {
   closing = true; await device.close(); device = undefined;
   await adb("shell", "am", "force-stop", appId);
   await adb("shell", "am", "start", "-n", `${appId}/.MainActivity`); await connectWebView(); closing = false;
-  await phone.locator(".grant-open").filter({ hasText: "Android acceptance" }).waitFor();
+  await phone.locator(".session-card").filter({ hasText: "Android acceptance" }).waitFor();
   check("Android process restart restores encrypted login and pairing");
-  await phone.locator(".grant-open").first().click();
+  await phone.locator(".session-card").filter({ hasText: "Android acceptance" }).click();
   await phone.getByText("Continuation sent from the actual Android APK", { exact: true }).waitFor();
   check("Android restart reloads durable desktop history");
   await until(async () => (await view()).snapshot?.session.id === session.id, "restored authoritative session snapshot");
   check("Android restart restores remembered chat Ultra", (await view()).snapshot.session.configuration.chat.ultra === true);
-  await phone.getByRole("button", { name: "Account and appearance", exact: true }).click();
-  await phone.getByRole("group", { name: "Theme", exact: true }).getByRole("button", { name: "Dark", exact: true }).click();
-  await phone.getByLabel("Language", { exact: true }).selectOption("zh-CN");
-  await phone.getByRole("dialog").getByRole("button", { name: "关闭", exact: true }).click();
+  await closeConversation(phone);
+  await changeAppearance(phone, { theme: "Dark", language: "zh-CN" });
+  await screenshot("android-sessions-dark-zh");
+  await openSharedSession(phone, "Android acceptance");
   await screenshot("android-conversation-dark-zh");
   check("no native WebView exceptions", errors.length === 0);
 } catch (error) {

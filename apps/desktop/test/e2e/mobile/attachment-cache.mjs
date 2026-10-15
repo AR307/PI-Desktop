@@ -107,7 +107,7 @@ try {
   await phone.locator('[name="username"]').fill("mobileqa");
   await phone.locator('[name="password"]').fill("mobile-pass");
   await phone.locator('.login-form button[type="submit"]').click();
-  await phone.getByRole("heading", { name: "Shared work", exact: true }).waitFor();
+  await phone.getByRole("heading", { name: "Sessions", exact: true }).waitFor();
   await phone.getByRole("button", { name: "Pair desktop", exact: true }).click();
   await phone.getByLabel("8-digit pairing code").fill(code);
   await phone.getByRole("button", { name: "Pair and sync", exact: true }).click();

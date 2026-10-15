@@ -109,19 +109,21 @@ try {
   await until(async () => phone.evaluate(() => Date.now() >= window.__PI_MOBILE_CONTROLLER__.getSnapshot().retryAt), "phone cooldown");
   await phone.locator('[name="password"]').fill("mobile-pass");
   await phone.locator(".login-form button[type=submit]").click();
-  await phone.getByRole("heading", { name: "Shared work", exact: true }).waitFor();
-  check("phone saves the device secret with its login", typeof JSON.parse(savedCredentials).deviceSecret === "string");
+  await phone.getByRole("heading", { name: "Sessions", exact: true }).waitFor();
+  // The signed-in list renders from cache while device registration completes.
+  await until(() => savedCredentials && typeof JSON.parse(savedCredentials).deviceSecret === "string", "device secret saved");
+  check("phone saves the device secret with its login");
   await phone.getByRole("button", { name: "Pair desktop", exact: true }).click();
   await phone.getByLabel("8-digit pairing code").fill(code);
   await phone.getByRole("button", { name: "Pair and sync", exact: true }).click();
-  await phone.locator(".grant-open").filter({ hasText: shared.title }).waitFor();
+  await phone.locator(".session-card").filter({ hasText: shared.title }).waitFor();
   await page.getByText("Device paired. Your phone can now view and continue this work.", { exact: true }).waitFor();
   check("visible desktop and phone interfaces pair the same session");
   await page.locator('[data-action="close-mobile-pairing"]').click();
   await page.getByRole("dialog").waitFor({ state: "hidden" });
   const beforeRestart = registrations();
   await phone.reload();
-  await phone.locator(".grant-open").filter({ hasText: shared.title }).waitFor();
+  await phone.locator(".session-card").filter({ hasText: shared.title }).waitFor();
   await closeDesktop(); await openDesktop();
   await until(async () => (await invoke("mobile-sync/status")).status === "online", "restored desktop relay");
   check("both clients restart without another device registration", registrations() === beforeRestart);
@@ -129,7 +131,7 @@ try {
   await phone.getByRole("button", { name: "Refresh", exact: true }).click();
   await until(() => fixture.control.mobileRefreshes === 1, "phone refresh");
   check("rotated mobile tokens retain installation secret", typeof JSON.parse(savedCredentials).deviceSecret === "string");
-  await phone.locator(".grant-open").filter({ hasText: shared.title }).click();
+  await phone.locator(".session-card").filter({ hasText: shared.title }).click();
   await phone.getByText("Open pelican bicycle animation", { exact: true }).waitFor();
   check("phone restores the shared history after restart");
   await phone.screenshot({ path: join(output, "phone-restored-history.png") });

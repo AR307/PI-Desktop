@@ -4,6 +4,7 @@ import { execFile, spawn } from "node:child_process";
 import { promisify } from "node:util";
 import { mkdir, writeFile, copyFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
+import { closeConversation, openTab } from "./phone-ui.mjs";
 
 // Package the official-origin preview APK after the controlled native suite.
 // The launch probe stops at the login screen and never submits to the real MC.
@@ -42,8 +43,9 @@ try {
   await adb("shell", "am", "start", "-n", `${appId}/.MainActivity`);
   const acceptancePage = await connect();
   assert(await acceptancePage.evaluate(() => Boolean(window.__PI_MOBILE_CONTROLLER__)), "existing app is the controlled acceptance package");
-  await acceptancePage.getByRole("button", { name: /^(Account and appearance|账号与外观)$/ }).click();
-  await acceptancePage.getByRole("dialog").getByRole("button", { name: /^(Sign out|退出登录)$/ }).click();
+  if (await acceptancePage.locator(".conversation").count()) await closeConversation(acceptancePage);
+  await openTab(acceptancePage, /^(Me|我的)$/);
+  await acceptancePage.getByRole("button", { name: /^(Sign out|退出登录)$/ }).click();
   await acceptancePage.getByRole("dialog", { name: /^(Sign out|退出登录)$/ }).getByRole("button", { name: /^(Sign out|退出登录)$/ }).click();
   await acceptancePage.locator('[name="username"]').waitFor({ timeout: 40_000 });
   await device.close(); device = undefined;

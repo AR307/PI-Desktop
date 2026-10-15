@@ -65,6 +65,26 @@ $env:PI_TEST_OUTPUT = Join-Path $PWD ('.artifacts/mobile-' + (Get-Date -Format '
 node apps/desktop/test/e2e/mobile/acceptance.mjs
 ```
 
+`attention.mjs` is the session attention flow (ADR mobile-attention-push). The
+phone pairs one of two desktop sessions. While the phone is visible, an approval
+shows as a toast, a Needs you row and an Activity badge, and no system
+notification is raised. With the phone hidden, it checks smart keep-alive, the
+completion, failure and question notifications (channel, tag, route and
+computer), and that an answer given on the desktop withdraws the notification.
+It also checks that a tap opens the conversation, that the unshared session
+stays silent, and that revocation stops delivery and clears the inbox. The
+acceptance hook replaces the native notification bridge with a recorder
+(`window.__PI_MOBILE_TEST__.notifications`), so Android channels, permission
+prompts and the foreground service are covered only by the native suites.
+
+```powershell
+node apps/desktop/test/e2e/mobile/attention.mjs
+```
+
+`phone-ui.mjs` holds the navigation helpers the suites share: opening a
+shared session from Sessions, returning from a conversation, switching tabs,
+and setting theme and language before or after sign-in.
+
 The harness starts its own fixture and mobile Vite server, launches an Electron
 window, and opens mobile UI in headless Chromium at phone-sized viewports. It
 injects an in-memory credential store through the acceptance-only browser hook;
@@ -117,6 +137,15 @@ pairing, Android Back, continuation and streamed replies, soft-keyboard layout,
 background/foreground recovery with a draft, the system file picker, reference
 image upload, image generation/preview, the Android save/share sheet, reuse of a
 generated image, and process restart with restored history and pairing.
+
+Session attention is also checked natively. The suite grants notification
+permission from the Activity banner through the system dialog, sends a slow
+task, and leaves the app straight away. Through `dumpsys`, it then verifies that
+the keep-alive foreground service is running and that the completion
+notification is posted. Tapping the notification opens the conversation, and
+the service stops once the app is back in the foreground. Each run resets
+`POST_NOTIFICATIONS` to its first-request state with `pm revoke` and
+`pm clear-permission-flags`. The `dumpsys` output is kept with the artifacts.
 
 The APK at `apps/mobile/android/app/build/outputs/apk/debug/app-debug.apk` after
 this run is an acceptance build tied to the temporary fixture. Rebuild normal

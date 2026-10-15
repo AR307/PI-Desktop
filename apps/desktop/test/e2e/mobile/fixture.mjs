@@ -85,6 +85,10 @@ export async function mobileFixture({ port = 0, messageHandler, encryptedLogin =
         const lastUser = body.messages.findLastIndex((message) => message.role === "user");
         const turn = body.messages.slice(lastUser), prompt = JSON.stringify(turn[0]);
         chatRequests.push({ prompt, group: req.headers["x-mirrorcoding-group"] });
+        if (prompt.includes("mobile-fail")) {
+          res.writeHead(400, { "Content-Type": "application/json" }).end(JSON.stringify({ error: { message: "Controlled upstream failure", type: "invalid_request_error", code: "mobile_fixture_failure" } }));
+          return;
+        }
         const toolResults = turn.filter((message) => message.role === "tool");
         const chunk = (delta, finish_reason = null) => `data: ${JSON.stringify({ id: `mobile-chat-${chats.length}`, object: "chat.completion.chunk", created: 1, model: body.model, choices: [{ index: 0, delta, finish_reason }] })}\n\n`;
         res.writeHead(200, { "Content-Type": "text/event-stream" });

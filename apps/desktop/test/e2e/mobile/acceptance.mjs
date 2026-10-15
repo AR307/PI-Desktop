@@ -8,6 +8,7 @@ import { randomUUID } from "node:crypto";
 import { execFileSync } from "node:child_process";
 import { HostProcess } from "@pi-desktop/host-runtime";
 import { mobileFixture } from "./fixture.mjs";
+import { closeConversation, openSharedSession, openTab } from "./phone-ui.mjs";
 
 const require = createRequire(import.meta.url);
 const { _electron, chromium } = require(process.env.PI_TEST_PLAYWRIGHT ?? "playwright");
@@ -72,7 +73,7 @@ async function loginPhone(username = "mobileqa") {
   await phone.locator('[name="username"]').fill(username);
   await phone.locator('[name="password"]').fill("mobile-pass");
   await phone.locator(".login-form button[type=submit]").click();
-  await phone.getByRole("heading", { name: "Shared work", exact: true }).waitFor();
+  await phone.getByRole("heading", { name: "Sessions", exact: true }).waitFor();
 }
 async function pairPhone(code) {
   await phone.getByRole("button", { name: "Pair desktop", exact: true }).click();
@@ -176,10 +177,10 @@ try {
   await until(() => fixture.control.mobileRefreshes === 1, "mobile expired access renewed");
   await until(async () => !(await view()).busy, "renewed work list loaded");
   check("concurrent work-list requests refresh mobile access once", !(await view()).error && (await view()).grants.length === 1);
-  await phone.locator(".grant-open").click();
+  await openSharedSession(phone, "Mobile shared session");
   await phone.getByText("History created on the desktop before pairing", { exact: true }).waitFor();
   check("phone loads existing desktop history", (await view()).sessions.length === 1);
-  check("conversation header identifies the shared session and online desktop", await phone.locator(".app-heading strong").textContent() === "Mobile shared session" && (await phone.locator(".app-heading small").textContent()).includes("Online"));
+  check("conversation header identifies the shared session and online desktop", await phone.locator(".conversation-heading strong").textContent() === "Mobile shared session" && (await phone.locator(".conversation-heading small").textContent()).includes("Online"));
   check("phone initially bounds a long conversation", (await view()).snapshot.hasMoreHistory === true && !(await view()).messages.some((message) => message.content === "Historical message 00"));
   await editor.fill("Desktop event during mobile history paging"); await editor.press("Enter");
   // Scrolling to the sentinel loads the page before its optional button can be clicked.
@@ -202,10 +203,12 @@ try {
   await until(async () => !(await view()).busy && !(await view()).snapshot?.activeTurn, "phone turn completed");
   check("phone continuation reaches desktop and retains reasoning", fixture.chats.some((body) => body.reasoning_effort === "medium"));
   await screenshot("mobile-conversation-dark-en");
-  await phone.getByRole("button", { name: "Account and appearance", exact: true }).click();
-  await phone.getByRole("heading", { name: "Account", exact: true }).waitFor();
-  await screenshot("mobile-account-sheet-dark-en");
-  await phone.keyboard.press("Escape"); await phone.getByRole("heading", { name: "Account", exact: true }).waitFor({ state: "hidden" });
+  await closeConversation(phone);
+  await screenshot("mobile-sessions-dark-en");
+  await openTab(phone, "Me");
+  await phone.getByRole("heading", { name: "Me", exact: true }).waitFor();
+  await screenshot("mobile-me-dark-en");
+  await openSharedSession(phone, "Mobile shared session");
   await mobileSend("mobile-slow streaming task");
   await phone.getByText("Working on the computer.", { exact: false }).waitFor();
   await phone.locator(".conversation-controls .model-chip").click();
@@ -436,10 +439,11 @@ try {
   await invoke("session/configure", shared.id, { mode: "agent", fast: true });
   await closeDesktop();
   await phone.getByRole("button", { name: "Refresh", exact: true }).click();
-  await phone.getByText("Desktop offline", { exact: false }).first().waitFor();
+  await phone.getByText("The computer is offline", { exact: false }).first().waitFor();
   check("desktop shutdown reports offline without queueing requests");
   await openDesktop(); await until(() => fixture.desktops.size > 0, "desktop relay restart");
-  await phone.getByRole("button", { name: "Refresh", exact: true }).click(); await phone.locator(".grant-open").first().click();
+  await phone.getByRole("button", { name: "Refresh", exact: true }).click(); await until(async () => (await view()).directories[0]?.connection === "connected", "desktop online again");
+  await openSharedSession(phone, "Mobile shared session");
   await phone.locator(".image-result .attachment-preview").first().click();
   await phone.locator(".image-result img").first().waitFor();
   check("desktop restart retains shared image history");
@@ -467,15 +471,16 @@ try {
   const projectCode = (await page.locator('[data-testid="mobile-pairing-code"]').textContent()).trim();
   await pairPhone(projectCode); await phone.locator(".grant-open").click();
   await phone.getByRole("button").filter({ hasText: "Existing project session" }).waitFor();
-  check("project share includes existing sessions with stable project identity", (await view()).grant.scope.id === project.id && (await view()).sessions.some((session) => session.id === projectSession.id));
+  check("project share includes existing sessions with stable project identity", (await view()).directories[0].grants.some((grant) => grant.scope.id === project.id) && (await view()).directories[0].sessions.some((session) => session.id === projectSession.id && session.projectId === project.id));
   await invoke("session/create", { title: "Future project session", projectPath, providerId: provider.id, modelId: "gpt-5", mode: "agent" });
   await phone.getByRole("button").filter({ hasText: "Future project session" }).waitFor({ timeout: 25_000 });
   check("project share includes future sessions without pairing again");
   await page.locator('[data-action="close-mobile-pairing"]').click();
-  await phone.getByRole("button", { name: "Account and appearance", exact: true }).click();
+  await openTab(phone, "Me");
   await phone.getByRole("button", { name: "Light", exact: true }).click();
   await phone.getByLabel("Language", { exact: true }).selectOption("zh-CN");
-  await phone.getByRole("button", { name: "关闭", exact: true }).click();
+  await screenshot("mobile-me-light-zh");
+  await openTab(phone, "会话");
   await phone.setViewportSize({ width: 320, height: 640 });
   await screenshot("mobile-project-light-zh-narrow");
   await phone.getByRole("button").filter({ hasText: "Existing project session" }).click();
