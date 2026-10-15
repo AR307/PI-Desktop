@@ -2,6 +2,14 @@ import type { ChangelogEntry } from "./changelog.js";
 
 export const trEntries: ChangelogEntry[] = [
   {
+    "version": "0.20.3",
+    "date": "2026-10-15",
+    "highlights": [
+      "Android: Sistem PI Mobile'ı arka planda duraklattığında uygulama bunu bildirir ve bildirimlerin gelmesi için telefon markanıza göre açılması gereken ayarı gösterir.",
+      "Android: Pil optimizasyonu muafiyeti tek dokunuşla istenebilir; sistem iletişim kutularından dönünce bildirim ve pil durumu güncellenir."
+    ]
+  },
+  {
     "version": "0.20.2",
     "date": "2026-10-15",
     "highlights": [

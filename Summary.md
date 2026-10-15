@@ -1458,3 +1458,16 @@ Captured native windows and the Android login screen were visually checked.
   native Android acceptance passed against controlled local provider fixtures.
 - Production packaging and final-commit acceptance are recorded separately in
   docs/releases/0.20.2-validation.md; no production account or paid model is used.
+
+## 2026-10-15 - Android 0.20.3: background notifications on vendor ROMs
+
+- An OPPO-family phone received attention only after the app was reopened.
+  Stock Android 15 with Doze delivered normally. The platform freezer
+  reproduced the vendor symptoms, which places the cause in the vendor's
+  background freezing rather than in the relay.
+- The phone now detects late delivery with a clock offset measured per computer.
+  It names each vendor's background switch and can request Android's battery
+  exemption. Returning from a system dialog refreshes notification state.
+- This is an Android-only release: workspace versions are 0.20.3, versionCode is
+  9, and the signing identity is unchanged. The desktop stays at published
+  0.20.2. See docs/releases/0.20.3.md for validation and publication.

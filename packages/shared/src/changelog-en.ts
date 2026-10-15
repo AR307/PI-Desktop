@@ -2,6 +2,14 @@ import type { ChangelogEntry } from "./changelog.js";
 
 export const enEntries: ChangelogEntry[] = [
   {
+    "version": "0.20.3",
+    "date": "2026-10-15",
+    "highlights": [
+      "Android: when the phone system pauses PI Mobile in the background, the app now says so and names the switch to turn on for your phone brand, so background notifications arrive.",
+      "Android: request the battery-optimization exemption in one tap; notification and battery status stay current after system dialogs."
+    ]
+  },
+  {
     "version": "0.20.2",
     "date": "2026-10-15",
     "highlights": [

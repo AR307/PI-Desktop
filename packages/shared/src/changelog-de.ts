@@ -2,6 +2,14 @@ import type { ChangelogEntry } from "./changelog.js";
 
 export const deEntries: ChangelogEntry[] = [
   {
+    "version": "0.20.3",
+    "date": "2026-10-15",
+    "highlights": [
+      "Android: Wenn das System PI Mobile im Hintergrund pausiert, weist die App darauf hin und nennt den Schalter für Ihre Gerätemarke, damit Benachrichtigungen im Hintergrund ankommen.",
+      "Android: Die Ausnahme von der Akkuoptimierung lässt sich mit einem Tippen anfordern; Benachrichtigungs- und Akkustatus bleiben nach Systemdialogen aktuell."
+    ]
+  },
+  {
     "version": "0.20.2",
     "date": "2026-10-15",
     "highlights": [

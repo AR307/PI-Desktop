@@ -1,4 +1,4 @@
-## Unreleased - Background notifications on vendor Android ROMs
+## v0.20.3 (Android) - Background notifications on vendor Android ROMs
 
 - ColorOS, OriginOS, HyperOS and EMUI/MagicOS can freeze PI Mobile in the
   background despite its foreground service. Notifications then wait until the

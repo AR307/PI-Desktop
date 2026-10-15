@@ -2,6 +2,14 @@ import type { ChangelogEntry } from "./changelog.js";
 
 export const zhTWEntries: ChangelogEntry[] = [
   {
+    "version": "0.20.3",
+    "date": "2026-10-15",
+    "highlights": [
+      "Android 手機端：系統在背景暫停 App 時會明確提示，並依手機品牌列出需要開啟的設定，確保背景也能收到提醒。",
+      "Android 手機端：可一鍵申請電池最佳化豁免；從系統對話框返回後，通知與電池狀態會即時更新。"
+    ]
+  },
+  {
     "version": "0.20.2",
     "date": "2026-10-15",
     "highlights": [

@@ -2,6 +2,14 @@ import type { ChangelogEntry } from "./changelog.js";
 
 export const zhCNEntries: ChangelogEntry[] = [
   {
+    "version": "0.20.3",
+    "date": "2026-10-15",
+    "highlights": [
+      "Android 手机端：系统在后台暂停 App 时会明确提示，并按手机品牌给出需要打开的开关，确保后台也能收到提醒。",
+      "Android 手机端：可一键申请电池优化豁免；从系统对话框返回后，通知和电池状态会及时刷新。"
+    ]
+  },
+  {
     "version": "0.20.2",
     "date": "2026-10-15",
     "highlights": [

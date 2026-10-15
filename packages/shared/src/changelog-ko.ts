@@ -2,6 +2,14 @@ import type { ChangelogEntry } from "./changelog.js";
 
 export const koEntries: ChangelogEntry[] = [
   {
+    "version": "0.20.3",
+    "date": "2026-10-15",
+    "highlights": [
+      "Android: 시스템이 백그라운드에서 PI Mobile을 일시 중지하면 앱이 이를 알리고 휴대폰 브랜드별로 켜야 할 설정을 안내해 백그라운드 알림을 받을 수 있습니다.",
+      "Android: 배터리 최적화 예외를 한 번에 요청할 수 있고, 시스템 대화상자에서 돌아오면 알림 및 배터리 상태가 갱신됩니다."
+    ]
+  },
+  {
     "version": "0.20.2",
     "date": "2026-10-15",
     "highlights": [

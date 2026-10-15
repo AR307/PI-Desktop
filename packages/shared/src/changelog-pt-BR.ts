@@ -2,6 +2,14 @@ import type { ChangelogEntry } from "./changelog.js";
 
 export const ptBREntries: ChangelogEntry[] = [
   {
+    "version": "0.20.3",
+    "date": "2026-10-15",
+    "highlights": [
+      "Android: quando o sistema pausa o PI Mobile em segundo plano, o app avisa e mostra o ajuste a ativar para a marca do seu celular, para que as notificações cheguem.",
+      "Android: solicite com um toque a isenção de otimização de bateria; o status de notificações e bateria é atualizado ao voltar das caixas de diálogo do sistema."
+    ]
+  },
+  {
     "version": "0.20.2",
     "date": "2026-10-15",
     "highlights": [
