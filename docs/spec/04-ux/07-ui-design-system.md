@@ -1199,6 +1199,15 @@ padding that under the global `border-box` would leave a 12px content box for a
 | Backdrop | rgba(0,0,0,0.5) with `z-dialog` |
 | Close | Escape key + X button top-right |
 
+**Shared dismissal primitive:** `OverlayBackdrop`, exported from
+`components/ui.tsx`, renders the existing backdrop `div` and accepts its normal
+HTML attributes and close callback. It forwards a backdrop click only after a
+primary pointer press and release both target that backdrop; capture-phase
+origin tracking protects text selection across content boundaries and nested
+layers. It does not prevent selection or capture the pointer. Callers retain
+busy/saving guards and their existing Escape/close controls. Presses cancelled
+by pointer cancellation or window blur cannot dismiss the surface.
+
 ### 11.5 Tabs
 
 | Variant | Indicator |

@@ -884,7 +884,8 @@ export function onLoad(pi) {
 
 A dialog you draw yourself is not a slot: `pi.ui.openLayer()` hands you a layer
 to render into, and the component draws inside it. Styles go through
-`pi.ui.injectStyle`, and `react` / `react-dom` resolve to the app's copies
+`pi.ui.injectStyle`, and `react`, `react/jsx-dev-runtime`,
+`react/jsx-runtime`, `react-dom` and `react-dom/client` resolve to the app's copies
 through the window's import map, so no bundled React is needed.
 
 `rendererActions` whitelists what a component may dispatch — `plugin.call`,

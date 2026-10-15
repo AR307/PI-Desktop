@@ -2,6 +2,57 @@ import type { ChangelogEntry } from "./changelog.js";
 
 export const trEntries: ChangelogEntry[] = [
   {
+    "version": "0.20.2",
+    "date": "2026-10-15",
+    "highlights": [
+      "MirrorCoding yetkilendirmesinden sonra aracı, görüntü modunu elle ayarlamadan model ve grup seçerek görsel üretir.",
+      "Masaüstü ve Android için yeni ortak logo kullanılır.",
+      "Mobil gezinme, bildirimler, arka plan bağlantısı ve okuma konumu iyileştirmeleri eklendi.",
+      "Veri taşıma düzeltmeleri, mobil geçmiş ve bağımsız arka plan görevleri korunarak upstream 0.20.1 eşitlendi."
+    ]
+  },
+  {
+    "version": "0.20.1",
+    "date": "2026-10-13",
+    "highlights": [
+      "Özel uç noktaları API anahtarı olmadan yapılandırın; bu modda isteklerle kimlik doğrulama bilgisi gönderilmez.",
+      "Yerleşik tarayıcıda proje klasörünün dışındaki yerel dosyaları açın; web sayfaları proje dosyalarıyla sınırlı kalır.",
+      "Bağlam kullanım panelinde sağlayıcı bekleme, akışlı model yanıtı ve üst düzey araç sürelerini ayrı ayrı, toplam süre ve oranlarıyla görün.",
+      "Durdurulan tur tamamen sonuçlanana kadar sonraki tur bekler; böylece işler üst üste binmez.",
+      "Windows taşınabilir ZIP'i artık güncelleme akışını içeriyor; kurulu kopyalar güncellemeleri bulup indirebilir.",
+      "Eklentiler fetch'in desteklediği yönlendirme modlarını sorgulayabilir ve yönlendirmeyi izlemeden incelemeyi veya reddetmeyi seçebilir; mevcut fetch çağrıları varsayılan olarak yönlendirmeleri izlemeyi sürdürür.",
+      "Uzun metin sıkıştırma ve model yanıt hızı tahminleri daha doğrudur; kesilen akışlarda mevcut yedek yöntem korunur.",
+      "Metin seçimi açılır katmanların üzerinden sürüklerken kesintisiz kalır.",
+      "Kenar çubuğunun altındaki satırlardan açılan proje menüleri görünür kalır.",
+      "Windows eski yedekleri kaldırırken yükleme kilidini korur.",
+    ],
+  },
+  {
+    "version": "0.19.1",
+    "date": "2026-10-13",
+    "highlights": [
+      "Özel moda döndüğünüzde geçerli bir taslak olmasa bile kayıtlı özel proxy adresiniz geri yüklenir.",
+      "Tarayıcı yanıt vermediğinde işlemler zaman aşımına uğrayıp kurtarılır; araç çağrıları süresiz beklemez.",
+    ],
+  },
+  {
+    "version": "0.19.0",
+    "date": "2026-10-13",
+    "highlights": [
+      "Ana sayfadan SSH çalışma alanı projeleri oluşturun, ayrı bir iletişim kutusunda uzak klasörleri gezinin ve her ana makine için bir SSH kimliği seçin.",
+      "Bir projeye uygun klasörler ekleyip kaldırın; mevcut sohbetler özgün çalışma alanlarında kalır.",
+      "Seçili ayarları cihazlar arasında eşitleyin, proje listelerini ise her cihazda yerel tutun.",
+      "Eşleştirilmiş uzak Host'lar doğrulanmış SSH kurulumu üzerinden güncel masaüstü sürümüne otomatik güncellenip aynı yerde yeniden bağlanır.",
+      "Ayarlar'dan yerleşik Skill'leri etkinleştirin, devre dışı bırakın veya uygulamayla gelen varsayılanları geri yükleyin.",
+      "Güncelleme kartında indirme ilerlemesini görün, indirmeyi iptal edin veya yeniden deneyin.",
+      "Ağ modları arasında geçerken özel proxy ayarlarınız korunur.",
+      "Bir mesajı silmek canlı AI çıktısını ve konuşmanın geri kalanını silmez.",
+      "Tarayıcı ekran görüntüsü yakalama takıldığında kurtarılır ve sayfanın kilitlenmesi önlenir.",
+      "Yerleşik model kataloğu yeni modeller ve güncel yetenek bilgileriyle yenilendi.",
+      "AskTool soruları için net bir uzunluk sınırı vardır; fazla uzun sorular kart açılmadan reddedilir.",
+    ],
+  },
+  {
     "version": "0.18.2",
     "date": "2026-10-14",
     "highlights": [
@@ -23,6 +74,7 @@ export const trEntries: ChangelogEntry[] = [
     "version": "0.18.0",
     "date": "2026-10-09",
     "highlights": [
+      "Ana sayfadan SSH çalışma alanı projeleri oluşturup adlandırın; klasörleri ayrı bir iletişim kutusunda seçin, model istekleri ve kimlik bilgileri bilgisayarınızda kalsın.",
       "TypeSafe Jev sınıflandırıcısını Hizmet Ekle'den kurun ve kaydetmeden önce API anahtarını doğrulayın.",
       "Bulut eşitlemesi paketlenmiş sürümün ayarlarında kullanılabilir ve deneysel olarak işaretlenir. Proje listeleri her cihazda yerel olarak kalır.",
       "Yerelleştirilmiş açıklamalar ve anahtar kurulumundan sonra model keşfiyle eklenti kaynaklı API anahtarlı hizmetleri ekleyin.",
@@ -35,6 +87,7 @@ export const trEntries: ChangelogEntry[] = [
       "Eklentiler ağ yönlendirmelerini inceleyebilir veya reddedebilir; mevcut fetch çağrıları varsayılan olarak yönlendirmeleri izlemeyi sürdürür.",
       "Çalışan bir alt ajanı kartından veya ayrıntı panelinden ya da geçerli oturumdaki tüm alt ajanları koordinatörü durdurmadan durdurabilirsiniz.",
       "Bağlam kullanımı panelinde toplam oturum süresini, birikimli model yanıt süresini ve oturum içindeki payını görün.",
+      "Masaüstü sürümünün gerisinde kalan eşleştirilmiş bir uzak Host artık aynı doğrulanmış SSH kurulumuyla kendini günceller ve yerinde yeniden eşleştirilir.",
     ],
   },
   {

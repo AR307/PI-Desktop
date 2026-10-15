@@ -71,6 +71,13 @@ async function exists(path) {
   catch (error) { if (error.code === "ENOENT") return false; throw error; }
 }
 const hash = (buffer) => createHash("sha256").update(buffer).digest("hex");
+// Chromium names the single-instance lock `lockfile` on Windows and
+// `SingletonLock` elsewhere, so a real installation anchor holds whichever name
+// its platform uses. Both are covered here on every platform: the cleanup and
+// the migration inventory must skip either name regardless of the host, and the
+// unit-test lane only runs on Linux. Fixturing the POSIX name alone is what let
+// the Windows delete failure ship.
+const installLockNames = ["lockfile", "SingletonLock"];
 const migrate = (value, overrides = {}) => storage.migrateFiles({ source: value.roots, target: value.target, anchor: value.anchor, id: randomUUID(), progress: () => {}, relocate: async () => {}, ...overrides });
 function resetHarness(anchor) {
   harness.anchor = anchor; harness.paths = []; harness.windows = []; harness.errors = [];
@@ -90,15 +97,17 @@ test("cold migration copies real data, verifies hashes, preserves secret permiss
   await chmod(value.roots.data, 0o700);
   await put(join(value.roots.browser, "Local Storage/leveldb/test.ldb"), "browser state");
   await put(join(value.roots.browser, storage.STORAGE_PREFERENCE_FILE), "bootstrap pointer");
-  await put(join(value.roots.browser, "SingletonLock"), "installation lock");
+  for (const name of installLockNames) await put(join(value.roots.browser, name), "installation lock");
   const events = []; const relocations = [];
   const next = await migrate(value, { progress: (event) => events.push(event), relocate: async (...roots) => relocations.push(roots) });
   assert.equal(hash(await readFile(join(next.data, "sessions/chat.jsonl"))), hash(payload));
-  assert.equal((await lstat(join(next.data, "secrets.json"))).mode & 0o777, 0o600);
-  assert.equal((await lstat(next.data)).mode & 0o777, 0o700);
+  if (process.platform !== "win32") {
+    assert.equal((await lstat(join(next.data, "secrets.json"))).mode & 0o777, 0o600);
+    assert.equal((await lstat(next.data)).mode & 0o777, 0o700);
+  }
   assert.equal(await readFile(join(next.browser, "Local Storage/leveldb/test.ldb"), "utf8"), "browser state");
   assert.equal(await exists(join(next.browser, storage.STORAGE_PREFERENCE_FILE)), false);
-  assert.equal(await exists(join(next.browser, "SingletonLock")), false);
+  for (const name of installLockNames) assert.equal(await exists(join(next.browser, name)), false);
   assert.equal(await readFile(join(value.roots.data, "sessions/chat.jsonl")).then(hash), hash(payload));
   assert.deepEqual(relocations, [[value.roots.data, next.data]]);
   assert.deepEqual([...new Set(events.map((event) => event.stage))], ["scanning", "copying", "verifying", "relocating", "complete"]);
@@ -269,13 +278,13 @@ test("backup removal protects active storage and the installation bootstrap anch
   await put(join(active.data, "session"), "active");
   await put(join(value.roots.data, "old-session"), "old");
   await put(join(value.anchor, storage.STORAGE_PREFERENCE_FILE), "pointer");
-  await put(join(value.anchor, "SingletonLock"), "lock");
+  for (const name of installLockNames) await put(join(value.anchor, name), "lock");
   await put(join(value.anchor, "Local Storage/old"), "old browser");
   await assert.rejects(storage.removeBackups([active], active, value.anchor), /active storage/);
   await storage.removeBackups([value.roots], active, value.anchor);
   assert.equal(await exists(value.roots.data), false);
   assert.equal(await readFile(join(value.anchor, storage.STORAGE_PREFERENCE_FILE), "utf8"), "pointer");
-  assert.equal(await readFile(join(value.anchor, "SingletonLock"), "utf8"), "lock");
+  for (const name of installLockNames) assert.equal(await readFile(join(value.anchor, name), "utf8"), "lock");
   assert.equal(await exists(join(value.anchor, "Local Storage/old")), false);
   assert.equal(await readFile(join(active.data, "session"), "utf8"), "active");
 });
@@ -305,7 +314,7 @@ test("storage preferences round-trip pending work atomically and reject malforme
   const preferences = { version: 1, roots: value.roots, backups: [], pending: { id: randomUUID(), kind: "migrate", target: value.target, language: "en" } };
   storage.writeStoragePreferences(file, preferences);
   assert.deepEqual(storage.readStoragePreferences(file, value.roots), preferences);
-  assert.equal((await lstat(file)).mode & 0o777, 0o600);
+  if (process.platform !== "win32") assert.equal((await lstat(file)).mode & 0o777, 0o600);
   await writeFile(file, JSON.stringify({ ...preferences, roots: { data: "relative", browser: value.anchor } }));
   assert.throws(() => storage.readStoragePreferences(file, value.roots), /Invalid storage preferences/);
 });

@@ -385,4 +385,10 @@ Each ADR includes:
 | 0323 | [Make Session Title Generation a Standalone Plugin](0323-plugin-owned-session-titles.md) | Accepted (D652, amended by D654; supersedes ADR 0186) |
 | 0324 | [Make Composer Prompt Enhancement an Optional Plugin](0324-plugin-owned-composer-prompt-enhancement.md) | Accepted (D653; supersedes ADR 0121) |
 | 0325 | [Smooth Windows main-window corner compositing](0325-windows-window-corner-compositing.md) | Proposed (implementation candidate; Windows E2E pending) |
+| 0326 | [Verified SSH Host installation and daily startup](0326-verified-ssh-host-installation.md) | Accepted for experimental implementation (amends ADR 0292; Linux SSH qualification and publication pending) |
+| 0327 | [Automatic remote Host version realignment](0327-remote-host-version-realignment.md) | Accepted for experimental implementation (amends ADR 0326 item 6; Linux SSH qualification pending) |
+| 0328 | [Open arbitrary local files in the embedded Browser](0328-browser-arbitrary-local-files.md) | Accepted (D657; amends ADR 0170; issue #1627) |
+| 0329 | [Isolate parallel sessions of one project in git worktrees](0329-session-worktree-isolation.md) | Accepted (Windows E2E pending) |
 | plugin-fetch-redirect-policy | [Host-enforced plugin fetch redirect policy](plugin-fetch-redirect-policy.md) | Accepted (implementation candidate for #1475) |
+
+| local-agent-remote-workspace-tools | [Local Agent and model requests for remote workspaces](local-agent-remote-workspace-tools.md) | Accepted for implementation |

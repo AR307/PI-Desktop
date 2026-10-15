@@ -1,0 +1,4 @@
+provider: github
+owner: AR307
+repo: PI-Desktop
+updaterCacheDirName: '@pi-desktopdesktop-updater'

@@ -2,6 +2,57 @@ import type { ChangelogEntry } from "./changelog.js";
 
 export const ptBREntries: ChangelogEntry[] = [
   {
+    "version": "0.20.2",
+    "date": "2026-10-15",
+    "highlights": [
+      "Após autorizar o MirrorCoding, o agente gera imagens sem configurar manualmente o modo de imagem.",
+      "Novo logotipo compartilhado no desktop e Android.",
+      "Integração da navegação móvel, notificações, conexão em segundo plano e posição de leitura.",
+      "Sincronização com upstream 0.20.1, preservando migração de dados, histórico móvel e tarefas independentes."
+    ]
+  },
+  {
+    "version": "0.20.1",
+    "date": "2026-10-13",
+    "highlights": [
+      "Configure endpoints personalizados sem chave de API; nesse modo, as solicitações não enviam informações de autenticação.",
+      "Abra arquivos locais fora da pasta do projeto no navegador integrado; páginas da Web continuam limitadas aos arquivos do projeto.",
+      "Veja separadamente a espera do provedor, a resposta transmitida do modelo e o tempo das ferramentas principais, com totais e percentuais.",
+      "Depois de parar uma execução, a próxima aguarda a anterior terminar para evitar sobreposição de tarefas.",
+      "O ZIP portátil do Windows agora inclui o feed de atualização para que cópias instaladas encontrem e baixem atualizações.",
+      "Plugins podem consultar os modos de redirecionamento compatíveis com fetch e optar por inspecionar ou recusar um redirecionamento sem segui-lo; chamadas fetch existentes continuam seguindo redirecionamentos por padrão.",
+      "As estimativas de compactação de textos longos e de taxa de resposta do modelo são mais precisas; fluxos interrompidos mantêm a alternativa atual.",
+      "A seleção de texto permanece contínua ao atravessar sobreposições de pop-up.",
+      "Os menus de projeto permanecem visíveis quando abertos nas linhas próximas ao fim da barra lateral.",
+      "O Windows mantém o bloqueio do instalador enquanto remove backups antigos.",
+    ],
+  },
+  {
+    "version": "0.19.1",
+    "date": "2026-10-13",
+    "highlights": [
+      "Ao voltar ao modo personalizado, o endereço de proxy salvo é restaurado mesmo quando o rascunho atual está vazio ou inválido.",
+      "As ações do navegador expiram e se recuperam quando a página para de responder, em vez de ficarem aguardando indefinidamente.",
+    ],
+  },
+  {
+    "version": "0.19.0",
+    "date": "2026-10-13",
+    "highlights": [
+      "Crie projetos SSH na página inicial, navegue por pastas remotas em um diálogo separado e escolha uma identidade SSH para cada host.",
+      "Adicione ou remova pastas compatíveis de um projeto sem tirar as conversas existentes do espaço de trabalho original.",
+      "Sincronize as configurações escolhidas entre dispositivos e mantenha as listas de projetos locais em cada um.",
+      "Hosts remotos pareados são atualizados para a versão atual do desktop pela instalação SSH verificada e se reconectam no mesmo local.",
+      "Ative ou desative Skills integradas nas configurações e restaure os padrões incluídos no aplicativo.",
+      "O cartão de atualização mostra o progresso do download e oferece ações claras para cancelar ou tentar novamente.",
+      "Suas configurações personalizadas de proxy são mantidas ao alternar os modos de rede.",
+      "Ao excluir uma mensagem, a saída de IA em andamento e as outras mensagens da conversa são preservadas.",
+      "Capturas de tela do navegador se recuperam quando travam, sem deixar a página bloqueada.",
+      "O catálogo de modelos integrado foi atualizado com novos modelos e informações atuais de capacidade.",
+      "AskTool agora tem um limite claro de tamanho; perguntas longas demais são recusadas antes de abrir o cartão.",
+    ],
+  },
+  {
     "version": "0.18.2",
     "date": "2026-10-14",
     "highlights": [
@@ -23,6 +74,7 @@ export const ptBREntries: ChangelogEntry[] = [
     "version": "0.18.0",
     "date": "2026-10-09",
     "highlights": [
+      "Crie e nomeie projetos SSH na página inicial, escolha pastas em um diálogo separado e mantenha solicitações e credenciais do modelo no seu computador.",
       "Configure o classificador Jev da TypeSafe em Adicionar serviço e valide a chave de API antes de salvá-la.",
       "A sincronização na nuvem está disponível nas configurações da versão empacotada e é identificada como experimental. As listas de projetos permanecem em cada dispositivo.",
       "Adicione em Adicionar serviço provedores de plugins com chave de API, descrições localizadas e descoberta de modelos após a configuração.",
@@ -35,6 +87,7 @@ export const ptBREntries: ChangelogEntry[] = [
       "Plugins podem inspecionar ou recusar redirecionamentos de rede; chamadas fetch existentes continuam seguindo redirecionamentos por padrão.",
       "Pare um subagente em execução pelo cartão ou painel de detalhes, ou todos os subagentes da sessão atual, sem parar o coordenador.",
       "Veja o tempo total da sessão, o tempo acumulado de resposta do modelo e sua proporção no painel de uso de contexto.",
+      "Um Host remoto emparelhado que fica atrás da versão do desktop agora se atualiza pela mesma instalação SSH verificada e se emparelha novamente no mesmo lugar, em vez de apenas pedir que você o atualize.",
     ],
   },
   {

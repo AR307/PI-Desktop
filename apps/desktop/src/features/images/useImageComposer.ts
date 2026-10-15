@@ -57,9 +57,11 @@ export function useImageComposer(sessionId: string | undefined, mode: Mode, thin
   };
   const submit = async () => {
     if (submitting.current || !ready || !config.providerId || !config.modelId) return;
-    const prompt = draft.readLiveDraft().trim();
+    const rawText = draft.readLiveDraft();
+    const snapshot = draft.draftSnapshot(rawText);
+    const prompt = draft.activeFileReferences.reduce((text, reference) =>
+      reference.token ? text.replaceAll(reference.token, "") : text, rawText).trim();
     if (!prompt) return;
-    const snapshot = draft.draftSnapshot(prompt);
     if (snapshot.fileReferences.some((item) => item.kind !== "image")) { report(new Error("images_only_references")); return; }
     let targetId = sessionId;
     submitting.current = true;

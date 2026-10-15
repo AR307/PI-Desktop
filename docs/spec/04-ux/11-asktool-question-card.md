@@ -29,6 +29,9 @@ The card has no countdown or expiration copy. On narrow screens options remain
 full-width and actions may share the row; question text and custom input may
 wrap naturally without clipping.
 
+Question text is limited to 300 Unicode characters before a card is opened.
+Overlong questions return a tool validation error and do not create a card.
+
 ## Rich-text content
 
 Question text and selectable option text may use CommonMark/GFM formatting,

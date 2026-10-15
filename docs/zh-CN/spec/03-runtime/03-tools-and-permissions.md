@@ -302,6 +302,38 @@ type ReviewChange = {
 `patch`）——返回带有错误专属恢复提示的终止工具结果，代理随后停止并报告准确的不匹配。
 不要手动编辑旧的 unified-diff 块头，也不要继续修复循环。
 
+## 4e. 隔离会话 worktree（ADR 0329）
+
+在 git 项目中以 `isolated: true` 创建的会话拥有专属 worktree，位于
+`<data_dir>/worktrees/<project-key>/<id>`，分支为 `pi-desktop/<id>`，从项目当前
+`HEAD` 创建（项目中未提交的改动不会被复制；`.worktreeinclude` 列出的 git 忽略文件会被
+复制，且不跟随链接）。对这类会话：
+
+- worktree 取代项目路径成为 §4–§5 所有规则的 `workspaceRoot`，文件工具、Bash 工作
+  目录、审阅快照和产物都在其中解析；绝不回退到主检出（worktree 丢失时返回
+  `WORKTREE_*` 错误）；
+- `AGENTS.md` 指令从 worktree 读取，而项目身份（记忆、技能、插件、MCP、子代理）仍以
+  项目路径为键；
+- Bash 获得 `PI_PORT`（41000–48999 中一个 10 端口块的首端口；只有整段 10 个端口都空闲时才分配该块）、
+  `PI_PROJECT_ROOT` 和 `PI_WORKTREE_ROOT`；
+- 可选的项目初始化命令在每个新 worktree 中运行一次，带同样的变量，使用用户的默认命令
+  shell（`defaultCommandShell`，未设置时用平台默认：Windows 上为 Windows PowerShell，
+  其他平台为 bash）。命令不会在方言之间转换，因此在 Windows 上必须使用 PowerShell 语法
+  （`$env:PI_PORT`；Windows PowerShell 5.1 用 `;` 而不是 `&&`），除非默认 shell 配置为
+  Git Bash 等 POSIX shell；
+- 宿主在 worktree 中运行的 git 命令禁用 hooks 和 fsmonitor，删除时绝不跟随链接越出
+  worktree；
+- 登记的 worktree 文件夹必须是真实目录：若它（或通往项目子目录的某一级目录）被替换为符号链接或
+  Windows junction，即视为缺失（`WORKTREE_MISSING`），不会被用作工具根目录、合并或同步；删除会话时
+  只删除链接本身，绝不删除其目标。
+
+宿主的工作区差异收集器会对其检查的所有仓库应用相同的 Git 加固措施，包括非隔离工作区。每次由宿主启动
+Git 命令都会禁用仓库配置的 hooks 和 `core.fsmonitor`，并移除可将 Git 重定向到其他仓库或注入命令级配置的环境变量。差异命令也会禁用外部 diff 和文本转换辅助程序。
+
+合并到项目是显式的用户操作（先预览，再携带预览令牌合并）：先把项目分支同步进
+worktree，项目只做快进，因此冲突留在 worktree 中。删除隔离会话即丢弃其 worktree
+和分支。
+
 ## 5. Bash 规则
 
 主机执行基线：
@@ -550,6 +582,12 @@ sidecar 不附加覆盖，委托使用会话的有效权限模式；因此父会
 会话范围的 `allow-session` 拨款仍按 `toolName` 和每个会话进行：
 一名代表对 `Bash` 的批准适用于整个会议，包括
 家长和其他代表。
+
+在隔离会话（§4e）中，工具包含 `Write` 或 `Edit` 的子代理在自己的 worktree 中运行：
+先为会话的未提交编辑建立检查点，再从会话 worktree 分出分支；它的 `tools.execute`
+调用携带委派链 id `delegationId`，路径规则和 Bash 因此以该 worktree 为根。运行完成后
+用与“合并到项目”相同的算法合回；冲突、失败或停止时保留子代理分支，报告会提示父代理
+续跑处理。只读和仅 Bash 的子代理，以及非隔离会话的所有子代理，仍共享所属会话的根目录。
 
 ## 11. 插件工具
 

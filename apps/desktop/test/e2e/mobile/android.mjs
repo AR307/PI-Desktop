@@ -119,7 +119,7 @@ try {
   await phone.getByRole("alert").filter({ hasText: "rate limited" }).waitFor();
   check("native login explains HTTP 429 and Retry-After", (await phone.getByRole("alert").textContent()).includes("Try again after"));
   await screenshot("android-login-rate-limited");
-  await until(async () => Date.now() >= (await view()).retryAt, "native login cooldown");
+  await until(() => phone.evaluate(() => Date.now() >= window.__PI_MOBILE_CONTROLLER__.getSnapshot().retryAt), "native login cooldown");
   await phone.locator('[name="password"]').fill("mobile-pass");
   await phone.locator(".login-form button[type=submit]").click();
   await phone.getByRole("heading", { name: "Sessions", exact: true }).waitFor();

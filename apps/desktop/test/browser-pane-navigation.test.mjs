@@ -10,7 +10,11 @@ import { pathToFileURL } from "node:url";
 // runs in the production BrowserPane, without opening a native window.
 const electron = `data:text/javascript,${encodeURIComponent(`
   import { EventEmitter } from "node:events";
-  export const shell = {};
+  export const shell = {
+    openedPaths: [],
+    openPath(path) { this.openedPaths.push(path); return Promise.resolve(""); },
+    openExternal() { return Promise.resolve(); },
+  };
   export class View {
     children = [];
     addChildView(view) { this.children.push(view); }
@@ -50,8 +54,8 @@ registerHooks({ resolve(specifier, context, next) {
   return specifier === "electron" ? { url: electron, shortCircuit: true } : next(specifier, context);
 } });
 register(new URL("./helpers/ts-import-hooks.mjs", import.meta.url));
-const { BrowserPane, normalizeUrl } = await import("../electron/main/browser-view.ts");
-const { WebContentsView } = await import("electron");
+const { BrowserPane, normalizeUrl, resolveLocalFile } = await import("../electron/main/browser-view.ts");
+const { WebContentsView, shell } = await import("electron");
 const settled = () => new Promise(setImmediate);
 
 function harness(t) {
@@ -75,7 +79,7 @@ test("address-bar host and port inputs normalize to HTTP without accepting other
   assert.equal(normalizeUrl("custom:8080"), null);
 });
 
-test("a scratch HTML preview loads, while a sibling session remains outside the allowed roots", async () => {
+test("explicit scratch HTML opens in the browser while agent preview remains workspace scoped", async () => {
   const root = mkdtempSync(join(tmpdir(), "pi-scratch-preview-"));
   const own = join(root, "session-one"), other = join(root, "session-two");
   mkdirSync(own); mkdirSync(other);
@@ -83,14 +87,18 @@ test("a scratch HTML preview loads, while a sibling session remains outside the 
   writeFileSync(page, "<!doctype html><title>Pelican</title>");
   writeFileSync(sibling, "<!doctype html><title>Other task</title>");
   const pane = new BrowserPane(() => {});
-  const request = pane.navigateAndWait(page, [own]);
+  const request = pane.navigateAndWait(page, own);
   const wc = WebContentsView.instances.at(-1).webContents;
   assert.equal(wc.pendingLoads[0].url, pathToFileURL(realpathSync(page)).href);
   wc.url = wc.pendingLoads[0].url;
   wc.pendingLoads.shift().resolve();
   assert.equal((await request).url, wc.url);
-  assert.equal(await pane.navigateAndWait(sibling, [own]), null);
-  assert.equal(pane.getState().loadError, "LOCAL_FILE_NOT_ALLOWED");
+  assert.equal(resolveLocalFile(sibling, own), null);
+  const siblingRequest = pane.navigateAndWait(sibling, own);
+  assert.equal(wc.pendingLoads[0].url, pathToFileURL(realpathSync(sibling)).href);
+  wc.url = wc.pendingLoads[0].url;
+  wc.pendingLoads.shift().resolve();
+  assert.equal((await siblingRequest).url, wc.url);
   pane.dispose();
 });
 
@@ -150,7 +158,7 @@ test("an invalid target cannot mark the previous document ready", async (t) => {
   await settled();
 });
 
-test("outside file URLs and absolute paths explain the workspace boundary without loading", async (t) => {
+test("address-bar file inputs and page links can open existing files outside the workspace", async (t) => {
   const root = mkdtempSync(join(tmpdir(), "pi-browser-root-"));
   const outside = mkdtempSync(join(tmpdir(), "pi-browser-outside-"));
   t.after(() => { pane.dispose(); rmSync(root, { recursive: true }); rmSync(outside, { recursive: true }); });
@@ -174,35 +182,76 @@ test("outside file URLs and absolute paths explain the workspace boundary withou
   wc.pendingLoads.shift().resolve();
   await allowedAbsolute;
 
-  const deniedUrl = pathToFileURL(outsideFile).href;
-  assert.equal(await pane.navigateAndWait(deniedUrl, root), null);
-  assert.equal(wc.pendingLoads.length, 0, "outside file must never reach Electron");
-  assert.equal(published.at(-1).url, deniedUrl);
-  assert.equal(published.at(-1).loadError, "LOCAL_FILE_NOT_ALLOWED");
-  assert.equal(published.at(-1).isLoading, false);
+  const outsideUrl = pathToFileURL(outsideFile).href;
+  const allowedOutsideUrl = pane.navigateAndWait(outsideUrl, root);
+  assert.equal(wc.pendingLoads.at(-1).url, pathToFileURL(realpathSync(outsideFile)).href);
+  wc.url = pathToFileURL(realpathSync(outsideFile)).href;
+  wc.pendingLoads.shift().resolve();
+  assert.equal((await allowedOutsideUrl).url, pathToFileURL(realpathSync(outsideFile)).href);
 
-  assert.equal(await pane.navigateAndWait(outsideFile, root, 10), null);
-  assert.equal(wc.pendingLoads.at(-1)?.url, undefined, "outside absolute path must never reach Electron");
-  assert.equal(published.at(-1).url, outsideFile);
-  assert.equal(published.at(-1).loadError, "LOCAL_FILE_NOT_ALLOWED");
+  const allowedOutsideAbsolute = pane.navigateAndWait(outsideFile, root);
+  assert.equal(wc.pendingLoads.at(-1).url, pathToFileURL(realpathSync(outsideFile)).href);
+  wc.pendingLoads.shift().resolve();
+  assert.equal((await allowedOutsideAbsolute).url, pathToFileURL(realpathSync(outsideFile)).href);
+  pane.openExternal();
+  assert.equal(shell.openedPaths.at(-1), realpathSync(outsideFile));
+
+  assert.equal(resolveLocalFile(outsideFile, root), null,
+    "workspace-scoped BrowserPreview resolution must remain restricted");
+
+  const willNavigate = wc.listeners("will-navigate")[0];
+  assert.ok(willNavigate, "top-level navigation guard is installed");
+  let outsidePrevented = false;
+  willNavigate({ preventDefault() { outsidePrevented = true; } }, outsideUrl);
+  assert.equal(outsidePrevented, false, "an existing outside file link is allowed");
+
+  let missingPrevented = false;
+  willNavigate({ preventDefault() { missingPrevented = true; } },
+    pathToFileURL(join(outside, "missing.html")).href);
+  assert.equal(missingPrevented, true, "a missing outside file remains blocked");
+
+  let directoryPrevented = false;
+  willNavigate({ preventDefault() { directoryPrevented = true; } }, pathToFileURL(outside).href);
+  assert.equal(directoryPrevented, true, "a directory is not a previewable file");
+
+  wc.url = "https://fixture.invalid/page";
+  let webPagePrevented = false;
+  willNavigate({ preventDefault() { webPagePrevented = true; } }, outsideUrl);
+  assert.equal(webPagePrevented, true, "a web page cannot navigate outside the workspace");
+
+  let remoteAuthorityPrevented = false;
+  willNavigate({ preventDefault() { remoteAuthorityPrevented = true; } },
+    `file://fileserver${outsideFile}`);
+  assert.equal(remoteAuthorityPrevented, true, "remote file authorities are not local files");
+
+  assert.equal(await pane.navigateAndWait(`../${outside.split("/").at(-1)}/demo.html`, root), null,
+    "relative address-bar paths remain inside the workspace");
 });
 
-test("a denied local file on a blank tab publishes an error without creating a guest", async () => {
+test("a missing local file on a blank tab publishes an error without creating a guest", async () => {
+  const tempRoot = mkdtempSync(join(tmpdir(), "pi-browser-missing-"));
+  const missingFile = join(tempRoot, "missing.html");
+  const missingUrl = pathToFileURL(missingFile).href;
   const published = [];
   const pane = new BrowserPane((state) => published.push(state));
-  const count = WebContentsView.instances.length;
-  assert.equal(await pane.navigateAndWait("file:///tmp/demo.html", "/projects/demo"), null);
-  assert.equal(WebContentsView.instances.length, count);
-  assert.deepEqual(published.at(-1), {
-    url: "file:///tmp/demo.html", title: "", isLoading: false,
-    loadError: "LOCAL_FILE_NOT_ALLOWED", canGoBack: false, canGoForward: false,
-  });
-  assert.equal(await pane.navigateAndWait("/tmp/demo.html", "/projects/demo"), null);
-  assert.equal(WebContentsView.instances.length, count);
-  assert.deepEqual(published.at(-1), {
-    url: "/tmp/demo.html", title: "", isLoading: false,
-    loadError: "LOCAL_FILE_NOT_ALLOWED", canGoBack: false, canGoForward: false,
-  });
+  try {
+    const count = WebContentsView.instances.length;
+    assert.equal(await pane.navigateAndWait(missingUrl, "/projects/demo"), null);
+    assert.equal(WebContentsView.instances.length, count);
+    assert.deepEqual(published.at(-1), {
+      url: missingUrl, title: "", isLoading: false,
+      loadError: "LOCAL_FILE_NOT_ALLOWED", canGoBack: false, canGoForward: false,
+    });
+    assert.equal(await pane.navigateAndWait(missingFile, "/projects/demo"), null);
+    assert.equal(WebContentsView.instances.length, count);
+    assert.deepEqual(published.at(-1), {
+      url: missingFile, title: "", isLoading: false,
+      loadError: "LOCAL_FILE_NOT_ALLOWED", canGoBack: false, canGoForward: false,
+    });
+  } finally {
+    pane.dispose();
+    rmSync(tempRoot, { recursive: true, force: true });
+  }
 });
 
 test("late native navigation events cannot publish after the session is invalidated", async () => {

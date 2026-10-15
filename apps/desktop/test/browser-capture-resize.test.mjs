@@ -28,6 +28,7 @@ const electron = `data:text/javascript,${encodeURIComponent(`
         id: WebContentsView.instances.length + 1,
         url: "", destroyed: false, viewport: { width: 0, height: 0 },
         captures: [],
+        layoutSize: { width: 800, height: 6000 },
         async loadURL(url) {
           this.emit("did-start-navigation", {}, url, false, true);
           this.url = url;
@@ -52,7 +53,7 @@ const electron = `data:text/javascript,${encodeURIComponent(`
         detach() { this.attached = false; },
         async sendCommand(method, params) {
           if (method === "Page.getLayoutMetrics") {
-            return { cssContentSize: { width: wc.viewport.width, height: 6000 } };
+            return { cssContentSize: { ...wc.layoutSize } };
           }
           if (method !== "Page.captureScreenshot") return {};
           const savedViewport = { ...wc.viewport };
@@ -87,7 +88,7 @@ const { WebContentsView } = await import("electron");
 async function harness(t) {
   const host = new BrowserHost({
     createPane: (onState, onOpenUrl) => new BrowserPane(onState, onOpenUrl),
-    isPluginLoaded: () => true, getFileRoot: async () => null, onState: () => {},
+    isPluginLoaded: () => true, getFileRoots: async () => [], onState: () => {},
   });
   const children = [];
   host.setWindow({ isDestroyed: () => false, contentView: {
@@ -115,6 +116,28 @@ function paintedBounds(view) {
     height: Math.min(own.height, parent.height - own.y),
   };
 }
+
+test("full-page screenshot scales both dimensions to provider-safe limits", async (t) => {
+  const { host, wc } = await harness(t);
+  for (const [layoutSize, expectedScale] of [
+    [{ width: 800, height: 6000 }, 2048 / 6000],
+    [{ width: 4000, height: 6000 }, 1280 / 4000],
+  ]) {
+    wc.layoutSize = layoutSize;
+    const started = once(wc, "capture-start");
+    const capture = host.screenshot({ fullPage: true });
+    await started;
+    assert.deepEqual(wc.captures.at(-1).params.clip, {
+      x: 0,
+      y: 0,
+      width: layoutSize.width,
+      height: layoutSize.height,
+      scale: expectedScale,
+    });
+    wc.captures.at(-1).resolve();
+    await capture;
+  }
+});
 
 for (const raw of [false, true]) {
   test(`${raw ? "raw CDP" : "browser screenshot"} stays inside the relocated panel before capture finishes`, async (t) => {
@@ -171,6 +194,42 @@ test("a failed capture releases resizing and does not poison the next capture", 
   wc.captures[1].resolve();
   assert.equal((await next).data, "fixture-image");
 });
+
+for (const raw of [false, true]) {
+  test(`${raw ? "raw CDP" : "browser screenshot"} timeout releases the queue for the next capture`, async (t) => {
+    const { host, wc } = await harness(t);
+    const capture = () => raw
+      ? host.cdpCommand("Page.captureScreenshot", { format: "png" })
+      : host.screenshot();
+    const setTimeout = globalThis.setTimeout;
+    let expire;
+    globalThis.setTimeout = (callback, delay, ...args) => {
+      assert.equal(delay, 30_000);
+      expire = () => callback(...args);
+      return 1;
+    };
+    t.after(() => { globalThis.setTimeout = setTimeout; });
+    const failed = assert.rejects(
+      capture(),
+      (error) => {
+        assert.match(error.message, /browser screenshot timed out after 30000ms/);
+        assert.equal(error.code, "TIMEOUT");
+        return true;
+      },
+    );
+    await once(wc, "capture-start");
+    expire();
+
+    await failed;
+    assert.equal(wc.debugger.isAttached(), false, "detach the stalled CDP session");
+    wc.captures[0].reject(new Error("debugger detached"));
+    const nextStarted = once(wc, "capture-start");
+    const next = capture();
+    await nextStarted;
+    wc.captures[1].resolve();
+    assert.equal((await next).data, "fixture-image");
+  });
+}
 
 test("overlapping capture APIs serialize per page, not across sibling tabs", async (t) => {
   const { host, resize, wc } = await harness(t);

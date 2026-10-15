@@ -81,10 +81,11 @@ PluginManager
 
 The shipped `pluginChanged` event carries a `reason` so the renderer can decide
 what to refetch: `install`, `loadDev`, `enable`, `disable`, `uninstall`, `crash`,
-`service`, `market.install`, `market.applyUpdates`, `themes` (runtime
+`service`, `restore`, `market.install`, `market.applyUpdates`, `themes` (runtime
 `themes.upsert` / `themes.remove`). `service` fires on every
 supervision transition and is the cheapest of them — only the service list needs
-a reload.
+a reload. `restore` fires once when startup recovery has loaded the enabled
+plugins, so a surface that listed them earlier still sees them.
 
 `settingsChanged` (`pi-desktop/app/event/settingsChanged`) carries a settings
 patch when the **host** writes app settings outside the renderer path — today

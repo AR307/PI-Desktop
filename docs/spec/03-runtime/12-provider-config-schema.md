@@ -393,7 +393,11 @@ Presets only prefill form defaults; they are not a closed world.
 | bedrock | bedrock | aws_sdk_default | no |
 | ollama | openai_compatible | none | yes |
 | lmstudio | openai_compatible | none | yes |
-| custom | openai_compatible | api_key_and_base_url | yes |
+| custom | openai_compatible | api_key_and_base_url by default; `none` when the endpoint needs no authentication | yes |
+
+The custom endpoint form keeps API-key authentication as its default and lets
+the user explicitly select `authKind: "none"` for endpoints that accept
+unauthenticated requests. Named cloud presets retain their declared auth kind.
 
 ### Fixed API-style presets
 
@@ -694,6 +698,11 @@ The canonical DDL lives in [04-data-storage](04-data-storage.md) (D086). Summary
    has no runtime effect
 11. Legacy `supportedThinkingLevels`, when present, must still validate as an
   array of canonical thinking levels but has no runtime effect
+
+User-created custom endpoints may use `authKind=none`. Updating an editable
+provider to this auth kind removes its API-key secret from the secret store and
+clears `secret_ref`; OAuth credentials use their separate lifecycle. The
+runtime sends no API-key or Authorization credential for a `none` provider.
 
 ## 11. Secret ref format
 

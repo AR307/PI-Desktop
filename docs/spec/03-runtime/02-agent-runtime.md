@@ -70,7 +70,9 @@ loop evaluates it after `turn_end`, once the current assistant response and
 tool batch have completed, and emits a normal `agent_end` before another model
 request. It does not cancel an active provider stream or running tool. An idle
 runtime returns `{ requested: false }`; immediate `abort()` remains the
-separate cancellation path.
+separate cancellation path. `abort()` resolves only after the named active
+operation has completed its cancellation cleanup, so the same runtime can
+accept a follow-up prompt as soon as the abort request returns.
 
 ### 4.0 Active-turn steering
 
@@ -87,8 +89,10 @@ An admission after pi's last queue poll suppresses the terminal event and
 continues once pi has released the run, with the same turn identity and without
 a second public `agent_start`. Existing context/provider recovery takes
 precedence over that continuation. Background delegates never hold a turn open
-(D628), so steering has no delegate wait to wake, and it never cancels
-delegates.
+(D628), so steering has no implicit delegate wait to wake and never cancels
+delegates. Steering interrupts an explicit TaskWait, which returns interrupted
+with current delegation states and asks the parent to handle new user input
+before waiting again.
 
 Abort, graceful stop, fatal errors and terminal settlement close admission.
 Accepted but unconsumed input remains transcript/context history and is removed
@@ -782,7 +786,10 @@ criterion-by-criterion report of what was met and the evidence observed.
   instead of collapsing to bare chat text (D127). An interrupted tool row
   restores as an errored result; a tool row whose assistant row was lost
   gets a synthesized call-only assistant carrier so call/result pairs stay
-  well-formed for every provider API.
+  well-formed for every provider API. A model system record saved while a
+  call ran restores between that call and its result without ending the
+  assistant's calls, so the call stays on the assistant that made it, as in
+  the live request.
 Vision runtimes hydrate persisted image refs only from the session-bound
 attachment, scratch, and project roots. Each image remains subject to the 10 MB
 safety bound, and restored history has a 30 MB aggregate raw-byte budget.
@@ -1218,6 +1225,20 @@ turn open and delivers the reports when they finish. User Stop, `TaskStop`,
 runtime dispose, or a parent fatal error (D352) abort a still-running
 delegate.
 
+**Isolated worktrees (ADR 0329).** In an isolated session, a delegate whose
+tools include `Write` or `Edit` gets its own worktree before its first turn
+(`worktree.delegate.create`, keyed by the delegation chain id, so a resumed
+delegate reuses it), and its `tools.execute` calls carry that id as
+`delegationId`. When the run ends the runtime calls
+`worktree.delegate.settle` before publishing the report: a completed run is
+merged back into the session worktree, a failed or stopped run keeps its
+changes, and the outcome (merged, no changes, conflict with files, not merged
+with reason, or kept) is appended to the report so the parent knows whether to
+resume the delegate. Host-core briefly holds the session's own tools while it
+commits and merges in the session worktree, waiting at most a few seconds for
+tools already running. Read-only and Bash-only delegates, and every delegate
+of a non-isolated session, are unchanged.
+
 ### 5f.1 Delegate permission scope (ADR 0089)
 
 A delegate's tool calls flow through the same host `tools.execute` path as the
@@ -1354,8 +1375,47 @@ other turn sends; a gateway fronting a Codex backend rejects such a request with
 `openai-codex-responses` the summary payload therefore carries the session id as
 `prompt_cache_key` (clamped to the adapter's 64-character limit) unless the
 adapter or a caller already set one. Every other wire API keeps its payload
-exactly as the adapter built it, and the key is added on a copy, so a caller's
+exactly as the adapter built it, apart from the unrecognized-endpoint key of
+§6.3, and the key is added on a copy, so a caller's
 payload hook keeps its own object and its return value still wins.
+
+### 6.3 Session identity for endpoints the adapters leave anonymous (issue #1634)
+
+pi-ai supplies a conversation id by itself only where a vendor published one:
+the Responses adapters send `session_id` and `x-client-request-id` on each
+request, and the Chat Completions and Anthropic Messages adapters send their
+session headers only while `compat.sendSessionAffinityHeaders` is set, which
+defaults to OpenRouter. The Chat Completions body key is narrower still,
+gated on `api.openai.com`. A provider row the user pointed at their own gateway
+or relay would therefore send every session of one credential with nothing
+reliable to tell them apart: reverse proxies commonly discard `session_id`
+because its name contains an underscore, while many gateways do not recognize
+`x-client-request-id` as a stable session key.
+
+Agent-runtime stamps that identity itself for a row whose base URL host is not
+a published vendor host (`NAMED_ENDPOINT_PRESETS`), on the
+`openai-completions`, `anthropic-messages`, and `openai-responses` wire APIs,
+and not on the OpenCode path that already carries its own session header
+(§6.2):
+
+- For Completions and Anthropic, the built model's `compat` gains
+  `sendSessionAffinityHeaders: true` with
+  `sessionAffinityFormat: "openai"`, so the adapter writes `x-session-affinity`
+  and `x-client-request-id` beside `session_id`. That default is spread under
+  the row's own `compat`, so an explicit catalog entry still wins.
+- A custom Responses endpoint keeps the adapter's existing `session_id`,
+  `x-client-request-id`, and `prompt_cache_key`; agent-runtime adds the stable
+  `x-session-affinity` alias through stream options so a reverse proxy can
+  route the session after dropping underscore headers.
+- A Chat Completions request body that carries no `prompt_cache_key` gains the
+  session id as one, clamped to the adapter's 64-character limit. The key rides
+  a copy of the payload and is appended after every other payload hook, so an
+  extension that rewrites the payload cannot drop it.
+
+The identity reaches session turns, subagent turns, context-compaction
+summaries, and plugin one-shots that were handed a session id. A published
+vendor host keeps its current request bytes, and a caller with no session id
+gains no affinity header or body key.
 
 
 ## 7. System prompt composition
@@ -1382,6 +1442,12 @@ an older aggregate `skills` section upgrades it once at the continuation
 boundary; checkpoints retain the effective per-entry state. Bodies remain
 on-demand and permission-checked. Different plugin tool schemas/permissions
 invalidate idle reuse even when their names are unchanged.
+
+The host-owned activation state for bundled skills is read when a session
+catalog is built. A disabled built-in is omitted from the prompt and slash
+catalog, and a stale direct load through `Skill` is refused. This switch governs
+the skill document only; associated agent tools keep their independent
+registration and activation behavior.
 
 Before model dispatch, Desktop acknowledges new system records through Host's
 existing transcript writer. Restart replays these provider-neutral records in
@@ -1673,6 +1739,15 @@ view project-list menu provides an `AGENTS.md` editor for its corresponding
 registered project root. Its IPC does not accept arbitrary renderer file paths.
 Saves affect the next prompt without restarting the application.
 
+For an isolated session (ADR 0329) the launch metadata carries a separate
+`workspaceRoot`, its git worktree: the instruction chain and its path
+resolution are rooted there, so the agent follows the worktree's own
+`AGENTS.md` files. `projectPath` stays the project identity for memory,
+skills, plugins, MCP servers, subagent definitions, the custom system prompt,
+and group context. The system prompt adds a short isolated-workspace note
+(work only in the worktree, use the `PI_PORT` block, leave branch changes and
+merging to the user, and how to resolve a merge conflict).
+
 ## 8. Concurrency
 
 | Scope | MVP policy |
@@ -1706,6 +1781,9 @@ does not dispose, abort, or re-root a runtime belonging to another session.
   estimate visible thinking plus answer output at four Unicode code points per
   token and persist it as `responseOutputTokens` so stopped-turn throughput is
   still available and visibly approximate
+- preserve request-to-first-response wait and streamed thinking/answer duration
+  on assistant messages when available; stopped streams retain the elapsed
+  streamed duration captured before cancellation
 - renderer smart-stop transcript undo and structured Composer restoration are
   reconciliation after abort; they do not change runtime cancellation or roll
   back completed tool effects

@@ -2,6 +2,57 @@ import type { ChangelogEntry } from "./changelog.js";
 
 export const enEntries: ChangelogEntry[] = [
   {
+    "version": "0.20.2",
+    "date": "2026-10-15",
+    "highlights": [
+      "Generate images directly after MirrorCoding authorization: the agent discovers available models and groups without manual Image-mode setup.",
+      "Refresh desktop and Android icons with the new shared logo.",
+      "Bring the mobile Sessions, Activity and Me navigation, notifications, background keep-alive and reading-position improvements into this release.",
+      "Synchronize upstream 0.20.1 while preserving storage migration fixes, mobile history and independent background workers."
+    ]
+  },
+  {
+    version: "0.20.1",
+    date: "2026-10-13",
+    highlights: [
+      "Configure custom endpoints without an API key; requests omit authentication in that mode.",
+      "Open local files outside a project folder in the built-in browser, while web pages remain scoped to project files.",
+      "See provider wait, streamed model response, and top-level tool time separately in the context usage inspector.",
+      "After you stop a turn, the next one waits for the previous run to settle so work does not overlap.",
+      "The Windows portable ZIP now includes the update feed so installed copies can find and download updates.",
+      "Plugins can query fetch's supported redirect modes and inspect or refuse redirects without following; existing fetch calls still follow redirects by default.",
+      "Long-text compaction and model response-rate estimates are more accurate; interrupted streams keep the existing fallback.",
+      "Text selection stays continuous when it crosses popup overlays.",
+      "Project menus stay visible when opened from rows near the bottom of the sidebar.",
+      "Windows keeps the installer lock while it removes old backups.",
+    ],
+  },
+  {
+    version: "0.19.1",
+    date: "2026-10-13",
+    highlights: [
+      "Restore your saved custom proxy URL when returning to Custom mode, even if the current draft is empty or invalid.",
+      "Browser actions time out and recover when a page stops responding, instead of leaving tool calls hanging indefinitely.",
+    ],
+  },
+  {
+    version: "0.19.0",
+    date: "2026-10-13",
+    highlights: [
+      "Create SSH workspace projects from Home, browse remote folders in a separate dialog, and choose an SSH identity for each host.",
+      "Add or remove eligible folders from a project while its existing chats stay in their original workspace.",
+      "Sync selected settings across devices while keeping project lists local to each device.",
+      "Paired Remote Hosts can update to the current desktop release through verified SSH setup and reconnect in place.",
+      "Enable or disable bundled Skills from Settings and restore the defaults shipped with the app.",
+      "See app-update download progress and use clear cancel or retry actions from the update card.",
+      "Keep custom proxy settings when switching network modes.",
+      "Keep live AI output and the remaining conversation messages when removing a message.",
+      "Browser screenshots recover from stalled captures instead of leaving the page stuck.",
+      "The bundled model catalog now includes new models and current capability details.",
+      "AskTool questions now have a clear length limit, and overlong questions are rejected before a card opens.",
+    ],
+  },
+  {
     "version": "0.18.2",
     "date": "2026-10-14",
     "highlights": [
@@ -23,6 +74,7 @@ export const enEntries: ChangelogEntry[] = [
     version: "0.18.0",
     date: "2026-10-09",
     highlights: [
+      "Create named SSH workspace projects from Home, browse folders in a separate dialog, and keep model requests and credentials on your computer.",
       "Set up TypeSafe's Jev classifier from Add Service and verify its API key before saving.",
       "Find Cloud sync in packaged Settings with its Experimental badge. Project lists stay on each device.",
       "Add plugin-owned API-key services from Add Service, with localized descriptions and model discovery after setup.",
@@ -35,6 +87,7 @@ export const enEntries: ChangelogEntry[] = [
       "Plugins can inspect or refuse network redirects; existing fetch calls still follow redirects by default.",
       "Stop a running subagent directly from its card or detail panel, or stop all subagents in the current session without stopping the coordinator.",
       "See total session time beside cumulative model response time and its share of the session.",
+      "A paired remote Host that falls behind the desktop release now upgrades itself through the same verified SSH install and re-pairs in place, instead of only asking you to upgrade it.",
     ],
   },
   {

@@ -1,6 +1,6 @@
 {
   "name": "@pi-desktop/racp",
-  "version": "0.18.2",
+  "version": "0.20.2",
   "private": true,
   "type": "module",
   "main": "./dist/index.js",
@@ -39,6 +39,6 @@
     "@types/node": "^24.13.3",
     "@types/ws": "^8.18.1",
     "typescript": "^5.9.3",
-    "vitest": "^4.1.10"
+    "vitest": "^4.1.11"
   }
 }

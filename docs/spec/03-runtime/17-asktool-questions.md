@@ -17,6 +17,11 @@ The tool accepts a non-empty `questions` array. Each question contains:
   `description`;
 - `multiSelect`: optional; when true, more than one selectable answer is allowed.
 
+Each question prompt is limited to 300 Unicode characters, including Markdown
+source. Longer prompts are rejected by the runtime before a pending card is
+created, so the model can retry with a shorter question. The character count
+uses Unicode code points, so a supplementary-plane character counts once.
+
 Plain string options remain supported. The card renders CommonMark/GFM text
 formatting such as emphasis, inline code, paragraphs, and lists. Links render as
 non-interactive text, images as alt text, and raw HTML is ignored. Question

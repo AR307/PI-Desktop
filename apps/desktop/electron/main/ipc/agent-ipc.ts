@@ -137,13 +137,14 @@ export function registerAgentIpc({
         errorCode: ErrorCodes.TURN_NOT_FOUND,
       });
     }
-    const context = await sidecar.call<{ projectPath?: string; supportsVision: boolean }>(
+    const context = await sidecar.call<{ projectPath?: string; remoteWorkspace?: unknown; supportsVision: boolean }>(
       "agent.steeringContext", { sessionId: req.sessionId, expectedTurnId: req.expectedTurnId },
     );
+    const localProjectPath = context.remoteWorkspace ? undefined : context.projectPath;
     const mcpExpansion = /^\/mcp:\S/.test(req.content)
       ? expandMcpInvocation(
           req.content,
-          await composerCommandService.buildComposerCommands(context.projectPath ?? null),
+          await composerCommandService.buildComposerCommands(localProjectPath ?? null),
           Boolean(req.attachments?.length),
         )
       : null;
@@ -151,7 +152,7 @@ export function registerAgentIpc({
     // shows and where each image block sits in the prompt.
     const steerContent = mcpExpansion?.expanded ?? req.content;
     const prepared = await preparePromptAttachments(
-      dataDir, req.sessionId, context.projectPath, req.attachments ?? [],
+      dataDir, req.sessionId, localProjectPath, req.attachments ?? [],
       context.supportsVision, steerContent,
     );
     const session = await host.call<{ session?: { messages?: UiMessage[] } }>("session.get", {
@@ -237,7 +238,7 @@ export function registerAgentIpc({
       ? expandMcpInvocation(
           req.content,
           await composerCommandService.buildComposerCommands(
-            typeof session.projectPath === "string" ? session.projectPath.trim() || null : null,
+            !session.remoteWorkspace && typeof session.projectPath === "string" ? session.projectPath.trim() || null : null,
           ),
           Boolean(req.attachments?.length),
         )
@@ -327,7 +328,7 @@ export function registerAgentIpc({
       settings,
       { fast: session.fast === true, ultra: session.ultra === true },
     );
-    sidecar.setProjectInstructionRoot(req.sessionId, launch.projectPath);
+    sidecar.setProjectInstructionRoot(req.sessionId, launch.workspaceRoot ?? launch.projectPath);
 
     // Open a durable turn row, then persist the user message under it.
     const turn = await host.call<{ turnId?: string }>("session.beginTurn", {
@@ -365,7 +366,7 @@ export function registerAgentIpc({
           ? req.content.slice(1, commandEnd === -1 ? undefined : commandEnd)
           : "";
         const commands = await composerCommandService.buildComposerCommands(
-          launch.projectPath ?? root,
+          session.remoteWorkspace ? null : launch.projectPath ?? root,
         );
         const command = commands.find((item) => item.name === commandName);
         const activeSkills = new Map(
@@ -417,7 +418,7 @@ export function registerAgentIpc({
       preparedAttachments = await preparePromptAttachments(
         dataDir,
         req.sessionId,
-        typeof session.projectPath === "string" && session.projectPath.trim()
+        !session.remoteWorkspace && typeof session.projectPath === "string" && session.projectPath.trim()
           ? session.projectPath.trim()
           : undefined,
         req.attachments ?? [],
@@ -604,7 +605,7 @@ export function registerAgentIpc({
       detail.session,
       settings,
     );
-    sidecar.setProjectInstructionRoot(req.sessionId, launch.projectPath);
+    sidecar.setProjectInstructionRoot(req.sessionId, launch.workspaceRoot ?? launch.projectPath);
     // A lost reply is not the sidecar's verdict: the sidecar keeps summarizing
     // and persists the checkpoint through host-core, so the durable record
     // decides whether this manual compaction succeeded (issue #795).
@@ -660,7 +661,10 @@ export function registerAgentIpc({
       // An open extension prompt resolves with its abort value (spec 16 §9).
       agentExtensions.cancelPrompts(req.sessionId);
       cancelSessionTools(req.sessionId, "Session turn was aborted");
-      result = await sidecar.call("agent.abort", req);
+      result = await sidecar.call("agent.abort", {
+        ...req,
+        ...(abortedTurnId ? { turnId: abortedTurnId } : {}),
+      });
     } finally {
       // A turn that already stopped owning the session is refused inside the
       // finalizer, so the identity captured above is the only one used here.

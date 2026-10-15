@@ -49,7 +49,6 @@ pub(super) fn refresh_task(
     }
     block["result"] = next["result"].clone();
     block["text"] = next["text"].clone();
-    invalidate_transcript_layout(session_id);
     if !transcripts::update_message(db.data_dir(), session_id, &existing)? {
         return Err(anyhow!(
             "delegation snapshot is missing from its transcript"

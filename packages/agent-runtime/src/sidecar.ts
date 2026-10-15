@@ -125,6 +125,9 @@ type RuntimeParams = {
   scratchDir?: string;
   /** Session-bound workspace root supplied by Electron main. */
   projectPath?: string;
+  remoteWorkspace?: { hostKey: string; path: string };
+  /** An isolated session's worktree root, supplied by Electron main (ADR 0329). */
+  workspaceRoot?: string;
   customSystemPrompt?: CustomSystemPrompt;
   projectInstructions?: ProjectInstructions;
   projectMemory?: string;
@@ -238,6 +241,8 @@ async function runtimeFor(
     customSystemPrompt: params.customSystemPrompt,
     projectMemory: params.projectMemory,
     projectPath: params.projectPath,
+    remoteWorkspace: params.remoteWorkspace,
+    workspaceRoot: params.workspaceRoot,
     commandShell: params.commandShell,
   };
   const reusable = existing?.matches(nextConfiguration) || existing?.canRebindTurn(nextConfiguration)
@@ -276,7 +281,7 @@ async function runtimeFor(
     const supportsVision = visionFromModelConfig(params.provider.modelConfig);
     history = await hydrateAttachmentHistory(restoredMessages, {
       scratchDir: params.scratchDir,
-      projectPath: params.projectPath,
+      projectPath: params.remoteWorkspace ? undefined : params.projectPath,
       attachmentsDir: params.attachmentsDir,
       supportsVision,
     });
@@ -312,6 +317,8 @@ async function runtimeFor(
     subagentProviders,
     subagentModelKeys,
     projectPath: params.projectPath,
+    remoteWorkspace: params.remoteWorkspace,
+    workspaceRoot: params.workspaceRoot,
     customSystemPrompt: params.customSystemPrompt,
     projectInstructions: params.projectInstructions,
     projectMemory: params.projectMemory,

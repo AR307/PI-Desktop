@@ -93,8 +93,13 @@ type ProjectGroupRecord = {
 `project-group/create` is additive and does not change the active workspace.
 `project-group/list` returns one row per logical group; old path projects are
 returned as `legacy` single-root groups. Group memory and instructions are
-shared by all sessions whose primary path belongs to the group. The primary
-path is the default builtin-tool workspace. The runtime advertises all registered
+shared by all sessions whose primary path belongs to the group. The first
+selected root is primary at creation; `project-group/update` may promote any
+other selected root by naming it as `primary`, and the host then stores that
+root first. The primary path is the default builtin-tool workspace. The runtime
+advertises all registered roots; an absolute path under an additional root is
+canonicalized and executed against that root, while arbitrary external paths
+still require the ordinary permission flow.
 roots; an absolute path under an additional root is canonicalized and executed
 against that root, while arbitrary external paths still require the ordinary
 permission flow.
@@ -301,9 +306,8 @@ finalized as `completed`; the request does not abort the provider stream,
 cancel running tools, or open a second concurrent turn. An idle session returns
 `requested: false`.
 
-The renderer owns the removable, in-memory queued-prompt list per session. It
-calls this channel only for a queued item's **Send now** action and releases
-that item through the ordinary `agent/prompt` flow after the terminal event.
+The Host owns the persisted prompt queue. **Send now** uses queue promotion and
+steering into the active turn; it does not call this graceful-stop channel.
 
 ### 5.2a stop-subagents
 
@@ -588,10 +592,14 @@ entries and `IDEMPOTENCY_CONFLICT` when a key is reused with other input.
 `entries` arrive in delivery order: promoted entries first in ascending
 `priority` (the order they were promoted), then every remaining entry by
 `position`. `prioritize` appends an entry to the end of that priority block
-without touching the running turn, refuses an entry that already carries a
-priority with `CONFLICT`, and refuses a turn that is no longer queued. The
-renderer's "send now" then requests a graceful stop so the entry starts at
-the next boundary. `reorder` swaps one non-promoted entry with its adjacent
+and attempts steering delivery into the active runtime turn, refuses an entry
+that already carries a priority with `CONFLICT`, and refuses a turn that is no
+longer queued. Delivery runs outside the session admission lock, reserves only
+the input being delivered, and never requests stop or abort. A queued input
+with a different effective permission mode stays queued so its own grants are
+preserved. Immediate promotion delivers only the paired caller's own input;
+other principals retain the existing turn-boundary delivery and queue policy.
+`reorder` swaps one non-promoted entry with its adjacent
 non-promoted neighbour and reports `moved: false` for a promoted entry, a
 missing entry, or a block/queue edge; a promoted entry is never a neighbour.
 `remove` cancels an entry that has not started. A restored queue stays held
@@ -599,10 +607,11 @@ until the desktop attaches as the owner, so a reboot never starts work
 unattended.
 
 The promoted block is delivered as adjacent messages rather than as separate
-turns: the first promoted entry starts the turn at the boundary and every later
-promoted entry is injected into that same turn through the steering channel
+turns: promoted entries join the active turn through the steering channel
+when it accepts input. With no active turn, the first promoted entry starts
+the turn and every later promoted entry is injected into that same turn
 (`pi-desktop/agent/steer` with the running turn's id), so the transcript shows
-the user rows one after another and the model answers once. An injected entry
+the user rows in click order within one turn. An injected entry
 leaves the queue and its own turn is canceled because it never runs on its own.
 An entry the runtime refuses to accept stays queued and leaves at the next
 boundary as its own turn.
@@ -938,6 +947,12 @@ type SessionSummary = {
  supportedThinkingLevels?: ThinkingLevel[];
  updatedAt: string;
  createdAt: string;
+ /** Isolated sessions only (ADR 0329); never carries a filesystem path. */
+ worktree?: {
+  branch: string;
+  status: "creating" | "active" | "conflict" | "merged" | "missing";
+  setupStatus?: "none" | "running" | "ok" | "failed" | null;
+ };
 };
 
 type SessionMessageOrigin = {
@@ -957,7 +972,9 @@ type UiMessage = {
  sessionMessage?: SessionMessageOrigin;
  thinking?: string; // assistant reasoning, never folded into content
  usage?: MessageUsage; // provider-reported assistant usage
- responseDurationMs?: number; // model stream duration for throughput
+ responseDurationMs?: number; // elapsed assistant response duration for throughput
+ providerWaitMs?: number; // request start to first model response event
+ modelStreamDurationMs?: number; // streamed thinking and answer duration
  responseOutputTokens?: number; // estimated partial output when stop has no final usage
  toolName?: string;
  toolCallId?: string;
@@ -1051,7 +1068,9 @@ through one Electron-only allowlisted channel:
 Minimal interface:
 
 - `session/list`
-- `session/create`
+- `session/create` — optional `isolated: true` with a `projectPath` creates
+  the session in its own git worktree (ADR 0329); a refusal surfaces the host's
+  `WORKTREE_*` code
 - `session/open(sessionId)` — validate and select an existing durable session
   through the reviewed desktop-control path; it does not create or mutate the
   session
@@ -1179,15 +1198,24 @@ same normalized `AppError` carried by the lifecycle `error` event to the
 assistant message before `message_end`. Error messages persist with the
 transcript but are excluded from restored model context.
 
-The context inspector consumes two additive usage signals. `MessageUsage` is
-the provider-reported assistant usage and `responseDurationMs` is the
+The context inspector consumes additive usage and timing signals. `MessageUsage`
+is the provider-reported assistant usage and `responseDurationMs` is the
 elapsed request duration used to display output tokens per second. Completed
 responses use pi-ai 1.1.0's monotonic `AssistantMessage.durationMs`; when
-that value is unavailable, the sidecar stopwatch remains the fallback. `ToolTokenUsage`
-is a runtime estimate from the tool call arguments and result; providers do not
-report per-tool allocation, so the renderer labels these rows as estimates and
-never merges them into the exact provider total. Older peers may omit all of
-these optional fields without breaking the v6 handshake.
+that value is unavailable, the sidecar stopwatch remains the fallback.
+`providerWaitMs` measures from the model request start to the first response
+event, including transport and provider-side first-response wait;
+`modelStreamDurationMs` measures streamed thinking and answer content after
+that event. Both are persisted as optional assistant-message metadata. Older
+messages without split timing keep their prior `responseDurationMs` as the
+model-duration fallback; their request-wait duration cannot be recovered. The
+inspector sums top-level model timing and tool duration against elapsed session
+time; nested delegate timings are excluded, and overlapping top-level tool
+calls count once. `ToolTokenUsage` is a runtime estimate from the tool call
+arguments and result; providers do not report per-tool allocation, so the
+renderer labels these rows as estimates and never merges them into the exact
+provider total. Older peers may omit all of these optional fields without
+breaking the v6 handshake.
 
 `turn_end.subagentUsage` is the settled subagent total since the previous
 emitted `turn_end` of the same durable turn. Parent `message.usage` stays the
@@ -1401,6 +1429,25 @@ type ProjectMemoryEntry = {
 };
 ```
 
+## 9a. Session worktree API (ADR 0329)
+
+Thin forwards to the host `worktree.*` methods
+(06-host-rpc-protocol §4); errors keep the host's `WORKTREE_*` code.
+
+- `worktree/probe({ projectPath })` → whether the project can host isolated
+  sessions, with the refusal code, or whether it has uncommitted changes
+- `worktree/preview({ sessionId })` / `worktree/merge({ sessionId, previewToken })`
+- `worktree/behind({ sessionId })` → commit count, and
+  `worktree/sync({ sessionId })` — "Sync from project"; `worktree/behindAll()`
+  → `{ counts: { [sessionId]: count }, statusesChanged }` for the sidebar marker
+- `worktree/pendingWork({ sessionId })` — unmerged work a delete discards
+- `worktree/setupLog({ sessionId })`
+- `worktree/reveal({ sessionId })` — Electron Main resolves the folder with
+  `worktree.location` and opens it in the OS file manager; the path is never
+  returned to the renderer
+- `worktree/setupCommand/get({ projectPath })` /
+  `worktree/setupCommand/set({ projectPath, command })`
+
 ## 10. Tool Permission API
 
 When a tool requires confirmation:
@@ -1598,6 +1645,15 @@ one-liner.
 - `skills.read({ id, level?, projectPath? })` → `{ skill, body }`
 - `skills.remove({ id, level?, projectPath? })`
 - `skills.setEnabled({ id, enabled, level, projectPath? })`
+- `skills.disabledBuiltins()` → `{ disabled: string[] }`
+- `skills.setBuiltinEnabled({ id, enabled })` → `{ id, enabled }`
+
+Built-in skill activation is global and defaults to enabled. Host stores only
+disabled IDs in `<data>/agent-capabilities/skill-builtins.json`, separately
+from the scanned user-skill state. Renderer IPC lists bundled entries with
+their effective enabled state and sets one entry's global state. The
+corresponding Desktop channels are `pi-desktop/skill/builtin/list` and
+`pi-desktop/skill/builtin/setEnabled`.
 
 The list contains frontmatter-derived `name` and `description`, not the body.
 Only the description enters the prompt, and the body is fetched when the model
@@ -1795,9 +1851,16 @@ Command sources:
 
 Work panel channels are Electron-main implementations. User-driven workspace
 operations resolve the visible root from `workspace.get` and fail closed
-without one. Agent-driven BrowserPreview routing resolves the originating
-conversation through `session.get`, so a background preview never inherits the
-visible session's workspace.
+without one. Agent-driven BrowserPreview resolves the owning conversation
+through `session.get`, allowing its project-group folders (or its isolated
+worktree) and its own `<data_dir>/scratch/<sessionId>` directory. A temporary
+conversation needs no workspace to preview its generated HTML. A missing
+session fails explicitly; a background preview never inherits the visible
+session's roots. BrowserPreview validates realpath containment before emitting
+the absolute path to the existing resource-tab owner. Chat links to other
+sessions' scratch files and attachments retain the read-only file surface.
+This does not restrict the Browser's explicit absolute-path / `file:` address
+entry or local-page navigation, which follow its existing local-file policy.
 
 ### workspace
 
@@ -1857,9 +1920,13 @@ Renderer IPC kept for the Plan-safe preview facade and URL fallback:
   `.mp4` symlink inside its private app-data directory before the OS handoff,
   so the extensionless blob has a media association without copying its bytes.
 - `fs/resolveRef({ref, sessionId?})` → `FsChatRefResolveResult`
+  (for isolated sessions, lookup and file reads use `worktree.location` rather
+  than the parent project checkout)
   (`{ match: FsChatRefMatch | null, reason?: "outside-allowed-roots" }`, the match naming the answering `root`
   (`workspace` / `scratch` / `attachments`), the `relativePath` relative to that
-  root, the absolute `absolutePath`, `matchedBy` (`exact-relative` /
+  root, optional `sessionScratch: true` for the current session's own scratch
+  (not the wider read-only scratch containment store), the absolute
+  `absolutePath`, `matchedBy` (`exact-relative` /
   `exact-absolute` / `path-suffix` / `basename`), and — for a `workspace` match
   — `projectRoot` (`{ path, name, primary }`), which names the project folder
   that answered); `sessionId` selects the

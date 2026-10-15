@@ -19,7 +19,7 @@ import shutil
 import subprocess
 from pathlib import Path
 
-from PIL import Image, ImageChops, ImageDraw
+from PIL import Image, ImageChops
 
 ROOT = Path(__file__).resolve().parent.parent
 BUILD = ROOT / "apps" / "desktop" / "build"
@@ -67,14 +67,6 @@ def main() -> None:
         ),
         master.getchannel("A"),
     )
-    # The source artwork also contains a soft outline around its light app
-    # tile. Keep the known PI mark area so that outline cannot leak into the
-    # menu bar template silhouette.
-    mark_clip = Image.new("L", master.size, 0)
-    mark_draw = ImageDraw.Draw(mark_clip)
-    mark_draw.rectangle((120, 115, 850, 800), fill=255)
-    mark_draw.rectangle((120, 115, 250, 250), fill=0)
-    tray_alpha = ImageChops.multiply(tray_alpha, mark_clip)
     tray_icon_mac = Image.new("RGBA", master.size, (0, 0, 0, 0))
     tray_icon_mac.putalpha(tray_alpha)
     mark_bounds = tray_alpha.getbbox()
@@ -87,9 +79,7 @@ def main() -> None:
     tray_icon_mac.save(tray_icon_mac_path)
 
     iconset = BUILD / "icon.iconset"
-    if iconset.exists():
-        shutil.rmtree(iconset)
-    iconset.mkdir()
+    iconset.mkdir(exist_ok=True)
     sizes = [16, 32, 128, 256, 512]
     for sz in sizes:
         master.resize((sz, sz), Image.LANCZOS).save(iconset / f"icon_{sz}x{sz}.png")
@@ -103,7 +93,8 @@ def main() -> None:
         print(f"wrote {windows_icon}")
         print(f"wrote {package_icon}")
         print(f"wrote {tray_icon_mac_path}")
-        print("skipped icon.icns (iconutil is unavailable)")
+        master.save(BUILD / "icon.icns", format="ICNS")
+        print("wrote icon.icns with Pillow")
         return
 
     icns = BUILD / "icon.icns"

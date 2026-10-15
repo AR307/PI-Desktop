@@ -1,6 +1,6 @@
 {
   "name": "@pi-desktop/agent-runtime",
-  "version": "0.18.2",
+  "version": "0.20.2",
   "private": true,
   "type": "module",
   "main": "./dist/index.js",
@@ -44,6 +44,6 @@
     "@types/node": "^24.13.3",
     "esbuild": "^0.25.12",
     "typescript": "^5.9.3",
-    "vitest": "^4.1.10"
+    "vitest": "^4.1.11"
   }
 }

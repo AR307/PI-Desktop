@@ -57,6 +57,41 @@ test("deleting a session drops its queued outbox entries (D318)", async () => {
   );
 });
 
+test("transcript replacement waits for an in-flight append before dropping the session queue", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "pi-outbox-replace-"));
+  const outbox = new PersistenceOutbox(dir, silent);
+  let releaseAppend;
+  let appendStarted;
+  const started = new Promise((resolve) => { appendStarted = resolve; });
+  const blockedAppend = new Promise((resolve) => { releaseAppend = resolve; });
+  const host = mockHost(async () => {
+    appendStarted();
+    await blockedAppend;
+  });
+
+  await outbox.enqueue(
+    {
+      key: "message:replace-session:assistant-1",
+      sessionId: "replace-session",
+      message: { id: "assistant-1", role: "assistant", content: "obsolete" },
+    },
+    () => host,
+  );
+  await started;
+
+  let replacementReady = false;
+  const preparing = outbox
+    .prepareSessionReplacement("replace-session", () => host)
+    .then(() => { replacementReady = true; });
+  await Promise.resolve();
+  assert.equal(replacementReady, false, "replacement must wait for the active append");
+
+  releaseAppend();
+  await preparing;
+  assert.equal(replacementReady, true);
+  assert.equal(outbox.size(), 0);
+});
+
 function mockHost(handler) {
   return {
     isAvailable: () => true,

@@ -177,7 +177,7 @@ test("logger bounds and redacts messages, paths, credentials, and arbitrary data
     assert.equal(record.data.apiKey, "***REDACTED***");
     assert.equal(record.data.authorization, "***REDACTED***");
     assert.equal(record.data.password, "***REDACTED***");
-    assert.equal(record.data.path, "<data-dir>/workspace/private.txt");
+    assert.equal(record.data.path, join("<data-dir>", "workspace", "private.txt"));
     assert.equal(record.data.detail, "failed while reading <local-path>");
     assert.match(record.data.huge, /\[truncated/);
     assert.ok(Buffer.byteLength(JSON.stringify(record.data), "utf8") <= 8 * 1024);

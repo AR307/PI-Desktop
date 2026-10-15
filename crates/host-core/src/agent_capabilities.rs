@@ -296,6 +296,15 @@ pub fn normalize_project_path(path: &str) -> String {
         return String::new();
     }
     let mut normalized = trimmed.replace('\\', "/");
+    // Keep capability roots aligned with the database's canonical spelling
+    // when older Windows callers provide an extended-length path.
+    if normalized.starts_with("//?/")
+        && normalized.len() >= 7
+        && normalized.as_bytes()[5] == b':'
+        && normalized.as_bytes()[6] == b'/'
+    {
+        normalized = normalized[4..].to_string();
+    }
     while normalized.len() > 1
         && normalized.ends_with('/')
         && !normalized

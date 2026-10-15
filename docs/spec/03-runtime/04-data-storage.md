@@ -1,4 +1,4 @@
-# 04. Data Storage (Schema v24)
+# 04. Data Storage (Schema v25)
 
 ## 0. Ownership decision
 
@@ -161,8 +161,9 @@ to an absolute path before it reaches host-core as a child-process variable.
  ├── pi.sqlite.v9.bak     # exact readable backup before v9→v15 destructive work
  ├── pi.sqlite.v10.bak    # exact readable backup before v10→v15 destructive work
  ├── sessions/            # transcript file store (D119) — host-core only
- │    ├── <sessionId>.jsonl           # live transcript (header + messages)
- │    ├── <sessionId>.revisions.jsonl # regenerate branches, append-only
+│    ├── <sessionId>.jsonl           # live transcript (header + messages)
+│    ├── <sessionId>.jsonl.layout    # disposable, versioned byte-offset cache
+│    ├── <sessionId>.revisions.jsonl # regenerate branches, append-only
  │    └── <sessionId>.inflight.json   # streaming reply checkpoint (D299), transient
  ├── secrets/             # encrypted secret blobs + .machine-key (unchanged)
  ├── config-sync/         # encrypted sync base/pending bundles — host-core only
@@ -389,7 +390,7 @@ CREATE TABLE kv (
 
 | ns | contents |
 |---|---|
-| `app` | the settings blob (`settings.get/set`), `currentProjectId`. Optional `networkProxy` (`mode`/`url`/`bypass`) is a JSON field in that blob; no schema version bump (D340) |
+| `app` | the settings blob (`settings.get/set`), `currentProjectId`. Optional `networkProxy` (`mode`/`url`/`bypass`) is a JSON field in that blob: `url`/`bypass` survive a switch to System or Direct and are applied only in Custom mode (issue #1541); no schema version bump (D340) |
 | `ui` | non-critical UI state the renderer asks the host to keep |
 | `cache` | model-refresh stamps, recent model refs (spec 13 §3) |
 | `plugin:<id>` | per-plugin settings; uninstall = `DELETE WHERE ns = ?` |
@@ -1444,16 +1445,38 @@ relationship or index. The renderer's unified reading view is shared by ordinary
 history and search; it never becomes canonical mutation or model input.
 
 A bounded window is served through a per-session **transcript layout**: the byte
-offset of every message and compaction line, plus the file length those offsets
-were recorded against. Serving a window then seeks to its first selected line
-instead of parsing the history in front of it, so the cost of opening a session
-is proportional to the window rather than to the conversation. Consequences:
+offset of every message and compaction line, plus the file identity and complete
+prefix length those offsets describe. Serving a window seeks to its first
+selected line instead of parsing the history in front of it, so the common
+cached read is proportional to the requested page. Consequences:
 
-- The layout is derived data, cached in memory and rebuilt by scanning the file.
-  `file_len` is its validity token: the transcript is append-only between atomic
-  rewrites, so a longer file is scanned from the previous end and a shorter or
-  replaced file is rescanned in full. Every rewrite and delete path also drops
-  the cached entry, because a rewrite can land on an identical length.
+- The layout is derived data, cached in memory and, when reliable file identity
+  is available, in the sibling `<sessionId>.jsonl.layout` file. Unix uses the
+  device and inode; Windows uses the volume serial number and file ID. If the
+  filesystem cannot provide a reliable identity, the host skips the disk cache
+  and scans the transcript normally.
+- The disk cache has an explicit format version and validates its identity,
+  checksum, counts, globally increasing in-range offsets, and the complete-line
+  prefix before reuse. Missing, old, unknown, corrupt, or mismatched caches are
+  ignored and rebuilt from the JSONL source. Cache read/write failures are
+  diagnostic only and do not make the session unreadable.
+- A matching identity and complete prefix permits append-only incremental
+  scanning. A transcript rewrite invalidates both in-memory and disk layouts
+  only after its atomic replacement succeeds; delete also removes both. Cache
+  invalidation stays in transcript rewrite/delete ownership, not the generic
+  atomic-swap helper used by unrelated files.
+- A point read that finds an invalid indexed line boundary drops both cache
+  layers, scans the complete transcript without consulting the disk cache, and
+  retries once with message counts, page ranges, and message location recomputed
+  from the rebuilt layout. Reads tolerate invalid UTF-8 within a complete line:
+  parseable records use U+FFFD for the damaged bytes, while records that remain
+  invalid JSON or do not match the record schema are skipped with a diagnostic.
+  Physical message-line positions stay consistent across bounded reads. The
+  transcript bytes are never rewritten; actual file I/O errors remain errors.
+- New cache files use a nonnumeric version header that older parsers safely
+  reject and rebuild. Downgrading to an older app preserves the transcript and
+  database, though that app's own cache defect may recur. No database or
+  transcript migration is involved.
 - A torn trailing line (crash mid-append) is excluded from both the offsets and
   `file_len`, so a later refresh picks it up once the writer completes it.
 - Line classification reads the `type` discriminator with a single depth-aware
@@ -1503,7 +1526,7 @@ truncating at a guessed position.
 - JSON columns are read blind on hot paths (shipped to the renderer as-is);
   anything filtered or summed is a promoted column by rule.
 
-## 7. Versioning, v7 reset, and v8-to-v24 migration
+## 7. Versioning, v7 reset, and v8-to-v25 migration
 
 - `PRAGMA user_version` stays the schema authority; future structural changes
   add ordered Rust migration fns again, each in one transaction, with a
@@ -1514,15 +1537,14 @@ truncating at a guessed position.
   Sessions, providers, and settings from the old file are not carried over;
   the archive remains for manual recovery. All pre-v7 migration code
   (v1 `settings.sqlite` import, v2→v6 chain) is deleted.
-- Fresh installs run the full v24 DDL directly.
-- **Fork schema v24 unifies the two v22 histories.** Upstream v22 added the
-  session-list index; MirrorCoding v22 added the durable mobile change index.
-  Existing fork v22 databases first receive the idempotent v23 title-source
-  migration. The v23-to-v24 migration ensures the upstream composite index and
-  mobile `session_sync_state` / `session_sync_changes` tables exist. Existing
-  mobile revisions and tombstones survive unchanged; canonical JSONL history
-  is neither rewritten nor downloaded again. Upstream v22/v23 databases start
-  with an empty mobile change index. Migration backups remain available.
+- Fresh installs run the full v25 DDL directly.
+- **Schema v25 combines both released v24 histories.** Upstream v24 added the
+  worktree registry; MirrorCoding v24 already carried the durable mobile change
+  index. The v24-to-v25 transaction ensures both sets of tables and the session
+  list index exist. Existing messages, mobile revisions, tombstones and worktree
+  records are retained. Fresh databases create both table sets. Earlier versions
+  follow their existing upgrades before this transaction. A readable v24 backup
+  is created before the transaction; canonical JSONL is not rewritten.
 - **Schema v7 first reaches v8, then uses the guarded path.** The v7→v8
   migration is followed by the same guarded v8→v15 migration; schema-v9 and
   schema-v10 databases take the same guarded path and receive an exact readable

@@ -2,6 +2,14 @@ use super::*;
 use tempfile::tempdir;
 
 #[test]
+fn canonical_windows_project_paths_use_the_registered_drive_spelling() {
+    assert_eq!(normalize_project_path(r"\\?\C:\Users\fixture\project\"), "C:/Users/fixture/project");
+    assert_eq!(normalize_project_path("//?/D:/project/"), "D:/project");
+    assert_eq!(normalize_project_path(r"C:\"), "C:/");
+    assert_eq!(normalize_project_path("/srv/project/"), "/srv/project");
+}
+
+#[test]
 fn front_matter_and_body_round_trip() {
     let (fields, body) =
         parse_front_matter("---\nname: Review\ndescription: Check code\n---\n\nDo it.\n");

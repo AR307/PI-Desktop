@@ -345,6 +345,9 @@ fn relocate_database(roots: &Roots) -> Result<()> {
         ("artifacts", "path", false),
         ("turn_queue", "attachments_json", true),
         ("scheduled_tasks", "config_json", true),
+        // Isolated-session worktrees live under the data directory (ADR 0329);
+        // host-core repairs git's back-links on the next start.
+        ("worktrees", "path", false),
     ] {
         if !column_exists(&transaction, table, column)? {
             continue;

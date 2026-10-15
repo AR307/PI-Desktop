@@ -17,6 +17,7 @@ import { flushSync } from "react-dom";
 import i18n from "i18next";
 import { I18nextProvider } from "react-i18next";
 import { en } from "@pi-desktop/i18n";
+import { MAX_ASK_TOOL_QUESTION_CHARS } from "../../packages/shared/src/types/agent";
 import { AskToolCard } from "../../apps/desktop/src/components/AskToolCard";
 import { api } from "../../apps/desktop/src/lib/api";
 import { useAppStore } from "../../apps/desktop/src/stores/app-store";
@@ -94,6 +95,11 @@ const LONG_QUESTIONS: FixtureQuestion[] = [
     options: [{ label: "Submit", description: "Finish the request" }],
   },
 ];
+
+const MAX_LENGTH_QUESTION: FixtureQuestion = {
+  question: "q".repeat(MAX_ASK_TOOL_QUESTION_CHARS),
+  options: [{ label: "continue", description: "Proceed with the selected choice." }],
+};
 
 export async function asktoolCardProbe() {
   await i18n.init({ lng: "en", resources: { en: { translation: en } } });
@@ -367,6 +373,22 @@ export async function asktoolCardProbe() {
     assert(
       element<HTMLElement>(".asktool-question-body").scrollTop === 0,
       "the next long question starts at the top",
+    );
+
+    // Flow G: the maximum permitted prompt remains visible and answerable.
+    mount("ask-max-length", [MAX_LENGTH_QUESTION]);
+    await until(() => options().length === 1, "maximum-length question mounts");
+    const maxLengthQuestion = "q".repeat(MAX_ASK_TOOL_QUESTION_CHARS);
+    assert(
+      questionText().endsWith(maxLengthQuestion),
+      "the card displays the complete 300-character question",
+    );
+    flushSync(() => options()[0]!.click());
+    flushSync(() => headerButtons().primary.click());
+    await until(() => resolutions.length === 5, "maximum-length question resolves");
+    assert(
+      JSON.stringify(resolutions[4]!.answers) === JSON.stringify([["continue"]]),
+      "the maximum-length question remains answerable",
     );
 
     assert(errors.length === 0, `render errors: ${errors.map(String)}`);

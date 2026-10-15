@@ -824,6 +824,10 @@ redirects; it does not wait for slow images or subframes. `browser:state` report
 loading immediately and optionally includes `loadError` for failed navigation.
 Optional `sessionId` and `tabId` identify the host-owned work-panel destination;
 plugins do not select these identities through navigation arguments.
+With the high-risk `browser.cdp` permission, `navigate` may open an existing
+local file through an absolute path or `file:` URL. Relative paths remain
+workspace-scoped. A local file page may navigate to other existing local files;
+web pages retain only the prior in-workspace file-navigation allowance.
 
 The current guest page is a host-owned `WebContentsView` (`persist:work-browser`).
 Each resource tab retains its own page. A navigation for a background session is
@@ -841,6 +845,16 @@ session and resolves only after that session's view is visible. A background
 session never takes focus; if it cannot become visible, `reveal()` fails with
 `UNAVAILABLE`. The bundled Browser agent tool calls `reveal()` before each
 operation. `BrowserPreview` remains the live-reloading workspace-file preview.
+
+Full-page `screenshot` captures are proportionally scaled to no more than
+1280×2048 output pixels. Viewport screenshots and raw `Page.captureScreenshot`
+CDP calls retain their existing dimensions.
+
+Screenshot captures, including raw `Page.captureScreenshot` CDP calls, have a
+30-second host-side deadline. A capture that exceeds it fails with `TIMEOUT`;
+the host detaches the stalled CDP session and releases that page's capture
+queue so a later capture can reattach and proceed. Other CDP methods retain
+their existing timeout behavior.
 
 `getHistory` returns newest-first entries explicitly recorded by the host, with
 text and images interleaved in capture order. Content written through
@@ -1384,3 +1398,9 @@ one at runtime.
 
 All high-risk entry points assert declared+granted permissions and emit audit log lines.
 Plugin panels no longer receive the full `pi` object; they use `window.pluginBridge.invoke`.
+
+Renderer ES modules may import `react/jsx-runtime` or
+`react/jsx-dev-runtime` for automatic JSX. The host import map exposes both of
+its runtimes alongside `react`, `react-dom`, and `react-dom/client`, before
+evaluating plugin entries. This keeps compiled JSX, hooks and context on the
+host React instance in production and development builds.

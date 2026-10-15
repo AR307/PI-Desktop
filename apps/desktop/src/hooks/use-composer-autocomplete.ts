@@ -165,6 +165,7 @@ export function useComposerAutocomplete({
   composing: boolean;
   enabled: boolean;
 }) {
+  const sessionId = useAppStore((s) => s.activeSessionId);
   const workspaceKey = useAppStore((s) => s.workspace?.path ?? "");
   const hasWorkspace = workspaceKey !== "";
   const ready = useAppStore((s) => s.ready);
@@ -232,7 +233,7 @@ export function useComposerAutocomplete({
     }
     let cancelled = false;
     void api
-      .fsIndex()
+      .fsIndex(sessionId)
       .then((res) => {
         filesCache = {
           key: workspaceKey,
@@ -248,7 +249,7 @@ export function useComposerAutocomplete({
     return () => {
       cancelled = true;
     };
-  }, [trigger?.mode, dismissed, workspaceKey, hasWorkspace]);
+  }, [trigger?.mode, dismissed, workspaceKey, hasWorkspace, sessionId]);
 
   // Warm the `/` source once bootstrap settles, so the first slash of a session
   // does not wait for a cold host round trip (#1543). Waiting for `ready` keeps

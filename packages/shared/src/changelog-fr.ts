@@ -2,6 +2,57 @@ import type { ChangelogEntry } from "./changelog.js";
 
 export const frEntries: ChangelogEntry[] = [
   {
+    "version": "0.20.2",
+    "date": "2026-10-15",
+    "highlights": [
+      "Après autorisation MirrorCoding, l’agent génère des images sans configuration manuelle du mode image.",
+      "Nouveau logo commun pour le bureau et Android.",
+      "Intégration de la navigation mobile, des notifications, de la connexion en arrière-plan et de la position de lecture.",
+      "Synchronisation avec upstream 0.20.1 en conservant la migration des données, l’historique mobile et les tâches indépendantes."
+    ]
+  },
+  {
+    "version": "0.20.1",
+    "date": "2026-10-13",
+    "highlights": [
+      "Configurez des points de terminaison personnalisés sans clé API ; dans ce mode, les requêtes n’envoient aucune donnée d’authentification.",
+      "Ouvrez des fichiers locaux situés hors d’un dossier de projet dans le navigateur intégré ; les pages Web restent limitées aux fichiers du projet.",
+      "Consultez séparément l’attente du fournisseur, la réponse du modèle en continu et le temps des outils principaux, avec les totaux et les pourcentages.",
+      "Après l’arrêt d’un tour, le suivant attend la fin du précédent pour éviter le chevauchement des tâches.",
+      "Le ZIP portable Windows inclut maintenant le flux de mise à jour afin que les copies installées puissent détecter et télécharger les mises à jour.",
+      "Les plugins peuvent interroger les modes de redirection pris en charge par fetch et choisir d’inspecter ou de refuser une redirection sans la suivre ; les appels fetch existants continuent de suivre les redirections par défaut.",
+      "Les estimations de compaction des longs textes et du débit de réponse du modèle sont plus précises ; les flux interrompus conservent le repli actuel.",
+      "La sélection de texte reste continue lorsqu’elle traverse les fenêtres superposées.",
+      "Les menus de projet restent visibles lorsqu’ils sont ouverts depuis les lignes en bas de la barre latérale.",
+      "Windows conserve le verrou d’installation pendant la suppression des anciennes sauvegardes.",
+    ],
+  },
+  {
+    "version": "0.19.1",
+    "date": "2026-10-13",
+    "highlights": [
+      "En revenant au mode personnalisé, votre adresse proxy enregistrée est restaurée même si le brouillon actuel est vide ou invalide.",
+      "Les actions du navigateur expirent et récupèrent lorsque la page ne répond plus, au lieu de rester bloquées indéfiniment.",
+    ],
+  },
+  {
+    "version": "0.19.0",
+    "date": "2026-10-13",
+    "highlights": [
+      "Créez des projets SSH depuis l’accueil, parcourez les dossiers distants dans une boîte de dialogue dédiée et choisissez une identité SSH par hôte.",
+      "Ajoutez ou retirez des dossiers compatibles d’un projet sans déplacer les conversations existantes de leur espace de travail.",
+      "Synchronisez les paramètres choisis entre appareils tout en gardant les listes de projets locales.",
+      "Les Hosts distants appairés se mettent à jour vers la version actuelle du bureau via l’installation SSH vérifiée, puis se reconnectent sur place.",
+      "Activez ou désactivez les Skills intégrés depuis les paramètres et restaurez les valeurs fournies avec l’application.",
+      "La carte de mise à jour affiche la progression du téléchargement et permet de l’annuler ou de réessayer.",
+      "Votre proxy personnalisé reste configuré lorsque vous changez de mode réseau.",
+      "La suppression d’un message préserve la sortie IA en cours et les autres messages de la conversation.",
+      "Les captures d’écran du navigateur récupèrent après un blocage sans laisser la page figée.",
+      "Le catalogue de modèles intégré a été actualisé avec de nouveaux modèles et leurs capacités actuelles.",
+      "AskTool limite clairement la longueur des questions ; les questions trop longues sont refusées avant l’ouverture de la carte.",
+    ],
+  },
+  {
     "version": "0.18.2",
     "date": "2026-10-14",
     "highlights": [
@@ -23,6 +74,7 @@ export const frEntries: ChangelogEntry[] = [
     "version": "0.18.0",
     "date": "2026-10-09",
     "highlights": [
+      "Créez et nommez des projets SSH depuis l’accueil, choisissez les dossiers dans une boîte de dialogue dédiée et gardez les requêtes et identifiants du modèle sur votre ordinateur.",
       "Configurez le classificateur Jev de TypeSafe depuis Ajouter un service et vérifiez la clé API avant de l'enregistrer.",
       "La synchronisation cloud est disponible dans les paramètres de la version empaquetée et porte la mention « expérimental ». Les listes de projets restent sur chaque appareil.",
       "Ajoutez depuis Ajouter un service des fournisseurs de plugins avec clé API, descriptions localisées et découverte des modèles après configuration.",
@@ -35,6 +87,7 @@ export const frEntries: ChangelogEntry[] = [
       "Les plugins peuvent inspecter ou refuser les redirections réseau ; les appels fetch existants continuent de les suivre par défaut.",
       "Arrêtez un sous-agent en cours depuis sa carte ou ses détails, ou tous ceux de la session en cours, sans arrêter le coordinateur.",
       "Consultez la durée totale de la session, le temps de réponse cumulé du modèle et sa part dans le panneau d'utilisation du contexte.",
+      "Un Host distant appairé qui reste en retard sur la version du bureau se met désormais à niveau via la même installation SSH vérifiée et se réappaire sur place, au lieu de simplement vous demander de le mettre à jour.",
     ],
   },
   {

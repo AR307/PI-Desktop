@@ -1,6 +1,6 @@
 {
   "name": "@pi-desktop/desktop",
-  "version": "0.18.2",
+  "version": "0.20.2",
   "desktopName": "pi-desktop.desktop",
   "private": true,
   "description": "PI-Desktop Electron application",
@@ -52,7 +52,7 @@
     "@types/react-dom": "^19.2.4",
     "@types/ws": "^8.18.1",
     "@vitejs/plugin-react": "^4.6.0",
-    "dompurify": "^3.4.13",
+    "dompurify": "^3.4.17",
     "electron": "^43.4.1",
     "electron-builder": "^26.15.3",
     "electron-vite": "^4.0.0",
@@ -226,6 +226,10 @@
       ],
       "icon": "build/icon.ico",
       "extraResources": [
+        {
+          "from": "resources/app-update.yml",
+          "to": "app-update.yml"
+        },
         {
           "from": "../../target/release/pi-desktop-host-core.exe",
           "to": "bin/pi-desktop-host-core.exe"

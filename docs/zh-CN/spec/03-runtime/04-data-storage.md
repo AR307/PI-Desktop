@@ -1,4 +1,4 @@
-# 04. 数据存储（架构 v24）
+# 04. 数据存储（架构 v25）
 
 > **翻译说明：** 本页是与 [英文源规格](/spec/03-runtime/04-data-storage) 一一对应的机器辅助翻译。代码、协议字段和标识符保持原文；如翻译与英文源事实有歧义，以英文版本为准。
 
@@ -1120,6 +1120,9 @@ outbox 排空。渲染器侧的停止绝不重写已有已开始回复的转录
   条目，因为一次重写可能落在完全相同的长度上。
 - 撕裂的尾行（追加过程中崩溃）会同时被排除在偏移量和 `file_len` 之外，因此在
   写入方补全它之后，后续刷新会重新收录它。
+- 完整行中包含非法 UTF-8 时，有界与完整读取仍会尽力恢复：可解析记录中的坏字节会以
+  U+FFFD 替代；仍不符合 JSON 或记录结构的行会记录诊断并跳过。分页仍使用一致的物理
+  消息行位置。读取不会改写转录文件字节；实际文件 I/O 错误仍会返回错误。
 - 行分类通过一次感知深度的扫描读取 `type` 判别字段，绝不把整行解析成值。只有
   **顶层**的 `type` 键决定行的种类：工具结果与检查点详情是开放式 JSON，可能
   嵌套一个自身带 `type` 的对象，而该 `type` 恰好是某个行种类的名字。每条新行都
@@ -1157,7 +1160,7 @@ outbox 排空。渲染器侧的停止绝不重写已有已开始回复的转录
 - JSON 列在热路径上盲读（按原样发送到渲染器）；
   任何过滤或求和的内容都是按规则提升的列。
 
-## 7. 版本控制、v7 重置和 v8 到 v24 迁移
+## 7. 版本控制、v7 重置和 v8 到 v25 迁移
 
 - `PRAGMA user_version` 保留模式权限；未来的结构性变化
   再次添加有序的 Rust 迁移 fns，每个都在一个事务中，并带有一个
@@ -1168,12 +1171,12 @@ outbox 排空。渲染器侧的停止绝不重写已有已开始回复的转录
   旧文件中的会话、提供程序和设置不会保留；
   存档仍保留以供手动恢复。所有 v7 之前的迁移代码
   （v1 `settings.sqlite` 导入，v2→v6 链）被删除。
-- 全新安装直接运行完整的 v24 DDL。
-- **二开架构 v24 统一两条 v22 历史。** 上游 v22 增加会话列表索引，MirrorCoding v22
-  增加持久化手机差量索引。现有二开 v22 数据库先执行幂等的 v23 标题来源迁移，
-  再由 v23→v24 确保上游组合索引及 `session_sync_state` / `session_sync_changes`
-  表存在。已有差量修订号和删除标记保持不变，不重写 JSONL 历史，也不重新下载历史。
-  上游 v22/v23 数据库从空的手机差量索引开始；迁移备份继续保留。
+- 全新安装直接运行完整的 v25 DDL。
+- **Fork schema v25 combines the two released v24 histories.** Upstream v24
+  introduced the worktree registry; the fork v24 introduced mobile delta tables.
+  The v24-to-v25 migration creates whichever structures are missing, preserves
+  existing messages and mobile revisions, and retains the migration backup.
+  Earlier v22/v23 databases receive the ordered title and index upgrades first.
 - **架构 v15 是增量的。** 它增加 `turn_queue` 表及其两个索引（D386 / ADR 0213），使 Host
   拥有的回合队列在重启后存活；不改动任何已有行，迁移前保留 `pi.sqlite.v14.bak`。
 - **架构 v16 是增量的。** 它增加会话协作 link 和投递表、生命周期索引，以及可为空的

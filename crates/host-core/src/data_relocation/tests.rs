@@ -344,7 +344,7 @@ fn handles_legacy_schema_without_upgrading_or_creating_missing_tables() {
     let path: String = database
         .query_row("SELECT path FROM projects", [], |row| row.get(0))
         .unwrap();
-    assert_eq!(path, destination.join("project").to_string_lossy());
+    assert_eq!(PathBuf::from(path), destination.join("project"));
     let tables: i64 = database
         .query_row(
             "SELECT count(*) FROM sqlite_master WHERE type='table'",

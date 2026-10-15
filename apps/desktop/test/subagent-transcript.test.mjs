@@ -70,6 +70,7 @@ test("a delegation card reads its outcome from the lifecycle rows", () => {
     transcriptSource,
     /const delegationStatuses = useMemo\(\(\) => turnDelegationStatuses \?\? collectDelegationStatuses\(delegationItems\)/,
   );
+  // Delegates remain live across replies split by steering in the same runtime turn.
   assert.match(
     transcriptSource,
     /collectDelegationStatuses[(]delegationItems[)]/,

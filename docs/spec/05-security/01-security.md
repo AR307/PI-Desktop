@@ -24,7 +24,9 @@ Required (all **implemented**):
   forwards only parsed `http:` / `https:` / `mailto:` URLs to the OS browser
   (`parseAllowedExternalUrl`, D330 / ADR 0168). `file:`, `javascript:`,
   `data:`, and custom URI schemes never reach `shell.openExternal`.
-  `will-navigate` blocks all non-dev-server navigations
+  `will-navigate` is enforced by each owning surface; the embedded Browser
+  permits HTTP(S), workspace file links, and local-file navigation initiated
+  from an already loaded local file, while other schemes remain blocked.
 - Every web contents Electron creates starts with a deny-all window-open
   handler and a blocked `<webview>` attach (`app.on("web-contents-created")`);
   the owning surface replaces the handler with its own policy, so a window
@@ -37,6 +39,15 @@ Required (all **implemented**):
   render, without a click. This is a deliberate readability trade-off: a
   reply can therefore reveal the user's IP to the host it names. Links never
   navigate in-app and always route through the external-open path.
+
+### Embedded Browser local files
+
+The embedded Browser can open any existing local file explicitly entered as an
+absolute path or `file:` URL. A loaded local file can navigate to other existing
+local files. A web page can still navigate to workspace files as before, but
+cannot use a file link to escape the workspace. This local-file browsing is
+covered by the high-risk `browser.cdp` capability; `BrowserPreview` and the
+sidecar's workspace file resolver remain restricted to the session workspace.
 
 ### Content Security Policy
 

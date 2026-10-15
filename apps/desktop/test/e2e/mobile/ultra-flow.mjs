@@ -15,7 +15,7 @@ export async function verifyUltraFlow({ page, phone, fixture, invoke, view, unti
   await page.getByText("High + Workflow + Subagent", { exact: true }).waitFor();
   await slider.press("Home");
   await until(async () => !(await session()).ultra, "leaving Ultra hides its summary");
-  assert.equal(await page.getByText(summary).count(), 0);
+  await until(async () => await page.getByText(summary).count() === 0, "ordinary reasoning renders without Ultra summary");
   const bounds = await slider.boundingBox();
   assert(bounds);
   await page.mouse.move(bounds.x + 2, bounds.y + bounds.height / 2);

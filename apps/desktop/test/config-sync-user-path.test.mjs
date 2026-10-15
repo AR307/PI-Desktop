@@ -311,6 +311,9 @@ test("S3 settings user path preserves credentials, modes, history and legacy dat
 const { app, BrowserWindow, session } = require("electron");
 const path = require("node:path");
 app.setPath("userData", path.join(__dirname, "profile"));
+app.commandLine.appendSwitch("disable-renderer-backgrounding");
+app.commandLine.appendSwitch("disable-backgrounding-occluded-windows");
+app.commandLine.appendSwitch("disable-features", "CalculateNativeWinOcclusion");
 app.whenReady().then(async () => {
   session.defaultSession.webRequest.onBeforeRequest({ urls: ["http://*/*", "https://*/*", "ws://*/*", "wss://*/*"] }, (_details, callback) => callback({ cancel: true }));
   const win = new BrowserWindow({ show: false, width: 1000, height: 900,

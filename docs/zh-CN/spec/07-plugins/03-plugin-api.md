@@ -662,6 +662,10 @@ pi.browser.cdp(input: { method: string; params?: unknown }): Promise<unknown>
 仅在 Browser 视图可见时可用。视图隐藏时调用会以 `UNAVAILABLE` 失败；应通过 `BrowserPreview`
 请求宿主显示 Browser 视图后再继续。
 
+截图（包括原始 `Page.captureScreenshot` CDP 调用）有 30 秒的宿主端期限。超时会以 `TIMEOUT` 失败，
+宿主会分离卡住的 CDP 会话并释放该页面的截图队列，使后续截图可以重新连接并继续。其他 CDP 方法
+沿用现有超时行为。
+
 `getHistory` 返回由主机明确记录的条目，按最新优先排列，文本和图片按捕获时间混排。
 通过 `writeText` 写入的内容，以及 Composer 用户主动粘贴事件提供的内容会被记录；主机
 不会在后台轮询或重新读取系统剪贴板。连续相同内容会合并并刷新时间戳。历史只保留在
@@ -671,6 +675,8 @@ pi.browser.cdp(input: { method: string; params?: unknown }): Promise<unknown>
 `navigate` 在当前主框架导航提交（含重定向）时返回，不等待慢图片或子框架。
 `browser:state` 立即报告加载状态，导航失败时可带 `loadError`。
 可选的 `sessionId`、`tabId` 标识宿主管理的工作面板目标；插件不能通过导航参数指定这些身份。
+拥有高风险 `browser.cdp` 权限后，`navigate` 可以通过绝对路径或 `file:` URL 打开任意已存在的本地文件。
+相对路径仍以工作区为根。本地文件页面可导航到其他已存在的本地文件；网页仍只能通过文件链接访问工作区内文件。
 
 ### 服务（需要 `background.service`）
 ```ts

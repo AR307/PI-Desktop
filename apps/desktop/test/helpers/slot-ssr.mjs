@@ -22,7 +22,7 @@ export async function slotSsr(t, { translationOverrides = {}, plugins = [] } = {
     configFile: false,
     plugins,
     logLevel: "silent",
-    server: { middlewareMode: true, hmr: false, ws: false },
+    server: { middlewareMode: true, hmr: false, ws: false, watch: null },
     esbuild: { jsx: "automatic" },
     appType: "custom",
     optimizeDeps: { noDiscovery: true, include: [] },

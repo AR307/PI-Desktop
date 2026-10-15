@@ -1,7 +1,7 @@
 import { mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it, vi, beforeEach } from "vitest";
 import { type Agent, type AgentMessage, type AgentTool } from "@earendil-works/pi-agent-core";
 import {
   createAssistantMessageEventStream,
@@ -18,6 +18,8 @@ import {
   COMPACTION_FALLBACK_MARKER,
   DesktopAgentRuntime,
   PATH_INSTRUCTION_RESOLUTION_TIMEOUT_MS,
+  isolatedWorkspaceGuidance,
+  delegateWorktreeNote,
   looksLikePseudoToolCall,
   toolResultFromUi,
   type CompactionStrategy,
@@ -167,6 +169,8 @@ function createRuntime(
     compactionSettings: ContextCompactionSettings;
     compactionStrategy: CompactionStrategy;
     projectPath: string;
+    remoteWorkspace: { hostKey: string; path: string };
+    workspaceRoot: string;
     scratchDir: string;
     customSystemPrompt: import("./custom-system-prompt.js").CustomSystemPrompt;
     projectInstructions: import("./project-instructions.js").ProjectInstructions;
@@ -197,6 +201,8 @@ function createRuntime(
     compactionSettings: overrides.compactionSettings,
     compactionStrategy: overrides.compactionStrategy,
     projectPath: overrides.projectPath,
+    remoteWorkspace: overrides.remoteWorkspace,
+    workspaceRoot: overrides.workspaceRoot,
     scratchDir: overrides.scratchDir,
     customSystemPrompt: overrides.customSystemPrompt,
     pluginTools: overrides.pluginTools,
@@ -257,6 +263,7 @@ function runtimeMatches(
     customSystemPrompt: (runtime as any).customSystemPrompt,
     projectMemory: (runtime as any).projectMemory,
     projectPath: (runtime as any).projectPath,
+    workspaceRoot: (runtime as any).workspaceRoot,
     commandShell: (runtime as any).commandShell,
     subagents: (runtime as any).subagents,
     subagentProviders: (runtime as any).subagentProviders,
@@ -2184,6 +2191,20 @@ describe("DesktopAgentRuntime live activity", () => {
 });
 
 describe("DesktopAgentRuntime deferred tool catalog", () => {
+  it("routes authorized MirrorCoding image requests through the live catalog before manual image setup", async () => {
+    const runtime = createRuntime({ provider: { ...provider, authKind: "mirrorcoding" } });
+    const view = runtime as unknown as {
+      agent: { state: { tools: Array<{ name: string }> ; systemPrompt: string } };
+    };
+    try {
+      expect(view.agent.state.tools.map(tool => tool.name)).toContain("ListImageModels");
+      expect(view.agent.state.tools.map(tool => tool.name)).toContain("GenerateImage");
+      expect(view.agent.state.systemPrompt).not.toMatch(/\bGenerateImages\b/);
+    } finally {
+      await runtime.dispose();
+    }
+  });
+
   it("offers Jev only in Agent mode when an API key is supplied", async () => {
     type ToolResult = {
       content: Array<{ type: "text"; text: string }>;
@@ -2377,6 +2398,71 @@ describe("DesktopAgentRuntime deferred tool catalog", () => {
     await expect(pending).resolves.toMatchObject({
       content: [{ text: "**Color?**：**Blue**\n---\nTargets?：" }],
       details: { answers: [["**Blue**"], null] },
+    });
+    await runtime.dispose();
+  });
+
+  it("rejects asktool questions over 300 Unicode characters before opening a card", async () => {
+    const onEvent = vi.fn();
+    const runtime = createRuntime({ onEvent });
+    type AskToolTestTool = {
+      name: string;
+      parameters: {
+        properties: {
+          questions: {
+            items: { properties: { question: { maxLength?: number } } };
+          };
+        };
+      };
+      execute: (toolCallId: string, params: unknown) => Promise<unknown>;
+    };
+    const tools = (runtime as unknown as {
+      agent: { state: { tools: AskToolTestTool[] } };
+    }).agent.state.tools;
+    const askTool = tools.find((tool) => tool.name === "asktool");
+    if (!askTool) throw new Error("asktool is missing from the runtime");
+    const questionSchema = askTool.parameters.properties.questions.items.properties.question;
+    expect(questionSchema.maxLength).toBe(300);
+
+    const result = await askTool.execute("ask-call-too-long", {
+      questions: [{ question: "q".repeat(301), options: ["Continue"] }],
+    });
+
+    expect(result).toMatchObject({
+      isError: true,
+      details: { errorCode: "ASKTOOL_INVALID_ARGUMENT" },
+    });
+    const askRequests = () =>
+      onEvent.mock.calls
+        .map(([envelope]) =>
+          (envelope as {
+            event: {
+              type: string;
+              request?: { requestId: string; questions: Array<{ question: string }> };
+            };
+          }).event,
+        )
+        .filter((event) => event.type === "asktool_request");
+    expect(askRequests()).toHaveLength(0);
+
+    const validQuestion = "🧭".repeat(300);
+    const pendingAtLimit = askTool.execute("ask-call-at-limit", {
+      questions: [{ question: validQuestion, options: ["Continue"] }],
+    });
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    const request = askRequests()[0]?.request;
+    if (!request) throw new Error("valid asktool question did not open a card");
+    expect(request.questions[0].question).toBe(validQuestion);
+    expect(
+      runtime.resolveAskTool({
+        requestId: request.requestId,
+        sessionId: "session-1",
+        answers: [["Continue"]],
+      }),
+    ).toEqual({ ok: true });
+    await expect(pendingAtLimit).resolves.toMatchObject({
+      content: [{ text: `${validQuestion}：Continue` }],
+      details: { answers: [["Continue"]] },
     });
     await runtime.dispose();
   });
@@ -5726,6 +5812,101 @@ describe("DesktopAgentRuntime response duration", () => {
     await runtime.dispose();
   });
 
+  it("persists request wait separately from streamed thinking and answer time", async () => {
+    vi.useFakeTimers();
+    try {
+      const start = Date.parse("2026-10-01T00:00:00.000Z");
+      vi.setSystemTime(start + 1_000);
+      const onEvent = vi.fn();
+      const runtime = createRuntime({ onEvent });
+      const internals = runtime as unknown as {
+        handleAgentEvent(event: unknown): Promise<void>;
+        requestStartedAt: number | undefined;
+      };
+      internals.requestStartedAt = start;
+
+      await internals.handleAgentEvent({
+        type: "message_start",
+        message: { role: "assistant", content: [] },
+      });
+      await vi.advanceTimersByTimeAsync(2_500);
+      await internals.handleAgentEvent({
+        type: "message_end",
+        message: assistantMessage({
+          content: [
+            { type: "thinking", thinking: "reasoning" },
+            { type: "text", text: "answer" },
+          ],
+        }),
+      });
+
+      const events = onEvent.mock.calls.map(([envelope]) => envelope as any);
+      expect(events.find(({ event }) => event.type === "message_start")?.event.message)
+        .toMatchObject({ providerWaitMs: 1_000 });
+      expect(events.find(({ event }) => event.type === "message_end")?.event.message)
+        .toMatchObject({
+          providerWaitMs: 1_000,
+          modelStreamDurationMs: 2_500,
+        });
+      await runtime.dispose();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("accumulates request and stream timing across a provider retry", async () => {
+    vi.useFakeTimers();
+    try {
+      const start = Date.parse("2026-10-01T00:00:00.000Z");
+      vi.setSystemTime(start + 2_000);
+      const onEvent = vi.fn();
+      const runtime = createRuntime({ onEvent });
+      const internals = runtime as unknown as {
+        handleAgentEvent(event: unknown): Promise<void>;
+        requestStartedAt: number | undefined;
+        currentAssistant: unknown;
+        providerRetryInProgress: boolean;
+      };
+      internals.requestStartedAt = start + 1_000;
+      internals.providerRetryInProgress = true;
+      internals.currentAssistant = {
+        id: "assistant-retry",
+        role: "assistant",
+        content: "partial attempt",
+        createdAt: new Date(start).toISOString(),
+        status: "streaming",
+        modelId: "local-model",
+        providerId: "local",
+        providerWaitMs: 1_000,
+        modelStreamDurationMs: 500,
+      };
+
+      await internals.handleAgentEvent({
+        type: "message_start",
+        message: { role: "assistant", content: [] },
+      });
+      await vi.advanceTimersByTimeAsync(2_500);
+      await internals.handleAgentEvent({
+        type: "message_end",
+        message: assistantMessage({
+          content: [{ type: "text", text: "recovered answer" }],
+        }),
+      });
+
+      const terminal = onEvent.mock.calls
+        .map(([envelope]) => envelope as any)
+        .find(({ event }) => event.type === "message_end");
+      expect(terminal?.event.message).toMatchObject({
+        id: "assistant-retry",
+        providerWaitMs: 2_000,
+        modelStreamDurationMs: 3_000,
+      });
+      await runtime.dispose();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it.each(fallbackDurations)(
     "falls back to the sidecar stopwatch for a $label Pi duration",
     async ({ durationMs }) => {
@@ -6993,11 +7174,20 @@ describe("DesktopAgentRuntime per-turn context protection", () => {
     const agent = (runtime as any).agent;
     agent.prompt = vi.fn();
     vi.spyOn(runtime as any, "automaticCompactionNeeded").mockReturnValue(true);
+    let releaseCheckpoint!: () => void;
+    let checkpointStarted!: () => void;
+    const checkpointGate = new Promise<void>((resolve) => {
+      releaseCheckpoint = resolve;
+    });
+    const checkpointReady = new Promise<void>((resolve) => {
+      checkpointStarted = resolve;
+    });
     // The summary request is in flight when the user presses Stop.
     vi.spyOn(runtime as any, "buildCheckpoint").mockImplementation(
       async (...args: unknown[]) => {
         const signal = args[0] as AbortSignal;
-        await runtime.abort();
+        checkpointStarted();
+        await checkpointGate;
         return {
           ok: false,
           entries: [],
@@ -7008,9 +7198,14 @@ describe("DesktopAgentRuntime per-turn context protection", () => {
       },
     );
 
-    await expect(runtime.prompt("stopped request", "user-stopped")).rejects.toMatchObject({
+    const prompt = runtime.prompt("stopped request", "user-stopped");
+    await checkpointReady;
+    const abort = runtime.abort();
+    releaseCheckpoint();
+    await expect(prompt).rejects.toMatchObject({
       name: "AbortError",
     });
+    await abort;
 
     expect(agent.prompt).not.toHaveBeenCalled();
     expect((runtime as any).fullEntries).toEqual([
@@ -7035,6 +7230,59 @@ describe("DesktopAgentRuntime per-turn context protection", () => {
       ),
     ).toBe(false);
     expect(runtime.getStatus().isRunning).toBe(false);
+    await runtime.dispose();
+  });
+
+  it("waits for the aborted prompt to settle before accepting a follow-up", async () => {
+    const runtime = createRuntime();
+    const testRuntime = runtime as unknown as {
+      agent: {
+        prompt: () => Promise<void>;
+        abort: () => void;
+      };
+      handleAgentEvent: (event: { type: "agent_end" }) => Promise<void>;
+    };
+    const agent = testRuntime.agent;
+    let rejectFirstPrompt!: (error: Error) => void;
+    let firstPromptStarted!: () => void;
+    const firstPromptGate = new Promise<void>((_resolve, reject) => {
+      rejectFirstPrompt = reject;
+    });
+    const firstPromptReady = new Promise<void>((resolve) => {
+      firstPromptStarted = resolve;
+    });
+    let promptCount = 0;
+    agent.prompt = vi.fn(async () => {
+      promptCount += 1;
+      if (promptCount === 1) {
+        firstPromptStarted();
+        await firstPromptGate;
+        return;
+      }
+      await testRuntime.handleAgentEvent({ type: "agent_end" });
+    });
+    agent.abort = vi.fn();
+
+    const firstPrompt = runtime.prompt("first task", "user-first", "turn-first");
+    await firstPromptReady;
+    let abortSettled = false;
+    const abort = runtime.abort().then(() => {
+      abortSettled = true;
+    });
+    await Promise.resolve();
+    expect(abortSettled).toBe(false);
+
+    rejectFirstPrompt(Object.assign(new Error("The operation was aborted"), {
+      name: "AbortError",
+    }));
+    await expect(firstPrompt).rejects.toMatchObject({ name: "AbortError" });
+    await abort;
+    expect(abortSettled).toBe(true);
+
+    await expect(runtime.prompt("continue", "user-next", "turn-next")).resolves.toEqual({
+      turnId: "turn-next",
+    });
+    expect(agent.prompt).toHaveBeenCalledTimes(2);
     await runtime.dispose();
   });
 
@@ -8197,6 +8445,75 @@ describe("DesktopAgentRuntime subagents", () => {
       }
     },
   );
+
+  it.each(["during", "before"] as const)("handles steering %s TaskWait while its delegate continues running", async (timing) => {
+    subagentRuns.calls.length = 0;
+    subagentRuns.instances.length = 0;
+    subagentRuns.deferred = true;
+    subagentRuns.result = undefined;
+    let waiting!: () => void;
+    const beganWaiting = new Promise<void>((resolve) => { waiting = resolve; });
+    const host = { call: vi.fn().mockResolvedValue(undefined) };
+    const runtime = createRuntime({ host, subagents: [explorer], onEvent: (value) => {
+      const envelope = value as AgentEventEnvelope;
+      if (envelope.event.type === "status" && envelope.event.status.activity?.phase === "waiting-subagents") waiting();
+    } });
+    const correct = () => runtime.steer({ text: "Correct the plan now." }, "active-turn", {
+      id: "correction-user", role: "user", content: "Correct the plan now.",
+      createdAt: "2026-10-13T00:00:00.000Z", steering: true,
+    });
+    const requests: AgentMessage[][] = [];
+    const internals = runtime as unknown as {
+      models: { streamSimple: (model: unknown, context: { messages: AgentMessage[] }) => ReturnType<typeof createAssistantMessageEventStream> };
+    };
+    internals.models = { streamSimple: (_model, context) => {
+      requests.push([...context.messages]);
+      const round = requests.length;
+      const message = assistantMessage({
+        content: round === 1
+          ? [{ type: "toolCall", id: "delegate", name: "Task", arguments: { agent: "explorer", task: "Inspect the fixture." } }]
+          : round === 2
+            ? [{ type: "toolCall", id: "wait", name: "TaskWait", arguments: {} }]
+            : [{ type: "text", text: "I have adjusted the plan." }],
+        stopReason: round <= 2 ? "toolUse" : "stop",
+      }) as unknown as AssistantMessage;
+      const stream = createAssistantMessageEventStream();
+      queueMicrotask(() => {
+        if (round === 2 && timing === "before") correct();
+        stream.push({ type: "start", partial: message });
+        stream.push({ type: "done", reason: round <= 2 ? "toolUse" : "stop", message });
+        stream.end(message);
+      });
+      return stream;
+    } };
+    const running = runtime.prompt("Start the inspection.", "initial-user", "active-turn");
+    try {
+      await beganWaiting;
+      if (timing === "during") {
+        expect(requests).toHaveLength(2);
+        correct();
+      }
+      await vi.waitFor(() => expect(requests.length).toBeGreaterThanOrEqual(3));
+      expect(JSON.stringify(requests[2])).toContain("Correct the plan now.");
+      expect(JSON.stringify(requests[2])).toContain("Interrupted by new user input");
+      const delegate = subagentRuns.calls[0] as { signal: AbortSignal };
+      expect(delegate.signal.aborted).toBe(false);
+      expect(runtime.getStatus().currentTurnId).toBe("active-turn");
+      // The corrected parent may finish while its independent worker continues.
+      await running;
+      expect(runtime.getStatus().isRunning).toBe(false);
+      expect(runtime.getStatus().backgroundDelegations).toBe(1);
+      subagentRuns.resolveRun?.({ agentName: "explorer", status: "completed", report: "Fixture inspected.", turns: 1, toolCalls: 0 });
+      await vi.waitFor(() => expect(host.call).toHaveBeenCalledWith("session.queuePush", expect.objectContaining({ notification: "subagent-report" })));
+      await runtime.prompt({ text: "Subagent reports ready:", delegationNotification: true });
+      expect(JSON.stringify(requests.at(-1))).toContain("Fixture inspected.");
+    } finally {
+      await runtime.abort();
+      await running;
+      await runtime.dispose();
+      subagentRuns.deferred = false;
+    }
+  });
 
   it("converges through TaskWait with reports and statuses", async () => {
     const runtime = createRuntime({ subagents: [explorer] });
@@ -12293,5 +12610,202 @@ describe("inline image placement", () => {
     } finally {
       await runtime.dispose();
     }
+  });
+});
+
+
+describe("local runtime with a remote tool workspace", () => {
+  it("keeps the local model and dispatches workspace tools through the Host without local instruction probes", async () => {
+    const call = vi.fn(async (method: string) => {
+      if (method === "tools.execute") return { ok: true, content: "remote contents" };
+      throw new Error(`Unexpected local workspace access: ${method}`);
+    });
+    const runtime = createRuntime({ host: { call }, remoteWorkspace: { hostKey: "ssh", path: "/remote/project" }, scratchDir: "/local/scratch" });
+    const result = await runtimeTool(runtime, "Read").execute("remote-read", { path: "README.md" }, undefined, undefined);
+    expect(result.content).toContainEqual({ type: "text", text: "remote contents" });
+    expect(call.mock.calls.map(([method]) => method)).toEqual(["tools.execute"]);
+    const internals = runtime as unknown as { projectPath: string; provider: RuntimeProviderConfig; agent: Agent };
+    expect(internals.projectPath).toBe("/remote/project");
+    expect(internals.provider.id).toBe(provider.id);
+    expect(internals.agent.state.systemPrompt).not.toContain("/local/scratch");
+    await runtime.dispose();
+  });
+});
+
+describe("isolated session workspace (ADR 0329)", () => {
+  const systemPrompt = (runtime: DesktopAgentRuntime): string =>
+    (runtime as unknown as { agent: { state: { systemPrompt: string } } }).agent.state
+      .systemPrompt;
+
+  it("tells the model about the worktree only in an isolated session", () => {
+    const isolated = createRuntime({ projectPath: "/work/app", workspaceRoot: "/data/wt/app/s1" });
+    const ordinary = createRuntime({ projectPath: "/work/app" });
+    expect(systemPrompt(isolated)).toContain(isolatedWorkspaceGuidance());
+    expect(systemPrompt(isolated)).toContain("PI_PORT");
+    expect(systemPrompt(ordinary)).not.toContain("Isolated session:");
+  });
+
+  it("works in the worktree while the project stays its identity", () => {
+    const runtime = createRuntime({ projectPath: "/work/app", workspaceRoot: "/data/wt/app/s1" });
+    const internals = runtime as unknown as { extensionCwd(): string; projectPath?: string };
+    expect(internals.extensionCwd()).toBe("/data/wt/app/s1");
+    expect(internals.projectPath).toBe("/work/app");
+    expect(
+      (createRuntime({ projectPath: "/work/app" }) as unknown as { extensionCwd(): string })
+        .extensionCwd(),
+    ).toBe("/work/app");
+  });
+
+  it("is not reused for another worktree or for a non-isolated launch", () => {
+    const runtime = createRuntime({ projectPath: "/work/app", workspaceRoot: "/data/wt/app/s1" });
+    expect(runtimeMatches(runtime)).toBe(true);
+    expect(runtimeMatches(runtime, { workspaceRoot: "/data/wt/app/s2" })).toBe(false);
+    expect(runtimeMatches(runtime, { workspaceRoot: undefined })).toBe(false);
+  });
+});
+
+describe("isolated-session subagent worktrees (ADR 0329)", () => {
+  const writer: SubagentDefinition = {
+    name: "fixer",
+    description: "Implement a change.",
+    tools: ["Read", "Edit", "Write"],
+    prompt: "Implement it.",
+    source: "builtin",
+  };
+  const shellOnly: SubagentDefinition = {
+    name: "test-runner",
+    description: "Run tests.",
+    tools: ["Read", "Grep", "Bash"],
+    prompt: "Run them.",
+    source: "builtin",
+  };
+  const tool = (runtime: DesktopAgentRuntime, name: string) =>
+    (runtime as any).agent.state.tools.find((entry: any) => entry.name === name);
+
+  function worktreeHost(settlement: unknown, createError?: Error) {
+    return {
+      call: vi.fn(async (method: string, _params?: unknown) => {
+        if (method === "worktree.delegate.create") {
+          if (createError) throw createError;
+          return { worktree: { branch: "pi-desktop/s-d", status: "active" } };
+        }
+        if (method === "worktree.delegate.settle") return { settlement };
+        if (method === "tools.execute") return { ok: true, content: {} };
+        return undefined;
+      }),
+      onNotification: vi.fn(() => () => {}),
+    };
+  }
+  const calls = (host: ReturnType<typeof worktreeHost>, method: string) =>
+    host.call.mock.calls.filter(([name]) => name === method).map(([, params]) => params as any);
+
+  async function runToEnd(runtime: DesktopAgentRuntime, agent: string, id: string) {
+    const started = await tool(runtime, "Task").execute(id, { agent, task: "Do it." });
+    const delegationId = (started.details as any).delegationId as string;
+    const waited = await tool(runtime, "TaskWait").execute(`${id}-wait`, { delegationIds: [delegationId] });
+    return { started, delegationId, text: waited.content[0].text as string };
+  }
+
+  beforeEach(() => {
+    subagentRuns.calls.length = 0;
+    subagentRuns.deferred = false;
+    subagentRuns.constructorError = undefined;
+    subagentRuns.result = undefined;
+  });
+
+  it("gives a writing delegate its own worktree, routes its tools there, and reports the merge", async () => {
+    const host = worktreeHost({ result: "merged", commits: 2 });
+    const runtime = createRuntime({
+      subagents: [writer, shellOnly],
+      host: host as never,
+      projectPath: "/work/app",
+      workspaceRoot: "/data/wt/app/s1",
+    });
+    const { delegationId, text } = await runToEnd(runtime, "fixer", "task-w");
+    const [create] = calls(host, "worktree.delegate.create");
+    expect(create).toEqual({ sessionId: "session-1", delegationId });
+
+    const write = subagentRuns.calls[0].tools.find((entry: any) => entry.name === "Write");
+    await write.execute("write-1", { path: "a.txt", content: "x" }, undefined, undefined);
+    expect(calls(host, "tools.execute").at(-1)).toEqual(
+      expect.objectContaining({ delegationId }),
+    );
+    expect((runtime as any).delegateWorktrees.size).toBe(0);
+
+    expect(calls(host, "worktree.delegate.settle")).toEqual([
+      { sessionId: "session-1", delegationId, merge: true },
+    ]);
+    expect(text).toContain("Isolated worktree: merged 2 commit(s) into the session workspace.");
+    await runtime.dispose();
+  });
+
+  it("leaves Bash-only delegates and non-isolated sessions on the shared workspace", async () => {
+    const host = worktreeHost({ result: "merged", commits: 1 });
+    const isolated = createRuntime({
+      subagents: [writer, shellOnly],
+      host: host as never,
+      projectPath: "/work/app",
+      workspaceRoot: "/data/wt/app/s1",
+    });
+    await runToEnd(isolated, "test-runner", "task-b");
+    const ordinary = createRuntime({ subagents: [writer], host: host as never, projectPath: "/work/app" });
+    await runToEnd(ordinary, "fixer", "task-o");
+    expect(calls(host, "worktree.delegate.create")).toEqual([]);
+    expect(calls(host, "worktree.delegate.settle")).toEqual([]);
+    const write = subagentRuns.calls[1].tools.find((entry: any) => entry.name === "Write");
+    await write.execute("write-o", { path: "a.txt", content: "x" }, undefined, undefined);
+    expect(calls(host, "tools.execute").at(-1)).not.toHaveProperty("delegationId");
+    await isolated.dispose();
+    await ordinary.dispose();
+  });
+
+  it("keeps an unfinished run's work and tells the parent how to resolve a conflict", async () => {
+    const conflictHost = worktreeHost({ result: "conflict", files: ["src/a.ts"] });
+    const runtime = createRuntime({
+      subagents: [writer],
+      host: conflictHost as never,
+      projectPath: "/work/app",
+      workspaceRoot: "/data/wt/app/s1",
+    });
+    const { delegationId, text } = await runToEnd(runtime, "fixer", "task-c");
+    expect(text).toContain("NOT merged");
+    expect(text).toContain("src/a.ts");
+    expect(text).toContain(`Task(resume: "${delegationId}")`);
+
+    const keptHost = worktreeHost({ result: "kept" });
+    const failing = createRuntime({
+      subagents: [writer],
+      host: keptHost as never,
+      projectPath: "/work/app",
+      workspaceRoot: "/data/wt/app/s1",
+    });
+    subagentRuns.result = { agentName: "fixer", status: "failed", report: "boom", turns: 1, toolCalls: 1 };
+    const failed = await runToEnd(failing, "fixer", "task-f");
+    expect(calls(keptHost, "worktree.delegate.settle")[0].merge).toBe(false);
+    expect(failed.text).toContain("changes were kept unmerged");
+    await runtime.dispose();
+    await failing.dispose();
+  });
+
+  it("does not start a writing delegate whose worktree cannot be created", async () => {
+    const host = worktreeHost({ result: "none" }, new Error("the session has an unfinished merge conflict"));
+    const runtime = createRuntime({
+      subagents: [writer],
+      host: host as never,
+      projectPath: "/work/app",
+      workspaceRoot: "/data/wt/app/s1",
+    });
+    const result = await tool(runtime, "Task").execute("task-x", { agent: "fixer", task: "Do it." });
+    expect(result.details.error).toContain("Could not prepare an isolated worktree");
+    expect(result.details.error).toContain("unfinished merge conflict");
+    expect(subagentRuns.calls).toHaveLength(0);
+    await runtime.dispose();
+  });
+
+  it("describes every settlement in the report", () => {
+    const resume = 'Task(resume: "d1")';
+    expect(delegateWorktreeNote({ result: "noChanges" }, resume)).toContain("no file changes");
+    expect(delegateWorktreeNote({ result: "notMerged", reason: "busy" }, resume)).toContain("busy");
+    expect(delegateWorktreeNote({ result: "none" }, resume)).toBe("");
   });
 });

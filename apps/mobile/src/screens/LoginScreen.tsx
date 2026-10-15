@@ -13,7 +13,7 @@ export function LoginScreen({ controller, view }: { controller: MobileController
   };
   return <main className="login-page">
     <div className="login-hero">
-      <div className="brand-mark" aria-hidden="true">π</div>
+      <div className="brand-mark" aria-hidden="true"><img src="/logo.svg" alt=""/></div>
       <h1>{t("title")}</h1>
       <p>{t("subtitle")}</p>
     </div>

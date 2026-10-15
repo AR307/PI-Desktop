@@ -9,6 +9,7 @@ import { api } from "../lib/api";
 import { isHtmlFilePath, toWorkspaceRel, type ChatPreviewTarget } from "../lib/chat-links";
 import { openHttpUrl } from "../lib/open-http-url";
 import {
+  BROWSER_PLUGIN_TAB,
   FILE_MANAGER_PLUGIN_TAB,
   fileManagerPluginTab,
   hasPluginView,
@@ -83,7 +84,8 @@ export type ResolvedChatFileRef = {
   inProject: boolean;
   /** True when that folder is the project's primary one. */
   primary: boolean;
-  scratch?: boolean;
+  /** Session-owned generated artifacts, rather than imported attachments. */
+  scratch: boolean;
 };
 
 /**
@@ -172,7 +174,7 @@ function useResolveChatFileRef() {
         : null;
       let result;
       try {
-        result = await api.fsResolveRef(anchored ?? raw, sessionId);
+        result = await api.fsResolveRef(anchored ?? raw, ownerId);
       } catch {
         showToast(t("chat.fileRefLookupFailed"), { variant: "error" });
         return null;
@@ -192,7 +194,7 @@ function useResolveChatFileRef() {
           relativePath: null,
           inProject: false,
           primary: false,
-          scratch: match.root === "scratch",
+          scratch: match.sessionScratch === true,
         };
       }
       // A project group can hold several folders, and a relative path always
@@ -205,6 +207,7 @@ function useResolveChatFileRef() {
         relativePath: match.relativePath,
         inProject: true,
         primary,
+        scratch: false,
       };
     },
     [paneSessionId, sessionId, showToast, t, workspacePath],
@@ -214,20 +217,21 @@ function useResolveChatFileRef() {
 /**
  * Open a file reference the conversation mentioned.
  *
- * A workspace or current-session scratch `.html` page stays with the side browser
- * (ADR 0163): it is a page to run, not a file to read. A plain project file
- * opens in the bundled file view when available; a positioned `path:line`
- * reference uses the host file tab, which can scroll to the requested line.
+ * A project or session-scratch `.html` page stays with the side browser
+ * (ADR 0163): it is a page to run, not a file to read. A direct click on a
+ * plain project file starts or retries the bundled file view; a positioned
+ * `path:line` reference uses the host file tab, which can scroll to the line.
  * The plugin view accepts opaque path locations and has no line-navigation
  * contract, so positioned references keep their path unchanged and use the
- * host viewer's existing scroll support. Scratch and attachment files also use
- * the host file tab.
+ * host viewer's existing scroll support. Other scratch and attachment files
+ * also use the host file tab.
  */
 export function useOpenChatFileRef() {
   const { t } = useTranslation();
+  const paneSessionId = useSlotSessionId();
   const resolveRef = useResolveChatFileRef();
   const workspacePath = useAppStore((s) => s.workspace?.path ?? null);
-  const sessionId = useAppStore((s) => s.activeSessionId);
+  const sessionId = useAppStore((s) => paneSessionId || s.activeSessionId);
   const openFile = useAppStore((s) => s.openFileInWorkPanel);
   const openUrl = useAppStore((s) => s.openUrlInWorkPanel);
   const openTab = useAppStore((s) => s.openWorkPanelTab);
@@ -247,25 +251,30 @@ export function useOpenChatFileRef() {
         if (!resolved) return;
         const current = useAppStore.getState();
         if (
-          current.workspace?.path !== workspacePath ||
+          (current.workspace?.path ?? null) !== workspacePath ||
           current.activeSessionId !== sessionId
         ) {
           return;
         }
         const hasPosition = line !== undefined || column !== undefined;
         if (
+          !current.workspace?.remote &&
           !hasPosition &&
-          ((resolved.inProject && resolved.primary) || resolved.scratch) &&
-          isHtmlFilePath(resolved.path)
+          (resolved.inProject || resolved.scratch) &&
+          isHtmlFilePath(resolved.absolutePath)
         ) {
-          openUrl(resolved.path);
+          if (!hasPluginView(current.pluginViews, BROWSER_PLUGIN_TAB)) {
+            showToast(t("panel.pluginView.failed"), { variant: "error" });
+            return;
+          }
+          openUrl(resolved.absolutePath);
           return;
         }
-        if (resolved.inProject && !hasPosition) {
+        if (!current.workspace?.remote && resolved.inProject && !hasPosition) {
           if (await ensureFileManagerView(workspacePath)) {
             const latest = useAppStore.getState();
             if (
-              latest.workspace?.path !== workspacePath ||
+              (latest.workspace?.path ?? null) !== workspacePath ||
               latest.activeSessionId !== sessionId
             ) {
               return;
@@ -275,7 +284,7 @@ export function useOpenChatFileRef() {
           }
           const latest = useAppStore.getState();
           if (
-            latest.workspace?.path !== workspacePath ||
+            (latest.workspace?.path ?? null) !== workspacePath ||
             latest.activeSessionId !== sessionId
           ) {
             return;
@@ -309,6 +318,8 @@ export function useOpenChatFileRef() {
 export function useRevealChatFileRef() {
   const { t } = useTranslation();
   const resolveRef = useResolveChatFileRef();
+  const paneSessionId = useSlotSessionId();
+  const sessionId = useAppStore((s) => paneSessionId || s.activeSessionId);
   const showToast = useAppStore((s) => s.showToast);
 
   return useCallback(
@@ -317,13 +328,13 @@ export function useRevealChatFileRef() {
         const resolved = await resolveRef(path, baseDir);
         if (!resolved) return;
         try {
-          await api.fsReveal(resolved.path);
+          await api.fsReveal(resolved.path, sessionId);
         } catch {
           showToast(t("chat.fileRevealFailed"), { variant: "error" });
         }
       })();
     },
-    [resolveRef, showToast, t],
+    [resolveRef, sessionId, showToast, t],
   );
 }
 

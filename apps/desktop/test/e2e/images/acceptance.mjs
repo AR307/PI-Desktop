@@ -52,7 +52,10 @@ async function choose(model, group = "中文 分组") {
 async function image(prompt) {
   const count = fixture.calls.length;
   const editor = page.locator('[contenteditable="true"]').first();
-  await editor.fill(prompt); await editor.press("Enter");
+  if (await editor.locator('[data-token]').count()) {
+    await editor.press("Control+Home"); await editor.pressSequentially(prompt);
+  } else await editor.fill(prompt);
+  await editor.press("Enter");
   await until(() => fixture.calls.length > count, "image request");
   await until(async () => (await invoke("image/jobs")).length === 0, "image task completion");
   sessionId ??= (await invoke("session/list")).sessions.find((session) => session.title !== "").id;
@@ -84,6 +87,22 @@ try {
   await invoke("settings/set", { ...await invoke("settings/get"), defaultProviderId: chatProvider.id, defaultModelId: "gpt-5", language: "zh-CN", theme: "dark" });
   await page.reload(); await page.locator(".app-shell:not(.app-shell-boot)").waitFor();
   const back = page.locator(".settings-back"); if (await back.count()) await back.click();
+  const initialSettings = await invoke("settings/get");
+  check("fresh authorization has no manual image selection", !initialSettings.imageGeneration && !Object.keys(initialSettings.imageSessions ?? {}).length);
+  const firstEditor = page.locator('[contenteditable="true"]').first();
+  await firstEditor.fill("tool-image: choose a suitable image model and group yourself");
+  await firstEditor.press("Enter");
+  await page.getByText("Agent image is ready. Manual image selection was kept.", { exact: true }).waitFor({ timeout: 45_000 });
+  sessionId = (await invoke("session/list")).sessions[0].id;
+  const firstSession = (await invoke("session/get", { id: sessionId })).session;
+  check("agent generates immediately after authorization without opening Image mode", firstSession.messages.some(message => message.toolName === "GenerateImage") && fixture.calls.at(-1)?.body.model === "seedream-fixture");
+  check("first agent generation leaves manual image settings unset", !Object.keys((await invoke("settings/get")).imageSessions ?? {}).length);
+  const directSession = (await invoke("session/create", { title: "Image controls acceptance", mode: "agent", providerId: chatProvider.id, modelId: "gpt-5", thinkingLevel: "medium" })).session;
+  sessionId = directSession.id;
+  await page.reload();
+  await page.locator(".app-shell:not(.app-shell-boot)").waitFor();
+  await page.locator('[data-sidebar-session-row="' + sessionId + '"]').first().click();
+  await page.locator('[contenteditable="true"]').first().waitFor();
   for (const expected of ["plan", "goal", "image"]) {
     await page.locator(".composer-mode-chip").click();
     await until(() => page.locator(".composer-mode-chip").getAttribute("data-mode").then((mode) => mode === expected), "mode cycle");
@@ -120,11 +139,15 @@ try {
   await page.getByRole("button", { name: "用作参考图", exact: true }).nth(1).click();
   await choose("text-only-image-fixture");
   const deniedStart = fixture.calls.length;
-  await page.locator('[contenteditable="true"]').first().fill("Unsupported reference request");
+  await page.locator('[contenteditable="true"]').first().press("Control+Home");
+  await page.locator('[contenteditable="true"]').first().pressSequentially("Unsupported reference request");
   await page.locator('[contenteditable="true"]').first().press("Enter");
   await page.getByRole("alert").filter({ hasText: "不支持参考图" }).first().waitFor();
   check("unsupported references are visibly rejected without a request", fixture.calls.length === deniedStart);
   await choose("gpt-image-1");
+  await page.locator('[contenteditable="true"]').first().fill("");
+  await page.locator(".image-result-actions button").filter({ hasText: /用作参考图/ }).nth(0).click();
+  await page.locator(".image-result-actions button").filter({ hasText: /用作参考图/ }).nth(1).click();
   const edits = await image("Edit both supplied references");
   check("GPT image with references selects edits JSON bridge", edits[0].path === "/v1/images/edits" && edits[0].body.images.length === 2 && edits[0].body.images.every((ref) => ref.image_url.startsWith("data:image/")));
   await choose("gemini-image-fixture");
@@ -140,6 +163,8 @@ try {
   await mode("智能体");
   await page.locator(".composer-model-thinking-chip").click();
   await page.locator("button.composer-menu-entry").click();
+  const otherModels = page.getByRole("menuitem", { name: /其他模型|Other models/ });
+  if (await otherModels.count()) await otherModels.click();
   check("chat menu excludes pure image models and retains dual-capability models", await page.getByRole("menuitem", { name: /^gpt-image-1/ }).count() === 0 && await page.getByRole("menuitem", { name: /^gemini-image-fixture/ }).count() === 1);
   await page.keyboard.press("Escape");
   check("chat selection remains gpt-5", (await page.locator(".composer-model-thinking-chip").textContent()).includes("gpt-5"));

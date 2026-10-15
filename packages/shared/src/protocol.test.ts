@@ -19,6 +19,8 @@ import {
   COMPACTION_SUMMARY_MAX_RETRIES,
   COMPACTION_SUMMARY_RETRY_BUDGET_MS,
   STREAM_IDLE_TIMEOUT_MS,
+  TOOL_QUEUE_WAIT_MS,
+  WORKTREE_DELEGATE_RPC_TIMEOUT_MS,
   rpcTimeoutMs,
   type PlanExecution,
   type PlanArtifact,
@@ -261,6 +263,14 @@ describe("Plan protocol contracts", () => {
     expect(rpcTimeoutMs("tools.abort", { sessionId: "s", toolCallId: "t" })).toBe(
       130_000,
     );
+  });
+
+  it("lets a subagent worktree merge outlast its permit waits (ADR 0329)", () => {
+    for (const method of ["worktree.delegate.create", "worktree.delegate.settle"]) {
+      expect(rpcTimeoutMs(method, {})).toBe(WORKTREE_DELEGATE_RPC_TIMEOUT_MS);
+    }
+    expect(WORKTREE_DELEGATE_RPC_TIMEOUT_MS).toBeGreaterThan(5_000 + TOOL_QUEUE_WAIT_MS + 3 * 120_000);
+    expect(rpcTimeoutMs("worktree.merge", {})).toBe(130_000);
   });
 
   it("outlasts the whole model request a manual compaction spends (#795)", () => {

@@ -442,6 +442,7 @@ export function registerSessionIpc({
       const sessionId = String(input?.sessionId || "");
       if (!sessionId) throw new Error("sessionId required");
       rejectNativeMutation(sessionId, "transcript replacement");
+      await persistenceOutbox.prepareSessionReplacement(sessionId, () => host);
       // Drop the live pi-agent so the next prompt reseeds from the truncated
       // transcript instead of replaying the discarded branch in memory.
       if (sidecar) {

@@ -245,12 +245,14 @@ type ToolBudgetHealth = {
   without changing the active workspace. A non-legacy root cannot belong to a
   second group.
 - `project.group.rename({ groupId, name })` — persists the group display name.
-- `project.group.update({ groupId, name, folders })` — edits the group name and
-  ordered roots. The primary root must remain first; duplicate roots are
-  removed, roots owned by another non-legacy group are rejected, and a root
-  with existing chats cannot be detached. Removed roots are retained as
-  suppressed historical paths rather than reappearing as standalone legacy
-  groups.
+- `project.group.update({ groupId, name, folders, primary? })` — edits the group
+  name and ordered roots. The stored primary root must remain first; naming a
+  `primary` promotes that selected root and reorders the roots around it, while
+  omitting it keeps the stored primary and refuses dropping it. Duplicate roots
+  are removed, a `primary` outside `folders` is rejected, roots owned by
+  another non-legacy group are rejected, and a root with existing chats cannot
+  be detached. Removed roots are retained as suppressed historical paths rather
+  than reappearing as standalone legacy groups.
 - `project.group.memory.get/set({ groupId, entries })` — reads or normalizes
   shared group memory using the existing 32 KiB entry limit.
 - `project.group.instructions.get/set({ groupId, content })` — reads or stores
@@ -294,6 +296,10 @@ to later refresh and inference; the vendor picker does not collect them.
   `inheritPermissionFromSessionId`; when present, the host copies the existing
   session's persisted permission mode atomically, while omission preserves the
   existing `inherit` default. Missing/null thinking level defaults to `off`.
+  Optional `isolated: true` (ADR 0329) also requires `projectPath` and gives
+  the new session its own git worktree before it returns; if the worktree
+  cannot be created the session is deleted again and the call fails with a
+  `WORKTREE_*` error (§7).
 - `session.fork` — accepts `sessionId`, an optional caller-provided display
   `title`, and optional `throughMessageId`; creates
   one independent session from the source's current active canonical
@@ -327,7 +333,8 @@ to later refresh and inference; the vendor picker does not collect them.
   contains the latest matching Task tool-call projection from the same canonical
   transcript. It is capped separately and does not widen the window or alter its
   cursors. Ordinary and uncapped reads omit this navigation-only field.
-- `session.delete`
+- `session.delete` — for an isolated session, also removes its worktree and
+  branch (discarding unmerged work)
 - `session.getScratchPath` — the session's scratch directory (D114), created
   on demand
 - `session.rename({ id, title })` trims and validates the title at the host
@@ -356,6 +363,7 @@ to later refresh and inference; the vendor picker does not collect them.
   data stay with the session. Blank ids or paths are `INVALID_PARAMS`, an
   unknown session is `NOT_FOUND`, and a session with a running turn is
   `CONFLICT` so a live agent never switches instruction roots mid-turn.
+  An isolated session is refused with `WORKTREE_MOVE_UNSUPPORTED`.
   Additive RPC; no protocol version bump.
 - `session.appendMessage`
 - `session.saveInflightMessage` — Electron-main-only checkpoint of the
@@ -595,6 +603,61 @@ Session summaries/details always return `thinkingLevel`. Assistant messages
 may return `thinking`; host storage maps it to a canonical content block rather
 than appending it to answer `content`.
 
+### Session worktrees (ADR 0329)
+
+Additive `worktree.*` methods; no protocol version bump. Failures use code
+1025 with a `WORKTREE_*` string code.
+
+- `worktree.probe({ projectPath })` → `{ available, uncommittedChanges }`, or
+  `{ available: false, errorCode, message }` when the project cannot host
+  isolated sessions (not git, no commits, detached `HEAD`, git missing or
+  older than 2.29, a remote-host project — `WORKTREE_REMOTE_UNSUPPORTED`, …).
+  `session.create` refuses `isolated: true` for a remote-host project with the
+  same code before any session is created.
+- `worktree.preview({ sessionId })` → `{ preview }` with the commits and files
+  that would land and a `previewToken`. The token covers the session `HEAD`,
+  the project branch tip, the conflict state, and the full content of every
+  uncommitted and untracked file.
+- `worktree.merge({ sessionId, previewToken })` → `{ outcome }`. A token
+  that no longer matches (the session or the project branch changed) is
+  `WORKTREE_CHANGED_SINCE_PREVIEW`; a dirty project is
+  `WORKTREE_PROJECT_DIRTY`; a conflict is `WORKTREE_CONFLICT` and leaves the
+  worktree conflicted and the project untouched. The project checkout must
+  still be on the session's owner branch and the worktree on its own branch,
+  checked again before every write (`WORKTREE_OWNER_BRANCH_CHANGED`,
+  `WORKTREE_SESSION_BRANCH_CHANGED`); the fast-forward is bound to the exact
+  commit that was checked and verified afterwards. While it runs, host-core
+  holds the session's tools: it waits up to five seconds for a running tool,
+  then fails with `WORKTREE_BUSY`, and queues new ones until it is done.
+- `worktree.behind({ sessionId })` → `{ commits }`, project-branch commits the
+  session does not have yet.
+- `worktree.behindAll()` → `{ counts, statusesChanged }`: the same count for
+  every isolated session keyed by session id (sessions whose count cannot be
+  read are omitted), computed a few sessions at a time. Conflicted sessions
+  are checked for a resolution first; `statusesChanged` asks the renderer to
+  refresh its session list. The renderer reads it in the background for the
+  sidebar marker.
+- `worktree.sync({ sessionId })` → `{ outcome }` (`synced` with `commits`, or
+  `upToDate`): "Sync from project" merges the project branch into the session
+  worktree after committing pending session work, under the same tool hold
+  and own-branch check as a merge. The project checkout is not touched; a
+  conflict is `WORKTREE_CONFLICT`, stays in the worktree, and marks the
+  session like a merge conflict.
+- `worktree.pendingWork({ sessionId })` → `{ pending }`, the unmerged work a
+  delete would discard.
+- `worktree.setupLog({ sessionId })` → `{ setupStatus, log }`.
+- `worktree.location({ sessionId })` → `{ path }`; Electron Main uses it for
+  "Reveal in folder" and never forwards it to the renderer.
+- `worktree.setupCommand.get({ projectPath })` → `{ command }`;
+  `worktree.setupCommand.set({ projectPath, command })` → `{ ok }` (unknown
+  project is `NOT_FOUND`). The command runs once in each new worktree.
+- `worktree.delegate.create({ sessionId, delegationId })` → `{ worktree }` and
+  `worktree.delegate.settle({ sessionId, delegationId, merge })` →
+  `{ settlement }` — agent-runtime only, for `Write`/`Edit` delegates of an
+  isolated session (03-tools-and-permissions §10.2). Both use a 10-minute
+  transport deadline (`WORKTREE_DELEGATE_RPC_TIMEOUT_MS`) because they may
+  wait for the session's tools before committing and merging.
+
 ### Tools
 - `tools.list`
 - `tools.execute`
@@ -824,6 +887,9 @@ type ToolsExecuteParams = {
   expectedCommandShellDialect?: "powershell" | "cmd" | "posix"
   /** Bash only: host default 60000; accepted override 1000..21600000. */
   timeoutMs?: number
+  /** Isolated `Write`/`Edit` delegate chain id; re-roots the call to that
+   * delegate's worktree (ADR 0329). Omitted for every other call. */
+  delegationId?: string
 }
 ```
 
@@ -1179,6 +1245,7 @@ numeric slot; the string is the contract, the number is transport detail.
 | 1022 | PLUGIN_MARKET_NOT_FOUND | the platform does not have that plugin or version |
 | 1023 | PLUGIN_MARKET_RATE_LIMITED | the download endpoint asked the client to wait |
 | 1024 | PLUGIN_MARKET_NO_SOURCE | no distribution target can serve the package |
+| 1025 | WORKTREE_* | every isolated-session worktree failure (`WORKTREE_NOT_GIT`, `WORKTREE_CONFLICT`, `WORKTREE_PROJECT_DIRTY`, `WORKTREE_MISSING`, …) shares this slot; the string code distinguishes them |
 | -32029 | HOST_OVERLOADED | RPC dispatcher capacity exhausted |
 | -32601 | — | unknown method |
 | -32700 | — | unparseable request line |

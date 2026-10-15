@@ -20,9 +20,9 @@ function harness() {
       setVisible(value) { this.visible = value; },
       getState: () => state, getWebContents: () => null,
       invalidateNavigation: () => {},
-      navigateAndWait(target, allowedRoots) {
+      navigateAndWait(target, fileRoot) {
         const done = deferred();
-        loads.push({ target, allowedRoots, pane, finish() {
+        loads.push({ target, fileRoot, pane, finish() {
           state = { url: target, title: target, isLoading: false, canGoBack: false, canGoForward: false };
           onState(state); done.resolve(state);
         }, fail: () => done.resolve(null) });
@@ -35,9 +35,9 @@ function harness() {
   };
   const host = new BrowserHost({
     createPane, isPluginLoaded: () => true,
-    getScratchDir: (sessionId) => `/scratch/${sessionId}`,
-    getFileRoot(sessionId) {
-      const done = deferred(); roots.push({ sessionId, ...done }); return done.promise;
+    getFileRoots(sessionId) {
+      const done = deferred(); roots.push({ sessionId, ...done });
+      return done.promise.then(root => root ? [root, "/scratch/" + sessionId] : ["/scratch/" + sessionId]);
     },
     onState: (state) => published.push(state),
     onRevealView: (sessionId, tabId) => reveals.push({ sessionId, tabId }),
@@ -58,7 +58,7 @@ async function open(h, sessionId, tabId, url) {
 
 test("BrowserPreview prepares a new resource tab without navigating or rewriting the current tab", async () => {
   const h = harness(); await open(h, "A", "one", "A.html");
-  const preview = h.host.previewWorkspaceFile("A", "preview.html", "/projects/A");
+  const preview = h.host.previewFile();
   await settled();
   assert.equal(h.loads.length, 1, "preview must wait for the resource-tab owner");
   assert.equal(h.host.getState().url, "A.html");
@@ -74,7 +74,7 @@ test("temporary preview passes only the page owner's scratch root when no worksp
   h.host.setChromeSession("temporary", "html", "/scratch/temporary/pelican.html");
   h.roots.at(-1).resolve(null);
   await settled();
-  assert.deepEqual(h.loads.at(-1).allowedRoots, ["/scratch/temporary"]);
+  assert.equal(h.loads.at(-1).fileRoot, "/scratch/temporary");
   h.loads.at(-1).finish();
   await settled();
   assert.equal(h.host.getState().url, "/scratch/temporary/pelican.html");
@@ -113,6 +113,21 @@ test("background navigation targets that session's last selected tab", async () 
   assert.equal(h.host.getState().url, "https://fixture.invalid/first-e");
   h.host.setChromeSession("C", "blank");
   assert.equal(h.host.getState(), null);
+});
+
+test("a temporary preview uses its own scratch even while a project session is visible", async () => {
+  const h = harness();
+  await open(h, "project", "project-tab", "project.html");
+  h.host.setChromeSession("temporary", "scratch-tab", "/scratch/temporary/animation.html");
+  assert.equal(h.roots.at(-1).sessionId, "temporary");
+  h.roots.at(-1).resolve(null);
+  await settled();
+  assert.equal(h.loads.at(-1).fileRoot, "/scratch/temporary");
+  h.loads.at(-1).finish();
+  await settled();
+  h.host.setChromeSession("project", "project-tab");
+  assert.equal(h.host.getState().url, "project.html");
+  h.host.dispose();
 });
 
 test("an empty tab exposes no previous address or native page", async () => {

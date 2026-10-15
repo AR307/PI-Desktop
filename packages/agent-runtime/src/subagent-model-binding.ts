@@ -12,6 +12,7 @@ import {
   openCodeEndpointFromProvider,
   withOpenCodeSessionHeaders,
 } from "./opencode-session-headers.js";
+import { withSessionAffinityOptions } from "./session-affinity.js";
 import { mergeProviderHeaders, withProviderHeaders } from "./provider-headers.js";
 import { clampOutputToContext } from "./output-cap.js";
 import {
@@ -102,6 +103,7 @@ export function subagentModelBinding(opts: {
                   ? response?.headers
                   : undefined;
               }, (request) => { retry.request = upstreamRequestDiagnostics(request, opts.provider); retry.attempts = (retry.attempts ?? 0) + 1; }),
+              opts.provider.authKind,
             ),
           },
           {
@@ -115,10 +117,19 @@ export function subagentModelBinding(opts: {
         ),
         m.api,
       );
+      // The conversation key rides the same options object the retry stream
+      // reuses, so every attempt of this delegate carries the parent session's
+      // id rather than only the first.
+      const sessionOptions = withSessionAffinityOptions(requestOptions, {
+        provider: opts.provider,
+        api: m.api,
+        baseUrl: m.baseUrl,
+        sessionId: opts.sessionId,
+      });
       return createProviderRetryStream(
         m,
         context,
-        withMirrorCodingFast(requestOptions, opts.provider),
+        withMirrorCodingFast(sessionOptions, opts.provider),
         (retryOptions) => accountModelStream(m, () =>
           omitThinking
             ? models.stream(omitThinkingModel, context, retryOptions)

@@ -179,14 +179,16 @@ destination, chat as the home surface, tools and permissions inline.
   redundant supporting paragraph, developer starter cards, or contextual
   quick-action row is rendered (D204/D206).
 - Create project uses one dialog with local folder, Git, and remote host sources.
-  Remote selection offers a connected-host chooser, existing projects, directory
-  browsing, and an absolute path field. Remote project labels follow the Host's
-  directory name. Successful remote selection opens its empty chat in the same
-  home layout and Composer as local selection. The sidebar groups its chats under
-  the remote project and host; New chat keeps that host/project identity. Local
-  and remote projects remain distinct even if their directory names match.
-  Unsupported remote controls remain disabled; remote paths never reach local
-  directory pickers, workspace activation, file previews, or plugin actions.
+  The project name is editable for every source and remains locally managed.
+  Remote selection chooses a connected host and an absolute directory, without
+  a Host project catalog; Settings → Remote Hosts opens the same dialog with the
+  clicked host preselected. Browse opens a separate directory dialog with path
+  entry, parent navigation, directory rows and explicit confirmation. Cancel
+  returns to the project form and restores focus; stale host responses cannot
+  replace the current selection. The same sidebar, switcher, archive and chat
+  workflow manage created projects. Model choices and requests use local settings;
+  remote machines execute admitted workspace tools only. Actual remote paths
+  are display/execution data, never local filesystem activation paths.
 - With transcript: message stream + tool disclosure rows (D071), a contextual
   message-scoped review card immediately after each successful workspace
   Write/Edit row, docked composer, and a session-scoped permission card inline.
@@ -233,6 +235,28 @@ destination, chat as the home surface, tools and permissions inline.
   delete remain separate actions. Rename edits the task label only; archive
   never removes the transcript. Open folder is a project action, not a
   conversation action.
+- **Isolated sessions** (ADR 0329): the project menu offers **New isolated
+  session**. Opening the menu probes the project: the item stays disabled
+  until the answer arrives, and for an unsuitable project (not git, no
+  commits, detached `HEAD`, missing or old git) it stays disabled with the
+  reason shown under it. Creating probes again; a dirty project gets an info
+  toast that uncommitted changes are not included. The menu also
+  holds **Worktree setup command…**. An isolated row shows an `Isolated` badge
+  (or `Conflict`, `Folder missing`, `Setup failed`) and adds **Merge into
+  project…** (preview of commits and files, then merge; conflicting files are
+  listed and stay in the session; the `Conflict` badge clears as soon as the
+  session resolves or abandons the conflict, and the next merge concludes it),
+  **Sync from project** (labelled with the number of new project commits
+  when the menu opens, disabled when there are none or while the session is
+  conflicted, which also hides the `↓N` marker; it merges the project's
+  branch into the session so the session continues on current code, and a
+  conflict stays in the session like a merge conflict; a row that lacks project
+  commits shows a `↓N` marker next to its badge, read in the background when
+  isolated sessions change, after a merge or sync, and on window focus at most
+  every 15 seconds, so rendering the list never waits for git), **Show worktree folder**, and **Setup log**.
+  Its delete confirmation states that unmerged work will be lost. Isolated
+  sessions are never reused as the empty draft and cannot move to another
+  project; forks are ordinary sessions.
 - **Temporary-task attachments**: selecting a saved attachment opens its file
   preview even without an open project. Back returns to the no-project browsing
   state. Branches preserve referenced pasted/imported inputs as child-owned

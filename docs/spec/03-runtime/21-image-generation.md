@@ -2,6 +2,23 @@
 
 The desktop exposes `AppSettings.imageGeneration` as the current default image-generation binding and `AppSettings.imageGenerationModels` as the optional list of models marked for image generation. The legacy single binding remains supported: when the list is absent, it is treated as the only candidate. A null or empty current binding means no default; host-core validates and persists both fields through the existing settings store. No schema bump is needed. A reference that no longer matches an existing provider row is not persisted: host-core drops the current binding and the matching candidate on every settings read and write, mirroring the reference rule config sync applies when it applies a bundle, so a deleted provider cannot leave behind a default the runtime must reject. Each candidate is independent of the conversation default and references an existing enabled API-key or no-auth provider and one of its configured models.
 
+## MirrorCoding authorized accounts
+
+Account image generation uses the live catalog, not the manual vendor binding
+described below. ListImageModels returns authorized model/group options and
+session references. GenerateImage requires an explicit providerId, modelId and
+prompt from that directory, with declared options and optional referenceIds.
+Agent-mode MirrorCoding conversations do not expose the separate GenerateImages
+tool. Other chat providers may still use the account catalog when signed in.
+Plan and Goal can inspect the directory but cannot generate.
+
+The bundled skill explains both contracts. First-use authorization is sufficient:
+the user need not open Image mode, select a manual model or change Settings.
+Account tool generation never changes manual image settings. Empty/revoked
+catalogs remain visible errors; the client does not invent models or replay
+uncertain generation. Inline reference chips are stripped from the image prompt
+while their explicit attachment references are retained.
+
 ## Configuration
 
 Saving a provider confirms the provider was saved or updated, including when

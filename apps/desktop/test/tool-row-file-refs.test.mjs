@@ -123,11 +123,12 @@ const { useOpenPreviewTarget } = loadModule("../src/hooks/use-preview-target.ts"
 
 const flush = () => new Promise((resolve) => setImmediate(resolve));
 
-function reset({ pluginView = false } = {}) {
+function reset({ pluginView = false, browserPluginView = false } = {}) {
   Object.values(calls).forEach((list) => list.splice(0, list.length));
-  state.pluginViews = pluginView
-    ? [{ pluginId: "pi.file-manager", viewId: "manager" }]
-    : [];
+  state.pluginViews = [
+    ...(pluginView ? [{ pluginId: "pi.file-manager", viewId: "manager" }] : []),
+    ...(browserPluginView ? [{ pluginId: "pi.browser", viewId: "browser" }] : []),
+  ];
   nextMatch = null;
   nextReason = null;
   resolveFails = false;
@@ -322,16 +323,25 @@ test("a file from a sibling project folder opens in the view by absolute path", 
 });
 
 test("a primary-folder HTML page stays with the side browser", async () => {
-  reset({ pluginView: true });
+  reset({ pluginView: true, browserPluginView: true });
   nextMatch = projectMatch({ relativePath: "docs/page.html", absolutePath: "C:/project/docs/page.html" });
   await click({ kind: "file", path: "docs/page.html" });
   assert.deepEqual(calls.tabs, [], "a page to run is not a file to read");
-  assert.deepEqual(calls.urls, [["docs/page.html"]]);
+  assert.deepEqual(calls.urls, [["C:/project/docs/page.html"]]);
+});
+
+test("an HTML reference reports a disabled Browser view without enabling it", async () => {
+  reset({ pluginView: true });
+  nextMatch = projectMatch({ relativePath: "docs/page.html", absolutePath: "C:/project/docs/page.html" });
+  await click({ kind: "file", path: "docs/page.html" });
+  assert.deepEqual(calls.urls, []);
+  assert.deepEqual(calls.enabled, []);
+  assert.deepEqual(calls.toasts[0], ["panel.pluginView.failed:", { variant: "error" }]);
 });
 
 test("a temporary conversation HTML link opens the resolved scratch page in the browser", async () => {
-  reset({ pluginView: true });
-  nextMatch = { root: "scratch", relativePath: "pelican.html", absolutePath: "C:/data/scratch/session-1/pelican.html", matchedBy: "exact-relative" };
+  reset({ pluginView: true, browserPluginView: true });
+  nextMatch = { root: "scratch", sessionScratch: true, relativePath: "pelican.html", absolutePath: "C:/data/scratch/session-1/pelican.html", matchedBy: "exact-relative" };
   await click({ kind: "file", path: "pelican.html" });
   assert.deepEqual(calls.urls, [[nextMatch.absolutePath]]);
   assert.deepEqual(calls.files, []);

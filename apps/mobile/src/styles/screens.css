@@ -38,3 +38,5 @@
   :root { --m-text-large: 26px; }
   .grant-chips { padding-left: var(--m-space-4); }
 }
+
+.brand-mark img { display: block; width: 100%; height: 100%; border-radius: inherit; }

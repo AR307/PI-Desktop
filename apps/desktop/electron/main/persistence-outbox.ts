@@ -130,6 +130,19 @@ export class PersistenceOutbox {
     if (deadLettersChanged) await this.persistDeadLetters();
   }
 
+  /**
+   * A transcript replacement must not be followed by an append that was
+   * already in flight when its queued entries were dropped. Drain the current
+   * flush first, then remove any entries that could not be written.
+   */
+  async prepareSessionReplacement(
+    sessionId: string,
+    getHost: () => HostProcess | null,
+  ): Promise<void> {
+    await this.flush(getHost);
+    await this.dropSession(sessionId);
+  }
+
   size(): number {
     return this.entries.length;
   }

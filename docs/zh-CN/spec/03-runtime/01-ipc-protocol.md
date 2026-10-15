@@ -770,6 +770,12 @@ type SessionSummary = {
  supportedThinkingLevels?: ThinkingLevel[];
  updatedAt: string;
  createdAt: string;
+ /** Isolated sessions only (ADR 0329); never carries a filesystem path. */
+ worktree?: {
+  branch: string;
+  status: "creating" | "active" | "conflict" | "merged" | "missing";
+  setupStatus?: "none" | "running" | "ok" | "failed" | null;
+ };
 };
 
 type UiMessage = {
@@ -863,7 +869,8 @@ ID、或会话无法解析出默认目标时，得到 `supportsReasoning: false`
 最小接口：
 
 - `session/list`
-- `session/create`
+- `session/create` — 可选的 `isolated: true` 配合 `projectPath` 会在专属 git worktree 中创建
+  会话（ADR 0329）；拒绝时返回主机的 `WORKTREE_*` 代码
 - `session/fork({ sessionId, title?, throughMessageId? }) -> { session: SessionDetail }`
 - `session/get`
 - `session/delete`
@@ -1106,6 +1113,23 @@ type ProjectRecord = {
  lastOpenedAt: number;
 };
 ```
+
+## 9a. 会话 worktree API（ADR 0329）
+
+对主机 `worktree.*` 方法的薄转发（06-host-rpc-protocol §4）；错误保留主机的
+`WORKTREE_*` 代码。
+
+- `worktree/probe({ projectPath })` → 项目能否承载隔离会话（不能时给出拒绝代码），以及是否
+  有未提交改动
+- `worktree/preview({ sessionId })` / `worktree/merge({ sessionId, previewToken })`
+- `worktree/behind({ sessionId })` → 提交数，以及 `worktree/sync({ sessionId })` — “从项目同步”；`worktree/behindAll()`
+  → `{ counts: { [sessionId]: count }, statusesChanged }`，用于侧边栏标记
+- `worktree/pendingWork({ sessionId })` — 删除时会丢弃的未合并工作
+- `worktree/setupLog({ sessionId })`
+- `worktree/reveal({ sessionId })` — Electron Main 通过 `worktree.location` 解析文件夹并在
+  系统文件管理器中打开；路径绝不返回给渲染器
+- `worktree/setupCommand/get({ projectPath })` /
+  `worktree/setupCommand/set({ projectPath, command })`
 
 ## 10. 工具权限 API
 

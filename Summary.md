@@ -1,5 +1,28 @@
 # PI-Desktop MirrorCoding Edition
 
+## 2026-10-15 - Upstream integration, shared branding and account image tools
+
+- Integrated upstream 0.20.1 at 2eb333723 with the committed mobile redesign
+  b1ab525b and storage maintenance release 155141316, on a dedicated worktree.
+- Replaced desktop, Android launcher/splash/notification and mobile login
+  branding from the supplied logo.svg. Platform assets remain generated assets.
+- MirrorCoding chat exposes ListImageModels and GenerateImage rather than the
+  manually configured GenerateImages entry. The bundled skill distinguishes
+  account catalogs from separately configured vendor providers. No model,
+  group, user settings or production credentials are invented by the agent.
+- Integrated inline image chips with direct image submission: references stay
+  attached while chip tokens are excluded from the provider prompt.
+- Combined the two released v24 database histories into schema v25. Upgrades
+  preserve both mobile revisions and upstream worktree tables in one migration.
+- Kept the fork's independent worker lifecycle; upstream steering tests now
+  exercise report delivery through the host queue after the parent idles.
+- Reused host dependencies first. Upstream patch drift required a lockfile-
+  matched install, reusing cached packages; old task dependency links were
+  preserved under ignored artifacts. Node 24 and Rust 1.90 are used for checks.
+- Release target: desktop and Android 0.20.2, Android versionCode 8.
+  Verification evidence is tracked in docs/releases/0.20.2-validation.md.
+
+
 ## 2026-10-12 - Keep overflowed panel tabs inside their native hit region
 
 - Reproduced titlebar drag loss with twelve horizontally scrolled panel tabs.
@@ -1423,3 +1446,15 @@ Captured native windows and the Android login screen were visually checked.
 - Keep installation exclusions at the browser root so same-named nested user files and host data files are still copied. A regression caught the previously recursive exclusion and now verifies these files remain intact.
 - Add a native lock regression and extend the real Settings/preload/IPC/cold-restart journey for retry after a partially completed backup cleanup. Verify the backup control disappears and current history, attachments and browser state remain readable. Synthetic profiles are retained; no real user data or backup is touched.
 - Validation: ten focused filesystem tests, the real Windows lock regression, three native Settings journeys and six archive/link scenarios passed. Desktop typecheck, targeted lint, style and policy checks passed. The unchanged 0.18.2 Host and renderer assets are reused; relaunch dispatch is scripted and each startup phase is a separate Electron process. No installer build, real backup deletion, publication or full-suite pass is claimed.
+
+### 0.20.2 integration validation follow-up
+
+- Preserve the AR307 updater feed when importing upstream packaging resources.
+- Interpret remote POSIX tool paths independently of the Windows Desktop path
+  parser; traversal and sibling-prefix paths still require external admission.
+- Align HTML preview and background-worker fixtures with the merged contracts;
+  keep Windows permission/path assertions native and disable unused SSR watchers.
+- Authorized-account image generation, reference attachments, mobile relay and
+  native Android acceptance passed against controlled local provider fixtures.
+- Production packaging and final-commit acceptance are recorded separately in
+  docs/releases/0.20.2-validation.md; no production account or paid model is used.

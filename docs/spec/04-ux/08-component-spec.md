@@ -117,7 +117,11 @@ Outer frame that positions Topbar, Sidebar, MainChat, and WorkPanel. Owns resize
   stay mounted but are hidden with `visibility: hidden` +
   `content-visibility: hidden` — never `display: none`, which would destroy the
   layout box and its scroll offset — and are `aria-hidden` and non-interactive.
-  Evicting a pane makes its session behave like a cold open on the next visit.
+  Eviction releases the DOM, not the renderer-lifetime reading bookmark. On
+  return, restore the bookmarked message and its viewport offset, loading a
+  bounded historical range when necessary without search focus/highlighting.
+  Explicit disclosure choices and the mounted-window budget survive eviction;
+  bookmarks do not persist across renderer/app restarts.
 - A pane renders the store's live `messages` while its session is the active one
   and its retained snapshot otherwise, so no pane can show another session's rows.
   While a session is running, or still holds live rows the durable page has
@@ -545,10 +549,14 @@ visually distinct from list content.
   the workspace list with a softly filled Add folder action; the field does not
   repeat its label as placeholder text and uses the shared field well plus the
   accent-tinted focus ring, not an outline stroke. Edit project reuses the same
-  surface, loads the host-owned group, allows the name and non-primary folders
-  to be adjusted, keeps Primary first and non-removable, and rejects removal of
-  a folder that still owns chats. Background session or run-status updates
-  must preserve unsaved name and folder edits in the open editor. The source selector offers This computer and
+  surface, loads the host-owned group, allows the name and folders to be
+  adjusted, keeps the Primary folder first and non-removable, and rejects
+  removal of a folder that still owns chats. Every other folder row carries a
+  Set as Primary action that promotes it: the row moves to the top, the Primary
+  tag moves with it, and the host stores the promoted folder as the group's
+  primary root on save. A remote project keeps its host-owned binding and shows
+  no promotion action. Background session or run-status updates
+  must preserve unsaved name, folder, and primary edits in the open editor.
   Git repository as equal filled tiles without strokes (D297); the active source
   uses a deeper tile, not a selected border. A repository URL reuses the clone
   rules of ADR 0247 and its checkout becomes the primary root of the same group.
@@ -726,10 +734,9 @@ controls.
 | Project pin | presentation priority only; no host row deletion/move |
 | Project reorder | press-and-move on the title (8px), or ArrowUp/ArrowDown on that title, writes contiguous normalized-path order to sidebar preferences; accent insertion line; no visible grip |
 | Project archive | omitted from default view; restorable from archived view |
-| Project close | removes retained tab only; durable project/sessions remain |
-| Project delete | row-menu danger action behind a second confirmation that names the project and the number of its sessions; refused with a message while any of those sessions is running and leaves group membership unchanged; removes the durable project row, those sessions, their transcripts, and its project memory; never deletes the folder on disk; deleting a root of a multi-folder project group detaches it as part of deletion, promotes the first remaining root when the primary is deleted, and removes the group record when its last root is deleted. A path the host no longer knows is still removed from the list. Detaching a root with chats through Edit project preserves them under a standalone project |
+| Project delete | the row-menu danger action always opens a confirmation dialog naming the project and session count; X, Cancel, Escape, and backdrop dismiss without changes; explicit confirmation stops listed running sessions before removing the durable project row, owned sessions/transcripts, and project memory; the folder is never deleted; deleting a root of a stored multi-folder project group is refused until the root is detached through Edit project. Chats on a detached root remain available as a standalone project. A path the host no longer knows is still removed from the list. |
 | Project memory | row-menu editor reads and saves a compact list of titled or untitled memory cards for the exact project path; cards can be added, edited, and removed, the context is available in later chats, and it is never a higher-priority instruction |
-| Session list | exact-path matches only; no basename grouping |
+| Session list | exact-path matches only; no basename grouping; the latest ten unpinned sessions appear initially, Load more reveals the remaining history, and collapsing the project clears that expanded-list state so the next expansion returns to the initial ten |
 | Active group | exactly one group reflects the selected host workspace |
 | Task state | In-progress, selected, completed, and failed indicators update by session without replacing the visible transcript; precedence is in-progress, selected, then terminal outcome |
 
@@ -1081,17 +1088,19 @@ entirely inside the plugin's isolated page:
   reveals the page without waiting for images or subframes; those continue to
   drive the loading/stop control. A failed switch or one exceeding the 15-second
   main-frame wait shows a retryable error, with the old guest hidden. Superseded
-  and cancelled requests cannot publish over the new navigation. A local file
-  address or absolute path that does not resolve to an existing file inside
-  the session workspace is rejected before loading and shows a specific
-  workspace-boundary message in the browser chrome, including on a blank tab.
-  Existing files inside the workspace remain previewable by absolute path.
+  and cancelled requests cannot publish over the new navigation. The address
+  bar accepts `file:` URLs and absolute paths to existing local files anywhere
+  on the machine; a local file page may also navigate to other existing local
+  files. Missing files, directories, remote file authorities, and unsupported
+  schemes are rejected before loading. Relative paths remain rooted in the
+  session workspace. BrowserPreview remains workspace-scoped.
 
 - Browser address input accepts HTTP(S) URLs and scheme-less web hosts. A
   `localhost` or dotted hostname followed by a numeric port (for example,
   `localhost:3000/index.html` or `example.com:8080`) is treated as an HTTP
   address rather than a custom URL scheme. Unsupported schemes remain blocked;
-  workspace file previews continue to use the in-root file path gate.
+  explicit local-file navigation is not limited to the workspace. BrowserPreview
+  continues to use the in-root file path gate.
 
 - Opening an HTTP(S) link in the work panel creates an additional Browser
   resource tab instead of replacing the previous URL. Each tab owns a host-retained WebContents, address, title and navigation
@@ -1129,6 +1138,12 @@ entirely inside the plugin's isolated page:
 | Plugin out of scope | A view contributed by a plugin that is not active in the current project disappears from the New launcher when the project changes. Unlike contributed themes, which are one global setting and stay unfiltered, a view is scoped work |
 
 ### 5.4 Interactions
+
+- Native plugin bounds follow the placeholder's complete viewport-relative
+  rectangle after every renderer layout commit, not only after the placeholder
+  changes size. Sidebar collapse/expand, preview mode, and ancestor transforms
+  therefore cannot leave the host `WebContentsView` at an earlier horizontal
+  position or expose an uncovered strip beside Browser or another plugin view.
 
 - Trigger: file/URL references and BrowserPreview create/activate their
   resource tab in the originating session's runtime context. BrowserPreview
@@ -1910,8 +1925,14 @@ Single message render — either user (plaintext) or assistant (markdown streami
   regardless of display mode, without making color the only signal.
   Clicking the trigger (or activating it from the keyboard) toggles a
   non-modal panel whose heading follows the same display-mode figure,
-  followed by used/window counts and two
-  unboxed turn/speed summary values. Model usage is compressed into one
+  followed by used/window counts, unboxed turn/speed summary values, and the
+  elapsed session time. Three compact timing rows show request-to-first-response
+  wait, streamed model response time (thinking plus answer), and top-level tool
+  execution time, each with its share of the session span. Network/provider wait
+  and streamed response are separate; parallel top-level tools count overlapping
+  time once, and nested delegate timing is excluded. Older messages retain the
+  existing response duration for the model row but cannot contribute request
+  wait. Model usage is compressed into one
   inline summary row that retains exact last-request
   input/output/cache/reasoning values
   and the provider-reported cache hit rate when available. Tool usage is
@@ -2203,7 +2224,8 @@ quotes and cell line breaks are escaped, and formula-leading nonnumeric cells
 are exported as text. Clipboard failures produce an error toast.
 
 The expanded view uses a modal dialog with the existing theme tokens, a scrollable
-table and opaque sticky headers, and copy/download controls. Columns retain
+table with visible scrollbars whenever either axis overflows, opaque sticky
+headers, and copy/download controls. Columns retain
 readable minimum widths; narrow previews scroll horizontally instead of crushing
 short labels. It follows streamed rows,
 contains keyboard focus, closes with Escape or Close, and restores focus to its
@@ -2411,6 +2433,12 @@ to two lines, its description is clamped to two readable lines, and its step
 summary can wrap rather than forcing the user to resize the divider. Complete
 descriptions remain available through the node's accessible name/hover title;
 the node and its live process never create horizontal overflow.
+
+An accepted steering message creates a new visual reply without ending the
+parent runtime turn. Earlier delegation cards in that running turn keep their
+live status and Stop controls across steering replies and compaction dividers.
+A new ordinary user turn, parent settlement, or history reading ends that live
+projection; terminal Task snapshots still take precedence.
 
 The lifecycle rows (`TaskWait`/`TaskList`/`TaskStop`) stay compact tool rows —
 they are not topology nodes and must not inflate the subagent counts — but they
@@ -2999,20 +3027,20 @@ reasoning-level control.
   after an app restart, when that in-memory draft is unavailable, restore the
   Host-stored content and image/file attachments without rewriting the content;
   while the input is non-empty (or holds attachments) the action is refused with
-  a toast and nothing changes. Remove drops the row immediately.
+  a toast and nothing changes. Remove drops the row after Host acknowledgement.
 - Send now: promotes the row to the end of the session's priority block, so a
   second Send now leaves behind the first instead of replacing it at the head.
-  It then requests `agent/stop`, and the promoted block is released after the
-  current reply/tool batch completes normally, before every waiting row. The
-  first promoted row starts the turn and the rest join it as adjacent user
-  messages, so the block is answered once. When idle it starts immediately.
+  The Host delivers promoted input into the current turn through steering;
+  it does not request `agent/stop`. `TaskWait` yields without canceling delegates.
+  Refused input or an input with a different effective permission mode retains
+  its durable queue entry until the next turn. When idle it starts immediately.
 - A pending queue row is locked until Host admission returns its durable id: move
   up/down, Send now, edit, and remove are disabled. All five tooltips explain
   that it is saving; Send now also displays the localized Saving label. Direct edit/remove actions leave the pending row and draft
   unchanged; after admission, ordinary waiting-row actions become available.
 - A promoted row fixes order: move up/down and edit are disabled with
   their tooltip and `aria-disabled` state intact, and the Send now button reads
-  as waiting for the current task (`chat.sendNowPending`). Remove remains
+  Waiting to send (`chat.sendNowPending`). Remove remains
   available until delivery and waits for Host acknowledgement. If delivery
   already started, show a conflict message directing the user to Stop.
   The row carries a distinct

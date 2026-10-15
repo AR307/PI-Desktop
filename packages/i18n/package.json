@@ -1,6 +1,6 @@
 {
   "name": "@pi-desktop/i18n",
-  "version": "0.18.2",
+  "version": "0.20.2",
   "private": true,
   "type": "module",
   "main": "./dist/index.js",
@@ -31,6 +31,6 @@
   },
   "devDependencies": {
     "typescript": "^5.9.3",
-    "vitest": "^4.1.10"
+    "vitest": "^4.1.11"
   }
 }

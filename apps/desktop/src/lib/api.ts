@@ -94,9 +94,18 @@ import type {
   SessionSearchContext,
   SessionSearchContextRequest,
   SessionSummary,
+  CreatedSessionWorktree,
+  WorktreeMergeOutcome,
+  WorktreeMergePreview,
+  WorktreePendingWork,
+  WorktreeSyncOutcome,
+  WorktreeBehindCounts,
+  WorktreeProbeResult,
+  WorktreeSetupLog,
   SessionCollaborationSummary,
   TraySessionPreferences,
   ToolPermissionResolution,
+  BuiltinSkillRecord,
   UserSkillInput,
   UserSkillRecord,
   UserSubagentInput,
@@ -348,6 +357,12 @@ async function invoke<T>(channel: string, ...args: unknown[]): Promise<T> {
   }
   return result.data;
 }
+
+/** `session.create` input: summary fields plus the isolation switch. */
+export type CreateSessionInput = Partial<SessionSummary> & {
+  /** Run the session in its own git worktree (ADR 0329). */
+  isolated?: boolean;
+};
 
 function normalizeSession(session: SessionSummary): SessionSummary {
   return {
@@ -627,10 +642,34 @@ export const api = {
       ...result,
       sessions: result.sessions.map(normalizeSession),
     })),
-  createSession: (input?: Partial<SessionSummary>) =>
-    invoke<{ session: SessionSummary }>(IPC.invoke.sessionCreate, input ?? {}).then(
-      (result) => ({ ...result, session: normalizeSession(result.session) }),
-    ),
+  createSession: (input?: CreateSessionInput) =>
+    invoke<{ session: SessionSummary; worktree?: CreatedSessionWorktree }>(
+      IPC.invoke.sessionCreate,
+      input ?? {},
+    ).then((result) => ({ ...result, session: normalizeSession(result.session) })),
+  /** Isolated sessions in git worktrees (ADR 0329). No call returns a path. */
+  probeWorktree: (projectPath: string) =>
+    invoke<WorktreeProbeResult>(IPC.invoke.worktreeProbe, { projectPath }),
+  previewWorktreeMerge: (sessionId: string) =>
+    invoke<WorktreeMergePreview>(IPC.invoke.worktreePreview, { sessionId }),
+  mergeWorktree: (sessionId: string, previewToken: string) =>
+    invoke<WorktreeMergeOutcome>(IPC.invoke.worktreeMerge, { sessionId, previewToken }),
+  getWorktreeBehind: (sessionId: string) =>
+    invoke<number>(IPC.invoke.worktreeBehind, { sessionId }),
+  /** Project commits each isolated session lacks, keyed by session id. */
+  getWorktreeBehindAll: () => invoke<WorktreeBehindCounts>(IPC.invoke.worktreeBehindAll),
+  syncWorktree: (sessionId: string) =>
+    invoke<WorktreeSyncOutcome>(IPC.invoke.worktreeSync, { sessionId }),
+  getWorktreePendingWork: (sessionId: string) =>
+    invoke<WorktreePendingWork>(IPC.invoke.worktreePendingWork, { sessionId }),
+  getWorktreeSetupLog: (sessionId: string) =>
+    invoke<WorktreeSetupLog>(IPC.invoke.worktreeSetupLog, { sessionId }),
+  revealWorktree: (sessionId: string) =>
+    invoke<{ ok: boolean }>(IPC.invoke.worktreeReveal, { sessionId }),
+  getWorktreeSetupCommand: (projectPath: string) =>
+    invoke<{ command: string | null }>(IPC.invoke.worktreeSetupCommandGet, { projectPath }),
+  setWorktreeSetupCommand: (projectPath: string, command: string | null) =>
+    invoke<{ ok: boolean }>(IPC.invoke.worktreeSetupCommandSet, { projectPath, command }),
   forkSession: (sessionId: string, title?: string, throughMessageId?: string) =>
     invoke<{ session: SessionDetail }>(IPC.invoke.sessionFork, {
       sessionId,
@@ -883,15 +922,25 @@ export const api = {
     invoke<{ projects: ProjectRecord[] }>(IPC.invoke.projectList),
   listProjectGroups: () =>
     invoke<{ groups: ProjectGroupRecord[] }>(IPC.invoke.projectGroupList),
+  createRemoteProjectGroup: (name: string, hostKey: string, path: string) =>
+    invoke<{ group: ProjectGroupRecord }>(IPC.invoke.projectGroupCreateRemote, { name, hostKey, path }),
   createProjectGroup: (name: string, folders: string[]) =>
     invoke<{ group: ProjectGroupRecord }>(IPC.invoke.projectGroupCreate, { name, folders }),
   renameProjectGroup: (groupId: string, name: string) =>
     invoke<{ group: ProjectGroupRecord }>(IPC.invoke.projectGroupRename, { groupId, name }),
-  updateProjectGroup: (groupId: string, name: string, folders: string[]) =>
+  // `primary` names the folder that becomes the group's primary root; the host
+  // keeps the stored one when it is omitted.
+  updateProjectGroup: (
+    groupId: string,
+    name: string,
+    folders: string[],
+    primary?: string,
+  ) =>
     invoke<{ group: ProjectGroupRecord }>(IPC.invoke.projectGroupUpdate, {
       groupId,
       name,
       folders,
+      ...(primary ? { primary } : {}),
     }),
   getProjectGroupMemory: (groupId: string) =>
     invoke<{ memory: ProjectMemory }>(IPC.invoke.projectGroupMemoryGet, { groupId }),
@@ -1218,6 +1267,10 @@ export const api = {
     ),
 
   // --- Skills the user owns -------------------------------------------------
+  listBuiltinSkills: () =>
+    invoke<{ builtins: BuiltinSkillRecord[] }>(IPC.invoke.skillBuiltinList),
+  setBuiltinSkillEnabled: (id: string, enabled: boolean) =>
+    invoke<{ id: string; enabled: boolean }>(IPC.invoke.skillBuiltinSetEnabled, { id, enabled }),
   listUserSkills: (query?: AgentCapabilityQuery) =>
     invoke<{ skills: UserSkillRecord[] }>(IPC.invoke.skillList, query),
   createUserSkill: (skill: UserSkillInput) =>
@@ -1440,7 +1493,7 @@ export const api = {
   /** Toggles the devtools console; rejects unless developer mode is on. */
   toggleDevTools: (open?: boolean) =>
     invoke<{ open: boolean }>(IPC.invoke.devtoolsToggle, { open }),
-  workspaceDiff: () => invoke<WorkspaceDiff>(IPC.invoke.workspaceDiff),
+  workspaceDiff: (sessionId?: string) => invoke<WorkspaceDiff>(IPC.invoke.workspaceDiff, { ...(sessionId ? { sessionId } : {}) }),
   workspaceReviewRollback: (input: {
     sessionId: string;
     snapshotId: string;
@@ -1461,22 +1514,24 @@ export const api = {
     invoke(IPC.invoke.browserOpenExternal, url ? { url } : {}),
   browserGetState: () =>
     invoke<BrowserState | null>(IPC.invoke.browserGetState),
-  fsList: (path?: string) =>
-    invoke<{ entries: FsEntry[] }>(IPC.invoke.fsList, { path: path ?? "" }),
-  fsRead: (path: string, mimeType?: string) =>
+  fsList: (path?: string, sessionId?: string) =>
+    invoke<{ entries: FsEntry[] }>(IPC.invoke.fsList, { path: path ?? "", ...(sessionId ? { sessionId } : {}) }),
+  fsRead: (path: string, mimeType?: string, sessionId?: string) =>
     invoke<FsReadResult>(IPC.invoke.fsRead, {
       path,
       ...(mimeType ? { mimeType } : {}),
+      ...(sessionId ? { sessionId } : {}),
     }),
-  fsReadImageDataUrl: (ref: string, mimeType?: string) =>
+  fsReadImageDataUrl: (ref: string, mimeType?: string, sessionId?: string) =>
     invoke<FsImageDataUrlResult>(IPC.invoke.fsReadImageDataUrl, {
       ref,
       ...(mimeType ? { mimeType } : {}),
+      ...(sessionId ? { sessionId } : {}),
     }),
-  fsReveal: (path: string) => invoke(IPC.invoke.fsReveal, { path }),
-  fsOpen: (path: string, mimeType?: string) =>
-    invoke(IPC.invoke.fsOpen, { path, mimeType }),
-  fsIndex: () => invoke<FsIndexResult>(IPC.invoke.fsIndex),
+  fsReveal: (path: string, sessionId?: string) => invoke(IPC.invoke.fsReveal, { path, ...(sessionId ? { sessionId } : {}) }),
+  fsOpen: (path: string, mimeType?: string, sessionId?: string) =>
+    invoke(IPC.invoke.fsOpen, { path, mimeType, ...(sessionId ? { sessionId } : {}) }),
+  fsIndex: (sessionId?: string) => invoke<FsIndexResult>(IPC.invoke.fsIndex, { ...(sessionId ? { sessionId } : {}) }),
   /**
    * Complete a file reference from chat text to a real file (D320 follow-up).
    * The main process owns the root order — project, session scratch,

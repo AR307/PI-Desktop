@@ -19,8 +19,11 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_session_sync_changes_revision
 "#;
 
 pub(crate) fn migrate(conn: &Connection, path: &Path) -> Result<()> {
-    let backup = create_migration_backup(conn, path, 23)?;
+    let backup = create_migration_backup(conn, path, 24)?;
     let tx = conn.unchecked_transaction()?;
+    // Both upstream and the released fork used v24 for independent features.
+    // Preserve either history and add only its missing tables/column.
+    super::worktree_migration::ensure_worktree_schema(&tx)?;
     tx.execute_batch(SCHEMA)?;
     tx.execute_batch(
         "DROP INDEX IF EXISTS idx_sessions_updated;
@@ -28,10 +31,10 @@ pub(crate) fn migrate(conn: &Connection, path: &Path) -> Result<()> {
     )?;
     // Existing transcripts start at zero. A first history page captures zero;
     // only later writes need change entries, so upgrading never copies bodies.
-    tx.pragma_update(None, "user_version", 24i64)?;
+    tx.pragma_update(None, "user_version", 25i64)?;
     tx.commit().with_context(|| {
         format!(
-            "commit schema v23 to v24 migration; backup {} remains",
+            "commit schema v24 to v25 migration; backup {} remains",
             backup.display()
         )
     })?;
@@ -124,7 +127,7 @@ mod tests {
                 .conn()
                 .query_row("PRAGMA user_version", [], |row| row.get(0))
                 .unwrap();
-            assert_eq!(version, 24);
+            assert_eq!(version, SCHEMA_VERSION);
         }
     }
 
@@ -165,7 +168,37 @@ mod tests {
             db.conn()
                 .query_row("PRAGMA user_version", [], |r| r.get::<_, i64>(0))
                 .unwrap(),
-            24
+            SCHEMA_VERSION
         );
+    }
+
+    #[test]
+    fn upgrades_both_released_v24_histories_without_losing_messages() {
+        for fork in [false, true] {
+            let dir = tempfile::tempdir().unwrap();
+            let path = dir.path().join("v24.sqlite");
+            let db = Database::open(&path).unwrap();
+            let session = crate::sessions::create_session(&db, None, None, None, None, None).unwrap();
+            let message: crate::sessions::UiMessage = serde_json::from_value(serde_json::json!({
+                "id": "retained-v24", "role": "user", "content": "Existing conversation",
+                "createdAt": "2026-10-15T00:00:00Z"
+            })).unwrap();
+            crate::sessions::append_message(&db, &session.id, &message, None).unwrap();
+            let revision = crate::sessions::session_sync_revision(&db, &session.id).unwrap();
+            if fork {
+                db.conn().execute_batch("DROP TABLE worktrees; ALTER TABLE projects DROP COLUMN worktree_setup_command;").unwrap();
+            } else {
+                db.conn().execute_batch("DROP TABLE session_sync_changes; DROP TABLE session_sync_state;").unwrap();
+            }
+            db.conn().pragma_update(None, "user_version", 24).unwrap();
+            drop(db);
+            let db = Database::open(&path).unwrap();
+            let detail = crate::sessions::get_session(&db, &session.id).unwrap().unwrap();
+            assert_eq!(detail.messages[0].content, "Existing conversation");
+            assert_eq!(detail.sync_revision, if fork { revision } else { 0 });
+            let count: i64 = db.conn().query_row("SELECT COUNT(*) FROM worktrees", [], |row| row.get(0)).unwrap();
+            assert_eq!(count, 0);
+            assert!(migration_backup_path(&path, 24).exists());
+        }
     }
 }
