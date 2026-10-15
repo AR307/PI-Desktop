@@ -30,6 +30,9 @@ public class MobileUpdatePlugin extends Plugin {
     private static final String PREFS = "pi_mobile_update";
     private static final String DOWNLOAD_ID = "download_id";
     private static final String DOWNLOAD_FILE = "download_file";
+    /** The manifest a stored download belongs to; records without them predate this check. */
+    private static final String DOWNLOAD_URL = "download_url";
+    private static final String DOWNLOAD_VERSION_CODE = "download_version_code";
 
     private SharedPreferences prefs() {
         return getContext().getSharedPreferences(PREFS, Context.MODE_PRIVATE);
@@ -54,13 +57,45 @@ public class MobileUpdatePlugin extends Plugin {
         } catch (Exception ignored) { return false; }
     }
 
+    private long installedVersionCode(PackageInfo info) {
+        return Build.VERSION.SDK_INT >= 28 ? info.getLongVersionCode() : info.versionCode;
+    }
+
+    private long installedVersionCode() {
+        try {
+            return installedVersionCode(getContext().getPackageManager().getPackageInfo(getContext().getPackageName(), 0));
+        } catch (Exception unavailable) {
+            return Long.MAX_VALUE;
+        }
+    }
+
+    /** Forget the stored download; DownloadManager deletes its APK file. */
+    private void discardDownload() {
+        long id = prefs().getLong(DOWNLOAD_ID, -1);
+        if (id >= 0) manager().remove(id);
+        prefs().edit().remove(DOWNLOAD_ID).remove(DOWNLOAD_FILE).remove(DOWNLOAD_URL).remove(DOWNLOAD_VERSION_CODE).apply();
+    }
+
+    /**
+     * A stored download serves only the update it was started for. It is stale
+     * once that version (or a later one) is installed, when the available update
+     * names a different APK, or when it predates the stored URL and versionCode;
+     * a stale APK must never be offered for installation.
+     */
+    private boolean storedDownloadServes(String url) {
+        String storedUrl = prefs().getString(DOWNLOAD_URL, null);
+        long storedVersionCode = prefs().getLong(DOWNLOAD_VERSION_CODE, -1);
+        if (storedUrl == null || storedVersionCode <= installedVersionCode()) return false;
+        return url == null || url.equals(storedUrl);
+    }
+
     @PluginMethod
     public void getInstalledInfo(PluginCall call) {
         try {
             PackageInfo info = getContext().getPackageManager().getPackageInfo(getContext().getPackageName(), 0);
             JSObject result = new JSObject();
             result.put("versionName", info.versionName);
-            result.put("versionCode", Build.VERSION.SDK_INT >= 28 ? info.getLongVersionCode() : info.versionCode);
+            result.put("versionCode", installedVersionCode(info));
             result.put("androidSdk", Build.VERSION.SDK_INT);
             call.resolve(result);
         } catch (Exception error) {
@@ -102,11 +137,20 @@ public class MobileUpdatePlugin extends Plugin {
     @PluginMethod
     public void startDownload(PluginCall call) {
         String url = call.getString("url");
+        // JSON numbers arrive as Integer or Long; PluginCall.getLong reads only Long.
+        Object rawVersionCode = call.getData().opt("versionCode");
+        long versionCode = rawVersionCode instanceof Number ? ((Number) rawVersionCode).longValue() : -1;
         if (url == null || !allowedUrl(url, ".apk")) {
             call.reject("Invalid mobile update URL");
             return;
         }
+        if (versionCode <= installedVersionCode()) {
+            call.reject("Invalid mobile update version");
+            return;
+        }
         try {
+            // One update at a time: an earlier APK, finished or not, is removed with its file.
+            discardDownload();
             String file = "pi-mobile-" + System.currentTimeMillis() + ".apk";
             DownloadManager.Request request = new DownloadManager.Request(Uri.parse(url));
             request.setTitle("PI Mobile update");
@@ -114,22 +158,29 @@ public class MobileUpdatePlugin extends Plugin {
             request.setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED);
             request.setDestinationInExternalFilesDir(getContext(), Environment.DIRECTORY_DOWNLOADS, "updates/" + file);
             long id = manager().enqueue(request);
-            prefs().edit().putLong(DOWNLOAD_ID, id).putString(DOWNLOAD_FILE, file).apply();
+            prefs().edit().putLong(DOWNLOAD_ID, id).putString(DOWNLOAD_FILE, file)
+                .putString(DOWNLOAD_URL, url).putLong(DOWNLOAD_VERSION_CODE, versionCode).apply();
             call.resolve();
         } catch (Exception error) {
             call.reject("Unable to start APK download", error);
         }
     }
 
-    private JSObject downloadState() {
+    /** State of the download for `url` (the available update), or of any still-useful download when null. */
+    private JSObject downloadState(String url) {
         JSObject state = new JSObject();
-        long id = prefs().getLong(DOWNLOAD_ID, -1);
         state.put("status", "idle");
         state.put("downloadedBytes", 0);
         state.put("totalBytes", 0);
+        if (prefs().getLong(DOWNLOAD_ID, -1) >= 0 && !storedDownloadServes(url)) discardDownload();
+        long id = prefs().getLong(DOWNLOAD_ID, -1);
         if (id < 0) return state;
         try (Cursor cursor = manager().query(new DownloadManager.Query().setFilterById(id))) {
-            if (cursor == null || !cursor.moveToFirst()) return state;
+            if (cursor == null || !cursor.moveToFirst()) {
+                // The system no longer has the job (cleared downloads); start over.
+                discardDownload();
+                return state;
+            }
             int status = cursor.getInt(cursor.getColumnIndexOrThrow(DownloadManager.COLUMN_STATUS));
             state.put("downloadedBytes", cursor.getLong(cursor.getColumnIndexOrThrow(DownloadManager.COLUMN_BYTES_DOWNLOADED_SO_FAR)));
             state.put("totalBytes", cursor.getLong(cursor.getColumnIndexOrThrow(DownloadManager.COLUMN_TOTAL_SIZE_BYTES)));
@@ -142,20 +193,19 @@ public class MobileUpdatePlugin extends Plugin {
 
     @PluginMethod
     public void getDownload(PluginCall call) {
-        call.resolve(downloadState());
+        call.resolve(downloadState(call.getString("url")));
     }
 
     @PluginMethod
     public void cancelDownload(PluginCall call) {
-        long id = prefs().getLong(DOWNLOAD_ID, -1);
-        if (id >= 0) manager().remove(id);
-        prefs().edit().remove(DOWNLOAD_ID).remove(DOWNLOAD_FILE).apply();
+        discardDownload();
         call.resolve();
     }
 
     @PluginMethod
     public void install(PluginCall call) {
-        if (!"downloaded".equals(downloadState().optString("status"))) {
+        // Only the APK downloaded for the update being shown may reach the installer.
+        if (!"downloaded".equals(downloadState(call.getString("url")).optString("status"))) {
             call.reject("APK download is not complete");
             return;
         }

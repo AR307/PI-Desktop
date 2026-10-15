@@ -20,10 +20,13 @@ export type InstallResult = { permissionRequired: boolean };
 export interface MobileUpdateTransport {
   getInstalledInfo(): Promise<InstalledVersion>;
   fetchManifest(options?: { url?: string }): Promise<{ manifest: unknown }>;
-  startDownload(options: { url: string }): Promise<void>;
-  getDownload(): Promise<DownloadState>;
+  /** The download belongs to this manifest's APK and versionCode; a previous one is discarded. */
+  startDownload(options: { url: string; versionCode: number }): Promise<void>;
+  /** With `url`, a download for any other APK is discarded and reported idle. */
+  getDownload(options?: { url?: string }): Promise<DownloadState>;
   cancelDownload(): Promise<void>;
-  install(): Promise<InstallResult>;
+  /** Installs only the APK downloaded for `url`. */
+  install(options?: { url?: string }): Promise<InstallResult>;
 }
 
 const nativeUpdate = registerPlugin<MobileUpdateTransport>("MobileUpdate");
@@ -56,7 +59,10 @@ export class MobileUpdater {
   constructor(private readonly transport: MobileUpdateTransport, private readonly storage: Pick<Storage, "getItem" | "setItem"> = localStorage) {}
 
   async installed(): Promise<InstalledVersion> { return this.transport.getInstalledInfo(); }
-  async downloadState(): Promise<DownloadState> { return this.transport.getDownload(); }
+  /** The download for the given update; an APK left from an earlier update is discarded. */
+  async downloadState(manifest?: MobileUpdateManifest | null): Promise<DownloadState> {
+    return this.transport.getDownload(manifest ? { url: manifest.apkUrl } : {});
+  }
   async savedUpdate(): Promise<MobileUpdateManifest | null> {
     const saved = this.storage.getItem(LAST_MANIFEST_KEY);
     if (!saved) return null;
@@ -81,11 +87,11 @@ export class MobileUpdater {
   }
 
   async download(manifest: MobileUpdateManifest): Promise<DownloadState> {
-    await this.transport.startDownload({ url: manifest.apkUrl });
-    return this.downloadState();
+    await this.transport.startDownload({ url: manifest.apkUrl, versionCode: manifest.versionCode });
+    return this.downloadState(manifest);
   }
   async cancel(): Promise<void> { await this.transport.cancelDownload(); }
-  async install(): Promise<InstallResult> { return this.transport.install(); }
+  async install(manifest: MobileUpdateManifest): Promise<InstallResult> { return this.transport.install({ url: manifest.apkUrl }); }
 }
 
 export function createMobileUpdater(): MobileUpdater | null {

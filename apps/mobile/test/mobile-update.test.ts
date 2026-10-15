@@ -37,4 +37,29 @@ describe("mobile update user path", () => {
     expect((await updater.check(true)).manifest?.versionName).toBe("0.16.2");
     expect(checks).toBe(2);
   });
+
+  it("binds downloads, their state and installation to the offered update", async () => {
+    const calls: Array<[string, unknown]> = [];
+    const transport: MobileUpdateTransport = {
+      getInstalledInfo: async () => installed,
+      fetchManifest: async () => ({ manifest }),
+      startDownload: async (options) => { calls.push(["start", options]); },
+      getDownload: async (options) => { calls.push(["state", options]); return { status: "idle", downloadedBytes: 0, totalBytes: 0 }; },
+      cancelDownload: async () => undefined,
+      install: async (options) => { calls.push(["install", options]); return { permissionRequired: false }; },
+    };
+    const updater = new MobileUpdater(transport, { getItem: () => null, setItem: () => undefined });
+    const next = { ...manifest, versionName: "0.16.3", versionCode: 6, apkUrl: manifest.apkUrl.replace(/0\.16\.2/g, "0.16.3") };
+    await updater.download(next);
+    await updater.install(next);
+    await updater.downloadState(null);
+    // A download started for 0.16.3 is what the native side keeps; asking with
+    // any other APK discards it, so an earlier update's file is never installed.
+    expect(calls).toEqual([
+      ["start", { url: next.apkUrl, versionCode: 6 }],
+      ["state", { url: next.apkUrl }],
+      ["install", { url: next.apkUrl }],
+      ["state", {}],
+    ]);
+  });
 });

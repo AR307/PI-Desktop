@@ -27,6 +27,9 @@ export function useMobileUpdate(): MobileUpdateView {
   const [error, setError] = useState<string | null>(null);
   const [installationPermission, setInstallationPermission] = useState(false);
   const resumeInstall = useRef(false);
+  /** The update being offered; downloads and installs are bound to it. */
+  const offered = useRef<MobileUpdateManifest | null>(null);
+  const offer = useCallback((next: MobileUpdateManifest | null) => { offered.current = next; setManifest(next); }, []);
   const [lastResult, setLastResult] = useState<"current" | "available" | null>(null);
 
   const check = useCallback(async (manual = false) => {
@@ -35,36 +38,38 @@ export function useMobileUpdate(): MobileUpdateView {
     try {
       const result = await updater.check(manual);
       setVersion(result.installed.versionName);
-      setManifest(result.manifest);
+      offer(result.manifest);
       setLastResult(result.manifest ? "available" : "current");
     } catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)); }
     finally { setChecking(false); }
-  }, []);
+  }, [offer]);
 
   const refreshDownload = useCallback(async () => {
     if (!updater) return;
-    try { setDownload(await updater.downloadState()); }
+    try { setDownload(await updater.downloadState(offered.current)); }
     catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)); }
   }, []);
 
   useEffect(() => {
     if (!updater) return;
     void updater.installed().then((value) => setVersion(value.versionName)).catch((cause: unknown) => setError(String(cause)));
-    void updater.savedUpdate().then((value) => { if (value) { setManifest(value); setLastResult("available"); } });
-    void refreshDownload();
+    void updater.savedUpdate().then((value) => { if (value) { offer(value); setLastResult("available"); } });
     void check();
     const listener = NativeApp.addListener("appStateChange", ({ isActive }) => {
       if (isActive) {
         void refreshDownload(); void check();
-        if (resumeInstall.current) {
+        if (resumeInstall.current && offered.current) {
           resumeInstall.current = false;
-          void updater.install().then((result) => { setInstallationPermission(result.permissionRequired); resumeInstall.current = result.permissionRequired; })
+          void updater.install(offered.current).then((result) => { setInstallationPermission(result.permissionRequired); resumeInstall.current = result.permissionRequired; })
             .catch((cause: unknown) => setError(cause instanceof Error ? cause.message : String(cause)));
         }
       }
     });
     return () => { void listener.then((value) => value.remove()); };
-  }, [check, refreshDownload]);
+  }, [check, offer, refreshDownload]);
+
+  // A newly offered update re-reads the download, discarding an APK left from an earlier one.
+  useEffect(() => { void refreshDownload(); }, [manifest?.apkUrl, refreshDownload]);
 
   useEffect(() => {
     if (download.status !== "downloading") return;
@@ -84,9 +89,10 @@ export function useMobileUpdate(): MobileUpdateView {
     catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)); }
   };
   const install = async (): Promise<boolean> => {
-    if (!updater) return false;
+    const current = offered.current;
+    if (!updater || !current) return false;
     setError(null);
-    try { const required = (await updater.install()).permissionRequired; setInstallationPermission(required); resumeInstall.current = required; return required; }
+    try { const required = (await updater.install(current)).permissionRequired; setInstallationPermission(required); resumeInstall.current = required; return required; }
     catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)); return false; }
   };
 
