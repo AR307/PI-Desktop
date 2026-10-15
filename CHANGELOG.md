@@ -1,3 +1,29 @@
+## Unreleased - Android companion redesign and session notifications
+
+- Reorganize the Android companion into Sessions, Activity and Me tabs.
+  Sessions lists work that needs you first, filters by computer and groups one
+  computer's sessions by project. Conversations open over the tabs with
+  directional transitions that honor reduced motion.
+- Notify the phone when a shared session asks for an approval or an answer,
+  finishes or fails. A visible phone shows an in-app toast and an Activity
+  badge. A phone in the background shows an Android notification, which opens
+  the conversation and disappears once the request is handled anywhere.
+- Keep the relay connected in the background with a foreground service. Smart
+  (the default) stays connected while shared work runs and for two minutes
+  after; the other modes are Always and Off. Nothing arrives after the app is
+  swiped away or force-stopped.
+- Fix several companion issues:
+  - Streaming wrote every loaded message to the phone cache; now it writes only
+    the changed ones.
+  - Live events stalled while the WebView was hidden; they now keep applying.
+  - Network loss showed repeated errors; it now shows as offline state.
+  - Share scopes were not localized.
+  - Language and theme are now applied before the first paint.
+  - Layouts broke on WebViews without `color-mix`.
+  - Internal model instructions showed as empty rows.
+- The desktop now reads settings once per mobile session-list page instead of
+  twice per session.
+
 ## Unreleased - Ultra collaboration
 
 - Add Ultra at the end of desktop reasoning controls and in the Android model

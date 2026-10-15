@@ -40,12 +40,24 @@ images use ImageService. Unsupported source capabilities remain read-only. No
 new project/session creation, provider management, terminal or file browser is
 offered by the mobile profile.
 
-The conversation header shows the session, desktop and connection state without
-an extra online banner. Mode and model controls open accessible bottom sheets;
-account/pairing share the same surface behavior, while destructive confirmation
-uses a centered dialog. Android Back closes the innermost surface before leaving
-the conversation. Sheets preserve unsaved choices while transcript snapshots
-continue to stream, and respect reduced-motion and safe-area settings.
+The app has three tabs: Sessions, Activity and Me. Sessions lists shared work
+with search, a computer filter, a Needs you section (pending approvals, plans and
+questions) and Recent work; filtering to one computer groups its sessions by
+project and offers archived entries. Activity is the attention inbox described
+below. Me holds the account, computers with their localized grants, pairing and
+revocation, notification and background-connection settings, appearance,
+language, Android updates and sign-out.
+
+A conversation opens over the tabs and hides the tab bar. Its header shows the
+session, desktop and connection state without an extra online banner. Mode and
+model controls open accessible bottom sheets; pairing uses the same sheet
+surface, while destructive confirmation uses a centered dialog. Android Back
+closes the innermost surface, then the conversation, then returns to Sessions
+before minimizing the app. Screen changes use directional View Transitions when
+the WebView supports them and plain enter animations otherwise. Sheets preserve
+unsaved choices while transcript snapshots continue to stream, and respect
+reduced-motion and safe-area settings. Network failures are shown as offline
+state, not repeated error toasts.
 
 Attachments are transferred in chunks and resolved to desktop-owned session
 references before submission. History downloads resolve only attachments of an
@@ -136,9 +148,10 @@ desktop configuration changes through ephemeral `turn.activity` events, then
 reads the current live state. History pages use bounded Rust queries. Each command,
 subscription and outbound event rechecks current project/session membership.
 
-`connection/initialize` advertises `sessionState` and `itemContent`. This mobile
-client requires the current light-state/durable-change contract; a missing state
-response is a protocol error, not a reason to replace cached history.
+`connection/initialize` advertises `sessionState`, `itemContent` and
+`sessionActivity`. This mobile client requires the current
+light-state/durable-change contract; a missing state response is a protocol
+error, not a reason to replace cached history.
 
 `session/state` returns the snapshot minus its transcript page (session
 description, active/queued turns, pending approvals/inputs, plans, image jobs,
@@ -191,6 +204,45 @@ Running chat edits affect the next turn only; image and auxiliary requests do no
 inherit it. MC transports these existing RACP payloads without new server state.
 
 
+## Session attention notifications
+
+The phone opts in with `directory/subscribe { activity: true }`. The desktop then
+sends `mobile.sessionActivity` for each shared session whose row changes: the
+refreshed `MobileSession` (including `attentionCounts` of pending approvals and
+questions) and, when the user should know, one `MobileAttention`:
+
+- `approval`: a tool permission or a Plan/Goal proposal awaits a decision;
+- `input`: a question awaits an answer;
+- `completed` or `failed`: a top-level task or direct image job ended; a
+  completion is not sent while an approval or question is still pending;
+- `resolved`: the last pending request was answered on any device.
+
+Delegate turns are not reported. Titles and previews are capped at 160
+characters. Every frame rechecks the peer's current scope, so unshared sessions
+never reach the phone and revocation stops delivery immediately. Updates for one
+session are coalesced for 250 ms. Phones that do not opt in, and desktops that
+do not advertise `sessionActivity`, keep the previous directory behavior.
+
+The phone deduplicates attentions by id and keeps an account-scoped inbox in
+IndexedDB, cleared by logout and revocation like cached history. While the user
+is reading that conversation, the item is only marked read. While the app is
+visible elsewhere, an in-app toast and the Activity badge show it. In the
+background, Android shows one notification per session: approvals and questions
+in the "Needs your action" channel, outcomes in "Task results". Opening the
+session or a `resolved` attention removes it. The keep-alive service's ongoing
+notification uses the silent "Background connection" channel. Notification text is localized on the phone and
+the lock screen shows only a generic public version. Each notification kind can
+be turned off in Me.
+
+Android delivery depends on a live app process. In the background a foreground
+service keeps the relay connected: Smart (default) while any task on an online
+computer runs, queues, waits for the user or generates images, plus two minutes;
+Always while signed in with a shared computer; or Off. It never runs while
+notifications are turned off. The service starts only when the app leaves the
+foreground and stops when it returns. A swiped-away or force-stopped app
+receives nothing until it is opened again. See
+[architecture decision](../../adr/mobile-attention-push.md).
+
 ## History-read failures
 
 A failed durable delta page does not discard already applied pages or buffered
@@ -208,7 +260,7 @@ versions exhibiting JSON errors after transcript rewrites must also be updated.
 
 ## Android application updates
 
-Account settings show the installed Android version, manual update check,
+The Me tab shows the installed Android version, manual update check,
 release notes and native download/install actions, including while signed out.
 Startup/foreground checks run at most daily; failures affect only updates.
 `AR307/Mirrorcoding-APP` is the sole release source. Build metadata generates

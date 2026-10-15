@@ -401,3 +401,24 @@ Joint acceptance: change Fast from either device, observe the other device,
 change it during a running task, then verify only the next request changes.
 Reconnect mid-turn and verify current and next remain distinct. Revoke Fast in
 the MC directory and verify pi_fast_unavailable with no normal-speed replay.
+
+## PI client-management alignment: session attention (2026-10-14)
+
+No new MC endpoint, storage or push service is requested. Phones that send
+`directory/subscribe` with `{activity:true}` receive the RACP notification
+`mobile.sessionActivity`, and `connection/initialize` advertises
+`sessionActivity:true`. Each frame carries one shared session row and an
+optional attention object (approval, question, completion, failure or
+resolution) whose title and preview are at most 160 characters. The desktop
+coalesces frames per session, so their volume follows session state changes.
+MC forwards them unchanged, like other relay frames, and must not persist or
+replay them.
+
+The phone keeps its relay connected while in the background by running an
+Android foreground service. Delivery to a phone whose app process has stopped
+is not requested; any later MC offline push would be a separate change.
+
+Joint acceptance: share a session, send the phone to the background, then
+trigger an approval, a completion and a failure on the desktop and verify the
+phone shows a system notification for each. Revoke the share and verify that
+no further notifications arrive.

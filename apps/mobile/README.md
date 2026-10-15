@@ -35,11 +35,21 @@ pairing against MirrorCoding. No desktop provider tokens enter the phone.
   device registry, pairing and grants.
 - `src/services/relay.ts`: browser RACP client and short-lived relay tickets.
 - `src/services/attachments.ts`: native picker, chunk transfers and Android share.
-- `src/state/controller.ts`: navigation workflows, scoped sessions, actions and
-  reconnect snapshots. Uncertain mutations are not automatically replayed.
-- `src/components`: mobile views, Markdown, task details, approvals and questions.
-- `src/styles.css`: responsive layout using the desktop's canonical color tokens.
-- `android`: Capacitor application, SDK 24 minimum / SDK 36 target.
+- `src/state/controller.ts`: account, grants, computers and navigation facade.
+- `src/state/conversation.ts`: the open conversation: attach, live events,
+  history paging, sends and actions. Uncertain mutations are not automatically
+  replayed; only changed messages are written back to the cache.
+- `src/state/attention.ts`, `notification-runtime.ts`, `keep-alive.ts`: the
+  attention inbox, notification presentation and the background keep-alive policy.
+- `src/app`: shell, tab bar, routing and screen transitions.
+- `src/screens`: Login, Sessions, Activity, Me (settings) and Conversation.
+- `src/features`: transcript, composer, approvals and questions, session
+  configuration, pairing, notifications and updates.
+- `src/ui`: sheets, rows, switches, segmented controls, toasts and screens.
+- `src/styles`: mobile tokens over the desktop's canonical colors, motion and
+  per-area layout; `src/styles.css` aggregates them.
+- `android`: Capacitor application, SDK 24 minimum / SDK 36 target, with the
+  `MobileNotifications` plugin and `RelayKeepAliveService`.
 
 Computer/project/session indexes and loaded history render from account-scoped
 IndexedDB before networking. Older pages and attachment bytes are fetched only
@@ -69,6 +79,15 @@ connection after removing an account grant, the phone refreshes grants/devices
 and reconnects with any remaining project/session authorization. Pairing errors
 remain visible beside the entered code and do not discard other pairings.
 
+The desktop pushes `mobile.sessionActivity` for shared sessions: refreshed rows
+plus approval, question, completion, failure and resolution notices. The phone
+shows them as an in-app toast when visible, in the Activity inbox and as Android
+notifications when backgrounded. A foreground service keeps the relay connected
+in the background: Smart (default) follows running work plus a two-minute grace,
+Always stays connected, and Off never does. Notification permission is requested
+from Me or Activity, never at launch. A swiped-away app receives nothing until
+reopened; see [the ADR](../../docs/adr/mobile-attention-push.md).
+
 Conversation controls update only the current shared session. The phone can
 choose Agent, Plan, Goal or Image and select any currently usable desktop chat
 or image model. MirrorCoding selection is model then group; reasoning and image
@@ -79,11 +98,11 @@ applies to the next turn; mode changes wait until work and approvals are idle.
 ## In-app updates
 
 Android checks `AR307/Mirrorcoding-APP`'s `mobile-update.json` once per day on
-startup or foreground, or immediately from Account. A newer compatible APK can
+startup or foreground, or immediately from Me. A newer compatible APK can
 be downloaded with Android DownloadManager, cancelled and retried, then handed
 to the system installer through the app's FileProvider. The first APK that
 contains this updater must still be installed manually; later releases can be
-installed from Account. Generate the release manifest with
+installed from Me. Generate the release manifest with
 `pnpm --filter @pi-desktop/mobile update:manifest <output-file> [notes-file]`.
 Upload the resulting `mobile-update.json` and its named APK together to a formal
 release in `AR307/Mirrorcoding-APP`. The Android package version comes from this
@@ -115,7 +134,9 @@ pairing, directory and history survive installer cancellation and covering upgra
 Use `vite --mode acceptance` with `VITE_MC_ORIGIN` set to the controlled local MC
 fixture. An acceptance web harness injects
 `window.__PI_MOBILE_TEST__.credentialStore` with async `read`, `write`, `clear`
-methods before loading the app. This hook is inactive in production builds.
+methods before loading the app, and may set `notifications` to a recorder that
+replaces the native notification bridge. These hooks are inactive in production
+builds.
 The native acceptance APK still uses the real Android secure storage plugin.
 Debug Android builds permit HTTP only for localhost and the emulator host alias;
 release builds require HTTPS. Never use browser Web Storage for account tokens.
