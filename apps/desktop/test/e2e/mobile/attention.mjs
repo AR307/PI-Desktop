@@ -10,7 +10,7 @@ import { resolve, join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { execFileSync } from "node:child_process";
 import { mobileFixture } from "./fixture.mjs";
-import { openTab } from "./phone-ui.mjs";
+import { closeConversation, openTab } from "./phone-ui.mjs";
 
 const require = createRequire(import.meta.url);
 const { _electron, chromium } = require(process.env.PI_TEST_PLAYWRIGHT ?? "playwright");
@@ -77,7 +77,8 @@ async function openPhone() {
   await context.addInitScript(() => {
     window.__PI_MOBILE_TEST__ = {
       credentialStore: { read: () => window.testCredentialRead(), write: (value) => window.testCredentialWrite(value), clear: () => window.testCredentialClear() },
-      notifications: { shown: [], cleared: [], keepAlive: [] },
+      // A vendor that freezes background apps, still under battery optimization.
+      notifications: { shown: [], cleared: [], keepAlive: [], manufacturer: "OPPO", batteryRestricted: true },
     };
   });
   phone = await context.newPage(); phone.setDefaultTimeout(20_000);
@@ -184,6 +185,44 @@ try {
   await setVisible(true);
   await until(async () => (await inbox()).filter((item) => item.sessionId === shared.id).every((item) => item.read), "opened session marked read");
   check("a notification tap opens the conversation and reads its activity");
+
+  // A vendor known to freeze background apps is told up front how to allow them.
+  await closeConversation(phone);
+  await openTab(phone, "Activity");
+  const notice = phone.locator(".background-notice");
+  await notice.getByText("Allow PI Mobile to run in the background", { exact: true }).waitFor();
+  check("a freezing vendor gets background setup guidance with its own steps", (await notice.textContent()).includes("Allow full background activity"));
+  await screenshot("attention-background-setup-dark-en");
+  await notice.getByRole("button", { name: "Allow background activity", exact: true }).click();
+  await until(async () => (await recorded()).exemptionRequests === 1 && !(await view()).notifications.batteryRestricted, "battery exemption requested");
+  await notice.getByRole("button", { name: "I've done this", exact: true }).click();
+  await notice.waitFor({ state: "detached" });
+  check("background guidance asks for the battery exemption and can be dismissed");
+
+  // Attention a frozen app reads only on resume is reported as held back.
+  await openTab(phone, "Sessions");
+  await desktopSend(shared.id, "mobile-slow finishes while the phone is frozen");
+  await until(async () => (await recorded()).keepAlive.at(-1)?.enabled === true && (await view()).notifications.activeTasks > 0, "keep-alive for the frozen-phone task");
+  const [, peer] = [...fixture.peers].find(([, candidate]) => candidate.desktopDeviceId === desktopId);
+  const send = peer.socket.send, held = [];
+  peer.socket.send = function (data, ...args) {
+    if (String(data).includes('"mobile.sessionActivity"')) { held.push(() => send.call(peer.socket, data, ...args)); return; }
+    return send.call(this, data, ...args);
+  };
+  await setVisible(false);
+  fixture.releaseChats();
+  await until(async () => await idle(shared.id) && held.length > 0, "desktop finished while the phone left its activity unread");
+  await pause(100_000);
+  await setVisible(true);
+  peer.socket.send = send;
+  for (const deliver of held.splice(0)) deliver();
+  await openTab(phone, "Sessions");
+  await notice.getByText("Notifications arrived late", { exact: true }).waitFor();
+  check("attention handled minutes late after a kept-alive background is reported with the vendor steps", (await notice.textContent()).includes("Allow full background activity"));
+  await screenshot("attention-background-delayed-dark-en");
+  await notice.getByRole("button", { name: "I've done this", exact: true }).click();
+  await notice.waitFor({ state: "detached" });
+  check("the held-back notice clears once the user has acted");
 
   // Revocation stops delivery.
   const grant = (await invoke("mobile-sync/status")).grants[0];

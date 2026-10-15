@@ -72,7 +72,13 @@ notification is raised. With the phone hidden, it checks smart keep-alive, the
 completion, failure and question notifications (channel, tag, route and
 computer), and that an answer given on the desktop withdraws the notification.
 It also checks that a tap opens the conversation, that the unshared session
-stays silent, and that revocation stops delivery and clears the inbox. The
+stays silent, and that revocation stops delivery and clears the inbox.
+
+The recorder also reports an OPPO phone still under battery optimization, which
+is used to check the vendor background guidance and its exemption request. The
+fixture holds the phone's `mobile.sessionActivity` frames back for 100 s while
+the phone is hidden, then releases them on return, as a frozen app would read
+them; the suite checks that the notice reporting late delivery appears. The
 acceptance hook replaces the native notification bridge with a recorder
 (`window.__PI_MOBILE_TEST__.notifications`), so Android channels, permission
 prompts and the foreground service are covered only by the native suites.
@@ -146,6 +152,26 @@ notification is posted. Tapping the notification opens the conversation, and
 the service stops once the app is back in the foreground. Each run resets
 `POST_NOTIFICATIONS` to its first-request state with `pm revoke` and
 `pm clear-permission-flags`. The `dumpsys` output is kept with the artifacts.
+
+`background-android.mjs` checks background delivery over minutes on the actual
+APK. The desktop starts a slow task while the phone rests on Sessions, then the
+phone leaves the foreground. By default the screen is turned off and Doze is
+forced (`PI_ANDROID_DOZE=0` skips that). After `PI_ANDROID_BACKGROUND_MS`
+(default 120000, below the desktop's stalled-stream limit), the completion must
+be posted as a system notification. Samples of the keep-alive text and process
+states are written to the report.
+
+With `PI_ANDROID_FREEZE=1`, the suite instead uses the platform freezer
+(`am freeze --sticky`, Android 14+) on the app and its WebView renderer to
+reproduce vendor ROMs. It checks that nothing is delivered while frozen, that
+the app reports the held-back delivery on return, and that Android's battery
+exemption dialog grants the exemption. Each run removes the app from the
+exemption allowlist first.
+
+```powershell
+node apps/desktop/test/e2e/mobile/background-android.mjs
+$env:PI_ANDROID_FREEZE = '1'; node apps/desktop/test/e2e/mobile/background-android.mjs
+```
 
 The APK at `apps/mobile/android/app/build/outputs/apk/debug/app-debug.apk` after
 this run is an acceptance build tied to the temporary fixture. Rebuild normal
