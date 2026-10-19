@@ -1,5 +1,17 @@
 # PI-Desktop MirrorCoding Edition
 
+## 2026-10-19 - Desktop package candidates on Windows and macOS
+
+- Package the synchronized 0.21.0-beta.4 desktop without changing Android 0.20.4.
+  Use a dedicated package branch; do not update main, tag or publish a release.
+- Add an artifact-only GitHub Actions lane for native macOS arm64 and x64.
+  Build locked dependencies and the native Host, typecheck, package DMG/ZIP,
+  smoke-test the packaged application, and retain artifacts for 14 days.
+- The fork has no configured Apple signing/notarization secrets. This explicit
+  lane creates unsigned test builds and does not change the signed release lane.
+- Build Windows installers locally with reused dependencies and isolated output;
+  validate the packaged application without touching the user's running profile.
+
 ## 2026-10-19 - Synchronize upstream v0.21.0-beta.4
 
 - Integrate upstream main at 589e5803a7a9f4ebf7ec1e8849c43e44b4a198f7
