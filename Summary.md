@@ -11,6 +11,8 @@
   lane creates unsigned test builds and does not change the signed release lane.
 - Build Windows installers locally with reused dependencies and isolated output;
   validate the packaged application without touching the user's running profile.
+- Keep package-probe data directly in its dedicated temporary boot directory,
+  as required by the existing Host session-list fixture safety boundary.
 
 ## 2026-10-19 - Synchronize upstream v0.21.0-beta.4
 

@@ -6,8 +6,8 @@ import { join, resolve } from 'node:path';
 
 const executable = process.argv[2];
 if (!executable) throw new Error('Usage: node scripts/e2e-packaged-boot.mjs <packaged executable>');
-const profile = await mkdtemp(join(tmpdir(), 'pi-packaged-boot-'));
-const env = { ...process.env, PI_DESKTOP_DATA_DIR: join(profile, 'data'),
+const profile = await mkdtemp(join(tmpdir(), 'pi-desktop-boot-'));
+const env = { ...process.env, PI_DESKTOP_DATA_DIR: profile,
   PI_DESKTOP_BOOT_PROBE: '1', PI_DESKTOP_START_MAXIMIZED: '1', ELECTRON_RENDERER_URL: '' };
 delete env.ELECTRON_RUN_AS_NODE;
 delete env.PI_DESKTOP_HOST_BIN;
