@@ -664,6 +664,26 @@ Additive `worktree.*` methods; no protocol version bump. Failures use code
 - `tools.abort`
 - `tools.output` notifications for ordered `stdout`/`stderr` chunks
 
+### Background tasks
+- `backgroundTasks.list`
+- `backgroundTasks.output`
+- `backgroundTasks.stop`
+- `backgroundTasks.changed` notification carrying `{ version }`, emitted when a
+  task starts, exits, or is stopped
+
+A `tools.execute` call with `runInBackground: true` starts a `Bash` command the
+host owns instead of the turn: the call resolves immediately with a
+`backgroundTaskId`, the task never joins the per-tool-call cancellation registry
+so `tools.abort` / `agent.abort` cannot reach it, and its output is kept in
+bounded per-stream rings. The registry lives in the host process, so every task
+stops during host shutdown and an application exit never leaves an orphan
+process.
+
+Output chunks do not emit `backgroundTasks.changed`; the event remains a
+lifecycle invalidation, not a high-volume log transport. Clients fetch only the
+selected output preview. A terminal snapshot includes the final drained output,
+and shutdown signals every registered task even during a concurrent output read.
+
 ### Shells
 - `commandShells.list`
 - `settings.set` with a partial settings object; omitted fields are preserved,

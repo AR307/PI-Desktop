@@ -143,21 +143,20 @@ recency only breaks ties between equally relevant matches.
   restores/focuses the same window, while clicking the entry for a merely
   covered window keeps the normal bring-to-front behavior (D252 / ADR 0117).
   macOS native minimize remains tray-resident. Windows/Linux close behavior is user-configurable
-  (ADR 0090): an unset preference asks once via a native prompt (Cancel / Close
-  to tray / Quit); `tray` hides the window under that same tray icon, whose
-  click restores the window; `quit` exits the app. Close behavior never creates
-  or destroys the tray — D216 owns it, so the icon is resident under either
-  choice. The choice is persisted, revisitable in Settings → General, and
-  applied by both the close button and the close shortcut. Explicit quit
-  (Cmd+Q, application-menu Quit, tray Quit) is a separate confirm step
-  (D363): Cancel leaves the app running; Confirm runs the ordered shutdown.
-  A D230 window-close Quit does not ask again. Automated boot, supervision,
-  and capture probes skip the dialog, as does the restart that installs an
-  already-downloaded update — its installer is already running and gives up
-  when the app stays alive. macOS keeps the
-  native Dock lifecycle (close keeps the app in the Dock; activating recreates
-  the window). The bounds watchdog never restores a minimized or tray-hidden
-  window.
+  (ADR 0090): an unset preference asks once via a themed in-app dialog (Cancel / Close to tray / Quit).
+  If the renderer is unavailable, the native dialog remains the bounded fallback. Escape and a
+  backdrop click cancel; Cancel is initially focused and leaves the preference unset. `tray` hides
+  the window under that same tray icon, whose click restores the window; `quit` exits the app.
+  Close behavior never creates or destroys the tray — D216 owns it, so the icon is resident under
+  either choice. The choice is persisted, revisitable in Settings → General, and applied by both
+  the close button and the close shortcut. Explicit quit (Cmd+Q, application-menu Quit, tray Quit)
+  is a separate themed confirmation step (D363): a tray-hidden main window is restored first;
+  Escape, backdrop click, or Cancel leaves the app running, while Confirm runs the ordered shutdown.
+  A D230 window-close Quit does not ask again. Automated boot, supervision, and capture probes skip
+  the dialog, as does the restart that installs an already-downloaded update — its installer is
+  already running and gives up when the app stays alive. macOS keeps the native Dock lifecycle
+  (close keeps the app in the Dock; activating recreates the window). The bounds watchdog never
+  restores a minimized or tray-hidden window.
 
 ### 1.5.1 Tray-resident and taskbar minimize
 
@@ -168,7 +167,9 @@ recency only breaks ties between equally relevant matches.
 - On Windows, clicking the taskbar button of the focused visible main window
   means **native minimize**. The window stays represented by its taskbar entry;
   the next click restores and focuses it. A taskbar click while the window is
-  merely covered brings it to the front and does not hide it to the tray.
+  merely covered brings it to the front and does not hide it to the tray. When
+  a maximized frameless window is restored, it respects the active display's
+  work area so the taskbar remains visible.
 - Tray hiding, including a Windows/Linux close with `tray`, removes the main
   window from the taskbar/dock window list while the Electron process and
   background work remain alive. It does not persist a minimized geometry or
@@ -295,10 +296,12 @@ may be retained while exactly one workspace supplies the visible shell context.
   ahead of the manual order; projects without an assigned order fall back to
   a stable path order until they are moved.
 - Each project group shows the ten most-recent rows in the active sort order
-  by default; the remaining sessions fold behind a **Load N more…** control
-  (the same affordance used for time-grouped overflow). Selecting it expands
-  the full time-grouped list, and the expanded state is per-group, for the
-  current session only, and not persisted.
+  by default; the remaining sessions fold behind a **Load N more…** control.
+  The expanded list remains flat. When Session time is enabled, each project
+  session row shows its title and localized last-reply age through seven
+  calendar days, then a month/day date; hover or keyboard focus replaces the
+  date with the session actions. Expanded state is per-group, for the current
+  session only, and not persisted.
 - Presentation changes are saved best-effort. Storage failure must not block
   project activation, session selection, or agent execution.
 
@@ -425,14 +428,19 @@ may be retained while exactly one workspace supplies the visible shell context.
   retain `aria-current`.
 - Toggling disclosure or a menu action keeps focus on its control. Selecting a
   project/session returns focus to the composer after loading.
-- Sort, archive, restore, pin, Create branch, and close actions remain
-  keyboard-reachable;
-  they cannot exist only as pointer-hover affordances.
-- Sidebar body-level menus opened from toolbar or row triggers remain
-  content-sized and use the same fixed rule as right-click menus: open 4px to
-  the anchor's right without flipping to the left. Their surface width is
-  capped for narrow viewports. This includes the Sessions sort menu,
-  session/project overflow menus, and section create menus.
+- Sort choices and all row actions remain keyboard-reachable; hover is never the
+  only way to reveal an action. Project and session overflow menus keep common
+  actions at the root and place related Git, Developer, and Danger actions in
+  menuitem/haspopup second-level menus.
+- A submenu opens on mouse hover or click/tap. ArrowRight or Enter opens the
+  focused submenu trigger; ArrowLeft or Escape closes the child first and
+  restores focus to its trigger. A second Escape closes the root menu. Moving
+  the pointer between the trigger and child does not dismiss the parent.
+- Sidebar body-level root menus remain content-sized and open 4px to the
+  trigger's right. A submenu opens flush beside its trigger, prefers the right,
+  flips left when needed, and clamps vertically inside the viewport. Neither
+  parent nor child may be clipped; the child does not resize or scroll the
+  sidebar.
 
 #### Floating dropdown surfaces
 
@@ -909,35 +917,42 @@ may be retained while exactly one workspace supplies the visible shell context.
 
 - Tool activity starts as a lightweight collapsed item row. Failed and denied
   calls keep their issue in the row header and do not auto-expand their payload.
-- Both modes give each loaded assistant turn one whole-process disclosure. It
-  contains thinking, tools, hosted searches and intermediate progress text; the
-  trailing answer, assistant errors and stopped trailing text remain outside it.
+- One unified presentation gives each loaded assistant turn chronological
+  collapsible process segments. They contain thinking, tools, hosted searches and
+  intermediate progress text; the trailing answer, assistant errors and stopped
+  trailing text remain outside them.
 - A contiguous activity segment receives a group disclosure only when it has at
-  least two mode-visible items. Progress text ends the segment, a singleton uses
-  its item disclosure directly, and compact-hidden thinking does not create a
-  redundant group. Existing Task topology remains separate.
-- Detailed starts active and completed whole processes open. Its active ordinary
-  group starts open and closes when it completes only if untouched; completed
-  groups otherwise start closed. Compact starts the process and groups closed,
-  except an untouched active process with any recorded failed/denied tool remains
-  open through recovery and closes on completion.
-- No item payload opens itself in either mode: a tool, hosted-search or plan call
-  stays a header row until the user opens it, including the literal final item of
-  the last activity group. Group and whole-process defaults are unchanged, so a
-  final thinking item never causes a backward scan. Compact keeps every item
-  payload closed and hides reasoning text/excerpts while retaining its active
-  thinking indicator.
-- Activating a process, group or item header toggles only that level. Closing a
-  parent preserves child state, reopening restores it, and sibling groups remain
+  least two visible items under the current thinking preference. Progress text or a
+  Bash row ends the segment, a singleton uses its item disclosure directly, and
+  hidden thinking does not create a redundant group. Existing Task topology remains
+  separate. Bash and run aliases are excluded from every process disclosure —
+  neither a turn-level process disclosure nor a group — and stay standalone rows
+  that remain visible even when every group is collapsed; adjacent Bash rows each
+  remain standalone.
+- The active ordinary group starts open and closes when it completes only if
+  untouched; completed groups otherwise start closed, and an untouched active group
+  with any recorded failed/denied tool remains open through recovery. These group
+  defaults do not depend on the thinking preference. Bash rows stay visible
+  regardless of any group's collapsed state.
+- No item payload opens itself: a tool, hosted-search or plan call stays a header
+  row until the user opens it, including the literal final item of the last
+  activity group. Group defaults are unchanged, so a final thinking item never
+  causes a backward scan. When `Show thinking` is off, every item payload stays
+  closed and completed reasoning text/excerpts are hidden while the live thinking
+  indicator remains visible; stored reasoning is retained and reappears when the
+  preference is turned back on.
+- Activating a group or item header toggles only that level. Closing a parent
+  preserves child state, reopening restores it, and sibling groups remain
   independent. Opening a parent is never an expand-all action.
-- A manual item action claims its group and process as user-owned without toggling
-  them. Streaming and completion cannot reopen a manual close or close around
-  content the user opened, focused or selected. Choices survive mode changes,
-  singleton-to-group growth and remounts while the retained session pane lives.
-- Search/navigation opens the process and activity group that own the named
+- A manual item action claims its containing group as user-owned without toggling
+  it. Streaming and completion cannot reopen a manual close or close around
+  content the user opened, focused or selected. Choices survive preference
+  changes, singleton-to-group growth and remounts while the retained session pane
+  lives.
+- Search/navigation opens the process segment and activity group that own the named
   message, once per reveal request. Item-level targeting is not part of this
-  change. Compact reasoning requires an explicit switch to Detailed. Closing
-  search does not collapse the revealed path.
+  change. Reasoning hidden by the preference stays hidden until the user turns
+  `Show thinking` on. Closing search does not collapse the revealed path.
 - Pending permission, question, plan/goal approval and other action cards remain
   reachable outside hidden process content.
 - Each disclosure uses its own button, `aria-expanded` and `aria-controls`; closed
@@ -1196,8 +1211,11 @@ Work-panel and application-window resizing are implemented in MVP:
   occupies flex space, the shared budget continues to count the sidebar.
 - Reopening a sidebar the layout collapsed spends work-panel width first: the
   panel keeps its width while MainChat stays at or above 450px, and otherwise
-  the reopen targets 460px. Closing the panel restores only a sidebar the
-  layout collapsed; a manual collapse stays collapsed.
+  the reopen targets 460px. That width is only lent: the preferred panel width
+  stays stored, extra client width returns to the panel first, collapsing the
+  sidebar again restores the preferred width, and divider drags keep the 244px
+  minimum. Closing the panel restores only a sidebar the layout collapsed; a
+  manual collapse stays collapsed.
 - No panel action requests a positive native reservation: the preferred panel
   width is renderer-local, the native seam stays at zero, and native window
   edges resize only the fixed app window. Background-session artifacts never
@@ -1280,9 +1298,10 @@ Project drag/drop follows these patterns:
   token (`@"…`) is treated as one token until the closing quote.
 - Pasting text never opens a menu unless the caret lands inside a valid
   trigger token.
-- File results keep each row compact by rendering only the leaf name (with a
-  trailing `/` for directories). The full relative path remains available as
-  the row tooltip and accessible name. Accepting a file (Enter/Tab/click)
+- File results render the leaf name (with a trailing `/` for directories)
+  followed by the entry's complete workspace-relative path in a de-emphasized
+  span that ellipsizes before the leaf name can. The full relative path also
+  remains the row tooltip and accessible name. Accepting a file (Enter/Tab/click)
   replaces the `@` token with an inline sentinel-backed leaf-name chip at the
   caret, backed by the full `entry.path`; that confirmation does not send.
   Accepting a directory keeps the full literal path in the draft so deeper
@@ -1375,16 +1394,14 @@ Project drag/drop follows these patterns:
   the work panel follows the folder that answered: a file of the primary folder
   travels as a project-relative path, a file of a sibling folder of the same
   project as an absolute one, exactly as a scratch or attachment file does. A
-  chip whose reference matches nothing opens nothing and reports itself, and so
-  does a right-click on it: the file-reference menu — offered on every
-  reference the transcript renders, a sent `@path` chip, an inline code span, a
-  local link, a local image, a tool row's own file path, a path in a tool
-  result's file or match list, and an image attachment's thumbnail — shows the
-  file in the system file manager through that same completion and that same
-  address, and copies that file's full path or its project-relative path. A file
-  outside the project has no relative path to copy and says so. The OS default
-  application is no longer what this click does, though that action stays
-  reachable from the file view's own context menu.
+  chip whose reference matches nothing opens nothing and reports itself. Right-
+  clicking a transcript file reference offers Copy full path and Copy relative
+  path on every surface that names it. Unpositioned `.html` and `.htm`
+  references also offer an **Open with** submenu containing File Manager,
+  built-in browser, and default browser. Each choice completes the reference
+  first and opens that exact resolved file. Other file types keep the copy
+  actions only; the transcript menu has no **Show in folder** action. A file
+  outside the project has no relative path to copy and reports that fact.
 - In the host `file:` tab, a conversation MP4 that cannot be previewed because
   it is binary or exceeds the text preview limit offers **Open with default
   application**. This applies to named `.mp4` files and extensionless
@@ -1447,10 +1464,11 @@ Project drag/drop follows these patterns:
   a multi-line draft: the bottom reserve is padding on the transcript content, so
   the content is observed on its border box and the newest turn moves up with
   the composer instead of sliding behind it (D287).
-- A manual disclosure — whole process, activity group, tool/search/thinking item,
+- A manual disclosure — process segment, activity group, tool/search/thinking item,
   delegate brief, or error detail — holds the reading position of the scroller
   that owns it (issue #324). Only the initiating level claims the anchor; marking
-  ancestors user-owned does not claim their scroll positions. The title is handed
+  the containing group user-owned does not claim its scroll position. The title is
+  handed
   to the scroller before the state changes, follow mode is left, and the scroller
   restores the title's viewport offset for every frame of the height change. A
   nested scroller (the delegate run dock, D302) holds its own position and passes
@@ -1586,6 +1604,11 @@ Project drag/drop follows these patterns:
   and remain reachable through keyboard focus (`:focus-within` /
   `:focus-visible`) without a pointer. A spelled-out control never triggers the
   row or header underneath it as well.
+- When Session time is enabled, project session dates and the overflow action
+  share one trailing slot: the date is visible at rest, then yields that slot
+  to the action on hover or keyboard focus. Dates through seven calendar days
+  use a relative day label; older dates use the localized month and day without
+  a year. On devices without hover, the action stays available in that slot.
 - The hover card's own navigation controls are the only interactive surfaces
   inside the card; the row keeps receiving pointer events everywhere else on
   it.

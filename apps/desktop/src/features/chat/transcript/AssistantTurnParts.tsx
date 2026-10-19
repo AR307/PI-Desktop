@@ -26,7 +26,7 @@ const SmoothMessageBubble = memo(function SmoothMessageBubble({ message, streami
       className={`message-bubble assistant-turn-fragment${streaming ? " streaming" : ""}${showCursor ? " smooth-cursor" : ""}`}
       data-message-id={message.id}
     >
-      {message.imageGeneration ? <ImageResult message={message} /> : displayContent ? <div className="prose-chat"><Markdown source={displayContent} streaming={streaming} /></div> : null}
+      {message.imageGeneration ? <ImageResult message={message} /> : displayContent ? <div className="prose-chat" data-quote-body={message.id}><Markdown source={displayContent} streaming={streaming} /></div> : null}
       {message.error ? <AssistantErrorMessage message={message} /> : null}
     </div>
   );

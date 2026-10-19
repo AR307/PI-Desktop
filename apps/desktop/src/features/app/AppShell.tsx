@@ -7,6 +7,7 @@ import {
   IconPanel,
   IconPanelOpen,
 } from "../../components/icons";
+import { LifecycleConfirmationDialog } from "../../components/LifecycleConfirmationDialog";
 import { ProjectCreateDialog } from "../../components/ProjectCreateDialog";
 import { SearchDialog } from "../../components/SearchDialog";
 import { Sidebar } from "../../components/Sidebar";
@@ -92,7 +93,7 @@ export function AppShell() {
     startupRetrying,
     sidebarToggleShortcut,
     workPanelToggleTooltip,
-    workPanelWidth,
+    requestedWorkPanelWidth,
   } = useAppShellRuntime();
   useCopyTex();
 
@@ -113,7 +114,7 @@ export function AppShell() {
     containerWidth: shellWidth,
     sidebarWidth,
     sidebarCollapsed,
-    requestedPanelWidth: workPanelWidth,
+    requestedPanelWidth: requestedWorkPanelWidth,
     maximized: workPanelMaximized,
   }).panelWidth;
 
@@ -378,6 +379,7 @@ export function AppShell() {
       ) : null}
       <ProjectCreateDialog />
       {ready ? <MirrorCodingWelcome /> : null}
+      <LifecycleConfirmationDialog />
       {splash}
       {startupRecovery}
     </div>

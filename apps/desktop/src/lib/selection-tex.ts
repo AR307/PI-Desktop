@@ -224,7 +224,7 @@ function replaceKatex(wrapper: Element, doc: Document): HTMLElement[] {
  * itself. Reading the offsets would add a branch only a hand-built `Range`
  * reaches, to trade an over-inclusive copy for a half-formula one.
  */
-function expandRangeToWholeKatex(range: Range): Range {
+export function expandRangeToWholeKatex(range: Range): Range {
   const expanded = range.cloneRange();
   const boundaryFor = (node: Node | null): Element | null => {
     const element =

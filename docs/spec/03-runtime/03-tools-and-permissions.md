@@ -424,6 +424,31 @@ Host execution baseline:
 - A command that exits non-zero returns `ok: false`, `isError: true`, and
   `errorCode: TOOL_FAILED` while preserving its `exitCode`, stdout, and stderr
   in `content` so the agent can diagnose the command without blindly retrying.
+- `runInBackground: true` detaches the command from the turn: the call returns
+  `backgroundTaskId` as soon as the shell starts, no timeout applies, and the
+  process survives `tools.abort` and `agent.abort`. The host owns the process
+  tree, reports it through the composer's running-tasks bar, and stops it on
+  request or on app shutdown. At most 32 tasks run concurrently and each stream
+  keeps its last 256KB.
+- Background output is drained before a terminal state is published, including
+  output queued when the process exits or is stopped. UTF-8 characters split
+  across pipe reads remain intact. Shutdown signals do not acquire output locks.
+- The task list keeps the existing Composer order: Todo, background commands,
+  Plan/Ask decisions, then the input. There is no configurable display priority.
+  The list scrolls within `min(200px, 24vh)` so additional tasks do not displace
+  the decision surfaces. Existing approval and Ask input gating is unchanged.
+- A finished background task is not permanent furniture. Its row lives for a
+  10-second grace window after the renderer observed the task end, so the exit
+  code stays readable, then it leaves the bar. A task that had already finished
+  when the renderer first loaded is registry history and never appears. Closing
+  a finished row removes it immediately; an open output preview pins its row so
+  a log being read cannot vanish underneath it. Closing is a view action only —
+  the host keeps its bounded task history.
+- Only one output preview is open at a time. While its task runs, the Renderer
+  refreshes that preview at one-second intervals after the previous read settles;
+  collapsed outputs are not fetched. The preview shows at most 8,000 stdout
+  characters and 4,000 stderr characters. Late reads from a previous selection
+  are ignored. Read/stop failures are visible and stopping can be retried.
 
 Shell catalog (D190) exposes the stable IDs `windows-powershell`, `windows-pwsh`,
 `cmd`, `git-bash`, and `bash` where supported by the platform. The host persists
@@ -440,7 +465,7 @@ or executable path hash is accepted as shell identity.
 2. Unix: well-known locations (`/bin/bash`, `/usr/bin/bash`, `/usr/local/bin/bash`, Homebrew), then PATH
 3. Windows: `bash.exe` from Git for Windows — derived from the `git` on PATH, then standard install dirs, then PATH excluding the WSL launcher in `System32`
 
-- Unix invokes `bash -lc` (login shell keeps profile PATH for Finder/Dock launches); Windows invokes `bash -c` with `CREATE_NO_WINDOW`
+- Unix invokes `bash -lc` (login shell keeps profile PATH for Finder/Dock launches); Windows invokes `bash -c` with `CREATE_NO_WINDOW`. The hidden host-core runner that owns the command tree is created with `CREATE_NO_WINDOW` and, only when the job that contains the host grants `JOB_OBJECT_LIMIT_BREAKAWAY_OK`, with `CREATE_BREAKAWAY_FROM_JOB`; it is then assigned to its own kill-on-close Job Object. Requesting the breakaway from the host's own job keeps a launcher or policy Job around the Desktop process from becoming the runner's termination scope. When that job withholds `JOB_OBJECT_LIMIT_BREAKAWAY_OK`, the flag is omitted and the runner joins the host-owned job as a nested job, because `CreateProcess` fails with `ERROR_ACCESS_DENIED` for a breakaway the job forbids; the shell itself stays inside the host-owned job either way, so timeout and abort still terminate the complete command tree.
 - On Unix, the Bash tool additionally probes the user's login shell for its
   PATH — `$SHELL` (fallback `/bin/zsh` → `/bin/bash` → `/bin/sh`) with
   `-lic 'printf %s "$PATH"'`, 5s-bounded, cached per process — and injects it
@@ -454,6 +479,12 @@ or executable path hash is accepted as shell identity.
 - No bash bundled in the installer: Git for Windows is the Windows prerequisite (the app requires git anyway)
 - Resolution failure returns stable `SHELL_NOT_FOUND` with install guidance
 - Windows PowerShell and cmd use their native non-interactive invocation.
+- PowerShell output passes through PowerShell's own formatter, so objects
+  (tables, lists, hashtables, `Measure-Object` results) reach the agent as a
+  console shows them, not as type names. Stderr lines from native commands are
+  forwarded to stderr and do not fail the call by themselves: the call reports
+  the native exit code. Any other PowerShell error fails the call with exit
+  code 1.
 - PowerShell 7 resolves `pwsh.exe` from `%ProgramFiles%\PowerShell\7` (or
   `ProgramW6432` when the host process is 32-bit), then PATH, which covers
   machine-scope, Store, user-scope, and portable installs. The PATH probe

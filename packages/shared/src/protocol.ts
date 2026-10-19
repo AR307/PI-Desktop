@@ -1,8 +1,8 @@
 export const PROTOCOL_VERSION = 11 as const;
-export const SCHEMA_VERSION = 16 as const;
+export const SCHEMA_VERSION = 26 as const;
 export const APP_ID = "net.aiuo.pi-desktop";
 export const APP_NAME = "PI-Desktop";
-export const APP_VERSION = "0.20.4";
+export const APP_VERSION = "0.21.0-beta.4";
 
 export const APP_MENU_COMMANDS = [
   "newTask",
@@ -48,6 +48,13 @@ export const WINDOW_CONTROL_ACTIONS = [
 
 export type WindowControlAction = (typeof WINDOW_CONTROL_ACTIONS)[number];
 
+export type LifecycleDialogKind = "quit-confirmation" | "close-behavior";
+export type LifecycleDialogChoice = "cancel" | "confirm" | "tray" | "quit";
+export type LifecycleDialogRequest = {
+  requestId: string;
+  kind: LifecycleDialogKind;
+};
+export type LifecycleDialogDismiss = { requestId: string };
 export const IPC = {
   invoke: {
     imageGenerate: "pi-desktop/image/generate",
@@ -133,6 +140,8 @@ export const IPC = {
     agentInstructionsSave: "pi-desktop/agent/instructions/save",
     sessionList: "pi-desktop/session/list",
     sessionCreate: "pi-desktop/session/create",
+    sideChatOpen: "pi-desktop/side-chat/open",
+    sideChatClose: "pi-desktop/side-chat/close",
     sessionFork: "pi-desktop/session/fork",
     sessionMoveProject: "pi-desktop/session/moveProject",
     sessionSearch: "pi-desktop/session/search",
@@ -175,6 +184,9 @@ export const IPC = {
     settingsGet: "pi-desktop/settings/get",
     settingsSet: "pi-desktop/settings/set",
     configSyncGetState: "pi-desktop/configSync/getState",
+    backgroundTasksList: "pi-desktop/backgroundTasks/list",
+    backgroundTasksOutput: "pi-desktop/backgroundTasks/output",
+    backgroundTasksStop: "pi-desktop/backgroundTasks/stop",
     configSyncConfigure: "pi-desktop/configSync/configure",
     configSyncTest: "pi-desktop/configSync/test",
     configSyncSyncNow: "pi-desktop/configSync/syncNow",
@@ -293,6 +305,8 @@ export const IPC = {
     providersRefreshModelCatalog: "pi-desktop/providers/refreshModelCatalog",
     providersModelCatalogStatus: "pi-desktop/providers/modelCatalogStatus",
     mirrorCodingGetState: "pi-desktop/mirrorcoding/getState",
+    mirrorCodingBenefits: "pi-desktop/mirrorcoding/benefits",
+    mirrorCodingCheckIn: "pi-desktop/mirrorcoding/checkIn",
     mirrorCodingLogin: "pi-desktop/mirrorcoding/login",
     mirrorCodingCancelLogin: "pi-desktop/mirrorcoding/cancelLogin",
     mirrorCodingRefresh: "pi-desktop/mirrorcoding/refresh",
@@ -346,6 +360,12 @@ export const IPC = {
     pluginViewClose: "pi-desktop/plugin/view/close",
     pluginViewSetBounds: "pi-desktop/plugin/view/setBounds",
     pluginViewSetVisible: "pi-desktop/plugin/view/setVisible",
+    /**
+     * The session the user is looking at, pushed by the renderer. The shell owns
+     * the selection; the main process owns turn identity, so the plugin
+     * `session:activated` snapshot is assembled from both (spec 07-plugins/03).
+     */
+    pluginSessionActive: "pi-desktop/plugin/session/active",
     mcpList: "pi-desktop/mcp/list",
     mcpUpsert: "pi-desktop/mcp/upsert",
     mcpRemove: "pi-desktop/mcp/remove",
@@ -392,6 +412,9 @@ export const IPC = {
     marketCheckUpdates: "pi-desktop/market/checkUpdates",
     marketApplyUpdates: "pi-desktop/market/applyUpdates",
     marketCancelInstall: "pi-desktop/market/cancelInstall",
+    marketReviewSummaries: "pi-desktop/market/reviewSummaries",
+    marketReviewTickers: "pi-desktop/market/reviewTickers",
+    marketReviews: "pi-desktop/market/reviews",
     commandPaletteSearch: "pi-desktop/commandPalette/search",
     commandPaletteExecute: "pi-desktop/commandPalette/execute",
     logOpenFolder: "pi-desktop/log/openFolder",
@@ -426,6 +449,8 @@ export const IPC = {
     windowControl: "pi-desktop/window/control",
     closeBehaviorGet: "pi-desktop/window/closeBehavior/get",
     closeBehaviorSet: "pi-desktop/window/closeBehavior/set",
+    lifecycleDialogReady: "pi-desktop/window/lifecycleDialog/ready",
+    lifecycleDialogRespond: "pi-desktop/window/lifecycleDialog/respond",
     menuRendererReady: "pi-desktop/menu/rendererReady",
     traySetSessionPreferences: "pi-desktop/tray/setSessionPreferences",
     nativeMenuAction: "pi-desktop/menu/nativeAction",
@@ -438,6 +463,8 @@ export const IPC = {
     /** Host-originated app settings mutation (e.g. plugin `app.setTheme`). */
     settingsChanged: "pi-desktop/app/event/settingsChanged",
     configSyncChanged: "pi-desktop/configSync/event/changed",
+    /** A chat-started background task started, exited, or was stopped. */
+    backgroundTasksChanged: "pi-desktop/backgroundTasks/event/changed",
     /** What a running sync is doing, while it is still running. */
     configSyncProgress: "pi-desktop/configSync/event/progress",
     extensionsUiPrompt: "pi-desktop/extensions/event/uiPrompt",
@@ -456,9 +483,18 @@ export const IPC = {
     insecureEndpointNotice: "pi-desktop/network/event/insecureEndpointNotice",
     browserState: "pi-desktop/browser/event/state",
     browserPreview: "pi-desktop/browser/event/preview",
+    browserOpenFile: "pi-desktop/browser/event/openFile",
+    /**
+     * A plugin asked the shell to show one of its own work-panel views
+     * (`pi.ui.revealView`). The shell owns tabs, so it — not the plugin — decides
+     * which session's panel takes the view.
+     */
+    pluginViewReveal: "pi-desktop/plugin/view/event/reveal",
     windowMaximized: "pi-desktop/window/event/maximized",
     windowFullScreen: "pi-desktop/window/event/fullscreen",
     windowWorkPanelResize: "pi-desktop/window/event/workPanelResize",
+    lifecycleDialogRequest: "pi-desktop/window/event/lifecycleDialogRequest",
+    lifecycleDialogDismiss: "pi-desktop/window/event/lifecycleDialogDismiss",
     menuCommand: "pi-desktop/menu/event/command",
     traySessionActivated: "pi-desktop/tray/event/sessionActivated",
     notificationChanged: "pi-desktop/notification/event/changed",

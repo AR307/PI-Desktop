@@ -471,7 +471,7 @@ task-candidate E2E 从请求工作树运行，但使用主工作区已经准备�
 
 - **前提条件**：已配置一个 Base URL 不含 `deepseek.com` 的 OpenAI 兼容提供商，模型 ID 属于 DeepSeek 系（例如硅基流动 `deepseek-ai/DeepSeek-V3.2`），并开启思考模式。
 - **步骤**：1) 在思考模式下开始会话。2) 完成若干回合，其中至少一条助手回复没有思考文本。3) 再发一条提示，使历史被回放到提供商。
-- **预期**：后续 Completions 请求的每条 assistant 消息都带推理字段。官方 `api.deepseek.com` 行对无思考内容的回合仍可使用 `""`。非官方 DeepSeek 系中转在可用时回传保留的真实思考，否则使用 ADR 0256 文档化的非空占位符——压缩后不得静默回填空串。不会仅因模型 ID 含 `"deepseek"` 就把 `thinkingFormat` 改成 `"deepseek"`。官方 `api.deepseek.com` 行仍使用 pi-ai 按 URL 检测的 DeepSeek `thinkingFormat`。
+- **预期**：后续 Completions 请求的每条 assistant 消息都带推理字段。官方 `api.deepseek.com` 行对无思考内容的回合仍可使用 `""`。非官方 DeepSeek 系中转在可用时回传保留的真实思考，否则使用 ADR 0256 文档化的非空占位符——压缩后不得静默回填空串。请求不会携带通用 OpenAI 的 `reasoning_effort` 字段，因为 DeepSeek 端点不接受它；已选的思考模式仍按端点自身线路发送。不会仅因模型 ID 含 `"deepseek"` 就把 `thinkingFormat` 改成 `"deepseek"`。官方 `api.deepseek.com` 行仍使用 pi-ai 按 URL 检测的 DeepSeek `thinkingFormat`。
 - **链接规格**：`03-runtime/11-provider-model-system.md`、
   `03-runtime/12-provider-config-schema.md`
 - **验收**：B（提供商 Completions 兼容）
@@ -1339,22 +1339,22 @@ task-candidate E2E 从请求工作树运行，但使用主工作区已经准备�
 #### E2E-040：嵌套工具活动在转录重新加载后仍然存在
 - **先决条件**：已配置提供商并打开项目；回合可以包含进度文字、多个搜索／工具／思考
   条目，以及失败或被拒工具。
-- **步骤**：1) 在详细模式流式输出进度段落 A、多项搜索片段、进度段落 B 和多项命令
-  片段。2) 检查已展开的整体过程和活动组；在更多输出到达时手动收起活动组。3) 完成
-  回合并比较未操作与用户接管的组。4) 展开一个已完成组和其中一个条目，复制输出，
-  收起并重新展开该组，再独立打开同级组。5) 分别检查单项片段，以及最后一个活动组的
-  字面最后一项为工具／搜索、思考、失败工具和被拒工具。6) 切换到紧凑模式，检查活动
-  思考、失败后恢复及完成状态。7) 在保留窗格内重新挂载行，然后重载渲染器并重新打开
-  会话。
-- **预期**：两种模式都使用一个整体过程披露，末尾回答位于其外。详细模式的活动中和
-  已完成过程默认展开；活动多项组展开，并且只在用户未操作时于完成后收起。紧凑模式
-  的过程、组和所有载荷默认收起，推理正文隐藏；记录过失败／被拒工具的未操作活动过程
-  会在后续恢复期间保持展开。单项没有组包装。没有任何条目载荷会自动展开：工具／搜索
-  行在用户打开之前保持标题行，最后一个活动组的字面最后一项也不例外，而思考项保留
-  自身的叶子默认值。父级、子级和同级选择彼此独立；
-  流式更新和完成不会覆盖用户接管的选择。保留窗格中的重新挂载保留选择；渲染器重启
-  重新应用默认值，但工具名称、参数、结果和状态仍会恢复。组／过程标题显示有界运行和
-  问题摘要，不会把整个回合标记为失败。
+- **步骤**：1) 流式输出进度段落 A、多项搜索片段、进度段落 B，以及带相邻 Bash 行的
+  多项命令片段。2) 检查已展开的活动组；在更多输出到达时手动收起该组。3) 完成回合并
+  比较未操作与用户接管的组，确认所有组都收起时 Bash 行仍保持可见。4) 展开一个已完成组
+  和其中一个条目，复制输出，收起并重新展开该组，再独立打开同级组。5) 分别检查单项片段，
+  以及最后一个活动组的字面最后一项为工具／搜索、思考、失败工具和被拒工具。6) 关闭并重新
+  打开 `Show thinking`，检查活动思考、失败后恢复及完成状态。7) 在保留窗格内重新挂载行，
+  然后重载渲染器并重新打开会话。
+- **预期**：按时间顺序排列的可折叠过程片段把末尾回答留在其外。活动组展开，并且只在用户
+  未操作时于完成后收起；其他已完成组默认收起。Bash／run 别名被排除在所有过程披露之外，
+  即使所有组都收起也保持可见。单项没有组包装。没有任何条目载荷会自动展开：工具／搜索行
+  在用户打开之前保持标题行，最后一个活动组的字面最后一项也不例外，而思考项保留自身的
+  叶子默认值。当 `Show thinking` 关闭时，活动思考指示器保持可见，已完成的推理正文与摘要
+  被隐藏，空的纯思考容器被省略；重新打开时恢复。父级、子级和同级选择彼此独立；
+  收起／重新展开父级会保留后代，流式更新和完成不会覆盖用户接管的选择。保留窗格中的重新
+  挂载保留选择；渲染器重启重新应用默认值，但工具名称、参数、结果和状态仍会恢复。组标题
+  显示有界运行和问题摘要，不会把整个回合标记为失败。
 - **链接规格**：`04-ux/01-ui-ia.md`、`04-ux/07-ui-design-system.md`、
   `04-ux/08-component-spec.md`、`04-ux/09-interaction-patterns.md`
 - **验收**：C（聊天流）、E（工具）、F（持久性）
@@ -3076,8 +3076,7 @@ PI-Desktop 图标；两个表面都不会暴露库存 Electron 名称或图标�
   主窗口可见；可以进入设置 → 通用。macOS 不在范围内：它保持原生 Dock
   生命周期。
 - **步骤**：1）在偏好未设置时点击关闭按钮（或按关闭窗口快捷键）并回答提示：
-  取消保持窗口打开且偏好仍未设置；关闭到托盘隐藏窗口、显示托盘图标，应用
-  继续运行（进行中的一轮保持存活）；退出则退出应用。2）逐个重跑每种选择，
+  确认显示主题化应用内对话框且初始焦点为“取消”；按 Escape、点击遮罩或取消都会保持窗口打开且偏好仍未设置；关闭到托盘隐藏窗口、显示托盘图标，应用继续运行（进行中的一轮保持存活）；退出则退出应用。renderer 不可用时回退到原生对话框。2）逐个重跑每种选择，
   验证它在完整重启后仍被记住，并且一旦存在选择就再也不会出现第二次提示。
   3）在设为 `tray` 时点击托盘图标：窗口恢复、显示并获得焦点；托盘右键菜单
   提供打开和退出，退出会退出应用。4）在设置 → 通用中在关闭到托盘 / 退出应用
@@ -3087,7 +3086,7 @@ PI-Desktop 图标；两个表面都不会暴露库存 Electron 名称或图标�
   窗口隐藏进托盘（D216），并且点击托盘可以把它带回来。7）向
   `pi-desktop/window/closeBehavior/set` 传入未知值和 `"ask"`，验证它们失败
   关闭，并验证该通道在 macOS 上直接被拒绝。
-- **预期**：每个未设置状态下首次关闭恰好提示一次，取消永远不会持久化选择。
+- **预期**：每个未设置状态下首次关闭恰好显示一次主题化弹窗；Escape、点击遮罩或取消都不会持久化选择。renderer 不可用时限时回退到原生弹窗，原生弹窗也失败时不会卡住关闭。
   托盘模式让应用带着本地化的提示与菜单继续存活且不丢数据；切换到退出应用
   不会移除托盘图标，因为最小化到托盘仍然把它当作回到隐藏窗口的唯一途径。
   偏好在重启后仍然有效，窗口控制的关闭按钮和关闭快捷键都遵循它，存有
@@ -3100,7 +3099,9 @@ PI-Desktop 图标；两个表面都不会暴露库存 Electron 名称或图标�
   D230）、ADR 0078、ADR 0090
 - **验收**：A（应用程序启动）、质量
 - **里程碑**：Windows/Linux 上的 M5（发布资格）
-- **状态**：草稿
+- **状态**：`lifecycle-confirmation-dialog-user-path.test.mjs`、`lifecycle-dialog-broker.test.mjs`
+  与 `lifecycle-close-behavior-runtime.test.mjs` 覆盖主题化弹窗、兜底和主进程关闭/退出选择；
+  完整持久化关闭偏好旅程仍为草稿。
 
 #### E2E-067A：预发行安装发现更新的稳定版本 (D120)
 
@@ -4533,7 +4534,11 @@ eleven-tool-round desktop paths are verified by
   后代、输出事件、审核以及关闭宽限后的状态。
 - **预期**：进程 group/job 树终止，没有后代保留，
   没有后续输出到达，本轮返回 `TURN_ABORTED`，工作空间为
-  不会自动回滚。
+  不会自动回滚。在 Windows 上，隐藏 runner 仅当宿主所在的 job 授予
+  `JOB_OBJECT_LIMIT_BREAKAWAY_OK` 时才请求 `CREATE_BREAKAWAY_FROM_JOB`，
+  然后进入自己的 kill-on-close job；若宿主 job 未授予 breakaway，runner
+  改以嵌套 job 运行，而不是让工具安全失败；终止范围仍限定在该 job，
+  因此 Desktop 进程树不会成为终止范围。
 - **链接规格**：`03-runtime/03-tools-and-permissions.md`，
   `03-runtime/07-process-model.md`、`03-runtime/08-error-codes.md`、
   `03-runtime/16-tool-result-limits.md`、`05-security/01-security.md`、ADR 0054
@@ -4542,6 +4547,33 @@ eleven-tool-round desktop paths are verified by
 - **状态**：自动（2026-08-04 通过）：`test:e2e:plan` 中止真实的
   后代进程树并验证没有迟到的 marker/output； host-core 测试
   验证取消注册表清理
+
+#### E2E-265：后台 Bash 任务在回合结束后继续运行
+
+- **前置条件**：项目会话，其目录 shell 支持后台执行；测试服务可绑定的端口。
+- **步骤**：1) 让 agent 用 `runInBackground` 启动长驻进程（本地 Web 服务），观察
+  输入框上方的运行中任务栏。2) 中止本轮，在同一会话发送第二条提示，然后重新加载
+  渲染进程。3) 展开该行的“输出”。4) 点击“停止”。5) 启动十个任务，每个流
+  输出十万行、每行一百字符，检查最终输出。6) 在宽窄窗口同时展示 Todo、Ask 和
+  任务列表，滚动到第十个任务，在旧读取未完成时切换日志。7) 模拟停止失败后重试。
+  8) 再启动两个任务，在输出读取期间退出应用。
+- **预期**：工具结果携带 `backgroundTaskId` 且不等待命令结束；任务栏显示运行中的
+  任务与递增的耗时，并展示流式输出；进程在中止后、Bash 60 秒超时后、渲染进程重载后
+    仍然存活。“停止”把该行落定为“已停止”并杀掉整个进程树；退出应用后不残留孤儿进程。
+  十任务列表在限高区域内滚动，不挤占 Todo、Ask 和输入框；仅刷新当前展开的日志，
+  过期响应不能清空新预览。每个流保持 256KiB 上限并保留最终标记。停止失败可见、
+  无未处理的 Promise 拒绝，且可以重试。
+- **关联规范**：`03-runtime/03-tools-and-permissions.md`（§5）、
+  `03-runtime/06-host-rpc-protocol.md`（§4）
+- **验收标准**：C、E、F
+- **里程碑**：M6+
+- **状态**：部分自动化（host-core `background_tasks::tests`、渲染层契约测试
+  `apps/desktop/test/background-tasks.test.mjs`；运行
+  `node scripts/e2e-background-tasks-host.mjs` 验证真实宿主、进程和管道压力路径，
+  `node scripts/e2e-background-tasks.mjs` 在隔离 Electron 中以 1280px、700px、
+  390px 宽度验证生产 React 组件。宿主回归测试覆盖退出前输出排空和输出锁竞争时关闭。
+  完整 agent 到桌面流程及约 83 分钟的十万行定速长测仍为人工场景；
+  自动化的大输出测试采用加速模式。）
 
 #### E2E-117：Agent/Plan/Goal UX 和区域设置不包含聊天控件
 
@@ -5249,7 +5281,7 @@ eleven-tool-round desktop paths are verified by
   及完整提供商发送仍需人工验证。应在更新后的任务候选版本运行并记录修订；随后
   按权威 `AGENTS.md` 工作流验证 PR 集成候选，无需先合入本地 main。
 
-#### E2E-102a：Composer 文件引用结果使用紧凑的叶名称
+#### E2E-102a：Composer 文件引用结果显示叶名称与完整相对路径
 
 - **先决条件**：应用程序正在工作区中使用 Agent 会话运行
   包含嵌套文件、不同目录中的重复叶名称，以及
@@ -5261,8 +5293,9 @@ eleven-tool-round desktop paths are verified by
   接受目录结果并继续子文件。 4) 发送完整的引用并检查持久化的用户
   消息。
 - **预期**：
-  - 每个结果持久地仅呈现其叶名称；目录保留一个
-    尾随 `/`，并且没有父路径消耗水平行空间。
+  - 每个结果持久地呈现其叶名称，并在其后以弱化样式显示条目完整的
+    工作区相对路径；目录叶名保留尾随 `/`，该 span 携带原始
+    `entry.path`，并先于叶名截断，行永不溢出菜单。
   - 工具提示和可访问名称保留完整的相对路径，以便
     重复的叶子名称仍然可以区分。
   - 对文件按 Enter/Tab/点击会把 `@` 标记替换为留在草稿中的行内芯片；
@@ -5272,11 +5305,12 @@ eleven-tool-round desktop paths are verified by
     空格引用，代理可以正常读取两个选定的文件。
 - **链接规格**：`04-ux/08-component-spec.md` §11.8，
   `04-ux/09-interaction-patterns.md` §8a、`03-runtime/01-ipc-protocol.md` §13c、
-  `08-meta/decisions-log.md`（D124、D209、D362）、ADR 0024、ADR 0070
+  `08-meta/decisions-log.md`（D124、D209、D362、D660）、ADR 0024、ADR 0070
 - **接受**：C（对话和直播），质量
 - **里程碑**：M5
 - **状态**：单位覆盖
-  （`apps/desktop/test/composer-file-reference-display.test.mjs`）；完整的用户界面
+  （`apps/desktop/test/composer-file-reference-display.test.mjs`）；文件模式行
+  布局由 `scripts/e2e-composer-autocomplete.mjs` 覆盖；完整的用户界面
   旅程草稿（适用变更合入前需在具备条件的环境中运行 E2E）
 
 #### E2E-102b：未答复的停止恢复紧凑的文件参考草稿
@@ -5736,8 +5770,8 @@ eleven-tool-round desktop paths are verified by
 **E2E-CHAT-session-todo-checklist：TodoWrite 到按会话显示的 TodoDock**
 
 - **前提：** 隔离的本地 Electron 配置、确定性的 Agent/Host fixture、两个 Desktop 会话，不使用真实 Provider 或付费 API。
-- **步骤：** 启动调用 `TodoWrite` 的多步骤 Agent 回合，观察 Composer 上方的 TodoDock，展开后切换会话并确认清单隔离。展开一个超过 dock 高度上限的清单，确认渲染全部条目、列表在 dock 内滚动而不撑高 Composer 栈；完成和取消条目，确认全部取消状态；清空清单后重载/重启 Host。发送乱序旧 `todos.changed` 事件，确认它不能覆盖新快照；再覆盖非法参数、Plan/Goal、委托和远程会话路径。
-- **预期：** 切换会话时收起、收起状态只占标题行高度、列表渲染全部条目并以自身为滚动容器、拒绝旧事件。
+- **步骤：** 启动调用 `TodoWrite` 的多步骤 Agent 回合，观察 Composer 上方的 TodoDock；确认右侧按钮至少为 36px 方形点击区域，箭头图标独立设为 18px，点击标题文本不会展开。点击向上箭头展开并确认箭头转向下方；切换会话并确认清单隔离。展开一个超过 dock 高度上限的清单，确认渲染全部条目、列表在 dock 内滚动而不撑高 Composer 栈；完成和取消条目，确认全部取消状态；清空清单后重载/重启 Host。发送乱序旧 `todos.changed` 事件，确认它不能覆盖新快照；再覆盖非法参数、Plan/Goal、委托和远程会话路径。
+- **预期：** 切换会话时收起、收起状态只占标题行高度、列表渲染全部条目并以自身为滚动容器、拒绝旧事件。展开后是纯文本清单，状态用字形标记而非带边框的方块；进行中的那一步文字带一道扫光，且任一时刻只有一处文字带扫光（收起时在标题行，展开时在对应行）。
 - **链接规格：** `03-runtime/03-tools-and-permissions.md`、`03-runtime/04-data-storage.md`、`03-runtime/06-host-rpc-protocol.md`、`04-ux/08-component-spec.md`、ADR 0312。
 - **验收：** C / E / F / Quality / Security。
 - **里程碑：** M6+。
@@ -5787,6 +5821,7 @@ eleven-tool-round desktop paths are verified by
 | E——工具和权限（Skill 常驻） | E2E-254 |
 | 品质（Skill 常驻与输入法斜杠别名） | E2E-254、E2E-255 |
 | C / E / F / 品质——内置技能启用状态 | E2E-SKILL-builtin-activation |
+| 品质——市场目录查询重试恢复 | E2E-MARKET-CATALOG-RETRY |
 | C — 对话和直播（插件会话导入可见性） | E2E-257 |
 | F——持久化（插件会话导入可见性） | E2E-257 |
 | C — 对话和直播（聊天文件引用） | E2E-CHAT-shorthand-file-ref-opens-the-matching-file、E2E-CHAT-file-ref-opens-the-surface-that-owns-it |
@@ -5887,6 +5922,7 @@ eleven-tool-round desktop paths are verified by
 | C / F / 质量 — 转录非法 UTF-8 恢复 | E2E-TRANSCRIPT-invalid-utf8-window-remains-readable |
 | G — 插件宿主生命周期（崩溃上报） | E2E-PLUGIN-crash-report-names-the-exit-code |
 | 品质（崩溃上报） | E2E-PLUGIN-crash-report-names-the-exit-code |
+| C / E / F / 品质 —— 后台 Bash 任务在回合结束后继续运行 | E2E-265 |
 | F — 持久化（存储的模型绑定数组） | E2E-PROVIDER-stored-binding-array-reads-entry-by-entry |
 | 品质（存储的模型绑定数组） | E2E-PROVIDER-stored-binding-array-reads-entry-by-entry |
 
@@ -6648,9 +6684,9 @@ eleven-tool-round desktop paths are verified by
 
 ### US-UI-73 Composer 模式选择器具有稳定的宽度
 - 以英语和中文打开空的主页和停靠的线程。
-- 通过Agent/Plan/Goal多次切换Composer模式芯片。
-- 期望模式芯片为最长的内置保持一个固定的宽度尺寸
-  标签（英文“Agent”/zh-CN“智能体”）；相邻的思维和
+- 打开 Composer 模式芯片，在 Agent/Plan/Goal 之间多次切换。
+- 期望芯片以带选中标记的菜单项列出三个模式、只显示当前模式，并为最长内置标签
+  （英文“Agent”/zh-CN“智能体”）加上箭头保留一个固定宽度；相邻的思考与
   权限控件、发送按钮和 Composer shell 不会移动或调整大小。
 - **链接规格**：`04-ux/08-component-spec.md` §11.3
 - **里程碑**：M5
@@ -6686,25 +6722,29 @@ eleven-tool-round desktop paths are verified by
   在同一会话排队两个请求，提交第一个后为第二个选择不同答案，确认两次提交分别包含
   自己的请求 ID 和所选答案。
 
-#### E2E-124：最小化隐藏跨平台托盘中的窗口
+#### E2E-124：窗口控件最小化到任务栏并关闭到所选界面
 
 - **先决条件**：在 macOS、Windows 和 Linux 上构建桌面应用程序；英语
   和 zh-CN 语言环境可用；正常的主窗口打开。
-- **步骤**：1）从平台的窗口控制最小化（macOS流量
-  光或 Windows/Linux 渲染器控制）。 2) 确认主窗口是
-  当应用程序进程保持驻留时隐藏。 3) 单击或双击
-  托盘图标并确认同一窗口已恢复并聚焦。 4) 打开
-  托盘菜单并选择“显示”，然后重复“退出”。 5) 在 zh-CN 中重复并
-  在窗口隐藏时调用 macOS 应用程序激活。
-- **预期**：所有最小化路径都隐藏到一个托盘图标，而不是退出或
-  留下任务栏最小化的窗口。 Show/click/double-click/app 激活
-恢复现有窗口；本地化菜单包含 Show PI-Desktop
-  并退出 PI-Desktop。 Quit 运行正常的关闭顺序，并且不留下任何内容
-  孤立主机、sidecar 或托盘进程。关闭窗口仍然是明确的
-  放弃行动。
-- **链接规格**：`03-runtime/07-process-model.md`，
-  `04-ux/09-interaction-patterns.md`、`08-meta/decisions-log.md` (D216)、
-  ADR 0078
+- **步骤**：1）在 Windows 上最大化主窗口，然后单击其任务栏按钮；确认窗口最小化，
+  PI-Desktop 的任务栏项仍然存在。再次单击同一任务栏按钮；还原过渡结束后，确认
+  窗口仍在最大化状态、边界符合显示器工作区，且任务栏仍可见。用其他应用覆盖窗口，
+  再单击 PI-Desktop 的任务栏项，确认窗口回到前台且没有隐藏到托盘。2）在 macOS 上
+  单击交通灯最小化控件，确认窗口隐藏到托盘。3）在 Windows/Linux 上使用渲染器最小化控件，
+  确认原生任务栏项仍然存在；再次单击后确认同一窗口还原并聚焦。选择“关闭到托盘”并关闭
+  Windows/Linux 窗口，确认任务栏项消失且可从托盘恢复；选择“退出”并重复，确认进程退出。
+  4）打开托盘菜单并选择“显示”，再重复“退出”。5）在 zh-CN 中重复，并在窗口隐藏时
+  调用 macOS 应用程序激活。
+- **预期**：Windows 原生任务栏切换和 Windows/Linux 渲染器最小化控件保留任务栏项，
+  并通过原生最小化/还原完成往返。还原最大化的无边框 Windows 窗口后，窗口仍符合显示器
+  工作区，任务栏保持可见。单击被覆盖窗口的任务栏项会将窗口带到前台。Windows/Linux 上
+  只有“关闭到托盘”会隐藏窗口；“退出”会结束进程。macOS 菜单栏图标是清晰的透明单色 PI
+  标记，不带圆角应用磁贴，原生最小化仍隐藏到托盘。“显示”、托盘图标点击/双击及应用激活
+  会恢复现有窗口；本地化菜单包含“显示 PI-Desktop”和“退出 PI-Desktop”。退出按正常顺序关闭，
+  不留下孤立的主机、sidecar 或托盘进程。
+- **链接规格**：`03-runtime/01-ipc-protocol.md`、`03-runtime/07-process-model.md`、
+  `04-ux/08-component-spec.md`、`04-ux/09-interaction-patterns.md`、
+  `08-meta/decisions-log.md` (D216、D230、D252、D256)、ADR 0078、ADR 0090、ADR 0117、ADR 0123
 - **验收**：A（应用程序生命周期），质量
 - **里程碑**：M6+
 - **状态**：Unit/source-contract 已覆盖；原生跨平台托盘之旅
@@ -7798,12 +7838,12 @@ eleven-tool-round desktop paths are verified by
 #### E2E-204：显式退出在关机前确认（D363）
 
 - **前提条件**：普通交互会话正在运行（不是 boot / supervision / capture 探针）。主窗口可见或已藏到托盘。
-- **步骤**：1) 从托盘菜单选择退出，或按 Cmd+Q / 应用菜单退出。2) 取消原生警告，确认窗口、托盘、host-core 和 sidecar 仍在。3) 再操作一次并确认退出，确认走有序关机。4) Windows/Linux 在关闭行为未设置时关窗，并在 D230 对话框选择退出；确认没有第二次警告。5) 以 `PI_DESKTOP_BOOT_PROBE=1`（及 supervision/capture 等价项）启动，确认 `app.quit()` 不弹对话框。6) 在打包的 Windows NSIS 或 Linux AppImage 安装上，下载更新并选择“重启以更新”；确认退出警告不再出现，安装器完成升级并重新拉起应用。
-- **预期**：误触显式退出可以取消。已经在关闭行为对话框选择退出的用户不会再被问一次。自动化探针不会被警告挡住。应用内更新重启同样不会被警告推迟：平台安装器先于 `app.quit()` 启动，应用一旦超出其等待窗口安装器就会中止，因此更新触发的退出必须立即走有序关机 —— 用户选择该操作时已经确认了重启。见 ADR 0022。
-- **链接规格**：`04-ux/08-component-spec.md`、`04-ux/09-interaction-patterns.md`、`08-meta/decisions-log.md`（D216、D230、D363）、ADR 0022
+- **步骤**：1) 从托盘菜单选择退出，或按 Cmd+Q / 应用菜单退出；若窗口藏在托盘，确认主窗口先恢复。2) 确认显示主题化应用内弹窗、标题与正文分开且初始焦点为“取消”；弹窗打开时再次触发退出，确认仍只等待同一个决定，既不重复弹窗也不绕过确认。分别按 Escape、点击遮罩取消，确认窗口、托盘、host-core 和 sidecar 仍在。3) 再次操作并确认退出，验证有序关机。4) Windows/Linux 在关闭行为未设置时关窗，确认 D230 主题弹窗提供取消 / 关闭到托盘 / 退出；取消保持未设置，选择退出不会二次询问。5) 以 `PI_DESKTOP_BOOT_PROBE=1`（及 supervision/capture 等价项）启动，确认 `app.quit()` 不弹窗。6) 在打包的 Windows NSIS 或 Linux AppImage 安装上选择“重启以更新”，确认退出警告不出现且安装器完成升级和重启。
+- **预期**：显式退出可取消；待确认期间的重复退出不会重复弹窗或绕过确认，取消后后续退出会再次询问。托盘退出即使窗口隐藏也能呈现弹窗。已在 D230 选择退出的关窗路径不会再次确认。renderer 不可用、崩溃或超时无响应时限时回退到原生弹窗；原生弹窗也不可用时不得阻塞退出。自动化探针和应用内更新重启均跳过警告，后者直接进入有序关机。
+- **链接规格**：`04-ux/08-component-spec.md`、`04-ux/09-interaction-patterns.md`、`08-meta/decisions-log.md`（D216、D230、D363）、ADR 0022、ADR 0090
 - **验收**：A、质量
 - **里程碑**：M5
-- **状态**：单元已覆盖（`close-behavior-tray.test.mjs` 断言探针与更新重启两项豁免，`auto-update.test.mjs` 断言安装闩锁先于 `quitAndInstall` 设置）；原生对话框旅程为草稿
+- **状态**：`lifecycle-dialog-broker.test.mjs`、`lifecycle-confirmation-dialog-user-path.test.mjs`、`lifecycle-close-behavior-runtime.test.mjs`、`close-behavior-tray.test.mjs` 和 `shutdown-regenerate-persistence.test.mjs` 覆盖 broker、renderer 用户旅程、主进程选择及待处理退出；完整应用关机和打包更新旅程仍为草稿，生命周期集成变更时需在可用发布环境运行。
 
 #### E2E-209：从本地智能体存储导入模型配置
 
@@ -8416,7 +8456,7 @@ runner 会在运行时的隔离临时目录中生成六个插件形态 fixture�
 - **步骤**：
   1. 打开工作面板并请求用户的首选宽度。
   2. 将内部分隔线向 MainChat 左边缘拖动，包含指针预览阶段，然后释放。
-  3. 在布局收起左栏后手动重开左栏。
+  3. 在布局收起左栏后手动重开左栏。在 866px 视口中重复一次，此时重开会让面板窄于 244px；然后再次收起左栏，并朝面板方向拖动分隔线。
   4. 关闭工作面板并确认左栏恢复；再在手动收起左栏后重复一次。
   5. 用 `ArrowLeft`、`ArrowRight`、`Home`、`End` 重复调整分隔线。
   6. Navigate to the real Plugins and Scheduled routes with the
@@ -8430,7 +8470,7 @@ runner 会在运行时的隔离临时目录中生成六个插件形态 fixture�
   ink. Hover does not change geometry; sidebar and New Task remain usable.
   Automated by `pnpm test:e2e:layout` using real route components and DOM/CDP
   interaction. This is renderer evidence, not native Windows/Linux hit-test proof.
-- **预期**：原生窗口宽度全程不变。MainChat 永不低于 360px —— 包含拖动过程中以及 `sidebar-out` 仍占位弹性空间期间。工作面板有效上限为客户端宽度减去 360px 下限与展开的左栏宽度，且无固定像素上限。预算耗尽时展开的左栏立即收起，面板之后仍可继续增长。手动重开优先占用右栏宽度；能保住当前 MainChat 则保持，否则落在 370px 的重开目标。关闭面板只恢复由布局机制收起的左栏。分隔线的 ARIA 最小/最大值遵循同一动态预算。
+- **预期**：原生窗口宽度全程不变。MainChat 永不低于 360px —— 包含拖动过程中以及 `sidebar-out` 仍占位弹性空间期间。工作面板有效上限为客户端宽度减去 360px 下限与展开的左栏宽度，且无固定像素上限。预算耗尽时展开的左栏立即收起，面板之后仍可继续增长。手动重开优先占用右栏宽度；能保住当前 MainChat 则保持，否则落在 370px 的重开目标。重开借出的宽度不会被存储：已存储的首选宽度不变，再次收起左栏即恢复该宽度，分隔线拖动仍停在 244px。关闭面板只恢复由布局机制收起的左栏。分隔线的 ARIA 最小/最大值遵循同一动态预算。
 - **在运行中的应用里实测的浮层覆盖**：在 Plugins 路由上打开一个插件模态框；模态遮罩是标题栏带内工作面板开关处的命中首选；标题栏带不是命中首选，因此不会绘制在模态遮罩之上；关闭模态框后路由保持干净。这四项命中由 `pnpm test:e2e:layout` 断言，属于渲染器 DOM/CDP 证据，不是原生命中测试证明。
 - **链接规格**：`04-ux/01-ui-ia.md`、`04-ux/07-ui-design-system.md` §10、`04-ux/08-component-spec.md` §1 与 §5、`04-ux/09-interaction-patterns.md` §8、ADR 0238
 - **验收**：F（持久化）、品质
@@ -8516,14 +8556,16 @@ runner 会在运行时的隔离临时目录中生成六个插件形态 fixture�
 
 #### E2E-LAYOUT-sidebar-row-states
 
-- **前提条件**：宿主预置项目、置顶和独立会话，存在当前工作区；应用使用隔离的数据与 profile。
+- **前提条件**：宿主预置项目、置顶和独立会话，启用侧边栏“会话时间”偏好，存在当前工作区；应用使用隔离的数据与 profile。
 - **步骤**：分别在深浅主题下选中项目会话，悬停项目标题、未选中和已选中会话；
+  确认项目会话日期静止可见，并在悬停和键盘焦点时于同一尾部位置切换为操作，日期左侧没有分隔线；验证七个日历日内显示相对天数，更早显示不含年份的月/日；
   检查失焦处理、拖拽目标样式、操作按钮悬停及 Tab/Shift+Tab 焦点；折叠后展开
   选中会话的分组，切换置顶与独立会话，打开设置再返回；开启减少动态效果，
   确认项目与会话行的悬停过渡均接近零时长。
 - **预期**：项目与会话共享整行悬停背景、圆角和过渡，标题按钮透明；选中背景
   只属于会话且优先于悬停。工作区仅通过圆点表达，折叠不会转移选中态。
   置顶和独立会话样式一致；焦点轮廓、独立操作按钮反馈和拖拽目标优先级保留。
+  项目会话日期默认可见且与操作共享尾部位置，悬停或聚焦后由操作替换，日期左侧无分隔线。
   失焦释放悬停而不清除选中；设置替换侧栏，返回后恢复会话与工作区上下文。
   渲染测试另覆盖没有选中会话、切换中的目标和非聊天页状态。
 - **链接规格**：`04-ux/01-ui-ia.md`、`04-ux/08-component-spec.md`、`04-ux/09-interaction-patterns.md` §9.1c
@@ -8644,6 +8686,7 @@ runner 会在运行时的隔离临时目录中生成六个插件形态 fixture�
 | E2E-MCP-MARKET-INSTALL | 内置目录条目经 `resolveCatalogEntry` 解析并通过宿主 `mcp.upsert` RPC 安装；记录落盘 `~/.agents/servers/` | 真实宿主二进制，隔离临时 HOME |
 | E2E-MCP-MARKET-HEADER-SCOPE | Registry header-local `{token}` resolves only in its header; same-named URL path/query tokens remain literal through mapping, resolution, host upsert/list and persistence. URL templates retain only legacy `${NAME}` substitution. When `headerBindings` exists (even empty or partial), unbound tokens in every header stay literal and never consume another header's input or default | shared regressions plus real host binary with isolated temporary storage; remote entry disabled, no network call |
 | E2E-MCP-MARKET-partial-header-bindings-stay-literal | Resolve a catalog with only Authorization bound and another header using the same `{token}` / `${token}`; an undeclared `${UNBOUND}` in a third header also remains literal through host upsert/list and disk persistence | real host binary, disabled remote entry, synthetic input and isolated temporary storage; no network call |
+| E2E-MARKET-CATALOG-RETRY | 技能市场和 MCP 市场查询全部失败后、以及部分来源失败时都显示重试；点击后播报加载、重跑当前查询，并在来源恢复后清除失败状态 | Electron 中的真实 React 组件使用确定性的模拟市场 API 响应；不访问公网 |
 
 
 #### E2E-SKILL-MARKET-NET-BOUNDARY：用户自填源可达局域网，第三方内容不行
@@ -8655,6 +8698,16 @@ runner 会在运行时的隔离临时目录中生成六个插件形态 fixture�
 - **验收**：Security、Quality
 - **里程碑**：M6+
 - **状态**：已自动化（`pnpm test:e2e:skill-market`、`apps/desktop/test/public-https-fetch.test.mjs`、`apps/desktop/test/public-https-fetch-route.test.mjs`、`apps/desktop/test/skill-market-scan.test.mjs`、`apps/desktop/test/skill-market-failure.test.mjs`、`apps/desktop/test/skill-market-policy-refusal.test.mjs`、`packages/shared/src/public-network.test.ts`）
+
+#### E2E-MARKET-CATALOG-RETRY：重试失败或部分可用的市场查询
+
+- **前提条件**：渲染技能市场和 MCP 市场面板，并在 IPC 边界模拟市场 API。每个 API 依次返回全部失败、一个来源失败的结果、完整成功结果。
+- **步骤**：打开两个市场；全部失败后点击重试；确认加载播报和恢复的目录条目；部分失败后再次点击重试。
+- **预期**：两个市场都按当前查询重新请求，期间显示加载状态；部分来源失败时仍有重试入口；来源恢复后失败项清除。测试不访问公网，也不改变主进程网络策略。
+- **链接规格**：`04-ux/06-settings-ia.md`、ADR 0177、ADR 0272
+- **验收**：Quality
+- **里程碑**：M6+
+- **状态**：已自动化（`pnpm test:e2e:market-retry`、`apps/desktop/test/skill-market-panel.test.mjs`、`apps/desktop/test/mcp-market-panel.test.mjs`）
 
 #### E2E-SKILL-MARKET-EXPANSION：相邻 markdown 资源在安装前内联
 
@@ -8713,8 +8766,8 @@ runner 会在运行时的隔离临时目录中生成六个插件形态 fixture�
 #### E2E-CHAT-running-status-survives-output-pauses
 
 - **先决条件**：Electron 中的生产 `ChatTranscript`、真实 store 和 React DOM，使用确定性消息/状态转换，无需模型凭据。
-- **步骤**：发送一轮，输出部分文字后停止增量，开始并完成工具，切换和清空具体阶段，恢复文字后完成、停止或失败。在详细与紧凑模式重复；验证规划、权限、提问与提案等待、历史阅读及会话切换。
-- **预期**：输出暂停和工具完成后仍有且仅有一行本地化、可访问的底部状态。具体阶段优先于规划/目标或工作中。等待用户操作时隐藏；回合结束与历史阅读时移除。会话切换只使用对应会话的状态；已有内容与权限操作保持可用。运行中与含助手错误的回合不挂载空操作栏；默认字号下，部分回答的片段盒底部到状态文字顶部为 24 CSS px。结束后的无错误正文保留复制、分支与重新生成。详细和紧凑模式均需验证。历史阅读和权限卡保留正常消息间距；回合结束后贴底模式继续跟随底部，恢复正常操作栏高度；向上阅读时正文位置和滚动偏移保持不变。
+- **步骤**：发送一轮，输出部分文字后停止增量，开始并完成工具，切换和清空具体阶段，恢复文字后完成、停止或失败。分别在 `Show thinking` 开启与关闭时重复；验证规划、权限、提问与提案等待、历史阅读及会话切换。
+- **预期**：输出暂停和工具完成后仍有且仅有一行本地化、可访问的底部状态。具体阶段优先于规划/目标或工作中。等待用户操作时隐藏；回合结束与历史阅读时移除。会话切换只使用对应会话的状态；已有内容与权限操作保持可用。运行中与含助手错误的回合不挂载空操作栏；默认字号下，部分回答的片段盒底部到状态文字顶部为 24 CSS px。结束后的无错误正文保留复制、分支与重新生成。需分别在 `Show thinking` 开启与关闭时验证。历史阅读和权限卡保留正常消息间距；回合结束后贴底模式继续跟随底部，恢复正常操作栏高度；向上阅读时正文位置和滚动偏移保持不变。
 - **链接规格**：`04-ux/08-component-spec.md`、`04-ux/09-interaction-patterns.md`
 - **验收**：C（对话与流式）、品质（交互和可访问性）
 - **里程碑**：M5
@@ -9155,27 +9208,32 @@ Follow the [current S3 acceptance scenario](/spec/06-delivery/04-e2e-test-plan#e
 ### E2E-CHAT-turn-process-and-thinking-display
 
 - **先决条件：** 一个回合包含进度段落 A、多次搜索及思考、进度段落 B、多条命令及
-  思考和最终回答；详细与紧凑显示模式。
-- **步骤：** 在详细模式确认活动过程默认展开，让同一回合在无人操作时完成，并确认过程
-  收起。另一个回合中，明确展开已完成过程，并确认后续更新仍保留该选择。检查嵌套路径，
-  包括相互独立的组／条目切换、父级收起与恢复、单项片段、字面最后一项选择、失败／被拒／
-  恢复、保留窗格重新挂载和旧版搜索定位。随后在紧凑模式重复，并覆盖权限／提问／计划／
-  目标操作卡、中止的部分回答、助手错误和委派子任务。
-- **预期：** 两种模式都使用一个整体过程披露，并把最终回答、助手错误、中止后的末尾
-  文字和待处理操作留在过程之外。详细模式的活动过程默认展开；未操作的过程在回合完成时
-  收起，用户明确选择的状态继续保留。活动多项组默认展开，未操作组在完成时收起。紧凑模式
-  的过程、组和载荷默认收起，隐藏推理；记录过失败／被拒工具的未操作活动过程会在恢复期间
-  保持展开，并在完成后收起。单项没有组。没有任何条目载荷会自动展开：工具／搜索行在
-  用户打开之前保持收起，而思考项保留自身的叶子默认值。父级、子级和同级
-  状态相互独立；窗格拥有的用户选择跨更新、模式切换和重新挂载保留，渲染器重启后重新应用
-  默认值。搜索只展开拥有目标消息的过程和活动组，每个请求应用一次；条目级精确定位不在
-  本次范围内，紧凑模式推理仍需显式切换到详细模式。已保存模式跨重启保留，缺失或未知设置
-  按详细模式处理。
+  思考和最终回答；`Show thinking` 偏好开启与关闭两种状态；旧版消息级转录搜索目标。
+- **步骤：** 确认活动组默认展开，让同一回合在无人操作时完成，并确认组收起。另一个
+  回合中，明确展开已完成组，并确认后续更新仍保留该选择。关闭 `Show thinking`，确认
+  活动思考指示器仍然可见、已完成的推理行和摘要消失且不残留空的纯思考容器；再重新打开，
+  确认已完成的推理行恢复。收起所有组，确认 Bash／run 行仍保持可见。检查嵌套路径，包括
+  相互独立的组／条目切换、父级收起与恢复、单项片段、字面最后一项选择、失败／被拒／恢复、
+  保留窗格重新挂载、Bash 行保持独立（包括相邻 Bash 行）且其详情在打开前保持收起，以及
+  旧版搜索定位。
+- **预期：** 按时间顺序排列的可折叠过程片段把最终回答、助手错误、中止后的末尾文字和待处理
+  操作留在过程之外。活动组默认展开；未操作的组在回合完成时收起，用户明确选择的状态继续
+  保留。这些组默认值不依赖 `Show thinking` 偏好。Bash／run 别名被排除在所有过程披露之外，
+  作为独立行渲染，即使所有组都收起也保持可见；相邻 Bash 行各自独立，Bash 行的详情在用户
+  打开前保持收起。`Show thinking` 关闭时，活动思考指示器保持可见，已完成的推理行和摘要
+  被隐藏，空的纯思考容器被省略；重新打开时恢复。单项没有组。没有任何条目载荷会自动展开：
+  工具／搜索行在用户打开之前保持收起，而思考项保留自身的叶子默认值。父级、子级和同级
+  状态相互独立；窗格拥有的用户选择跨更新、偏好切换和重新挂载保留，渲染器重启后重新应用
+  默认值。搜索只展开拥有目标消息的过程片段和活动组，每个请求应用一次；条目级精确定位不在
+  本次范围内，被偏好隐藏的推理会保持隐藏，直到用户打开 `Show thinking`。已保存的
+  `showThinking` 跨重启保留；缺失值回退到旧版 `thinkingDisplayMode`（`compact` 隐藏，
+  `detailed`／未知／缺失显示）。
 - **2026-09-20 变更的验证范围：** 本次变更只包含多级折叠与活动组呈现；精确转录搜索
   定位不在本次范围内，保持原有搜索行为。
 - **自动化：** `pnpm test:e2e:transcript` 覆盖默认及运行中到完成时的过程披露行为；
   `pnpm test:e2e:transcript-disclosure` 验证手动展开状态保留和视口锚定；
-  `apps/desktop/test/turn-process.test.mjs` 覆盖默认选择。
+  `apps/desktop/test/turn-process.test.mjs` 覆盖过程默认值，
+  `apps/desktop/test/thinking-visibility.test.mjs` 覆盖 `showThinking`／旧版解析优先级。
 - **规格：** 04-ux/06-settings-ia、04-ux/08-component-spec、
   04-ux/09-interaction-patterns；ADR turn-process-and-thinking-display。
 ### E2E-CONTEXT-estimate-calibration-stays-safe
@@ -9756,3 +9814,20 @@ host-created files. The full app's file-preview viewer is covered separately.
 - **关联规格**：`04-ux/06-settings-ia.md`、`04-ux/09-interaction-patterns.md`、ADR 0294、D659、issue #1653。
 - **验收**：仅在 Host 项目激活成功后，渲染层才恢复该规范化路径的本地归档元数据。
 - **状态**：`apps/desktop/test/app-store-sidebar.test.mjs` 与 `apps/desktop/test/project-create-dialog.test.mjs` 有源码契约覆盖；完整 UI 场景仍为草稿，仅在明确请求且环境可用时运行。
+
+### E2E-266：项目折叠时标题显示运行活动
+
+- **前提条件**：至少两个带会话的本地项目组，其中一个有运行中的回合（也可另有等待权限的会话）；另有一个已连接且存在运行会话的远程主机项目组。设置 → 常规 → 侧边栏使用默认值。
+- **步骤**：
+  1. 在一个项目中启动回合并折叠该项目组。
+  2. 检查折叠标题，再展开项目组。
+  3. 在另一个项目中启动并行回合，并在远程主机项目中启动回合。
+  4. 打开设置 → 常规 → 侧边栏，关闭“在项目上显示运行状态”，再检查侧边栏。
+  5. 重新开启总开关，并开启“活动流光”。
+  6. 只关闭“数量徽标”并检查效果，然后重新开启徽标。
+  7. 只关闭“活动流光”并检查效果，然后重新开启活动流光。
+  8. 开启操作系统的“减少动态效果”并检查活动流光。
+- **预期**：默认时有运行活动的项目标题只显示数量徽标，活动流光关闭；运行中与等待权限的数量分开呈现。远程主机项目也遵循相同默认值。启用活动流光后，它与徽标同时显示。关闭总开关会隐藏两种提示，子开关置灰但保留已存值；重新开启后恢复此前选择。每个子开关只隐藏自身提示。减少动态效果时两种提示仍可见，但不播放动画。设置在渲染进程重载后保留。
+- **关联规格**：`04-ux/01-ui-ia.md` §3.2、`04-ux/06-settings-ia.md`（常规 → 侧边栏卡片）。
+- **验收**：项目折叠时仍能回答“这里是否有正在运行的工作”，且两种提示可从持久化设置独立控制。
+- **状态**：草稿。现有 `apps/desktop/test/sidebar-project-runs.test.mjs` 覆盖数量分类、总开关与子开关门控、两种渲染入口，以及主题令牌和减少动态效果保证；它不覆盖设置 API 缺省值规范化或完整交互，相关场景仍需在可用环境手动验证。

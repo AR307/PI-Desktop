@@ -22,6 +22,8 @@ import {
   displayWorkAreaKey,
   emptyWorkPanelReservationState,
   isWorkPanelOuterResizeEdge,
+  maximizedBoundsExceedWorkArea,
+  maximizedBoundsForWorkArea,
   planWorkPanelChatResize,
   planWorkPanelReservation,
   WORK_PANEL_MAX_WIDTH,
@@ -927,6 +929,35 @@ export async function createWindow({
   window.on("show", () => ensureStableBounds(false));
   window.on("focus", () => ensureStableBounds(false));
   window.on("restore", () => ensureStableBounds(false));
+
+  // Windows restores a frameless maximized window to the full monitor rect
+  // instead of the work area, so the window covers the taskbar and reads as
+  // fullscreen (issue #1655). Re-apply the work-area-based maximized rect.
+  const reconcileRestoredMaximize = () => {
+    if (!isLiveWindow() || process.platform !== "win32") return;
+    if (
+      !window.isMaximized() ||
+      isWindowFullScreen(window) ||
+      window.isMinimized()
+    ) {
+      return;
+    }
+    const bounds = window.getBounds();
+    const workArea = screen.getDisplayMatching(bounds).workArea;
+    if (!maximizedBoundsExceedWorkArea(bounds, workArea)) return;
+    window.setBounds(maximizedBoundsForWorkArea(bounds, workArea));
+  };
+  // The OS finishes the restore after the event dispatch, overwriting a
+  // synchronous correction, so try now and again once the transition settles.
+  let restoredMaximizeTimer: NodeJS.Timeout | null = null;
+  window.on("restore", () => {
+    reconcileRestoredMaximize();
+    if (restoredMaximizeTimer) clearTimeout(restoredMaximizeTimer);
+    restoredMaximizeTimer = setTimeout(() => {
+      restoredMaximizeTimer = null;
+      reconcileRestoredMaximize();
+    }, windowBoundsSettleMs);
+  });
   window.on("resize", observeNativeWorkPanelResize);
   window.on("move", scheduleBoundsCheck);
   window.on("move", noteUserWindowMove);
@@ -1096,6 +1127,10 @@ export async function createWindow({
     if (workPanelSettleExpiryTimer) {
       clearTimeout(workPanelSettleExpiryTimer);
       workPanelSettleExpiryTimer = null;
+    }
+    if (restoredMaximizeTimer) {
+      clearTimeout(restoredMaximizeTimer);
+      restoredMaximizeTimer = null;
     }
     if (boundsWatchdog) clearInterval(boundsWatchdog);
   });

@@ -1,5 +1,6 @@
 /** Shared public types grouped by the owning application domain. */
 import type { AppError } from "../errors.js";
+import type { MessageQuote } from "../message-quotes.js";
 import type { PlanExecution, PlanningStateEvent } from "./plans.js";
 import type { ContextCompactionFallback, ContextCompactionMark, ContextCompactionReason } from "./sessions.js";
 import type { AgentStatus } from "./sessions.js";
@@ -11,6 +12,7 @@ import type { RacpPermissionMode } from "../racp.js";
 export type AgentPromptRequest = {
   sessionId: string;
   content: string;
+  quotes?: MessageQuote[];
   /** Host-owned collaboration delivery; its durable record supplies the input. */
   sessionMessageId?: string;
   /** Attachments are resolved by Electron main and never trusted by the sidecar. */
@@ -77,7 +79,7 @@ export type AgentPromptAttachment = {
 
 export type AgentSteerRequest = Pick<
   AgentPromptRequest,
-  "sessionId" | "content" | "attachments" | "messageId" | "voiceOrigin"
+  "sessionId" | "content" | "attachments" | "quotes" | "messageId" | "voiceOrigin"
 > & {
   expectedTurnId: string;
 };
@@ -119,6 +121,7 @@ export type QueuedTurnSummary = {
   id: string;
   sessionId: string;
   content: string;
+  quotes?: MessageQuote[];
   sessionMessageId?: string;
   userMessageId?: string;
   voiceOrigin?: VoiceOrigin;
@@ -132,6 +135,7 @@ export type QueuedTurnSummary = {
 export type AgentQueuePushRequest = {
   sessionId: string;
   content: string;
+  quotes?: MessageQuote[];
   sessionMessageId?: string;
   userMessageId?: string;
   voiceOrigin?: VoiceOrigin;

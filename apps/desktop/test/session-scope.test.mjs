@@ -13,6 +13,19 @@ function session(id, overrides = {}) {
   };
 }
 
+test("temporary side chats never become the reusable primary conversation", () => {
+  const parent = session("parent");
+  const side = session("side-newer", { updatedAt: "2026-01-03T00:00:00.000Z" });
+  assert.equal(latestSessionInScope([side, parent], "/work", {})?.id, parent.id);
+});
+
+test("scheduled runs are excluded alongside temporary side chats", () => {
+  const parent = session("parent");
+  const automation = session("scheduled", { scheduledRun: true, updatedAt: "2026-01-04T00:00:00.000Z" });
+  const side = session("side-newer", { updatedAt: "2026-01-03T00:00:00.000Z" });
+  assert.equal(latestSessionInScope([automation, side, parent], "/work", {})?.id, parent.id);
+});
+
 test("latestSessionInScope prefers the newest non-archived session in the project", () => {
   const older = session("older", { updatedAt: "2026-01-01T00:00:00.000Z" });
   const newer = session("newer", { updatedAt: "2026-01-02T00:00:00.000Z" });

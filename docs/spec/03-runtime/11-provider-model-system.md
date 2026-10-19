@@ -127,7 +127,9 @@ Non-official DeepSeek endpoints also set `requiresNonEmptyReasoningReplay` so
 missing reasoning is filled with a documented placeholder instead of `""`
 (OpenCode / third-party relays reject empty echoes after compaction; see
 ADR 0256 / #296). Official `deepseek.com` rows keep empty-string fill (#223).
-The overlay does not change `thinkingFormat`.
+Both official and relay rows set `supportsReasoningEffort: false`; DeepSeek
+does not accept the generic OpenAI `reasoning_effort` request field even when
+thinking is enabled. The overlay does not change `thinkingFormat`.
 
 Anthropic Messages requests set `forceAdaptiveThinking: true` when the
 models.dev record publishes a reasoning `effort` option and no

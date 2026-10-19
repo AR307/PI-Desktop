@@ -42,7 +42,7 @@ export function retainSessionPane(
     id,
     ...current.retainedSessionIds.filter((held) => held !== id),
   ].slice(0, RETAINED_SESSION_PANE_LIMIT);
-  const next: Record<string, UiMessage[]> = { [id]: messages };
+  const next: Record<string, UiMessage[]> = { ...Object.fromEntries(Object.entries(current.retainedTranscripts).filter(([key]) => key.startsWith("side-"))), [id]: messages };
   for (const held of order) {
     if (held === id) continue;
     const snapshot = current.retainedTranscripts[held];
@@ -64,8 +64,10 @@ export function retainSessionPane(
  * session is no longer reachable would otherwise stay on screen as the visible
  * pane and suppress the empty state.
  */
-export function clearSessionPanes(): RetainedPanes {
-  return { retainedSessionIds: [], retainedTranscripts: {} };
+export function clearSessionPanes(current?: RetainedPanes): RetainedPanes {
+  return { retainedSessionIds: [], retainedTranscripts: Object.fromEntries(
+    Object.entries(current?.retainedTranscripts ?? {}).filter(([id]) => id.startsWith("side-")),
+  ) };
 }
 
 /** Releases a pane whose session is gone (deleted, or no longer reachable). */

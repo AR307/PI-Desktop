@@ -10,6 +10,7 @@ use crate::{
     sessions,
 };
 mod permissions;
+pub(crate) use permissions::effective_mode;
 mod projections;
 mod provenance;
 mod repository;

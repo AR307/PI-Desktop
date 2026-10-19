@@ -85,6 +85,7 @@ export function createQueueSlice({
       content: entry.content,
       draft: queuedDrafts.get(entry.id) ?? {
         text: entry.content,
+        quotes: entry.quotes,
         fileReferences: (entry.attachments ?? []).map((attachment) => {
           const token = formatFileInsert(attachment.path, "file").trim();
           return {
@@ -104,6 +105,7 @@ export function createQueueSlice({
     sessionId: string,
     entries: QueuedTurnSummary[],
   ): void {
+    if (sessionId.startsWith("side-") && !get().sessions.some((session) => session.id === sessionId)) return;
     set((state) => {
       const current = state.queuedPrompts[sessionId] ?? [];
       const pending = current.filter(isPendingQueuedPrompt);
@@ -148,6 +150,7 @@ export function createQueueSlice({
       const queuedDraft: ComposerDraftSnapshot = draft
         ? {
             text: draft.text,
+            quotes: draft.quotes?.map((quote) => ({ ...quote })),
             fileReferences: draft.fileReferences.map((reference) => ({
               ...reference,
             })),
@@ -169,6 +172,7 @@ export function createQueueSlice({
           sessionId,
           content,
           ...(attachments.length ? { attachments } : {}),
+          quotes: queuedDraft.quotes,
         })
         .then((entry) => {
           queuedDrafts.set(entry.id, queuedDraft);
@@ -198,8 +202,8 @@ export function createQueueSlice({
         });
     },
 
-    removeQueuedPrompt: async (promptId) => {
-      const sessionId = get().activeSessionId;
+    removeQueuedPrompt: async (promptId, targetSessionId) => {
+      const sessionId = targetSessionId ?? get().activeSessionId;
       if (!sessionId) return;
       const item = queuedPromptForSession(get().queuedPrompts, sessionId, promptId);
       if (!item || isPendingQueuedPrompt(item)) return;
@@ -221,8 +225,8 @@ export function createQueueSlice({
     },
 
     /** Return one waiting row to the composer as an editable draft. */
-    editQueuedPrompt: (promptId) => {
-      const sessionId = get().activeSessionId;
+    editQueuedPrompt: (promptId, targetSessionId) => {
+      const sessionId = targetSessionId ?? get().activeSessionId;
       if (!sessionId) return;
       const item = queuedPromptForSession(
         get().queuedPrompts,
@@ -237,6 +241,7 @@ export function createQueueSlice({
       const restored: ComposerPrefill = {
         sessionId,
         text: item.draft.text,
+        quotes: item.draft.quotes,
         fileReferences: item.draft.fileReferences.map((reference) => ({
           ...reference,
         })),
@@ -246,8 +251,8 @@ export function createQueueSlice({
     },
 
     /** Move one waiting row past its neighbour; promoted rows stay locked. */
-    moveQueuedPrompt: async (promptId, direction) => {
-      const sessionId = get().activeSessionId;
+    moveQueuedPrompt: async (promptId, direction, targetSessionId) => {
+      const sessionId = targetSessionId ?? get().activeSessionId;
       if (!sessionId) return;
       const item = queuedPromptForSession(
         get().queuedPrompts,
@@ -278,8 +283,8 @@ export function createQueueSlice({
       }
     },
 
-    sendQueuedNow: async (promptId) => {
-      const sessionId = get().activeSessionId;
+    sendQueuedNow: async (promptId, targetSessionId) => {
+      const sessionId = targetSessionId ?? get().activeSessionId;
       if (!sessionId) return;
       const item = queuedPromptForSession(
         get().queuedPrompts,
@@ -320,9 +325,9 @@ export function createQueueSlice({
       applyQueueEntries(event.sessionId, event.entries);
     },
 
-    steerPrompt: async (content, draft) => {
+    steerPrompt: async (content, draft, targetSessionId) => {
       const state = get();
-      const sessionId = state.activeSessionId;
+      const sessionId = targetSessionId ?? state.activeSessionId;
       if (!sessionAllows(state.sessions.find((session) => session.id === sessionId), "canSteer")) return false;
       const expectedTurnId = sessionId ? state.agentStatuses[sessionId]?.currentTurnId : undefined;
       if (
@@ -336,11 +341,13 @@ export function createQueueSlice({
         crypto.randomUUID(), content, draft?.fileReferences ?? [],
       );
       message.steering = true;
+      message.quotes = draft?.quotes;
       runtime.insertOptimisticUserMessage(sessionId, message);
       try {
         await api.steer({
           sessionId, expectedTurnId, content, messageId: message.id,
           attachments: draft ? promptAttachmentsFromDraft(draft.fileReferences) : [],
+          quotes: draft?.quotes,
         });
         return true;
       } catch (error) {
@@ -401,12 +408,13 @@ export function createQueueSlice({
         const messageCountBeforeSend =
           startedIn === get().activeSessionId
             ? get().messages.length
-            : runtime.sessionTranscriptCache.get(startedIn)?.length ?? 0;
+            : (runtime.sessionTranscriptCache.get(startedIn) ?? get().retainedTranscripts[startedIn])?.length ?? 0;
         const submission: SubmittedComposerDraft = {
           messageCountBeforeSend,
           draft: draft
             ? {
                 text: draft.text,
+                quotes: draft.quotes?.map((quote) => ({ ...quote })),
                 fileReferences: draft.fileReferences.map((reference) => ({
                   ...reference,
                 })),
@@ -428,6 +436,7 @@ export function createQueueSlice({
           content,
           submission.draft.fileReferences,
         );
+        optimisticMessage.quotes = submission.draft.quotes;
         runtime.insertOptimisticUserMessage(startedIn, optimisticMessage);
         const current = get().sessions.find((session) => session.id === sessionId);
         // Keeps the session readable without any plugin: the owning host derives
@@ -474,6 +483,7 @@ export function createQueueSlice({
             messageId: optimisticMessage.id,
             viewingSessionId: isRemoteSession(current) ? null : viewingSessionIdForPrompt(get(), sessionId),
             attachments: draft ? promptAttachmentsFromDraft(draft.fileReferences) : [],
+            quotes: draft?.quotes,
           });
           const submitted = runtime.submittedComposerDrafts.get(startedIn);
           if (submitted?.abortResolution && (await submitted.abortResolution)) {
@@ -506,7 +516,7 @@ export function createQueueSlice({
               sessionOutcomes: { ...state.sessionOutcomes, [startedIn]: "failed" },
               ...(state.activeSessionId === startedIn
                 ? { messages: [...state.messages, errorRow] }
-                : {}),
+                : startedIn.startsWith("side-") ? { retainedTranscripts: { ...state.retainedTranscripts, [startedIn]: [...(state.retainedTranscripts[startedIn] ?? []), errorRow] } } : {}),
             };
           });
           return false;

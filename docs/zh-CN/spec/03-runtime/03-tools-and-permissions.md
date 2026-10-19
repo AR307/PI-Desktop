@@ -365,7 +365,7 @@ tool/protocol 名称，请求中单独携带固定的 shell ID。
 2. Unix：众所周知的位置（`/bin/bash`、`/usr/bin/bash`、`/usr/local/bin/bash`、Homebrew），然后是 PATH
 3. Windows：来自 Git 的 Windows 的 `bash.exe` — 派生自 PATH 上的 `git`，然后是标准安装目录，然后是排除 `System32` 中的 WSL 启动器的 PATH
 
-- Unix 调用 `bash -lc`（登录 shell 为 Finder/Dock 启动保留配置文件路径）； Windows 使用 `CREATE_NO_WINDOW` 调用 `bash -c`
+- Unix 调用 `bash -lc`（登录 shell 为 Finder/Dock 启动保留配置文件路径）；Windows 使用 `CREATE_NO_WINDOW` 调用 `bash -c`。负责拥有命令树的隐藏 host-core runner 会使用 `CREATE_NO_WINDOW` 创建，并且仅当宿主所在的 job 授予 `JOB_OBJECT_LIMIT_BREAKAWAY_OK` 时才加上 `CREATE_BREAKAWAY_FROM_JOB`，然后被分配到自己的 kill-on-close Job Object 中。按宿主自身 job 的能力请求 breakaway，使启动器或策略 Job 不会成为 Desktop 进程的终止范围。当该 job 未授予 `JOB_OBJECT_LIMIT_BREAKAWAY_OK` 时，`CreateProcess` 会以 `ERROR_ACCESS_DENIED` 拒绝该 breakaway，因此不再带上该标志，runner 改以嵌套 job 的形式加入 host 拥有的 job；无论哪种情况，shell 本身都留在这个 host 拥有的 job 中，所以超时和中止仍会终止完整的命令树。
 - 在 Unix 上，Bash 工具另外探测用户的登录 shell 以获取其信息
   路径 — `$SHELL`（回退 `/bin/zsh` → `/bin/bash` → `/bin/sh`）
   `-lic 'printf %s "$PATH"'`，5 秒范围内，每个进程缓存 — 并注入它
@@ -377,6 +377,10 @@ tool/protocol 名称，请求中单独携带固定的 shell ID。
 - 安装程序中没有捆绑 bash：Windows 的 Git 是 Windows 的先决条件（无论如何，该应用程序都需要 git）
 - 解决失败返回稳定的 `SHELL_NOT_FOUND` 并提供安装指导
 - Windows PowerShell 和 cmd 使用其本机非交互式调用。
+- PowerShell 输出经过 PowerShell 自身的格式化器，因此对象（表格、列表、哈希表、
+  `Measure-Object` 结果）以控制台显示的形式交给 Agent，而不是类型名。原生命令
+  写入 stderr 的行会转发到 stderr，但本身不会使调用失败：调用报告原生命令的退出码。
+  其他 PowerShell 错误会使调用以退出码 1 失败。
 - PowerShell 7 先解析 `%ProgramFiles%\PowerShell\7`（宿主进程为 32 位时为
   `ProgramW6432`）下的 `pwsh.exe`，再回退到 PATH，覆盖机器级安装、Store、
   用户级与便携安装。它与 Windows PowerShell 5.1 共用同一调用契约，且从不被
@@ -385,6 +389,18 @@ tool/protocol 名称，请求中单独携带固定的 shell ID。
 - Git Bash 使用发现的 Git 来执行 Windows 可执行文件。
 - Unix Bash 使用经过批准的系统 Bash 条目。
 - 用户中止和超时在返回之前终止整个进程树。
+- `runInBackground: true` 让命令脱离本轮：shell 一启动就返回 `backgroundTaskId`，
+  不再套用超时，进程也不会被 `tools.abort` / `agent.abort` 终止。进程树归宿主
+  所有，通过输入框上方的运行中任务栏展示，可由用户停止或随应用退出而结束。
+    最多同时运行 32 个任务，每个输出流保留最后 256KB。
+- 后台任务先排空输出，再发布最终状态，保留跨管道读取边界的 UTF-8 字符；
+  退出和停止时已排队的输出不会丢失。关闭宿主时发送停止信号不依赖输出锁。
+- 输入框上方保持 Todo、后台命令、Plan/Ask 决策、输入框的既有顺序，没有可配置的
+  显示优先级。任务列表在 `min(200px, 24vh)` 内滚动，不随任务数量无限增高；
+  审批和 Ask 对输入的既有约束不变。
+- 同时只展开一个输出预览；任务运行时，上次读取完成后每秒刷新一次，折叠的日志
+  不读取。预览最多展示 stdout 的 8,000 字符和 stderr 的 4,000 字符，忽略切换前
+  的过期响应。读取或停止失败会显示错误，停止操作可以重试。
 
 初始拒绝名单（可扩展）：
 

@@ -7,7 +7,6 @@ import {
 } from "@pi-desktop/shared";
 import { api } from "../../../../lib/api";
 import { draftKeyForSession } from "../../../../lib/composer-draft-cache";
-import { useAppStore } from "../../../../stores/app-store";
 import { setEditorCaret, type ComposerFileReference } from "../editor";
 
 type DraftAccess = {
@@ -65,6 +64,8 @@ export function useComposerTransforms(options: {
   const requestRef = useRef<symbol | null>(null);
   const transformsRef = useRef(transforms);
   transformsRef.current = transforms;
+  const targetSessionRef = useRef(activeSessionId);
+  targetSessionRef.current = activeSessionId;
 
   const invalidate = () => {
     versionRef.current += 1;
@@ -102,7 +103,7 @@ export function useComposerTransforms(options: {
         text,
         ...(providerId && modelId ? { modelKey: `${providerId}/${modelId}` } : {}),
       });
-      const currentSessionId = useAppStore.getState().activeSessionId;
+      const currentSessionId = targetSessionRef.current;
       if (
         requestRef.current !== requestToken ||
         currentSessionId !== sourceSessionId ||
@@ -137,7 +138,7 @@ export function useComposerTransforms(options: {
         setEditorCaret(element, nextText.length);
       });
     } catch (error) {
-      const currentSessionId = useAppStore.getState().activeSessionId;
+      const currentSessionId = targetSessionRef.current;
       if (
         requestRef.current !== requestToken ||
         currentSessionId !== sourceSessionId ||

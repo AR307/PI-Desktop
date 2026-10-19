@@ -27,8 +27,8 @@ export function isAutomationSession(
  * place — so the SessionList's groups, search's recents view, and the tray drop
  * them before they can be listed or switched to.
  */
-export function listableSessions<T extends Pick<SessionSummary, "scheduledRun">>(
+export function listableSessions<T extends Pick<SessionSummary, "scheduledRun"> & { id?: string }>(
   sessions: readonly T[],
 ): T[] {
-  return sessions.filter((session) => !isAutomationSession(session));
+  return sessions.filter((session) => !isAutomationSession(session) && !session.id?.startsWith("side-"));
 }

@@ -1,5 +1,53 @@
 # PI-Desktop MirrorCoding Edition
 
+## 2026-10-19 - Synchronize upstream v0.21.0-beta.4
+
+- Integrate upstream main at 589e5803a7a9f4ebf7ec1e8849c43e44b4a198f7
+  (99 commits not in origin/main) on codex/sync-upstream-20261019, based on
+  fork main 5f272b38bf540251263623f8b94818545d94f78b. Keep both source
+  checkouts and their uncommitted work unchanged.
+- Carry the existing selected-reference/temporary-side-chat and account
+  benefits changes into this isolated candidate, including compact controls.
+  Preserve mobile synchronization, branding, storage maintenance and account
+  image generation while adopting upstream menus and work-panel width loans.
+- Integrate detached Bash with temporary sessions: filter background-task
+  bars by session, confirm close when a detached command remains, and stop
+  that session's processes before recycling its temporary records. Ordinary
+  turn abort still leaves detached commands alive; foreground tool approvals
+  remain cancellable. Parent commands are unaffected by child closure.
+- Retain the fourth Image mode in the new single-chip mode menu and restore
+  arrow/Home/End keyboard navigation. Update affected contracts, fixtures and
+  behavior specifications rather than retaining obsolete chip CSS.
+- Windows candidate builds and targeted Desktop/shared/runtime/Host checks
+  passed. Isolated Electron acceptance covers selected references, concurrent
+  side chats, cancellation, restart, menus and account image generation;
+  controlled browser acceptance covers subscription quota and manual check-in.
+- This is a local synchronization, not a remote-main update or a release.
+  See docs/upstream-sync-20261019.md for exact evidence and untested platforms.
+
+## 2026-10-18 - Account subscription quota and manual daily check-in
+
+- Add a main-owned benefits service using the existing Pi OAuth request path;
+  parsed subscription/check-in projections cross main-window IPC, never tokens.
+  No changes to Rust persistence, catalog routing, agent execution or mobile.
+- The account feature owns quota aggregation, lifecycle and a shared panel
+  used by the composer and Account settings. The compact bar is green/yellow/red,
+  shows percentage on hover only, and opens every active plan's quota/expiry.
+  Manual check-in refreshes wallet reward without changing subscription quota.
+- Preserve the shared AnchoredMenu's fixed-layer/visibility contract. A
+  real-browser geometry regression failed before the popup placement fix.
+- Add controlled browser-to-IPC-to-local-HTTP acceptance plus service tests
+  for permissions, error states, duplicates, cancellation and account changes.
+  No personal profile, production login, paid model or server mutation is used.
+- Server consent and endpoint implementation are still required. The separate
+  handoff is docs/mirrorcoding-account-benefits-server-requirements.md.
+- Validation: 37 related Desktop tests and 39 i18n tests passed; workspace
+  dependency builds, Desktop typecheck, targeted lint/style checks and the
+  Electron main/preload/renderer production build passed. Browser acceptance
+  covers actual Composer and Account settings interactions with controlled
+  HTTP/IPC handlers. Native Electron transport, production server parity and
+  packaged-install acceptance are not claimed.
+
 ## 2026-10-15 - Upstream integration, shared branding and account image tools
 
 - Integrated upstream 0.20.1 at 2eb333723 with the committed mobile redesign
@@ -1472,6 +1520,32 @@ Captured native windows and the Android login screen were visually checked.
   9, and the signing identity is unchanged. The desktop stays at published
   0.20.2. See docs/releases/0.20.3.md for validation and publication.
 
+## 2026-10-19 - Selected references and temporary side chats
+
+- Add modular selection, reference-draft, and WorkPanel side-chat UI; keep
+  Composer operations bound to the target session instead of global focus.
+- Carry shared MessageQuote metadata through ordinary, queued, steered and
+  edited prompts, transcript storage and unanswered-stop draft restoration.
+- Host schema 26 owns unique temporary parent/child identities and excludes
+  them from history/search/mobile. Runtime inherits effective context only in
+  memory and persists only new child records; Electron recycles child files.
+- Test real local-provider Electron paths, shared-directory writes/approval,
+  concurrent main/side execution, stop/resend and lifecycle cleanup.
+- Preserve child entry IDs and memory-only compaction when configuration
+  recreates a runtime, so earlier referenced messages remain editable.
+- Cancel all Host-tool permission waits on close, including Write/Edit;
+  real Electron coverage verifies no pending write runs and delegates settle.
+- Validate immediate steering, queued reference delivery, independent model
+  and reasoning selection, and edit/regenerate after a completed Plan turn.
+- Keep side tab/close controls reachable with a side-specific 360px minimum
+  and narrow overlay; never persist temporary compression as the preferred width.
+- Local acceptance passed with 1466 runtime tests, 71 AgentHost tests, 66
+  Desktop tests, 941 Host tests and the real isolated Electron journey. See
+  docs/selection-side-chat-validation.md for skipped coverage and baseline fmt drift.
+- See docs/spec/04-ux/24-selected-references-and-temporary-side-chat.md for the
+  feature contract and docs/adr/temporary-side-chat-runtime.md for ownership.
+- Local implementation only: no push, merge, installer or server modification.
+
 ## 2026-10-15 - Android 0.20.4: in-app update fixes
 
 - A phone that had downloaded and installed 0.20.2 was offered "Install update"
@@ -1484,3 +1558,29 @@ Captured native windows and the Android login screen were visually checked.
   release cases. It failed on the pre-fix code and passes on the fix.
 - Android-only release; the desktop stays at published 0.20.2. Phones holding a
   stale record need one manual install of 0.20.4. See docs/releases/0.20.4.md.
+
+
+## 2026-10-19 - Combined selection and account preview
+
+The selected-reference/side-chat preview now includes the committed account-benefits feature from f08901a5d. The preview had been built from origin/main without that separate feature branch, so authorization worked but the check-in/subscription controls were absent. Integration preserves both locale namespaces, session-scoped composer behavior and the existing independent test profile. No server implementation or grant changes are included; unavailable endpoints and missing permissions remain explicit.
+
+## 2026-10-19 - Side-chat layout correction
+
+Removed the side-only in-flow composer, forced two-row toolbar and model-label
+overrides. The transcript mask had reserved the composer a second time, hiding
+an extra composer-height strip above the input. Side chats now use the same
+overlay dock, spacing and surface as main chat, with their own measured height.
+Shared container rules keep signed-in quota/context/model/send controls separate
+at narrow widths. Real Electron regressions cover expanded/narrow layouts and
+multiline drafts; browser acceptance compares main/side controls at seven widths
+in both themes. No session lifecycle, storage, permission or server changes.
+
+## 2026-10-19 - Compact selected-text actions and annotations
+
+SelectionActions now uses compact shared ghost buttons without an outer card.
+MessageQuotes shares a borderless disclosure, numbered source tooltip, quote
+rail and accessible close-icon action across main chat, side chat and sent
+messages. Full source identities remain in structured references and tooltips.
+The renderer-only update preserves drafts, sending and temporary-chat lifetime.
+Real Electron coverage checks the appearance, keyboard/source/removal paths,
+narrow panes and both themes; see docs/selection-side-chat-validation.md.

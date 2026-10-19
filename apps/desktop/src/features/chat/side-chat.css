@@ -1,0 +1,36 @@
+.side-chat-pane {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  background: var(--ds-bg-primary);
+  --chat-content-max-width: 760px;
+  --chat-composer-max-width: var(--chat-content-max-width);
+  --chat-prose-max-width: var(--chat-content-max-width);
+  --chat-width-transition: var(--motion-duration-normal) var(--motion-ease-out);
+}
+/* Reuse the main chat's overlay dock and measured transcript reserve together.
+ * An in-flow dock would subtract its height twice through the shared mask.
+ * Toolbar compression also follows the shared composer container queries. */
+.side-chat-pane .minimap-rail {
+  display: none;
+}
+.side-chat-notice {
+  flex: 0 0 auto;
+  padding: 8px 12px;
+  opacity: 0.65;
+}
+.work-panel.is-side-chat-drawer {
+  position: absolute;
+  right: 0;
+  top: 0;
+  bottom: 0;
+  z-index: 30;
+  box-shadow: var(--ds-raised-shadow);
+}
+.work-panel.is-side-chat-drawer .work-panel-resize {
+  display: none;
+}

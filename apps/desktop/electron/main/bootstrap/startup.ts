@@ -346,6 +346,7 @@ export function registerApplicationStartup(deps: StartupDependencies): void {
       applyToggleWindowShortcut();
     }
     if (host && !bootError) {
+      await clearStaleSideChats(host);
       await deps.mirrorCoding.start();
       await deps.mobileSync?.start();
     }
@@ -525,3 +526,4 @@ export function registerApplicationStartup(deps: StartupDependencies): void {
     }
   });
 }
+import { clearStaleSideChats } from "../services/side-chats";

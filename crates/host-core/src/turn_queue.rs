@@ -38,6 +38,7 @@ pub struct QueuedTurnInput {
     pub user_message_id: Option<String>,
     pub voice_origin: Option<VoiceOrigin>,
     pub attachments: Option<Value>,
+    pub quotes: Option<Vec<crate::sessions::MessageQuote>>,
     pub permission_mode: String,
 }
 
@@ -59,6 +60,7 @@ pub struct QueuedTurn {
     pub voice_origin: Option<VoiceOrigin>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub attachments: Option<Value>,
+    pub quotes: Option<Vec<crate::sessions::MessageQuote>>,
     pub permission_mode: String,
     pub position: i64,
     /// Set once the entry is promoted ("send now"). The value is the entry's
@@ -72,6 +74,18 @@ pub struct QueuedTurn {
 fn row_to_entry(row: &rusqlite::Row<'_>) -> rusqlite::Result<QueuedTurn> {
     let attachments: Option<String> = row.get(6)?;
     let voice_origin_json: Option<String> = row.get(13)?;
+    let quotes = row
+        .get::<_, Option<String>>(14)?
+        .map(|value| {
+            serde_json::from_str(&value).map_err(|error| {
+                rusqlite::Error::FromSqlConversionFailure(
+                    14,
+                    rusqlite::types::Type::Text,
+                    Box::new(error),
+                )
+            })
+        })
+        .transpose()?;
     let voice_origin = voice_origin_json
         .map(|value| {
             serde_json::from_str(&value).map_err(|error| {
@@ -97,13 +111,14 @@ fn row_to_entry(row: &rusqlite::Row<'_>) -> rusqlite::Result<QueuedTurn> {
         priority: row.get(11)?,
         user_message_id: row.get(12)?,
         voice_origin,
+        quotes,
         created_at: ms_to_ts(row.get::<_, i64>(9)?),
     })
 }
 
 const SELECT: &str = "SELECT id, session_id, principal, idempotency_key, input_hash, content,
         attachments_json, permission_mode, position, created_at, session_message_id, priority,
-        user_message_id, voice_origin_json
+        user_message_id, voice_origin_json, quotes_json
  FROM turn_queue";
 
 /// Delivery order: promoted entries first in click order (ascending
@@ -114,6 +129,15 @@ const ORDER_BY: &str = "ORDER BY (priority IS NULL) ASC, priority ASC, position 
 /// the existing entry when the input hash matches and fails with
 /// `IDEMPOTENCY_CONFLICT` otherwise; a full queue fails with `QUEUE_FULL`.
 pub fn push(db: &Database, input: QueuedTurnInput) -> Result<QueuedTurn> {
+    if input.quotes.as_ref().is_some_and(|quotes| {
+        quotes.iter().any(|q| {
+            q.session_id.trim().is_empty()
+                || q.message_id.trim().is_empty()
+                || q.text.trim().is_empty()
+        })
+    }) {
+        return Err(anyhow!("INVALID_ARGUMENT: invalid message quotes"));
+    }
     if let Some(origin) = &input.voice_origin {
         if origin.call_id.trim().is_empty()
             || origin.call_id.len() > 128
@@ -183,8 +207,8 @@ pub fn push(db: &Database, input: QueuedTurnInput) -> Result<QueuedTurn> {
         "INSERT INTO turn_queue (
             id, session_id, principal, idempotency_key, input_hash, content,
             attachments_json, permission_mode, position, created_at, session_message_id,
-            user_message_id, voice_origin_json
-         ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)",
+            user_message_id, voice_origin_json, quotes_json
+         ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)",
         params![
             id,
             input.session_id,
@@ -198,7 +222,12 @@ pub fn push(db: &Database, input: QueuedTurnInput) -> Result<QueuedTurn> {
             created_at,
             input.session_message_id,
             input.user_message_id,
-            voice_origin_json
+            voice_origin_json,
+            input
+                .quotes
+                .as_ref()
+                .map(serde_json::to_string)
+                .transpose()?
         ],
     )?;
     tx.commit()?;
@@ -212,6 +241,7 @@ pub fn push(db: &Database, input: QueuedTurnInput) -> Result<QueuedTurn> {
         session_message_id: input.session_message_id,
         user_message_id: input.user_message_id,
         voice_origin: input.voice_origin,
+        quotes: input.quotes,
         attachments: input.attachments,
         permission_mode: input.permission_mode,
         position: max_position + 1,
@@ -230,7 +260,7 @@ pub fn list(db: &Database, session_id: Option<&str>) -> Result<Vec<QueuedTurn>> 
             .query_map(params![session_id], row_to_entry)?
             .collect::<rusqlite::Result<Vec<_>>>()?,
         None => conn
-            .prepare_cached(&format!("{SELECT} ORDER BY session_id ASC, (priority IS NULL) ASC, priority ASC, position ASC"))?
+            .prepare_cached(&format!("{SELECT} WHERE session_id NOT LIKE 'side-%' ORDER BY session_id ASC, (priority IS NULL) ASC, priority ASC, position ASC"))?
             .query_map([], row_to_entry)?
             .collect::<rusqlite::Result<Vec<_>>>()?,
     };
@@ -386,6 +416,7 @@ mod tests {
             session_message_id: None,
             user_message_id: None,
             voice_origin: None,
+            quotes: None,
             attachments: None,
             permission_mode: "ask".into(),
         }
@@ -570,7 +601,7 @@ mod tests {
             assert_eq!(entries[0].content, "existing");
             assert_eq!(entries[0].user_message_id.as_deref(), mobile_message_id);
             assert!(entries[0].voice_origin.is_none());
-            assert_eq!(crate::db::SCHEMA_VERSION, 25);
+            assert_eq!(crate::db::SCHEMA_VERSION, 26);
         }
     }
 

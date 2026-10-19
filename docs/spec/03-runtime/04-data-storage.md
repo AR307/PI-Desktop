@@ -92,9 +92,12 @@ are rejected. The stable installation lock prevents competing managed launches.
 Filesystem maintenance uses Electron's `original-fs`: archives such as `app.asar`
 inside session scratch or downloaded applications remain physical files, not
 virtual directories. Their bytes and adjacent `.asar.unpacked` directories migrate
-unchanged. Windows link types are read from the link's own filesystem attributes
-in one batch, not by following its target; dangling directory/file links remain
-links, and internal targets are relocated without requiring them to exist.
+unchanged. Windows links are classified in one batch by their reparse-point
+kind, preserving junctions as junctions and symbolic links as symbolic links.
+For a symbolic link whose target exists, the target's kind determines whether
+it is recreated as a directory or file link; for dangling or unavailable
+targets, the link's own directory attribute determines that type. Internal
+targets are relocated without requiring them to exist.
 Windows absolute link targets are lexically normalized before creation and
 verification, so trailing separators from junctions do not cause false failures. Copy
 failures include the source and destination paths in the existing local error
@@ -125,6 +128,17 @@ atomically replaced. Errors keep the old profile active and visible in settings;
 retrying the same destination uses the failed job's ownership identity. A crash
 before publication leaves pending work to recopy from the source. An unavailable
 selected volume refuses startup rather than creating a blank profile elsewhere.
+If the managed installation's default data root is missing, startup pauses before
+loading app services and offers two recovery choices: create a fresh default data
+root or select an existing PI-Desktop storage root. The selected location must
+contain `data/pi.sqlite` or be the data directory containing `pi.sqlite`; its
+pointer is written only after validation. A sibling `browser/` directory is used
+when present, otherwise the installation's current browser root is retained.
+Dismissal exits without changing the pointer or creating a profile. Missing custom
+roots and pending cache/backup maintenance continue to refuse startup. A queued
+migration may resume with an absent default data root only when its browser root
+still exists, preserving first-install migration. An explicit `PI_DESKTOP_DATA_DIR`
+remains outside this recovery flow.
 Original directories remain explicit backups. Deleting these requires a separate
 settings confirmation after checking new-location functionality, including plugins
 that may own absolute references the host cannot safely rewrite. Backup cleanup
@@ -396,9 +410,13 @@ CREATE TABLE kv (
 | `plugin:<id>` | per-plugin settings; uninstall = `DELETE WHERE ns = ?` |
 | `projectMemory` | durable user-authored context keyed by canonical project path; structured values contain `format: "entries-v1"`, visual `entries`, derived `content`, and `updatedAt` |
 
-The app settings JSON optionally stores `thinkingDisplayMode` (`detailed` or
-`compact`). Missing values retain detailed presentation. This additive display
-preference neither rewrites stored reasoning nor changes the database schema.
+The app settings JSON optionally stores `showThinking` (boolean) for transcript
+reasoning visibility. It is a portable application preference and synchronizes
+across devices like the legacy field. Missing values fall back to the legacy
+`thinkingDisplayMode` field (`compact` hides, `detailed`/unknown/absent shows),
+which is retained only for persisted-settings compatibility and as that
+fallback. These additive display preferences neither rewrite stored reasoning
+nor change the database schema.
 
 The settings blob may still contain legacy prompt-enhancement keys from an
 earlier release. They are retained for rollback and downgrade compatibility,

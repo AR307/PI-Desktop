@@ -1,7 +1,7 @@
 use crate::{db::Database, sessions};
 use anyhow::{anyhow, Result};
 
-pub(super) fn effective_mode(db: &Database, session_id: &str) -> Result<String> {
+pub(crate) fn effective_mode(db: &Database, session_id: &str) -> Result<String> {
     let mode = sessions::session_permission_mode(db, session_id)?
         .ok_or_else(|| anyhow!("NOT_FOUND: session {session_id}"))?;
     if mode != "inherit" {

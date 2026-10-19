@@ -91,7 +91,10 @@ describe("DeepSeek reasoning replay", () => {
     );
     expect(
       deepseekRequestCompat({ baseUrl: "https://api.deepseek.com" }),
-    ).toEqual({ requiresReasoningContentOnAssistantMessages: true });
+    ).toEqual({
+      requiresReasoningContentOnAssistantMessages: true,
+      supportsReasoningEffort: false,
+    });
   });
 
   it("matches aggregator and custom DeepSeek-family models without a deepseek.com URL", () => {
@@ -103,6 +106,7 @@ describe("DeepSeek reasoning replay", () => {
       }),
     ).toEqual({
       requiresReasoningContentOnAssistantMessages: true,
+      supportsReasoningEffort: false,
       requiresNonEmptyReasoningReplay: true,
     });
     expect(DEEPSEEK_REASONING_REPLAY_PLACEHOLDER.length).toBeGreaterThan(0);
@@ -182,12 +186,15 @@ describe("named endpoint presets", () => {
     });
   });
 
-  it("keeps StepFun Plan on its subscription endpoint and catalog vendor", () => {
+  it("keeps StepFun Plan on its subscription endpoint, catalog vendor and model-list auth", () => {
     const expected = {
       id: "stepfun-plan",
       vendorKey: "stepfun-step-plan",
       baseUrl: "https://api.stepfun.com/step_plan/v1",
       apiStyle: "anthropic_messages",
+      /* Chat is Anthropic Messages; this deployment publishes its models the
+         OpenAI way, so the endpoint states that instead of it being derived. */
+      discoveryStyle: "openai_models",
     };
     expect(NAMED_ENDPOINT_PRESETS.find((preset) => preset.id === expected.id)).toMatchObject(expected);
     expect(matchNamedPreset({ vendorKey: expected.vendorKey })).toMatchObject(expected);

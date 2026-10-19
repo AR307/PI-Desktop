@@ -7,6 +7,8 @@
  * - `attachment`: a file the plugin staged, owned by it for `attachments.*`.
  * Parts are immutable; a change is a new object.
  */
+import type { MessageQuote } from "@pi-desktop/shared";
+
 export type ComposerPluginPart =
   | { readonly kind: "mark"; readonly pluginId: string; readonly send: string }
   | {
@@ -35,6 +37,7 @@ export type ComposerDraftFileReference = {
 export type ComposerDraftSnapshot = {
   text: string;
   fileReferences: ComposerDraftFileReference[];
+  quotes?: MessageQuote[];
 };
 
 export type ComposerPrefill = ComposerDraftSnapshot & {
@@ -44,6 +47,7 @@ export type ComposerPrefill = ComposerDraftSnapshot & {
 type AbortMessage = {
   role: string;
   content: string;
+  quotes?: MessageQuote[];
   thinking?: string;
   steering?: boolean;
 };
@@ -89,6 +93,9 @@ export function resolveComposerSmartStop<T extends AbortMessage>(
     draft: submitted?.draft ?? {
       text: lastUserIndex >= 0 ? messages[lastUserIndex].content : "",
       fileReferences: [],
+      ...(lastUserIndex >= 0 && messages[lastUserIndex].quotes?.length
+        ? { quotes: messages[lastUserIndex].quotes }
+        : {}),
     },
   };
 }

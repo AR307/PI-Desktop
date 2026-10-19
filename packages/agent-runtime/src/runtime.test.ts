@@ -1529,6 +1529,34 @@ describe("DesktopAgentRuntime configuration matching", () => {
     await runtime.dispose();
   });
 
+  it("opts into background Bash without changing foreground timeout forwarding", async () => {
+    const host = { call: vi.fn().mockResolvedValue({ ok: true, content: "done" }) };
+    const runtime = createRuntime({ host });
+    const agent = Reflect.get(runtime, "agent") as Agent;
+    const bash = agent.state.tools.find((tool) => tool.name === "Bash");
+    if (!bash) throw new Error("Bash tool is missing");
+    try {
+      await bash.execute("background", { command: "npm run dev", runInBackground: true });
+      expect(host.call).toHaveBeenLastCalledWith("tools.execute", expect.objectContaining({
+        toolName: "Bash",
+        timeoutMs: 60_000,
+        runInBackground: true,
+        args: { command: "npm run dev", runInBackground: true },
+      }));
+      for (const args of [
+        { command: "printf foreground" },
+        { command: "printf foreground", runInBackground: false },
+      ]) {
+        await bash.execute("foreground", args);
+        const request = host.call.mock.calls.at(-1)?.[1];
+        expect(request).toMatchObject({ toolName: "Bash", timeoutMs: 60_000 });
+        expect(request).not.toHaveProperty("runInBackground");
+      }
+    } finally {
+      await runtime.dispose();
+    }
+  });
+
   it("reads a millisecond Bash timeout as seconds and clamps it to the ceiling", async () => {
     const host = {
       call: vi.fn().mockResolvedValue({ ok: true, content: "done" }),

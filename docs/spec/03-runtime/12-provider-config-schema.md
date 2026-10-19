@@ -452,6 +452,17 @@ Step 5 Preview capabilities come from the bundled first-party models.dev
 record; no supplemental catalog or hard-coded limits are needed. The ordinary
 StepFun API and existing custom-provider rows retain their configuration.
 
+Its model list is asked differently from its chat route: this deployment
+publishes `GET /step_plan/v1/models` to `Authorization: Bearer`, so the preset
+declares `discoveryStyle: "openai_models"` — a declared model-list style, not
+one derived from `anthropic_messages`. Chat stays on Anthropic Messages while
+the model-list probe and the connection test both send a Bearer token.
+
+A declared style is a statement about the endpoint, not about one spelling of
+it: it holds for the base URL and for a URL pasted with an operation suffix
+(`/models`, `/messages`), which is stripped before resolution. Pasting back the
+address the settings dialog itself offered therefore keeps the same model-list
+authentication.
 
 Zhipu / Z.AI Completions requests still receive `thinkingFormat: "zai"` and
 `zaiToolStream: true`. pi-ai `zai-coding-cn` remains an alias of
@@ -770,11 +781,13 @@ registry's `/api/paas/v4` sibling. The only generic extra path is `/v1` for an
 unknown OpenAI-compatible endpoint. Every published model-list shape is read —
 `data[].id`, Google's `models[].name`, and the `models[].slug` rows Zhipu's
 OpenAI Responses endpoint returns — so an endpoint that answers is never treated
-as empty. Connection testing reuses
-the same request builder, so "the model list loaded" and "the connection test
-passed" always describe the same URL, auth header and format. Anthropic-style
-endpoints that return 404 because they intentionally publish no model list may
-instead pass connection testing through a same-origin `OPTIONS /v1/messages`
+as empty. Connection testing reuses the same request builder, so "the model list
+loaded" and "the connection test passed" always describe the same URL, auth
+header and format — including a deployment whose model list authenticates
+differently from its chat route, where the endpoint's declared model-list style
+is what both surfaces use. Anthropic-style endpoints that return 404 because
+they intentionally publish no model list may instead pass connection testing
+through a same-origin `OPTIONS /v1/messages`
 route probe; this proves reachability without sending credentials or a billable
 model request, while model IDs remain manual.
 

@@ -173,7 +173,7 @@ export function createSessionSlice({
   const refreshSessionList = createRefreshCoordinator(async () => {
     const result = await api.listSessions();
     set((state) => {
-      const next = result.sessions.map(safeSessionSummary);
+      const next = [...result.sessions.map(safeSessionSummary), ...state.sessions.filter((session) => session.sideChatParentId)];
       const active = state.sessions.find((session) => session.id === state.activeSessionId);
       // A disconnected host may temporarily disappear from inventory; keep the
       // active identity fail-closed until an authoritative detail/list replaces it.
@@ -778,8 +778,8 @@ export function createSessionSlice({
       }
     },
 
-    configureActiveSession: async (config) => {
-      const sessionId = get().activeSessionId;
+    configureActiveSession: async (config, targetSessionId) => {
+      const sessionId = targetSessionId ?? get().activeSessionId;
       if (!sessionId) {
         set((state) => ({
           draftConfiguration: {
@@ -804,6 +804,8 @@ export function createSessionSlice({
           session.id === sessionId
             ? {
                 ...result.session,
+                sideChatParentId: session.sideChatParentId,
+                sideChatWorkspacePath: session.sideChatWorkspacePath,
                 pinned: sessionIsPinned(sessionId, state.sessionMeta),
                 archived: sessionIsArchived(sessionId, state.sessionMeta),
               }

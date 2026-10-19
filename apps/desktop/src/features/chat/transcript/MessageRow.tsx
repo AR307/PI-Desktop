@@ -1,3 +1,4 @@
+import { MessageQuotes } from "../MessageQuotes";
 import {
   memo,
   useMemo,
@@ -86,12 +87,13 @@ export const MessageRow = memo(function MessageRow({
   const deleteMessage = useAppStore((s) => s.deleteMessage);
   const paneSessionId = useSlotSessionId();
   const session = useAppStore((s) => s.sessions.find((item) => item.id === paneSessionId));
+  const isSideChat = paneSessionId.startsWith("side-");
   const canEditMessages = sessionAllows(session ?? (paneSessionId.startsWith("remote:") ? { id: paneSessionId } : undefined), "canEditMessages");
   const isUser = message.role === "user";
   const isSessionMessage = Boolean(message.sessionMessage);
   const editableUserMessage = isUser && !isSessionMessage && canEditMessages;
   const localWorkspaceRoot = useAppStore((s) => s.workspace?.path);
-  const workspaceRoot = sessionAllows(session, "canUseLocalTools") ? localWorkspaceRoot : undefined;
+  const workspaceRoot = sessionAllows(session, "canUseLocalTools") ? session?.sideChatWorkspacePath ?? localWorkspaceRoot : undefined;
   const openFileRef = useOpenChatFileRef();
   // userAction belongs to user cards; other rows keep a plugin-free bar.
   const slotUser = isUser ? slotMessage("user", message) : undefined;
@@ -114,7 +116,7 @@ export const MessageRow = memo(function MessageRow({
   const hasAnswer = Boolean((message.content || "").trim());
   const revisionCount = message.revisionCount ?? 0;
   const activeRevision = message.activeRevision ?? revisionCount;
-  const showRevisionPager = editableUserMessage && revisionCount > 1;
+  const showRevisionPager = editableUserMessage && !isSideChat && revisionCount > 1;
   const extraAttachments = useMemo(() => {
     return getExtraMessageAttachments(
       String(message.content || ""),
@@ -193,7 +195,7 @@ export const MessageRow = memo(function MessageRow({
       if (editRequest.current === request) setLoadingEdit(false);
     }, { once: true });
     try {
-      const full = await prepareUserMessageEdit(message.id, request.signal);
+      const full = await prepareUserMessageEdit(message.id, request.signal, paneSessionId);
       if (!full || request.signal.aborted || editRequest.current !== request) return;
       setEditValue(full.command || full.content || "");
       setEditing(true);
@@ -211,9 +213,9 @@ export const MessageRow = memo(function MessageRow({
   };
   const retryEdit = async () => {
     const next = editValue.trim();
-    if (!editableUserMessage || retryingEdit || (!next && !message.attachments?.length)) return;
+    if (!editableUserMessage || retryingEdit || (!next && !message.attachments?.length && !message.quotes?.length)) return;
     setRetryingEdit(true);
-    const saved = await editUserMessage(message.id, next, message.attachments);
+    const saved = await editUserMessage(message.id, next, message.attachments, paneSessionId);
     setRetryingEdit(false);
     if (saved) setEditing(false);
   };
@@ -234,6 +236,7 @@ export const MessageRow = memo(function MessageRow({
           editing ? ".message-edit-input" : ".message-bubble",
         ),
         editable: editableUserMessage && !editing && !loadingEdit,
+        deletable: !isSideChat,
         running: isRunning,
         revision: !editing && showRevisionPager
           ? { count: revisionCount, active: activeRevision }
@@ -302,7 +305,7 @@ export const MessageRow = memo(function MessageRow({
                   <button
                     type="submit"
                     className="send-btn message-edit-submit"
-                    disabled={retryingEdit || (!editValue.trim() && !message.attachments?.length)}
+                    disabled={retryingEdit || (!editValue.trim() && !message.attachments?.length && !message.quotes?.length)}
                   >
                     {retryingEdit ? t("chat.retryingEdit") : t("chat.retryEdit")}
                   </button>
@@ -310,8 +313,9 @@ export const MessageRow = memo(function MessageRow({
               </form>
             ) : isUser ? (
               <>
+                <MessageQuotes quotes={message.quotes} />
                 {message.content ? (
-                  <div className="message-user-text selectable">
+                  <div className="message-user-text selectable" data-quote-body={message.id}>
                     {editableUserMessage && message.command ? (
                       <>
                         {message.skillMentions?.length ? (
@@ -398,7 +402,7 @@ export const MessageRow = memo(function MessageRow({
                 <IconPencil size={13} />
               </TooltipButton>
             ) : null}
-            {editableUserMessage ? (
+            {editableUserMessage && !isSideChat ? (
               <TooltipButton
                 className="copy-btn icon danger"
                 tooltip={deleteLabel}

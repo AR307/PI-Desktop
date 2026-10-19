@@ -1,3 +1,5 @@
+import type { AgentMessage } from "@earendil-works/pi-agent-core";
+import type { SideChatRuntimeState } from "./side-chat-context.js";
 import { ImageTasks, type ImageTask } from "./images.js";
 import { parseMcpServerIds, parseMcpToolNames } from "./mcp-tool-selection.js";
 /**
@@ -177,6 +179,8 @@ function respond(id: string | number, result?: unknown, error?: unknown) {
 async function runtimeFor(
   params: RuntimeParams,
   currentPrompt?: string,
+  initialContext?: AgentMessage[],
+  strictHistory = false,
 ): Promise<DesktopAgentRuntime> {
   const sessionId = String(params.sessionId);
   const mode = normalizeMode(params.mode);
@@ -247,8 +251,10 @@ async function runtimeFor(
   };
   const reusable = existing?.matches(nextConfiguration) || existing?.canRebindTurn(nextConfiguration)
     ? existing : undefined;
+  let sideChatState: SideChatRuntimeState | undefined;
   if (existing && !reusable) {
     await existing.dispose();
+    if (sessionId.startsWith("side-")) sideChatState = existing.takeSideChatState();
     runtimes.delete(sessionId);
   }
   if (reusable) {
@@ -261,6 +267,7 @@ async function runtimeFor(
     return reusable;
   }
 
+  if (sessionId.startsWith("side-") && !initialContext && !sideChatState) throw new Error("Side chat context was lost; close and reopen this side chat");
   let history: UiMessage[] = [];
   let compaction: ContextCompactionRecord | undefined;
   try {
@@ -270,6 +277,7 @@ async function runtimeFor(
         compaction?: ContextCompactionRecord;
       } | null;
     }>("session.get", { id: sessionId });
+    if (strictHistory && !detail?.session) throw new Error("Parent conversation context is unavailable");
     let restoredMessages = detail?.session?.messages ?? [];
     // The current prompt is sent separately below. Exclude its persisted row
     // before attachment hydration so it cannot consume the history byte budget.
@@ -286,7 +294,8 @@ async function runtimeFor(
       supportsVision,
     });
     compaction = detail?.session?.compaction;
-  } catch {
+  } catch (error) {
+    if (sessionId.startsWith("side-") || strictHistory) throw error;
     // History restore is best-effort; a prompt can still start cleanly.
   }
   // Older callers without a stable message id retain the previous content match.
@@ -308,7 +317,9 @@ async function runtimeFor(
     infiniteProviderRetry: params.infiniteProviderRetry === true,
     jevApiKey: params.jevApiKey,
     history,
-    compaction,
+    initialContext,
+    sideChatState,
+    compaction: initialContext || sideChatState ? undefined : compaction,
     compactionSettings: params.compactionSettings,
     pluginTools,
     pluginSkills,
@@ -611,6 +622,29 @@ async function handle(method: string, params: any): Promise<unknown> {
           pendingToolConfirmations: 0,
         },
       };
+    }
+    case "agent.openSideChat": {
+      const request = params as { parent: RuntimeParams; child: RuntimeParams };
+      if (runtimes.has(request.child.sessionId)) return { ok: true };
+      const existingParent = runtimes.get(request.parent.sessionId);
+      const parent = existingParent ?? await runtimeFor(request.parent, undefined, undefined, true);
+      try {
+        const context = parent.sideChatContext();
+        await runtimeFor(request.child, undefined, context);
+      } finally {
+        // A cold parent is only a context builder, not another permanent cache.
+        if (!existingParent) {
+          await parent.dispose();
+          runtimes.delete(request.parent.sessionId);
+        }
+      }
+      return { ok: true };
+    }
+    case "agent.rewindSideChat": {
+      const runtime = runtimes.get(String(params.sessionId));
+      if (!runtime) throw new Error("Side chat context is unavailable");
+      runtime.rewindSideChat(String(params.userMessageId));
+      return { ok: true };
     }
     case "agent.disposeSession": {
       const sessionId = String(params.sessionId);

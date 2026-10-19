@@ -1,3 +1,5 @@
+import { sideChatContext, type SideChatRuntimeState } from "./side-chat-context.js";
+import { promptWithQuotes } from "@pi-desktop/shared";
 import { returnToParent } from "./return-to-parent.js";
 import { highestThinkingLevel, isReturnToParent } from "@pi-desktop/shared";
 import { delegationGuidance, delegationHandoffGuidance, delegationSystemPrompt, resolveDelegationThinking, shouldHandOffDelegations } from "./ultra-policy.js";
@@ -1022,6 +1024,8 @@ export type AgentRuntimeOptions = {
   /** Persisted transcript to seed the agent with (session isolation: each
    * session's agent carries only its own history). */
   history?: UiMessage[];
+  initialContext?: AgentMessage[];
+  sideChatState?: SideChatRuntimeState;
   /** Latest host-owned checkpoint used only to rebuild model context. */
   compaction?: ContextCompactionRecord;
   compactionSettings?: ContextCompactionSettings;
@@ -1351,6 +1355,7 @@ function commandShellToolDescription(
     shellSyntaxGuidance(shell),
     `The session scratch directory variable is ${shellScratchVariable(shell)}.`,
     `An optional timeout from 1 to ${MAX_COMMAND_TIMEOUT_SECONDS} seconds may be supplied; without it, the command defaults to a 60-second timeout.`,
+    `Set runInBackground: true for long-lived processes the user needs after the turn ends (dev servers, watchers, builds). A background call returns a backgroundTaskId immediately, survives turn aborts and timeouts, and its output is visible in the composer's running-tasks bar; do not set it for commands whose output the current turn depends on.`,
     ...(formattedScratch ? [`The session scratch directory is ${formattedScratch}.`] : []),
   ].join(" ");
 }
@@ -2101,8 +2106,14 @@ export class DesktopAgentRuntime {
     this.models = models;
 
     this.transcriptHistory = [...(opts.history ?? [])];
-    this.fullEntries = this.historyToEntries(this.transcriptHistory);
-    this.activeCompaction = opts.compaction;
+    this.fullEntries = opts.sideChatState?.entries ?? (opts.initialContext ? opts.initialContext.map((message, index) => ({
+      type: "message" as const, id: "inherited-" + index, seq: index, parentId: index ? "inherited-" + (index - 1) : null, timestamp: timestampMs(message.timestamp), message,
+    })) : this.historyToEntries(this.transcriptHistory));
+    // Inherited system declarations are context only, not new child records.
+    if (opts.initialContext || opts.sideChatState) {
+      for (const entry of this.fullEntries) this.systemJournal.remember(entry.message, entry.id);
+    }
+    this.activeCompaction = opts.sideChatState?.compaction ?? opts.compaction;
     this.delegationChains.hydrate(
       rebuildChainsFromTranscript(this.transcriptHistory),
     );
@@ -3151,11 +3162,11 @@ export class DesktopAgentRuntime {
           ),
         );
         const content = promptContent({
-          text: m.sessionMessage ? formatSessionMessage(m.content, m.sessionMessage) : m.content,
+          text: promptWithQuotes(m.sessionMessage ? formatSessionMessage(m.content, m.sessionMessage) : m.content, m.quotes),
           attachments,
         });
         if (
-          !(m.content || "").trim() &&
+          !(m.content || "").trim() && !m.quotes?.length &&
           !attachments.some((attachment) => attachment.data)
         ) {
           continue;
@@ -3474,6 +3485,12 @@ export class DesktopAgentRuntime {
               `Optional command timeout in seconds from 1 to ${MAX_COMMAND_TIMEOUT_SECONDS}; defaults to 60 seconds.`,
           }),
         ),
+        runInBackground: Type.Optional(
+          Type.Boolean({
+            description:
+              "Start the command as a background task that outlives the turn (dev servers, watchers, builds). Returns backgroundTaskId immediately; ignored with timeout.",
+          }),
+        ),
       },
       PluginScaffold: {
         template: Type.String(),
@@ -3546,7 +3563,9 @@ export class DesktopAgentRuntime {
             })
           : undefined;
         const abort = () => {
-          if ((!isBash && toolName !== "GenerateImages" && toolName !== "GenerateImage") || abortRequested || settled) return;
+          // Every host tool may be waiting for approval, including Write/Edit.
+          // Cancel that waiter before disposal waits for the turn to settle.
+          if (abortRequested || settled) return;
           abortRequested = true;
           abortPromise = this.host
             .call("tools.abort", {
@@ -3611,6 +3630,9 @@ export class DesktopAgentRuntime {
                     expectedCommandShellId: this.commandShell.id,
                     expectedCommandShellDialect: this.commandShell.dialect,
                     timeoutMs,
+                    ...(isRecord(params) && params.runInBackground === true
+                      ? { runInBackground: true }
+                      : {}),
                   }
                 : {}),
               ...(toolName.startsWith("plugin_")
@@ -7305,6 +7327,38 @@ export class DesktopAgentRuntime {
     };
   }
 
+  sideChatContext(): AgentMessage[] {
+    return sideChatContext(this.liveSessionContext().messages);
+  }
+
+  /** Move the existing buffers after disposal; preserve child IDs and compaction. */
+  takeSideChatState(): SideChatRuntimeState {
+    if (!this.disposed || !this.sessionId.startsWith("side-")) {
+      throw new Error("Only a disposed side chat can transfer its context");
+    }
+    const state = { entries: this.fullEntries, compaction: this.activeCompaction };
+    this.fullEntries = [];
+    this.activeCompaction = undefined;
+    return state;
+  }
+
+  /** Rewind a child edit, retry or unanswered stop without dropping inherited context. */
+  rewindSideChat(userMessageId: string): void {
+    this.assertNotRunning();
+    if (!this.sessionId.startsWith("side-")) throw new Error("Not a temporary side chat");
+    const index = this.fullEntries.findIndex((entry) => entry.id === userMessageId && entry.message.role === "user");
+    if (index < 0) throw new Error("Side chat turn is no longer available to restore");
+    this.fullEntries = this.fullEntries.slice(0, index);
+    if (this.activeCompaction && !this.fullEntries.some((entry) => entry.id === this.activeCompaction?.throughMessageId)) {
+      this.activeCompaction = undefined;
+    }
+    const keptHistory = this.transcriptHistory.filter((message) => this.fullEntries.some((entry) => entry.id === message.id));
+    this.transcriptHistory.splice(0, this.transcriptHistory.length, ...keptHistory);
+    this.currentAssistant = undefined;
+    this.pendingUserMessageId = undefined;
+    this.setAgentMessages(this.liveSessionContext().messages);
+  }
+
   private liveSessionContext(
     checkpoint: ContextCompactionRecord | undefined = this.activeCompaction,
   ): { messages: AgentMessage[] } {
@@ -7605,7 +7659,8 @@ export class DesktopAgentRuntime {
       return "oversized";
     }
     try {
-      await this.host.call("session.appendCompaction", {
+      // Side context may summarize inherited parent material; keep it in memory.
+      if (!this.sessionId.startsWith("side-")) await this.host.call("session.appendCompaction", {
         sessionId: this.sessionId,
         compaction: checkpoint,
       });
@@ -9446,6 +9501,9 @@ export class DesktopAgentRuntime {
 
   async dispose(): Promise<void> {
     if (this.disposed) return;
+    const settlements = this.sessionId.startsWith("side-")
+      ? [...this.activeTurnSettlements.values(), ...this.runningDelegations().map((record) => record.completion)]
+      : [];
     const runner = this.extensionRunner;
     this.extensionRunner = undefined;
     const closingExtensions = runner?.dispose();
@@ -9476,5 +9534,6 @@ export class DesktopAgentRuntime {
     if (this.compactionInProgress) this.compactionAborted = true;
     this.compactionAbort?.abort();
     await closingExtensions;
+    await Promise.all(settlements);
   }
 }

@@ -16,6 +16,16 @@ const store = await readStoreSource();
 const empty = { retainedSessionIds: [], retainedTranscripts: {} };
 const say = (id) => [{ id: `${id}-1`, role: "user", content: id }];
 
+test("switching projects hides ordinary panes without dropping a running side chat", () => {
+  const side = say("side-one");
+  const state = { retainedSessionIds: ["parent"], retainedTranscripts: { parent: say("parent"), "side-one": side } };
+  const cleared = clearSessionPanes(state);
+  assert.deepEqual(cleared.retainedSessionIds, []);
+  assert.deepEqual(Object.keys(cleared.retainedTranscripts), ["side-one"]);
+  assert.strictEqual(retainSessionPane(cleared, "next", say("next")).retainedTranscripts["side-one"], side);
+  assert.deepEqual(releaseSessionPane(cleared, "side-one").retainedTranscripts, {});
+});
+
 function visit(state, ids) {
   return ids.reduce(
     (current, id) => retainSessionPane(current, id, say(id)),
@@ -95,7 +105,7 @@ test("the store drops panes wherever it clears the active session", () => {
     store.match(
       /activeSessionId: undefined,(?:\n\s*(?:draftConfiguration: null|selectingSessionId: undefined),)*\n\s*messages: \[\],/g,
     ) ?? [];
-  const releasing = store.match(/\.\.\.clearSessionPanes\(\),/g) ?? [];
+  const releasing = store.match(/\.\.\.clearSessionPanes\([^\n]*\),/g) ?? [];
   assert.equal(
     releasing.length,
     clearing.length,

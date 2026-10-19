@@ -72,11 +72,6 @@ export type ComposerFileReference = {
 
 export type ComposerMenuView = "root" | "model" | "group";
 
-export function nextMode(mode: Mode): Mode {
-  const index = MODE_CYCLE.indexOf(mode);
-  return MODE_CYCLE[(index + 1) % MODE_CYCLE.length] ?? "agent";
-}
-
 export function isThinkingLevel(value: unknown): value is SessionThinkingLevel {
   return isSessionThinkingLevel(value);
 }

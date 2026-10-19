@@ -1,4 +1,5 @@
 mod config_sync_rpc;
+mod plugin_reviews_rpc;
 mod remote_tools;
 mod scheduled_rpc;
 mod scheduled_tools;
@@ -6,6 +7,9 @@ mod session_sync;
 mod todos;
 mod window_corner_rpc;
 mod worktree_rpc;
+
+#[cfg(test)]
+mod plugin_reviews_rpc_tests;
 
 use std::io::{self, BufRead, BufReader as StdBufReader, Read, Write};
 use std::path::{Path, PathBuf};
@@ -21,6 +25,7 @@ use tokio::sync::{mpsc, oneshot, Mutex, Semaphore};
 use crate::agent_capabilities::CapabilityLevel;
 use crate::artifacts;
 use crate::audit;
+use crate::background_tasks;
 use crate::notifications;
 use crate::permissions::{PermissionDecision, PermissionEvaluationParams, PermissionManager};
 use crate::plans;
@@ -309,6 +314,27 @@ pub async fn serve(state: Arc<Mutex<AppState>>) -> Result<()> {
     // chord. Keep the native fallback beside the host transport so it remains
     // active even when PI-Desktop is unfocused.
     crate::keyboard::start(tx.clone());
+    // Fan background-task state changes out to the renderer. The supervisors
+    // bump a static counter (no AppState lock involved); this loop watches it
+    // and emits `backgroundTasks.changed` so the composer bar stays current.
+    let background_change_task = {
+        let tx = tx.clone();
+        tokio::spawn(async move {
+            let mut seen = background_tasks::change_counter();
+            loop {
+                tokio::time::sleep(std::time::Duration::from_millis(250)).await;
+                let current = background_tasks::change_counter();
+                if current != seen {
+                    seen = current;
+                    send_notification(
+                        &tx,
+                        "backgroundTasks.changed",
+                        json!({ "version": current }),
+                    );
+                }
+            }
+        })
+    };
     let (input_tx, mut input_rx) = mpsc::unbounded_channel::<StdinEvent>();
     let _stdin_reader = match spawn_stdin_reader(input_tx) {
         Ok(handle) => handle,
@@ -459,6 +485,8 @@ pub async fn serve(state: Arc<Mutex<AppState>>) -> Result<()> {
 
     config_sync_scheduler.abort();
     let _ = config_sync_scheduler.await;
+    background_change_task.abort();
+    let _ = background_change_task.await;
     {
         let mut st = state.lock().await;
         st.shutdown();
@@ -519,6 +547,18 @@ fn request_budget_ms(method: &str, params: &Value) -> Option<u64> {
     }
     if !matches!(method, "tools.execute" | "tools.workspaceExecute") {
         return Some(RPC_REQUEST_BUDGET_MS);
+    }
+    // A background Bash call returns as soon as the process is spawned; the
+    // task lives in the registry, not in this request. The sidecar relay must
+    // not budget it like a foreground execution or the turn's abort path
+    // would race the spawn.
+    let run_in_background = params
+        .get("runInBackground")
+        .or_else(|| params.get("run_in_background"))
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
+    if run_in_background {
+        return Some(RPC_REQUEST_BUDGET_MS + RPC_TOOL_BUDGET_GRACE_MS);
     }
     // `ToolsExecuteParams` is `#[serde(rename_all = "camelCase")]`, so the wire
     // carries `toolName` / `timeoutMs`. Reading the snake_case spellings here
@@ -1287,6 +1327,11 @@ fn resolve_tool_workspace(
     state: &AppState,
     session_id: &str,
 ) -> Result<Option<String>, JsonRpcError> {
+    if let Some(path) = crate::side_chats::workspace(&state.db, session_id)
+        .map_err(|e| rpc_err(1000, e.to_string(), "INTERNAL"))?
+    {
+        return Ok(Some(path));
+    }
     match sessions::session_summary(&state.db, session_id) {
         Ok(Some(summary)) => {
             // An isolated session's root is its worktree and never falls back
@@ -1634,6 +1679,10 @@ fn plugin_err(err: impl ToString) -> JsonRpcError {
         rpc_err(1023, msg, "PLUGIN_MARKET_RATE_LIMITED")
     } else if msg.contains("PLUGIN_MARKET_NO_SOURCE") {
         rpc_err(1024, msg, "PLUGIN_MARKET_NO_SOURCE")
+    } else if msg.contains("PLUGIN_MARKET_INVALID") {
+        // The center answered something this client refuses to render, which
+        // is the client's contract violation, not an internal crash.
+        rpc_err(1026, msg, "PLUGIN_MARKET_INVALID")
     } else if msg.contains("PLUGIN_NETWORK") {
         rpc_err(1014, msg, "PLUGIN_NETWORK")
     } else {
@@ -2600,6 +2649,59 @@ async fn handle_request(
                 .ok_or_else(|| rpc_err(1007, "session not found", "NOT_FOUND"))?;
             let session = remote_tools::session_value(&st.db, session)?;
             Ok(json!({ "session": session, "worktree": created }))
+        }
+        "sideChat.open" => {
+            let parent_id = params
+                .get("parentSessionId")
+                .and_then(Value::as_str)
+                .ok_or_else(|| rpc_err(1002, "parentSessionId required", "INVALID_PARAMS"))?;
+            let st = state.lock().await;
+            let workspace = resolve_tool_workspace(&st, parent_id)?
+                .ok_or_else(|| rpc_err(1007, "Workspace unavailable", "NOT_FOUND"))?;
+            let result = crate::side_chats::open(&st.db, parent_id, &workspace)
+                .map_err(|e| rpc_err(1000, e.to_string(), "INTERNAL"))?;
+            Ok(json!(result))
+        }
+        "sideChat.info" => {
+            let id = params
+                .get("sessionId")
+                .and_then(Value::as_str)
+                .ok_or_else(|| rpc_err(1002, "sessionId required", "INVALID_PARAMS"))?;
+            let st = state.lock().await;
+            Ok(
+                json!({ "workspacePath": crate::side_chats::workspace(&st.db, id).map_err(|e| rpc_err(1000, e.to_string(), "INTERNAL"))? }),
+            )
+        }
+        "sideChat.list" => {
+            let st = state.lock().await;
+            Ok(
+                json!({ "ids": crate::side_chats::ids(&st.db).map_err(|e| rpc_err(1000, e.to_string(), "INTERNAL"))? }),
+            )
+        }
+        "sideChat.cleanupPaths" | "sideChat.close" => {
+            let id = params
+                .get("sessionId")
+                .and_then(Value::as_str)
+                .ok_or_else(|| rpc_err(1002, "sessionId required", "INVALID_PARAMS"))?;
+            let st = state.lock().await;
+            if crate::side_chats::workspace(&st.db, id)
+                .map_err(|e| rpc_err(1000, e.to_string(), "INTERNAL"))?
+                .is_none()
+            {
+                return Err(rpc_err(1002, "Not a temporary side chat", "INVALID_PARAMS"));
+            }
+            background_tasks::stop_session_tasks(&st.background_tasks, id)
+                .await
+                .map_err(|e| rpc_err(1000, e, "INTERNAL"))?;
+            if method == "sideChat.cleanupPaths" {
+                Ok(
+                    json!({ "paths": crate::side_chats::cleanup_paths(&st.db, id).map_err(|e| rpc_err(1000, e.to_string(), "INTERNAL"))? }),
+                )
+            } else {
+                crate::side_chats::close(&st.db, id)
+                    .map_err(|e| rpc_err(1000, e.to_string(), "INTERNAL"))?;
+                Ok(json!({ "ok": true }))
+            }
         }
         "session.fork" => {
             let session_id = params
@@ -3812,6 +3914,45 @@ async fn handle_request(
             }
             Ok(json!({ "tools": definitions }))
         }
+        "backgroundTasks.list" => {
+            let st = state.lock().await;
+            Ok(json!({
+                "tasks": st.background_tasks.summaries(),
+                // The change counter is the single version source: supervisors
+                // bump it on every transition and the renderer re-lists on the
+                // matching notification.
+                "version": background_tasks::change_counter(),
+            }))
+        }
+        "backgroundTasks.output" => {
+            let id = params
+                .get("id")
+                .and_then(|v| v.as_str())
+                .ok_or_else(|| rpc_err(1002, "id required", "INVALID_PARAMS"))?;
+            let st = state.lock().await;
+            match background_tasks::task_output(&st.background_tasks, id).await {
+                Ok(Some(output)) => Ok(output),
+                // `NOT_FOUND` is the registered, documented code for an unknown
+                // entity id; a dedicated TASK_NOT_FOUND would be a new contract
+                // (ErrorCodes + 08-error-codes) for no behavioural gain.
+                Ok(None) => Err(rpc_err(1007, "task not found", "NOT_FOUND")),
+                Err(message) => Err(rpc_err(1000, message, "INTERNAL")),
+            }
+        }
+        "backgroundTasks.stop" => {
+            let id = params
+                .get("id")
+                .and_then(|v| v.as_str())
+                .ok_or_else(|| rpc_err(1002, "id required", "INVALID_PARAMS"))?;
+            let st = state.lock().await;
+            // Signalling is enough: the supervisor kills the tree, records the
+            // terminal state, and bumps the change counter, which fans out the
+            // `backgroundTasks.changed` notification for this same task.
+            let found = background_tasks::stop_task(&st.background_tasks, id)
+                .await
+                .map_err(|message| rpc_err(1000, message, "INTERNAL"))?;
+            Ok(json!({ "ok": true, "found": found }))
+        }
         "tools.execute" => {
             let call_started = std::time::Instant::now();
             let p: ToolsExecuteParams = serde_json::from_value(params.clone())
@@ -3885,10 +4026,9 @@ async fn handle_request(
             };
 
             // Register before permission evaluation so tools.abort can cancel
-            // an approval wait as well as an already-spawned process.
-            let cancellation_receiver = if remote_workspace.is_some()
-                || matches!(p.tool_name.as_str(), "Bash" | "GenerateImages")
-            {
+            // Foreground tools, including approval waits, are cancelled with the turn.
+            // Detached background Bash tasks retain their independent lifetime.
+            let cancellation_receiver = if p.tool_name != "Bash" || !p.run_in_background {
                 let mut st = state.lock().await;
                 match st.register_bash_cancellation(&p.session_id, &p.tool_call_id) {
                     Ok(receiver) => Some(receiver),
@@ -3896,7 +4036,7 @@ async fn handle_request(
                         let result = shell_failure_result(
                             &p,
                             &error_code,
-                            "another Bash call is already active for this tool call ID",
+                            "another tool call is already active for this tool call ID",
                             command_shell_id.clone(),
                             call_started,
                         );
@@ -4343,6 +4483,8 @@ async fn handle_request(
                         cancellation,
                         output_tx: Some(tx.clone()),
                         extra_env: worktree_env.clone(),
+                        run_in_background: p.run_in_background,
+                        app_state: Some(state.clone()),
                     });
                 }
 
@@ -5192,6 +5334,9 @@ async fn handle_request(
             crate::network_proxy::set_system_proxy_relay(url)
                 .map_err(|message| rpc_err(1002, message, "INVALID_PARAMS"))?;
             Ok(json!({ "ok": true }))
+        }
+        "market.reviewSummaries" | "market.reviewTickers" | "market.reviews" => {
+            plugin_reviews_rpc::handle(&state, method, params).await
         }
         "market.refresh" => {
             let force = params

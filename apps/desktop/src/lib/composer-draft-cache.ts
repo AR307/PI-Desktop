@@ -95,10 +95,12 @@ export function snapshotComposerDraft(
   fileReferences: readonly ComposerDraftFileInput[],
   key: string,
   workspacePath?: string,
+  quotes?: ComposerDraftSnapshot["quotes"],
 ): CachedComposerDraft {
   const owner = draftOwnerSessionId(key);
   const snapshot: CachedComposerDraft = {
     text,
+    ...(quotes?.length ? { quotes: quotes.map((quote) => ({ ...quote })) } : {}),
     fileReferences: fileReferences
       .filter((fileReference) => (fileReference.sessionId ?? "") === owner)
       .map(draftFileReference),
@@ -136,6 +138,7 @@ export function writeComposerDraft(
   const existing = cache.get(key);
   const next: CachedComposerDraft = {
     ...snapshot,
+    quotes: snapshot.quotes?.map((quote) => ({ ...quote })),
     fileReferences: snapshot.fileReferences.map((reference) => ({ ...reference })),
   };
   if (workspacePath !== undefined) {
@@ -151,8 +154,9 @@ export function captureComposerDraft(
   text: string,
   fileReferences: readonly ComposerDraftFileInput[],
   workspacePath?: string,
+  quotes?: ComposerDraftSnapshot["quotes"],
 ): CachedComposerDraft {
-  const snapshot = snapshotComposerDraft(text, fileReferences, key, workspacePath);
+  const snapshot = snapshotComposerDraft(text, fileReferences, key, workspacePath, quotes);
   cache.set(key, snapshot);
   return snapshot;
 }
@@ -184,7 +188,7 @@ export function adoptHomeDraftForSession(sessionId: string): void {
   const home = cache.get(HOME_DRAFT_KEY);
   cache.delete(HOME_DRAFT_KEY);
   if (!home) return;
-  if (!home.text && home.fileReferences.length === 0) return;
+  if (!home.text && home.fileReferences.length === 0 && !home.quotes?.length) return;
   writeComposerDraft(sessionId, home);
 }
 

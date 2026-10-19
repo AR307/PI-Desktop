@@ -193,6 +193,15 @@ pub struct MessageAttachment {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+#[derive(PartialEq, Eq)]
+pub struct MessageQuote {
+    pub session_id: String,
+    pub message_id: String,
+    pub text: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct UiMessage {
     pub id: String,
     pub role: String,
@@ -209,6 +218,8 @@ pub struct UiMessage {
     /// Minimal provenance for an accepted Live Voice work input.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub voice_origin: Option<Value>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub quotes: Option<Vec<MessageQuote>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub attachments: Option<Vec<MessageAttachment>>,
     /// Accepted input to an existing turn, preserved by Stop after renderer reload.
@@ -380,7 +391,8 @@ const PLACEHOLDER_TITLES: [&str; 13] = [
 ];
 
 fn is_default_title(title: &str) -> bool {
-    PLACEHOLDER_TITLES.contains(&title.trim())
+    let t = title.trim();
+    PLACEHOLDER_TITLES.iter().any(|p| p.eq_ignore_ascii_case(t))
 }
 
 // ---- UiMessage ⇄ transcript record mapping -----------------------------------
@@ -400,6 +412,9 @@ pub(crate) fn ui_to_record(message: &UiMessage) -> (MessageRecord, Option<String
     }
     if let Some(origin) = &message.session_message {
         meta_obj.insert("sessionMessage".into(), origin.clone());
+    }
+    if let Some(quotes) = &message.quotes {
+        meta_obj.insert("quotes".into(), json!(quotes));
     }
     if let Some(origin) = &message.voice_origin {
         meta_obj.insert("voiceOrigin".into(), origin.clone());
@@ -566,6 +581,9 @@ pub(crate) fn record_to_ui(record: MessageRecord) -> UiMessage {
         .and_then(|value| serde_json::from_value(value.clone()).ok());
     let session_message = meta.get("sessionMessage").cloned();
     let voice_origin = meta.get("voiceOrigin").cloned();
+    let quotes: Option<Vec<MessageQuote>> = meta
+        .get("quotes")
+        .and_then(|value| serde_json::from_value(value.clone()).ok());
     let steering = meta.get("steering").and_then(Value::as_bool);
     let status = meta
         .get("status")
@@ -706,6 +724,7 @@ pub(crate) fn record_to_ui(record: MessageRecord) -> UiMessage {
             skill_mentions: skill_mentions.clone(),
             session_message,
             voice_origin: voice_origin.clone(),
+            quotes: quotes.clone(),
             attachments: None,
             steering,
             created_at: record.created_at,
@@ -763,6 +782,7 @@ pub(crate) fn record_to_ui(record: MessageRecord) -> UiMessage {
             skill_mentions,
             session_message,
             voice_origin,
+            quotes,
             attachments,
             steering,
             created_at: record.created_at,
@@ -1206,6 +1226,9 @@ fn insert_recovered_session_row(
 /// Restore a missing sessions row (and its search index) from an orphaned
 /// JSONL transcript. Returns true when a row was inserted (D318).
 pub fn restore_orphaned_session(db: &Database, session_id: &str) -> Result<bool> {
+    if session_id.starts_with("side-") {
+        return Ok(false);
+    }
     if session_created_at(db, session_id).is_ok() {
         return Ok(false);
     }
@@ -1296,6 +1319,9 @@ fn ensure_session_for_append(db: &Database, session_id: &str) -> Result<String> 
     match session_created_at(db, session_id) {
         Ok(created) => Ok(created),
         Err(error) if error.to_string().starts_with("session not found") => {
+            if session_id.starts_with("side-") {
+                return Err(error);
+            }
             if restore_orphaned_session(db, session_id)? {
                 return session_created_at(db, session_id);
             }
@@ -1376,7 +1402,7 @@ fn attach_worktrees(db: &Database, summaries: &mut [SessionSummary]) -> Result<(
 // ---- sessions ---------------------------------------------------------------
 
 pub fn list_sessions(db: &Database) -> Result<Vec<SessionSummary>> {
-    let sql = format!("{SUMMARY_SELECT} ORDER BY s.updated_at DESC");
+    let sql = format!("{SUMMARY_SELECT} AND s.id NOT LIKE 'side-%' ORDER BY s.updated_at DESC");
     let mut stmt = db.conn().prepare_cached(&sql)?;
     let rows = stmt.query_map([], summary_from_row)?;
     let mut out = Vec::new();
@@ -1995,6 +2021,9 @@ pub fn configure_session_with_thinking(
 }
 
 pub fn delete_session(db: &Database, id: &str) -> Result<bool> {
+    if id.starts_with("side-") {
+        return Err(anyhow!("Close temporary side chats through sideChat.close"));
+    }
     let tx = db.conn().unchecked_transaction()?;
     tx.execute(
         "DELETE FROM kv WHERE ns = 'app' AND key IN (?1, ?2)",
@@ -4327,6 +4356,7 @@ mod tests {
             skill_mentions: None,
             attachments: None,
             voice_origin: None,
+            quotes: None,
             steering: None,
             created_at: ts.into(),
             thinking: None,
@@ -4956,6 +4986,12 @@ mod tests {
             "Tarefa sem título",
             "Yeni görev",
             "New chat",
+            "new task",
+            "new chat",
+            "tarefa sem título",
+            "nova conversa",
+            "yeni görev",
+            "yeni sohbet",
         ] {
             let session =
                 create_session(&db, Some(placeholder.into()), None, None, None, None).unwrap();
@@ -5225,6 +5261,7 @@ mod tests {
             skill_mentions: None,
             attachments: None,
             voice_origin: None,
+            quotes: None,
             steering: None,
             created_at: "2025-05-01T00:00:02Z".into(),
             thinking: None,
@@ -5846,6 +5883,7 @@ mod tests {
             skill_mentions: None,
             attachments: None,
             voice_origin: None,
+            quotes: None,
             steering: None,
             created_at: "2025-05-01T00:00:01Z".into(),
             thinking: Some("first plan\nsecond plan".into()),
@@ -5957,6 +5995,7 @@ mod tests {
             skill_mentions: None,
             attachments: None,
             voice_origin: None,
+            quotes: None,
             steering: None,
             created_at: "2025-05-01T00:00:01Z".into(),
             thinking: None,

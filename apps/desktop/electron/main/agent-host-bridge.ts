@@ -1,4 +1,5 @@
 import { SUBAGENT_REPORT_SUBJECT } from "@pi-desktop/shared";
+import { submitSideChatQueue } from "./services/side-chats";
 import { delegationNotification } from "./runtime/delegation-notification";
 import {
   AgentHost,
@@ -152,6 +153,7 @@ export function createAgentHostBridge(options: AgentHostBridgeOptions) {
             ...(request.userMessageId ? { messageId: request.userMessageId } : {}),
             ...(request.voiceOrigin ? { voiceOrigin: request.voiceOrigin } : {}),
             ...(request.attachments ? { attachments: request.attachments } : {}),
+            ...(request.quotes ? { quotes: request.quotes } : {}),
             ...(permissionModeOverride ? { permissionMode: permissionModeOverride } : {}),
           },
         ])) as { accepted?: boolean; turnId: string };
@@ -191,6 +193,7 @@ export function createAgentHostBridge(options: AgentHostBridgeOptions) {
               : {}),
             ...(request.voiceOrigin ? { voiceOrigin: request.voiceOrigin } : {}),
             ...(request.attachments ? { attachments: request.attachments } : {}),
+            ...(request.quotes ? { quotes: request.quotes } : {}),
           },
         ])) as { accepted?: boolean } | undefined;
         return { accepted: result?.accepted !== false };
@@ -287,6 +290,7 @@ export function createAgentHostBridge(options: AgentHostBridgeOptions) {
   /** The desktop's queue operations, all under the owner principal. */
   const queue = {
     async push(request: AgentQueuePushRequest, notification = false): Promise<QueuedTurnSummary> {
+      return submitSideChatQueue(request.sessionId, async () => {
       const result = await forIpc(() =>
         agentHost.startTurn(notification ? { ...DESKTOP_PRINCIPAL, subject: SUBAGENT_REPORT_SUBJECT } : DESKTOP_PRINCIPAL, {
           sessionId: request.sessionId,
@@ -298,6 +302,7 @@ export function createAgentHostBridge(options: AgentHostBridgeOptions) {
             ...(request.userMessageId ? { userMessageId: request.userMessageId } : {}),
             ...(request.voiceOrigin ? { voiceOrigin: request.voiceOrigin } : {}),
             ...(request.attachments ? { attachments: request.attachments } : {}),
+            ...(request.quotes ? { quotes: request.quotes } : {}),
           },
           context: { requestId: `desktop-queue-${Date.now().toString(36)}` },
         }),
@@ -313,10 +318,13 @@ export function createAgentHostBridge(options: AgentHostBridgeOptions) {
             ...(request.userMessageId ? { userMessageId: request.userMessageId } : {}),
             ...(request.voiceOrigin ? { voiceOrigin: request.voiceOrigin } : {}),
             ...(request.attachments ? { attachments: request.attachments } : {}),
+            ...(request.quotes ? { quotes: request.quotes } : {}),
             position: 0,
             createdAt: new Date().toISOString(),
           };
+      });
     },
+    clearSession: (sessionId: string) => agentHost.clearSessionQueue(sessionId),
     list(sessionId: string): QueuedTurnSummary[] {
       return agentHost.queueEntries(sessionId).filter((entry) => entry.principalSubject !== SUBAGENT_REPORT_SUBJECT).map(toQueueSummary);
     },
@@ -433,6 +441,7 @@ export function createAgentHostBridge(options: AgentHostBridgeOptions) {
       return agentHost.lookupTurnByIdempotency(DESKTOP_PRINCIPAL, request);
     },
     queue,
+    releaseSession: (sessionId: string) => agentHost.releaseSession(sessionId),
     async steerWorkSession(input: { sessionId: string; expectedTurnId: string; content: string; userMessageId: string; voiceOrigin: import("@pi-desktop/shared").VoiceOrigin }): Promise<boolean> {
       const result = await options.invoke(options.channels.agentSteer, [{
         sessionId: input.sessionId,
@@ -580,6 +589,7 @@ function toQueueSummary(entry: QueueEntryView): QueuedTurnSummary {
     ...(entry.userMessageId ? { userMessageId: entry.userMessageId } : {}),
     ...(entry.voiceOrigin ? { voiceOrigin: entry.voiceOrigin } : {}),
     ...(entry.attachments ? { attachments: entry.attachments } : {}),
+    ...(entry.quotes ? { quotes: entry.quotes } : {}),
     position: entry.turn.queuePosition ?? 0,
     ...(entry.priority !== undefined ? { priority: entry.priority } : {}),
     createdAt: entry.turn.startedAt ?? new Date().toISOString(),

@@ -1,3 +1,4 @@
+import { clearStaleSideChats } from "../services/side-chats";
 import { shell } from "electron";
 import { isAbsolute, join, relative, resolve } from "node:path";
 import { mkdirSync } from "node:fs";
@@ -73,6 +74,14 @@ function rejectNativeMutation(sessionId: unknown, action: string): void {
   }
 }
 
+function rejectSideHistoryMutation(sessionId: unknown): void {
+  if (typeof sessionId === "string" && sessionId.startsWith("side-")) {
+    throw Object.assign(new Error("Temporary side chats do not support durable revisions or project moves"), {
+      errorCode: ErrorCodes.INVALID_ARGUMENT,
+    });
+  }
+}
+
 function modelConfigSelectionKey(value: unknown): string | null {
   if (!value || typeof value !== "object") return null;
   const source = Reflect.get(value, "source");
@@ -100,6 +109,11 @@ export type SessionIpcDependencies = {
   sessionCapabilityContext: () => Promise<{ providers: any; defaults: any }>;
   enrichSession: (session: any, providers: any, defaults: any) => any;
   acquireSessionOperation: (sessionId: string) => Promise<() => void>;
+  beginTranscriptRewrite: (sessionId: string) => {
+    commit: () => void;
+    rollback: () => void;
+  };
+  forgetTranscriptRewriteHistory: (sessionId: string) => void;
   stripWinLongPrefix: (path: string) => string;
 };
 
@@ -116,6 +130,8 @@ export function registerSessionIpc({
   sessionCapabilityContext,
   enrichSession,
   acquireSessionOperation,
+  beginTranscriptRewrite,
+  forgetTranscriptRewriteHistory,
   stripWinLongPrefix,
 }: SessionIpcDependencies): void {
   let host: HostProcess | null = null;
@@ -126,6 +142,56 @@ export function registerSessionIpc({
       sidecar = getSidecar();
       return fn(...args);
     });
+  };
+
+  /**
+   * The one gate for the two transcript-rewrite entrances — replacement and
+   * revision activation rewrite the same host-side transcript rows, so both
+   * go through this boundary instead of each entrance remembering its own
+   * (#1612, #1613): refuse while a turn is running (consistent with fork and
+   * move), serialize overlapping operations per session, and drain the
+   * persistence outbox so writes queued before the rewrite land in the old
+   * transcript rather than replaying into the new one. The persistence fence
+   * also holds callbacks delivered after that drain: successful rewrites
+   * invalidate pre-rewrite turns, while failed rewrites replay their events.
+   * The sidecar runtime is dropped after the drain so the next prompt reseeds
+   * from the rewritten transcript instead of replaying the discarded branch
+   * in memory.
+   */
+  const runTranscriptRewrite = async <T>(
+    sessionId: string,
+    purpose: string,
+    currentHost: HostProcess,
+    run: () => Promise<T>,
+  ): Promise<T> => {
+    rejectNativeMutation(sessionId, purpose);
+    const releaseSessionOperation = await acquireSessionOperation(sessionId);
+    let rewriteFence: ReturnType<typeof beginTranscriptRewrite> | undefined;
+    try {
+      if (activeTurns.has(sessionId)) {
+        throw Object.assign(
+          new Error("Cannot rewrite the transcript of a running session"),
+          { errorCode: ErrorCodes.AGENT_BUSY },
+        );
+      }
+      rewriteFence = beginTranscriptRewrite(sessionId);
+      await persistenceOutbox.prepareSessionReplacement(sessionId, () => currentHost);
+      if (sidecar && !sessionId.startsWith("side-")) {
+        sidecar.clearProjectInstructionRoot(sessionId);
+        sidecar.clearVendorAuthBindings(sessionId);
+        await sidecar
+          .call("agent.disposeSession", { sessionId })
+          .catch(() => undefined);
+      }
+      const result = await run();
+      rewriteFence.commit();
+      return result;
+    } catch (error) {
+      rewriteFence?.rollback();
+      throw error;
+    } finally {
+      releaseSessionOperation();
+    }
   };
 
   handle(IPC.invoke.sessionSearch, async (input) => {
@@ -147,6 +213,7 @@ export function registerSessionIpc({
   });
   handle(IPC.invoke.sessionList, async () => {
     if (!host) throw new Error("host unavailable");
+    await clearStaleSideChats(host);
     const [result, native, { providers, defaults }] = await Promise.all([
       host.call<{ sessions: RuntimeSession[] }>("session.list"),
       sidecar
@@ -337,6 +404,7 @@ export function registerSessionIpc({
     if (!host) throw new Error("host unavailable");
     const res = await host.call("session.delete", { id });
     await persistenceOutbox.dropSession(id);
+    forgetTranscriptRewriteHistory(id);
     // Drop the session's pi-agent so a later session with the same id (or a
     // stale runtime) can't answer with this session's context.
     if (sidecar) {
@@ -374,6 +442,7 @@ export function registerSessionIpc({
       if (!host) throw new Error("host unavailable");
       const sessionId = String(input.sessionId ?? "").trim();
       rejectNativeMutation(sessionId, "project move");
+      rejectSideHistoryMutation(sessionId);
       const projectPath = String(input.projectPath ?? "").trim();
       if (!sessionId) {
         throw Object.assign(new Error("sessionId required"), {
@@ -441,21 +510,30 @@ export function registerSessionIpc({
       if (!host) throw new Error("host unavailable");
       const sessionId = String(input?.sessionId || "");
       if (!sessionId) throw new Error("sessionId required");
-      rejectNativeMutation(sessionId, "transcript replacement");
-      await persistenceOutbox.prepareSessionReplacement(sessionId, () => host);
-      // Drop the live pi-agent so the next prompt reseeds from the truncated
-      // transcript instead of replaying the discarded branch in memory.
-      if (sidecar) {
-        sidecar.clearProjectInstructionRoot(sessionId);
-        sidecar.clearVendorAuthBindings(sessionId);
-        await sidecar
-          .call("agent.disposeSession", { sessionId })
-          .catch(() => undefined);
-      }
-      return host.call("session.replaceMessages", {
+      const currentHost = host;
+      return runTranscriptRewrite(
         sessionId,
-        messages: input.messages ?? [],
-      });
+        "transcript replacement",
+        currentHost,
+        async () => {
+      if (sessionId.startsWith("side-")) {
+        if (!sidecar) throw new Error("sidecar unavailable");
+        const { session } = await currentHost.call<{ session?: { messages: Array<{ id: string; role: string }> } }>("session.get", { id: sessionId });
+        const kept = input.messages ?? [];
+        if (!session || kept.length >= session.messages.length || kept.some((message, index) => !message || typeof message !== "object" || !("id" in message) || message.id !== session.messages[index]?.id)) {
+          throw new Error("Side chat replacement must restore the existing transcript prefix");
+        }
+        const removedUser = session.messages.slice(kept.length).find((message) => message.role === "user");
+        if (!removedUser) throw new Error("No unanswered side chat prompt to restore");
+        await sidecar.call("agent.rewindSideChat", { sessionId, userMessageId: removedUser.id });
+        return await currentHost.call("session.replaceMessages", { sessionId, messages: session.messages.slice(0, kept.length) });
+      }
+          return           currentHost.call("session.replaceMessages", {
+            sessionId,
+            messages: input.messages ?? [],
+          });
+        },
+      );
     },
   );
   handle(
@@ -468,6 +546,7 @@ export function registerSessionIpc({
     }) => {
       if (!host) throw new Error("host unavailable");
       rejectNativeMutation(input?.sessionId, "revision save");
+      rejectSideHistoryMutation(input?.sessionId);
       return host.call("session.saveRevision", {
         sessionId: String(input?.sessionId || ""),
         rootUserId: String(input?.rootUserId || ""),
@@ -497,20 +576,21 @@ export function registerSessionIpc({
     }) => {
       if (!host) throw new Error("host unavailable");
       const sessionId = String(input?.sessionId || "");
-      rejectNativeMutation(sessionId, "revision activation");
-      if (sidecar) {
-        sidecar.clearProjectInstructionRoot(sessionId);
-        sidecar.clearVendorAuthBindings(sessionId);
-        await sidecar
-          .call("agent.disposeSession", { sessionId })
-          .catch(() => undefined);
-      }
-      return host.call("session.activateRevision", {
+      if (!sessionId) throw new Error("sessionId required");
+      rejectSideHistoryMutation(sessionId);
+      const currentHost = host;
+      return runTranscriptRewrite(
         sessionId,
-        rootUserId: String(input?.rootUserId || ""),
-        revisionIndex: Number(input?.revisionIndex || 0),
-        prefix: input?.prefix ?? [],
-      });
+        "revision activation",
+        currentHost,
+        () =>
+          currentHost.call("session.activateRevision", {
+            sessionId,
+            rootUserId: String(input?.rootUserId || ""),
+            revisionIndex: Number(input?.revisionIndex || 0),
+            prefix: input?.prefix ?? [],
+          }),
+      );
     },
   );
   handle(IPC.invoke.sessionGetScratchPath, async (input: { sessionId: string }) => {

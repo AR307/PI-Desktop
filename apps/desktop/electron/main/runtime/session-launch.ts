@@ -456,7 +456,9 @@ export function createSessionLaunchRuntime({
     // workspaces are never isolated.
     const workspaceRoot = remoteWorkspace
       ? undefined
-      : await isolatedWorkspaceRoot(sessionId, session);
+      : sessionId.startsWith("side-")
+        ? (await runtimeState.host!.call<{ workspacePath: string }>("sideChat.info", { sessionId })).workspacePath
+        : await isolatedWorkspaceRoot(sessionId, session);
     let projectInstructions = await loadInstructionChain(
       remoteWorkspace ? undefined : (workspaceRoot ?? projectPath),
     );

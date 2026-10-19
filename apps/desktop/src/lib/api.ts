@@ -78,6 +78,10 @@ import type {
   MarketPluginDetail,
   PluginInstallResult,
   PluginInstallProgress,
+  PluginReviewPage,
+  PluginReviewQuery,
+  PluginReviewSummary,
+  PluginReviewTicker,
   ProjectRecord,
   ProjectGroupRecord,
   ProjectMemory,
@@ -139,6 +143,9 @@ import type {
   UpdateState,
   WindowControlAction,
   CloseBehavior,
+  LifecycleDialogChoice,
+  LifecycleDialogKind,
+  LifecycleDialogRequest,
   ConfigSyncApprovalInput,
   ConfigSyncChangePasswordInput,
   ConfigSyncHistoryEntry,
@@ -151,6 +158,7 @@ import type {
   TrustedExtensionUiPrompt,
   TrustedExtensionUiPromptResponse,
   MirrorCodingAccountState,
+  MirrorCodingBenefitsState,
   SessionTodoSnapshot,
   StorageInfo,
 } from "@pi-desktop/shared";
@@ -358,6 +366,31 @@ async function invoke<T>(channel: string, ...args: unknown[]): Promise<T> {
   return result.data;
 }
 
+/** One chat-started background command reported by host-core. */
+export type BackgroundTaskSummary = {
+  id: string;
+  sessionId: string;
+  command: string;
+  commandShellId: string;
+  state: "running" | "exited" | "failed" | "stopped";
+  elapsedMs: number;
+  exitCode?: number;
+};
+
+export type BackgroundTasksListResult = {
+  tasks: BackgroundTaskSummary[];
+  version: number;
+};
+
+export type BackgroundTaskOutput = {
+  id: string;
+  state: "running" | "exited" | "failed" | "stopped";
+  exitCode?: number;
+  stdout: string;
+  stderr: string;
+  truncated: boolean;
+};
+
 /** `session.create` input: summary fields plus the isolation switch. */
 export type CreateSessionInput = Partial<SessionSummary> & {
   /** Run the session in its own git worktree (ADR 0329). */
@@ -396,6 +429,9 @@ export type SessionHistoryReadOptions = {
 export function normalizeSettings(settings: AppSettings): AppSettings {
   return {
     ...settings,
+    sidebarRunningIndicators: settings.sidebarRunningIndicators !== false,
+    sidebarRunningBadge: settings.sidebarRunningBadge !== false,
+    sidebarRunningRail: settings.sidebarRunningRail === true,
     defaultMode: normalizeMode((settings as { defaultMode?: unknown }).defaultMode),
     infiniteProviderRetry:
       (settings as { infiniteProviderRetry?: unknown }).infiniteProviderRetry === true,
@@ -429,6 +465,14 @@ export function validateSettingsWrite(settings: AppSettings): AppSettings {
       errorCode: "INVALID_PARAMS",
     });
   }
+  if (
+    Object.prototype.hasOwnProperty.call(settings, "showThinking") &&
+    typeof settings.showThinking !== "boolean"
+  ) {
+    throw Object.assign(new Error("showThinking is invalid"), {
+      errorCode: "INVALID_PARAMS",
+    });
+  }
   const value = settings as AppSettings & {
     defaultCommandShell?: unknown;
     largePasteThreshold?: unknown;
@@ -437,6 +481,10 @@ export function validateSettingsWrite(settings: AppSettings): AppSettings {
     infiniteProviderRetry?: unknown;
     jevEnabled?: unknown;
     smoothStreaming?: unknown;
+    sidebarRunningIndicators?: unknown;
+    sidebarRunningBadge?: unknown;
+    sidebarRunningRail?: unknown;
+    sidebarSessionTime?: unknown;
     updatePreference?: unknown;
     lastNotifiedUpdateVersion?: unknown;
     networkProxy?: unknown;
@@ -498,6 +546,21 @@ export function validateSettingsWrite(settings: AppSettings): AppSettings {
     throw Object.assign(new Error("smoothStreaming is invalid"), {
       errorCode: "INVALID_PARAMS",
     });
+  }
+  for (const key of [
+    "sidebarRunningIndicators",
+    "sidebarRunningBadge",
+    "sidebarRunningRail",
+    "sidebarSessionTime",
+  ] as const) {
+    if (
+      Object.prototype.hasOwnProperty.call(value, key) &&
+      typeof value[key] !== "boolean"
+    ) {
+      throw Object.assign(new Error(`${key} is invalid`), {
+        errorCode: "INVALID_PARAMS",
+      });
+    }
   }
   if (
     Object.prototype.hasOwnProperty.call(value, "updatePreference") &&
@@ -637,6 +700,17 @@ export const api = {
     invoke<{ ok: boolean }>(IPC.invoke.notificationSetViewingSession, {
       sessionId,
     }),
+  /**
+   * Report the session on screen to the main process. Plugin
+   * `pi.session.getActive()` and the `session:activated` event answer from it,
+   * so the shell — not a plugin — is what decides which session is active.
+   */
+  setPluginActiveSession: (input: {
+    sessionId: string | null;
+    projectPath?: string | null;
+    /** Renderer-side counter: a slower push must never undo a newer one. */
+    seq?: number;
+  }) => invoke<{ ok: boolean }>(IPC.invoke.pluginSessionActive, input),
   listSessions: () =>
     invoke<{ sessions: SessionSummary[] }>(IPC.invoke.sessionList).then((result) => ({
       ...result,
@@ -690,6 +764,8 @@ export const api = {
     })),
   getSessionCollaboration: (sessionId: string) =>
     invoke<SessionCollaborationSummary>(IPC.invoke.sessionCollaboration, { sessionId }),
+  openSideChat: (parentSessionId: string) => invoke<{ session: SessionSummary }>(IPC.invoke.sideChatOpen, { parentSessionId }),
+  closeSideChat: (sessionId: string) => invoke<{ ok: boolean }>(IPC.invoke.sideChatClose, { sessionId }),
   deleteSession: (id: string) => invoke(IPC.invoke.sessionDelete, id),
   getSessionScratchPath: (sessionId: string) =>
     invoke<{ path: string }>(IPC.invoke.sessionGetScratchPath, { sessionId }),
@@ -746,6 +822,8 @@ export const api = {
     invoke(IPC.invoke.settingsSet, validateSettingsWrite(settings)),
   mirrorCodingState: () =>
     invoke<MirrorCodingAccountState>(IPC.invoke.mirrorCodingGetState),
+  mirrorCodingBenefits: () => invoke<MirrorCodingBenefitsState>(IPC.invoke.mirrorCodingBenefits),
+  mirrorCodingCheckIn: () => invoke<MirrorCodingBenefitsState>(IPC.invoke.mirrorCodingCheckIn),
   mirrorCodingLogin: (confirmed = false) =>
     invoke<{ confirmationRequired?: boolean; state?: MirrorCodingAccountState }>(
       IPC.invoke.mirrorCodingLogin,
@@ -776,6 +854,18 @@ export const api = {
    */
   testJevApiKey: (value: string) =>
     invoke<JevKeyCheckResult>(IPC.invoke.jevTest, value),
+  backgroundTasksList: () =>
+    invoke<BackgroundTasksListResult>(IPC.invoke.backgroundTasksList),
+  backgroundTasksOutput: (id: string) =>
+    invoke<BackgroundTaskOutput>(IPC.invoke.backgroundTasksOutput, { id }),
+  backgroundTasksStop: (id: string) =>
+    invoke<{ ok: boolean; found: boolean }>(IPC.invoke.backgroundTasksStop, { id }),
+  onBackgroundTasksChanged: (listener: (payload: { version?: number }) => void) => {
+    if (!window.piDesktop?.on) return () => undefined;
+    return window.piDesktop.on(IPC.event.backgroundTasksChanged, (payload) =>
+      listener((payload ?? {}) as { version?: number }),
+    );
+  },
   configSyncGetState: () => invoke<ConfigSyncState>(IPC.invoke.configSyncGetState),
   configSyncConfigure: (input: ConfigSyncConfigureInput) =>
     invoke<ConfigSyncState>(IPC.invoke.configSyncConfigure, input),
@@ -1457,6 +1547,29 @@ export const api = {
   /** Ask the running install to stop. Only a download can be interrupted. */
   marketCancelInstall: (id: string) =>
     invoke<{ cancelled: boolean; id: string }>(IPC.invoke.marketCancelInstall, { id }),
+  /**
+   * Public rating summaries for plugin ids, keyed by id. Anonymous read
+   * through the host; an unreachable or older center rejects instead of
+   * answering fabricated zeros, so callers show an unavailable state.
+   */
+  marketReviewSummaries: (pluginIds: string[]) =>
+    invoke<{ summaries: Record<string, PluginReviewSummary> }>(
+      IPC.invoke.marketReviewSummaries,
+      { pluginIds },
+    ).then((result) => result.summaries),
+  /** One page of public reviews, its summary, and the trusted review URL. */
+  marketReviews: (query: PluginReviewQuery) =>
+    invoke<PluginReviewPage>(IPC.invoke.marketReviews, query),
+  /**
+   * The center's selected review line for plugin ids, keyed by id. Anonymous
+   * read through the host, stable for a UTC day. An older center rejects; the
+   * card then simply has no review line.
+   */
+  marketReviewTickers: (pluginIds: string[]) =>
+    invoke<{ tickers: Record<string, PluginReviewTicker> }>(
+      IPC.invoke.marketReviewTickers,
+      { pluginIds },
+    ).then((result) => result.tickers),
   /** Import a pi CLI extension file or directory as a development plugin (spec 16 §3). */
   importPiExtension: () =>
     invoke<
@@ -1569,6 +1682,31 @@ export const api = {
     invoke<{ behavior: CloseBehavior }>(IPC.invoke.closeBehaviorSet, {
       behavior,
     }),
+  markLifecycleDialogRendererReady: () =>
+    invoke<{ ready: boolean }>(IPC.invoke.lifecycleDialogReady),
+  respondLifecycleDialog: (requestId: string, choice: LifecycleDialogChoice) =>
+    invoke<{ accepted: boolean }>(IPC.invoke.lifecycleDialogRespond, { requestId, choice }),
+  onLifecycleDialogRequest: (listener: (request: LifecycleDialogRequest) => void) => {
+    if (!window.piDesktop?.on) return () => undefined;
+    return window.piDesktop.on(IPC.event.lifecycleDialogRequest, (payload) => {
+      if (!payload || typeof payload !== "object") return;
+      const value = payload as Record<string, unknown>;
+      if (
+        typeof value.requestId !== "string" ||
+        !value.requestId ||
+        (value.kind !== "quit-confirmation" && value.kind !== "close-behavior")
+      ) return;
+      listener({ requestId: value.requestId, kind: value.kind as LifecycleDialogKind });
+    });
+  },
+  onLifecycleDialogDismiss: (listener: (requestId: string) => void) => {
+    if (!window.piDesktop?.on) return () => undefined;
+    return window.piDesktop.on(IPC.event.lifecycleDialogDismiss, (payload) => {
+      if (!payload || typeof payload !== "object") return;
+      const requestId = (payload as Record<string, unknown>).requestId;
+      if (typeof requestId === "string" && requestId) listener(requestId);
+    });
+  },
   getTokenUsageHistory: (query?: { startDate?: number; endDate?: number; bucket?: "day" | "week" | "month" }) =>
     invoke<import("@pi-desktop/shared").TokenUsageHistoryResult>(
       IPC.invoke.statsGetTokenUsageHistory,
@@ -1649,6 +1787,49 @@ export const api = {
         revealOnly?: boolean;
       }),
     );
+  },
+  /**
+   * A plugin asked to show one of its own views in a session's work panel
+   * (`pi.ui.revealView`). The shell owns tabs, so it opens the tab for the
+   * session the main process already validated as the active one.
+   */
+  onPluginViewReveal: (
+    listener: (event: {
+      pluginId: string;
+      viewId: string;
+      sessionId: string;
+      location?: string;
+    }) => void,
+  ) => {
+    if (!window.piDesktop?.on) return () => undefined;
+    return window.piDesktop.on(IPC.event.pluginViewReveal, (payload) => {
+      const event = payload as {
+        pluginId?: unknown;
+        viewId?: unknown;
+        sessionId?: unknown;
+        location?: unknown;
+      };
+      if (
+        typeof event?.pluginId !== "string" ||
+        typeof event?.viewId !== "string" ||
+        typeof event?.sessionId !== "string"
+      ) {
+        return;
+      }
+      listener({
+        pluginId: event.pluginId,
+        viewId: event.viewId,
+        sessionId: event.sessionId,
+        ...(typeof event.location === "string" && event.location ? { location: event.location } : {}),
+      });
+    });
+  },
+  onBrowserOpenFile: (listener: (event: { path: string }) => void) => {
+    if (!window.piDesktop?.on) return () => undefined;
+    return window.piDesktop.on(IPC.event.browserOpenFile, (payload) => {
+      const event = payload as { path?: unknown };
+      if (typeof event?.path === "string") listener({ path: event.path });
+    });
   },
   onAgentEvent: (listener: (event: AgentEventEnvelope) => void) => {
     if (!window.piDesktop?.on) return () => undefined;

@@ -74,7 +74,7 @@ export function useComposerSubmit({
     // arrives where the user put it instead of trailing the text.
     const inlineContent = serializeInlineComposerFileReferences(rawText, activeFileReferences);
     const serializedContent = serializeComposerFileReferences(rawText, activeFileReferences);
-    if (!serializedContent) return;
+    if (!serializedContent && !draft.draftSnapshot(rawText).quotes?.length) return;
     if (sendBlocked || (steering && !steeringAllowed)) {
       if (pasting) showToast(t("chat.pasteInProgress"), { variant: "info" });
       return;
@@ -121,7 +121,7 @@ export function useComposerSubmit({
           command.id === "builtin.mode.goal";
         if (isModeCommand && commandBody) {
           try {
-            await runPaletteCommand(command.id);
+            await runPaletteCommand(command.id, activeSessionId ?? undefined);
             const visibleDraft = rawText.trim();
             const visibleCommandEnd = visibleDraft.search(/\s/);
             const visibleCommandBody =
@@ -148,7 +148,7 @@ export function useComposerSubmit({
         }
         if (command.kind === "extension") {
           try {
-            await runExtensionCommand(command.name, commandBody);
+            await runExtensionCommand(command.name, commandBody, activeSessionId ?? undefined);
             draft.clearDraftForKey(submittedDraftKey, submittedDraftRevision, submittedDraft);
             remember();
           } catch (error) {
@@ -160,7 +160,8 @@ export function useComposerSubmit({
         }
         if (!commandBody) {
           try {
-            if (command.kind === "builtin") await runPaletteCommand(command.id);
+            if (command.kind === "builtin") await runPaletteCommand(command.id, activeSessionId ?? undefined);
+            else if (activeSessionId?.startsWith("side-")) throw new Error(t("chat.sideChat.mainCommand"));
             else await api.executeCommand(command.id);
             draft.clearDraftForKey(submittedDraftKey, submittedDraftRevision, submittedDraft);
             remember();
@@ -179,7 +180,7 @@ export function useComposerSubmit({
     }
     draft.clearDraftForKey(submittedDraftKey, submittedDraftRevision, submittedDraft);
     const accepted = steering
-      ? await steerPrompt(inlineContent, submittedDraft)
+      ? await steerPrompt(inlineContent, submittedDraft, activeSessionId ?? undefined)
       : await sendPrompt(
           inlineContent,
           submittedDraft,

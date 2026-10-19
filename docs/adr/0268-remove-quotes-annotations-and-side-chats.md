@@ -1,6 +1,9 @@
 # ADR 0268: Remove quotes, annotations, and side chats
 
 - Status: Accepted
+- Current amendment: [Host-owned temporary side chats](temporary-side-chat-runtime.md)
+  partially supersedes selection/quote/side-chat retirement for the requested
+  fork feature. Retired identifiers below remain retired.
 - Date: 2026-09-16
 - Deciders: PI-Desktop runtime and desktop UI maintainers
 - Supersedes: ADR message-quotes-and-side-chats, ADR response-annotations, ADR floating-annotation-index

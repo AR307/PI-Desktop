@@ -109,10 +109,7 @@ export function ComposerModelPicker({
           </span>
           <span className="composer-model-thinking-model">{modelLabel}</span>
           {!imageMode && thinkingLevel !== "off" ? (
-            <>
-              <span className="composer-model-thinking-dot" aria-hidden="true">·</span>
-              <span className="composer-model-thinking-level">{thinkingLabel}</span>
-            </>
+            <span className="composer-model-thinking-level">{thinkingLabel}</span>
           ) : null}
           {!imageMode && controller.fast && <IconZap size={12} fill="currentColor" strokeWidth={0} className="composer-model-fast-icon" aria-hidden="true" />}
           <IconChevronDown size={12} aria-hidden="true" className="composer-model-thinking-chevron" />

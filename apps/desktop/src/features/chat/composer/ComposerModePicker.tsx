@@ -1,64 +1,114 @@
-import { useEffect, useState } from "react";
-import { useTranslation } from "react-i18next";
+import type { Dispatch, SetStateAction } from "react";
+import type { TFunction } from "i18next";
 import type { Mode } from "@pi-desktop/shared";
 import { AnchoredMenu } from "../../../components/settings/AnchoredMenu";
 import { TooltipButton } from "../../../components/ui";
 import { IconCheck, IconChevronDown } from "../../../components/icons";
 import { ModeIcon } from "./ComposerModeIcon";
-import { MODE_LABEL_KEYS } from "./model";
+import { MODE_CYCLE, MODE_LABEL_KEYS } from "./model";
 
 export type ComposerMode = Mode | "image";
-const modes: readonly ComposerMode[] = ["agent", "plan", "goal", "image"];
+const modes: readonly ComposerMode[] = [...MODE_CYCLE, "image"];
 
-/** One selection path for both cycling and the accessible dropdown. */
-export function ComposerModePicker({ mode, planningLive = false, blocked, onSelect, onOpen }: {
+/**
+ * Operating mode as a compact chip that opens one menu.
+ *
+ * The chip only ever names the committed mode, so the toolbar keeps the width
+ * of a single label; the other modes are one menu away instead of one
+ * cycle-click away.
+ */
+export function ComposerModePicker({
+  t,
+  mode,
+  planningLive,
+  open,
+  setOpen,
+  controlsBlocked,
+  onCloseOtherMenus,
+  onSelect,
+}: {
+  t: TFunction;
   mode: ComposerMode;
-  planningLive?: boolean;
-  blocked: boolean;
-  onSelect: (mode: ComposerMode) => Promise<void>;
-  onOpen: () => void;
+  planningLive: boolean;
+  open: boolean;
+  setOpen: Dispatch<SetStateAction<boolean>>;
+  controlsBlocked: boolean;
+  onCloseOtherMenus: () => void;
+  onSelect: (mode: ComposerMode) => void | Promise<void>;
 }) {
-  const { t } = useTranslation();
-  const [open, setOpen] = useState(false);
-  useEffect(() => { if (blocked) setOpen(false); }, [blocked]);
-  const label = (value: ComposerMode) => t(value === "image" ? "images.mode" : MODE_LABEL_KEYS[value]);
-  const chipLabel = planningLive && mode !== "image" ? t(`${mode}.planning`) : label(mode);
-  const select = (value: ComposerMode) => {
-    setOpen(false);
-    onOpen();
-    void onSelect(value);
-  };
-  return <div className="composer-mode-switch">
-    <TooltipButton type="button" className="icon-btn mode-chip composer-mode-chip"
-      data-mode={mode} data-planning={planningLive ? "true" : undefined}
-      tooltip={chipLabel} ariaLabel={chipLabel} disabled={blocked}
-      onClick={() => select(modes[(modes.indexOf(mode) + 1) % modes.length])}>
-      <span className="composer-mode-chip-face" key={mode}>
-        <ModeIcon mode={mode} /><span className="composer-mode-chip-label text-sm">{label(mode)}</span>
-      </span>
-    </TooltipButton>
-    <AnchoredMenu className="composer-mode-menu" open={open} onClose={() => setOpen(false)}
-      menuClassName="composer-permission-menu" label={t("images.chooseMode")} role="menu" align="start" side="top"
+  const modeLabel = (value: ComposerMode) => t(value === "image" ? "images.mode" : MODE_LABEL_KEYS[value]);
+  const label = modeLabel(mode);
+  const isPlanning = planningLive && mode !== "image";
+  return (
+    <AnchoredMenu
+      className="composer-mode"
+      open={open}
+      onClose={() => setOpen(false)}
+      menuClassName="composer-mode-menu"
+      label={t("settings.mode")}
+      role="menu"
+      align="start"
+      side="top"
       onMenuKeyDown={(event) => {
         if (!["ArrowDown", "ArrowUp", "Home", "End"].includes(event.key)) return;
         event.preventDefault();
-        const items = Array.from(event.currentTarget.querySelectorAll<HTMLButtonElement>('[role="menuitemradio"]'));
-        const index = items.indexOf(document.activeElement as HTMLButtonElement);
+        const items = Array.from(event.currentTarget.querySelectorAll<HTMLButtonElement>('[role="menuitemradio"]:not([disabled])'));
+        if (!items.length) return;
+        const index = items.findIndex((item) => item === document.activeElement);
         const next = event.key === "Home" ? 0 : event.key === "End" ? items.length - 1 :
           (index + (event.key === "ArrowDown" ? 1 : -1) + items.length) % items.length;
         items[next]?.focus();
       }}
-      trigger={(ref) => <TooltipButton ref={ref} type="button" className="icon-btn mode-chip composer-mode-chevron"
-        tooltip={t("images.chooseMode")} ariaLabel={t("images.chooseMode")} disabled={blocked}
-        aria-haspopup="menu" aria-expanded={open} onClick={() => { onOpen(); setOpen(!open); }}>
-        <IconChevronDown size={12} aria-hidden="true" />
-      </TooltipButton>}>
-      {modes.map((candidate) => <button key={candidate} type="button" role="menuitemradio"
-        aria-checked={candidate === mode} className={`composer-plus-item ${candidate === mode ? "active" : ""}`}
-        onClick={() => select(candidate)}>
-        <ModeIcon mode={candidate} /><span className="flex-1 text-left">{label(candidate)}</span>
-        {candidate === mode ? <IconCheck size={13} /> : null}
-      </button>)}
+      trigger={(ref) => (
+        <TooltipButton
+          ref={ref}
+          type="button"
+          className={`icon-btn mode-chip composer-mode-chip ${open ? "active" : ""}`}
+          data-mode={mode}
+          data-planning={isPlanning ? "true" : undefined}
+          tooltip={isPlanning ? t(`${mode}.planning`) : t("settings.mode")}
+          ariaLabel={
+            isPlanning
+              ? `${t("settings.mode")}: ${label}. ${t(`${mode}.planning`)}`
+              : `${t("settings.mode")}: ${label}`
+          }
+          aria-haspopup="menu"
+          aria-expanded={open}
+          disabled={controlsBlocked}
+          onClick={() => {
+            onCloseOtherMenus();
+            setOpen((current) => !current);
+          }}
+        >
+          <span className="composer-mode-chip-face" key={mode}>
+            <ModeIcon mode={mode} />
+            <span className="composer-mode-chip-label text-sm">{label}</span>
+          </span>
+          <IconChevronDown
+            size={12}
+            aria-hidden="true"
+            className="composer-mode-chip-caret"
+          />
+        </TooltipButton>
+      )}
+    >
+      {modes.map((candidate) => (
+        <button
+          key={candidate}
+          type="button"
+          role="menuitemradio"
+          aria-checked={mode === candidate}
+          disabled={controlsBlocked}
+          className={`composer-plus-item ${mode === candidate ? "active" : ""}`}
+          onClick={async () => {
+            setOpen(false);
+            await onSelect(candidate);
+          }}
+        >
+          <span className="flex-1 text-left">{modeLabel(candidate)}</span>
+          {mode === candidate ? <IconCheck size={13} /> : null}
+        </button>
+      ))}
     </AnchoredMenu>
-  </div>;
+  );
 }

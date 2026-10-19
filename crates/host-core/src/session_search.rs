@@ -112,7 +112,7 @@ pub fn search(db: &Database, query: &str, offset: i64, limit: i64) -> Result<Sea
                 EXISTS (SELECT 1 FROM task_runs r WHERE r.session_id = s.id) AS scheduled_run
          FROM sessions s LEFT JOIN projects p ON p.id = s.project_id
          LEFT JOIN matched ON matched.session_id = s.id
-         WHERE s.deleted_at IS NULL AND (matched.count > 0 OR metadata_match)
+         WHERE s.deleted_at IS NULL AND s.id NOT LIKE 'side-%' AND (matched.count > 0 OR metadata_match)
          ORDER BY s.updated_at DESC, s.id ASC LIMIT ?4 OFFSET ?3"
     );
     let mut hits = db

@@ -1,3 +1,4 @@
+import { SelectionActions } from "../SelectionActions";
 import { memo, useMemo, useRef, type MouseEvent as ReactMouseEvent } from "react";
 import { useTranslation } from "react-i18next";
 import type { PlanningState, UiMessage } from "@pi-desktop/shared";
@@ -242,6 +243,7 @@ function TranscriptBody({
       ref={wrapRef}
       data-transcript-settling={veilCovering ? "true" : undefined}
     >
+      {sessionId && !sessionId.startsWith("side-") && !sessionId.startsWith("native-pi:") && !sessionId.startsWith("remote:") ? <SelectionActions rootRef={wrapRef} sessionId={sessionId} visible={paneVisible} /> : null}
       {/* The minimap measures row positions against a rendered scroller. A
         * hidden pane has none, so measuring there would cache junk offsets and
         * reuse them on reveal. It is out of flow and re-measures on mount, so

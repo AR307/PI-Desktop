@@ -1,3 +1,4 @@
+import { isAutomationSession } from "./session-origin.ts";
 import type { SessionSummary } from "@pi-desktop/shared";
 import {
   sessionIsArchived,
@@ -7,7 +8,7 @@ import { sessionMatchesProject } from "./sidebar-session-groups.ts";
 
 export type SessionScopeRow = Pick<
   SessionSummary,
-  "id" | "projectPath" | "updatedAt" | "providerId" | "modelId"
+  "scheduledRun" | "id" | "projectPath" | "updatedAt" | "providerId" | "modelId"
 >;
 
 /** Newest non-archived session in the same project (or temporary) group. */
@@ -17,7 +18,7 @@ export function latestSessionInScope<T extends SessionScopeRow>(
   sessionMeta: Record<string, SessionMeta>,
 ): T | undefined {
   return sessions
-    .filter((session) => sessionMatchesProject(session, projectPath))
+    .filter((session) => !isAutomationSession(session) && sessionMatchesProject(session, projectPath))
     .sort((a, b) => {
       const aUpdated = Date.parse(a.updatedAt);
       const bUpdated = Date.parse(b.updatedAt);

@@ -148,6 +148,8 @@ impl Database {
                 tx.execute_batch(crate::session_collaboration::SCHEMA)?;
                 tx.execute_batch(super::session_sync_migration::SCHEMA)?;
                 tx.execute_batch(WORKTREE_DDL)?;
+                tx.execute_batch(super::side_chat_migration::SCHEMA)?;
+                tx.execute_batch("ALTER TABLE turn_queue ADD COLUMN quotes_json TEXT;")?;
                 tx.pragma_update(None, "user_version", SCHEMA_VERSION)?;
                 tx.commit()?;
             }
@@ -209,6 +211,7 @@ impl Database {
                 migrate_v23_to_v24(&conn, path)?;
             }
             24 => {}
+            25 => {}
             legacy @ 1..=6 => {
                 let _ = conn.execute_batch("PRAGMA wal_checkpoint(TRUNCATE);");
                 drop(conn);
@@ -262,6 +265,9 @@ impl Database {
         }
         if conn.query_row("PRAGMA user_version", [], |row| row.get::<_, i64>(0))? == 24 {
             super::session_sync_migration::migrate(&conn, path)?;
+        }
+        if conn.query_row("PRAGMA user_version", [], |row| row.get::<_, i64>(0))? == 25 {
+            super::side_chat_migration::migrate(&conn, path)?;
         }
         let db = Self { conn, data_dir };
         db.boot_maintenance()?;

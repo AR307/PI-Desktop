@@ -253,6 +253,13 @@ export class ApprovalBroker {
     return result;
   }
 
+  /** The owner disposed a temporary session, including its pending contract. */
+  releaseSession(sessionId: string): void {
+    for (const [id, entry] of this.pending) {
+      if (entry.request.sessionId === sessionId) this.pending.delete(id);
+    }
+  }
+
   /** Turn cleanup cancels tool requests; durable Plan/Goal approvals remain open. */
   cancelToolsForSession(sessionId: string, revision: number): RacpApprovalResult[] {
     const closed: RacpApprovalResult[] = [];

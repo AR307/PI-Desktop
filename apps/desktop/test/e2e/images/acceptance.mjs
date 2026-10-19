@@ -28,7 +28,7 @@ async function open() {
   closing = false;
   const env = { ...process.env, PI_DESKTOP_DATA_DIR: join(output, "profile"), PI_DESKTOP_HOST_BIN: join(root, "target/debug/pi-desktop-host-core.exe"), PI_DESKTOP_MIRRORCODING_TEST_ORIGIN: fixture.origin };
   delete env.ELECTRON_RUN_AS_NODE;
-  desktop = await _electron.launch({ executablePath: require("electron"), args: [join(root, "apps/desktop"), "--user-data-dir=" + join(output, "electron-profile")], env, timeout: 60_000 });
+  desktop = await _electron.launch({ executablePath: process.env.PI_TEST_ELECTRON ?? require("electron"), args: [join(root, "apps/desktop"), "--user-data-dir=" + join(output, "electron-profile")], env, timeout: 60_000 });
   page = await until(async () => { for (const p of desktop.windows()) if (await p.locator(".app-shell").count()) return p; }, "desktop window", 60_000);
   page.setDefaultTimeout(20_000);
   page.on("pageerror", (error) => (closing ? shutdownErrors : errors).push({ message: error.message, after: passed.at(-1) }));
@@ -37,9 +37,9 @@ async function open() {
 }
 async function close() { if (desktop) { closing = true; await desktop.evaluate(() => { process.env.PI_DESKTOP_BOOT_PROBE = "1"; }); await desktop.close(); desktop = undefined; } }
 async function mode(name) {
-  await page.getByRole("button", { name: /选择任务模式|Choose task mode/ }).click();
+  await page.locator(".composer-mode-chip").click();
   await page.getByRole("menuitemradio", { name, exact: true }).click();
-  await until(() => page.locator(".composer-mode-switch").textContent().then((text) => text.includes(name)), "mode selection");
+  await until(() => page.locator(".composer-mode-chip").textContent().then((text) => text.includes(name)), "mode selection");
 }
 async function choose(model, group = "中文 分组") {
   await page.locator(".composer-model-thinking-chip").click();
@@ -53,7 +53,8 @@ async function image(prompt) {
   const count = fixture.calls.length;
   const editor = page.locator('[contenteditable="true"]').first();
   if (await editor.locator('[data-token]').count()) {
-    await editor.press("Control+Home"); await editor.pressSequentially(prompt);
+    await editor.press("Control+Home");
+    await page.keyboard.insertText(prompt);
   } else await editor.fill(prompt);
   await editor.press("Enter");
   await until(() => fixture.calls.length > count, "image request");
@@ -103,11 +104,12 @@ try {
   await page.locator(".app-shell:not(.app-shell-boot)").waitFor();
   await page.locator('[data-sidebar-session-row="' + sessionId + '"]').first().click();
   await page.locator('[contenteditable="true"]').first().waitFor();
-  for (const expected of ["plan", "goal", "image"]) {
+  for (const [expected, name] of [["plan", "规划"], ["goal", "目标"], ["image", "图片生成"]]) {
     await page.locator(".composer-mode-chip").click();
-    await until(() => page.locator(".composer-mode-chip").getAttribute("data-mode").then((mode) => mode === expected), "mode cycle");
+    await page.getByRole("menuitemradio", { name, exact: true }).click();
+    await until(() => page.locator(".composer-mode-chip").getAttribute("data-mode").then((mode) => mode === expected), "mode selection");
   }
-  check("main mode button cycles through planning, goal and image");
+  check("single mode menu selects planning, goal and image");
   await page.locator(".composer-model-thinking-chip").click();
   await page.locator("button.composer-menu-entry").click();
   check("image menu excludes chat-only and video models", await page.getByRole("menuitem", { name: /^gpt-5/ }).count() === 0 && await page.getByRole("menuitem", { name: /^video-fixture/ }).count() === 0);
@@ -225,11 +227,12 @@ try {
   check("restart renders saved images", await page.locator(".image-result-thumbnail img").count() > 0);
   await screenshot("image-light-en-narrow", 600, 700);
   await screenshot("image-light-en", 1200, 800);
-  await page.getByRole("button", { name: "Choose task mode" }).click();
+  await page.locator(".composer-mode-chip").click();
+  await page.waitForFunction(() => document.querySelector(".composer-mode-menu.is-open")?.contains(document.activeElement));
   await page.getByRole("menuitemradio").first().focus(); await page.keyboard.press("ArrowDown");
   check("mode menu supports keyboard focus", await page.getByRole("menuitemradio").nth(1).evaluate((el) => el === document.activeElement));
   await page.keyboard.press("Escape");
-  check("Esc closes mode menu without changing selection", await page.getByRole("menuitemradio").count() === 0 && (await page.locator(".composer-mode-switch").textContent()).includes("Image generation"));
+  check("Esc closes mode menu without changing selection", await page.getByRole("menuitemradio").count() === 0 && (await page.locator(".composer-mode-chip").textContent()).includes("Image generation"));
   for (const planningMode of ["plan", "goal"]) {
     const planning = (await invoke("session/create", { title: `Image catalog in ${planningMode}`, mode: planningMode, providerId: chatProvider.id, modelId: "gpt-5", thinkingLevel: "medium" })).session;
     const chatStart = fixture.chats.length;

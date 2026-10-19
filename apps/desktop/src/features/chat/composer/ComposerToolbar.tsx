@@ -1,3 +1,4 @@
+import { AccountBenefitsControl } from "../../account/AccountBenefits";
 import type { Dispatch, SetStateAction } from "react";
 import type { TFunction } from "i18next";
 import {
@@ -38,10 +39,13 @@ export type ComposerToolbarProps = {
   modelId?: string;
   thinkingLevel: SessionThinkingLevel;
   composerPermissionMode: Exclude<PermissionMode, "inherit">;
+  modeOpen: boolean;
+  setModeOpen: Dispatch<SetStateAction<boolean>>;
   permissionOpen: boolean;
   setPermissionOpen: Dispatch<SetStateAction<boolean>>;
   controlsBlocked: boolean;
   localToolsAllowed?: boolean;
+  globalComposerControlsAllowed?: boolean;
   attachmentsAllowed?: boolean;
   stopAllowed?: boolean;
   pasting: boolean;
@@ -80,10 +84,13 @@ export function ComposerToolbar({
   modelId,
   thinkingLevel,
   composerPermissionMode,
+  modeOpen,
+  setModeOpen,
   permissionOpen,
   setPermissionOpen,
   controlsBlocked,
   localToolsAllowed = true,
+  globalComposerControlsAllowed = true,
   attachmentsAllowed = true,
   stopAllowed = true,
   pasting,
@@ -131,21 +138,28 @@ export function ComposerToolbar({
             <IconPlus size={15} aria-hidden="true" />
           </TooltipButton>
         </div>
-        {task === "chat" && localToolsAllowed ? <LiveVoiceControls t={t} workSessionId={workSessionId} /> : null}
+        {task === "chat" && localToolsAllowed && globalComposerControlsAllowed ? <LiveVoiceControls t={t} workSessionId={workSessionId} /> : null}
         <ComposerModePicker
+          t={t}
           mode={task === "image" ? "image" : mode}
           planningLive={planningLive}
-          blocked={controlsBlocked || modeBlocked}
-          onSelect={onModeChange}
-          onOpen={() => {
+          open={modeOpen}
+          setOpen={setModeOpen}
+          controlsBlocked={controlsBlocked || modeBlocked}
+          onCloseOtherMenus={() => {
             modelMenu.setOpen(false);
             setPermissionOpen(false);
           }}
+          onSelect={onModeChange}
         />
         {task === "chat" ? <ComposerPermissionPicker t={t} mode={mode}
           composerPermissionMode={composerPermissionMode}
           permissionOpen={permissionOpen} setPermissionOpen={setPermissionOpen}
-          controlsBlocked={controlsBlocked} onCloseOtherMenus={() => modelMenu.setOpen(false)}
+          controlsBlocked={controlsBlocked}
+          onCloseOtherMenus={() => {
+            modelMenu.setOpen(false);
+            setModeOpen(false);
+          }}
           onSelect={async (candidate) => {
                 try {
                   await configureActiveSession({
@@ -161,12 +175,13 @@ export function ComposerToolbar({
                   });
                 }
           }} /> : null}
-        {localToolsAllowed ? <ComposerControlSlots side="left" /> : null}
+        {localToolsAllowed && globalComposerControlsAllowed ? <ComposerControlSlots side="left" /> : null}
       </div>
 
       <div className="composer-right">
-        {localToolsAllowed ? <ComposerControlSlots side="right" /> : null}
+        {localToolsAllowed && globalComposerControlsAllowed ? <ComposerControlSlots side="right" /> : null}
         {task === "chat" && contextUsage ? <ContextUsageInspector {...contextUsage} /> : null}
+        <AccountBenefitsControl onOpen={() => { modelMenu.setOpen(false); setPermissionOpen(false); }} />
         <ComposerModelPicker
           t={t}
           controller={modelMenu}

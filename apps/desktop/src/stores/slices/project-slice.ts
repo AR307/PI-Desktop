@@ -1,4 +1,5 @@
 import { forgetTranscriptReadingState } from "../../lib/transcript-reading-position";
+import { closeSideChat, confirmSideChatDiscard } from "../../features/chat/side-chat-service";
 import i18n from "i18next";
 import type { ProjectWorkspace } from "@pi-desktop/shared";
 import { api } from "../../lib/api";
@@ -155,6 +156,8 @@ function clearLocalSessionState(
   runtime.sessionTranscriptCache.delete(id);
   runtime.sessionHistoryCache.delete(id);
   runtime.liveSessionTranscripts.delete(id);
+  runtime.submittedComposerDrafts.delete(id);
+  runtime.nextPlanSyncGeneration(id);
   if (get().activeSessionId === id) get().resetWorkPanelContext();
   set((state) => {
     const sessionMeta = { ...state.sessionMeta };
@@ -212,6 +215,8 @@ function clearLocalSessionState(
       planCheckpoints,
       sessionCompactions,
       sessionHistory,
+      transcriptViews: withoutRecordKey(state.transcriptViews, id),
+      sessionTodos: withoutRecordKey(state.sessionTodos, id),
       navStack,
       navIndex: Math.min(state.navIndex, navStack.length - 1),
     };
@@ -251,6 +256,7 @@ export function createProjectSlice({
   | "renameSession"
   | "moveSessionProject"
   | "deleteSession"
+  | "releaseClosedSession"
   | "setSessionSort"
   | "setSessionArchiveVisibility"
   | "setSessionView"
@@ -305,7 +311,7 @@ export function createProjectSlice({
           page: "chat" as const,
           ...(switchesVisibleProject && !preserveConversation
             ? {
-                ...clearSessionPanes(),
+                ...clearSessionPanes(state),
                 activeSessionId: undefined,
                 messages: [],
                 isRunning: false,
@@ -441,7 +447,7 @@ export function createProjectSlice({
         ...(preserveConversation
           ? {}
           : {
-              ...clearSessionPanes(),
+              ...clearSessionPanes(get()),
               activeSessionId: undefined,
               messages: [],
               isRunning: false,
@@ -461,6 +467,9 @@ export function createProjectSlice({
           (session) => normalizeProjectPath(session.projectPath) === key,
         )
         .map((session) => session.id);
+      const sides = get().sessions.filter((session) => session.sideChatParentId && removedSessionIds.includes(session.id));
+      for (const side of sides) if (!(await confirmSideChatDiscard(side.id))) return;
+      for (const side of sides) await closeSideChat(side.id);
       // A path the host has no durable row for is not a failure: the local
       // records cleared below are the only thing that can keep such a row
       // visible, so an already-removed project still leaves the desktop.
@@ -588,8 +597,14 @@ export function createProjectSlice({
       return true;
     },
 
+    releaseClosedSession: (id) => clearLocalSessionState({ get, set, runtime, withoutRecordKey }, id),
+
     deleteSession: async (id) => {
       if (!id) return;
+      for (const side of get().sessions.filter((session) => session.sideChatParentId === id)) {
+        if (!(await confirmSideChatDiscard(side.id))) return;
+        await closeSideChat(side.id);
+      }
       await api.deleteSession(id);
       void api.pluginViewClose("pi.browser", "browser", { sessionId: id })
         .catch((error) => get().showToast(String(error), { variant: "error" }));

@@ -107,7 +107,7 @@ function writeBuckets(buckets: readonly HistoryBucket[]): void {
 
 /** Prompts accepted in one conversation, newest first. */
 export function loadComposerInputHistory(sessionId: string): ComposerHistoryEntry[] {
-  if (!sessionId) return [];
+  if (!sessionId || sessionId.startsWith("side-")) return [];
   return readBuckets().find((bucket) => bucket.sessionId === sessionId)?.entries ?? [];
 }
 
@@ -126,7 +126,7 @@ export function rememberComposerInput(
   sessionId: string,
   snapshot: ComposerDraftSnapshot,
 ): void {
-  if (!sessionId) return;
+  if (!sessionId || sessionId.startsWith("side-")) return;
   if (!snapshot.text.trim() && snapshot.fileReferences.length === 0) return;
   const entry: ComposerHistoryEntry = {
     text: snapshot.text,

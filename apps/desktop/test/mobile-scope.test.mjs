@@ -17,6 +17,7 @@ const groups = [{ id: "p1", name: "Work", roots: [{ path: "D:/work" }] }];
 const sessions = [
   { id: "s1", title: "Work session", projectPath: "D:/work" },
   { id: "s2", title: "Ungrouped" },
+  { id: "side-ephemeral", title: "Side chat", projectPath: "D:/work" },
 ];
 const host = { call: async (method, params) => {
   if (method === "project.groups.list") return { groups };
@@ -25,6 +26,13 @@ const host = { call: async (method, params) => {
   throw new Error(`Unexpected RPC ${method}`);
 } };
 const scope = new MobileScopeAccess(() => host);
+
+test("temporary side chats cannot be listed, read or shared even with account scope", async () => {
+  const grants = [{ scope: { kind: "account", id: "account-1" } }];
+  assert.ok((await scope.sessions(grants)).every((session) => !session.id.startsWith("side-")));
+  await assert.rejects(() => scope.require("side-ephemeral", grants), (error) => error.code === "FORBIDDEN");
+  await assert.rejects(() => scope.resolve({ kind: "session", sessionId: "side-ephemeral" }), (error) => error.code === "FORBIDDEN");
+});
 
 test("account grant exposes all sessions, including ungrouped work", async () => {
   const account = [{ scope: { kind: "account", id: "account-1" } }];

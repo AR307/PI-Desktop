@@ -141,6 +141,7 @@
   --ds-placeholder-ink: color-mix(in oklab, var(--gray-0) 42%, transparent);
   --ds-success: #40c977;
   --ds-warning: #ff8549;
+  --ds-quota-warning: #facc15;
   --ds-error: #ff6764;
   --ds-info: var(--gray-300);
   --ds-purple: #c27aff;
@@ -282,6 +283,7 @@
   --ds-switch-knob-on: #ffffff;
   --ds-success: #00a240;
   --ds-warning: #e25507;
+  --ds-quota-warning: #a16207;
   --ds-error: #e02e2a;
   --ds-info: #5d5d5d;
   --ds-purple: #7c3aed;

@@ -453,6 +453,21 @@ off | minimal | low | medium | high | xhigh | max
 - `tools.abort`
 - 有序 `stdout`/`stderr` 块的 `tools.output` 通知
 
+### 后台任务
+- `backgroundTasks.list`
+- `backgroundTasks.output`
+- `backgroundTasks.stop`
+- `backgroundTasks.changed` 通知，携带 `{ version }`；任务启动、退出或被停止时发出
+
+`tools.execute` 带 `runInBackground: true` 时启动的是归宿主所有的 `Bash` 命令，
+而不是本轮的命令：调用立即以 `backgroundTaskId` 返回，任务不进入按工具调用注册的
+取消表，因此 `tools.abort` / `agent.abort` 都无法触及它，输出按流保存在有界环形缓冲
+中。注册表位于宿主进程内，宿主关闭时会停止全部任务，因此应用退出不会残留孤儿进程。
+
+输出块不会触发 `backgroundTasks.changed`；该事件仍用于生命周期状态失效通知，
+不承担高频日志传输。客户端只读取当前展开的输出。最终状态包含排空后的尾部输出，
+即使并发读取占用输出锁，关闭宿主仍会向每个任务发送停止信号。
+
 ### 贝壳
 - `commandShells.list`
 - `settings.set` 带有部分设置对象；保留省略的字段，
