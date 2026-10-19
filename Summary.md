@@ -13,6 +13,12 @@
   validate the packaged application without touching the user's running profile.
 - Keep package-probe data directly in its dedicated temporary boot directory,
   as required by the existing Host session-list fixture safety boundary.
+- Windows NSIS, ZIP and portable outputs passed packaged boot probes; the
+  packaged side-chat user journey passed all five scenario groups.
+- Both native macOS Actions jobs passed build, package and Host boot checks.
+  DMG/ZIP artifacts and local delivery copies are available; signing and
+  interactive installation remain explicitly outside this test-build scope.
+  See docs/releases/desktop-0.21.0-beta.4-package.md for exact evidence.
 
 ## 2026-10-19 - Synchronize upstream v0.21.0-beta.4
 
