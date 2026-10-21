@@ -1682,3 +1682,9 @@ preserving meaningful output and completed tools after compaction.
 Windows packages are built locally; macOS arm64/x64 use the artifact-only
 Actions lane. Android remains on its existing release. Validation and artifact
 results are recorded in docs/releases/0.21.0-beta.5-validation.md.
+
+Published v0.21.0-beta.5 with 14 Windows/macOS assets and both updater feeds.
+Validation passed 435 runtime tests, 128 Desktop tests, 978 Host tests, real
+image/cache/side-chat/account-benefits journeys, Windows packaged acceptance,
+and both native macOS package/Host boot checks. Public download and updater
+checks passed. Main, Android and server deployments are unchanged.
