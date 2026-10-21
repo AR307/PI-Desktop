@@ -1,4 +1,5 @@
 import { withMirrorCodingFast } from "./mirrorcoding-fast.js";
+import { claudeCacheOptions } from "./claude-cache.js";
 import { accountModelStream, type UsageObserver } from "./request-usage.js";
 import {
   buildProviderModel,
@@ -85,6 +86,7 @@ export function subagentModelBinding(opts: {
         withOpenCodeSessionHeaders(
           {
             ...options,
+            ...claudeCacheOptions(m, opts.provider.modelConfig, options),
             // Same request-side output cap as the parent runtime: the
             // `omit` branch hits pi-ai's low-level `stream` which never
             // re-derives max_tokens (issue B).

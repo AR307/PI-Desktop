@@ -12,7 +12,7 @@ const source = () => ({
   models: [{ id: 'model', alias: 'Fast', contextWindow: 32000, maxTokens: 4000,
     thinkingLevels: ['off', 'high'], defaultThinkingLevel: 'high',
     supportsImages: true, supportsDocuments: null, availableForSubagents: true,
-    contextWindowSource: 'catalog', maxTokensSource: 'user',
+    contextWindowSource: 'catalog', maxTokensSource: 'user', claudeCacheTtl: '1h',
     secretValue: 'never-copy' }],
 });
 test('copy drafts carry only editable non-credential fields, with independent models', () => {
@@ -27,6 +27,7 @@ test('copy drafts carry only editable non-credential fields, with independent mo
   assert.equal(copy.models[0].contextWindowSource, 'catalog');
   assert.equal(copy.models[0].maxTokensSource, 'user');
   assert.equal(copy.models[0].availableForSubagents, true);
+  assert.equal(copy.models[0].claudeCacheTtl, '1h');
   assert.ok(!JSON.stringify(copy).includes('never-copy'));
   copy.name='Changed'; copy.apiStyle='anthropic_messages';
   copy.models[0].alias='Changed'; copy.models[0].thinkingLevels.push('low');

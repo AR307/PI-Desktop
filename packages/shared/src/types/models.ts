@@ -254,6 +254,8 @@ export type ModelBinding = {
    * knowledge of the endpoint is the only source.
    */
   nativeWebSearch?: boolean;
+  /** Claude Messages prompt-cache lifetime; absent uses the five-minute default. */
+  claudeCacheTtl?: "5m" | "1h";
   /** Selected MirrorCoding group for this model on an account-level provider. */
   mirrorCodingGroupId?: string;
   /** Model-level sampling override; absent leaves the adapter default. */

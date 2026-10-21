@@ -238,6 +238,9 @@ pub struct ModelBinding {
     /// default because models.dev does not publish hosted-tool capability.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub native_web_search: Option<bool>,
+    /// Claude Messages prompt-cache lifetime; absent uses five minutes.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub claude_cache_ttl: Option<ClaudeCacheTtl>,
     /// Selected MirrorCoding group for an account-level provider.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub mirror_coding_group_id: Option<String>,
@@ -250,6 +253,14 @@ pub struct ModelBinding {
 }
 
 impl Eq for ModelBinding {}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+pub enum ClaudeCacheTtl {
+    #[serde(rename = "5m")]
+    FiveMinutes,
+    #[serde(rename = "1h")]
+    OneHour,
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]

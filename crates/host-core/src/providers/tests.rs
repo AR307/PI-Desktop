@@ -69,6 +69,7 @@ fn mirrorcoding_sync_persists_group_and_model_bindings() {
                     supports_documents: None,
                     available_for_subagents: None,
                     native_web_search: None,
+                    claude_cache_ttl: None,
                     mirror_coding_group_id: Some("group-1".into()),
                     temperature: None,
                     api_style: None,
@@ -166,6 +167,7 @@ fn mirrorcoding_account_model_settings_project_to_groups_and_survive_refresh() {
     edited[0].context_window = 200_000;
     edited[0].max_tokens = 12_000;
     edited[0].temperature = Some(0.7);
+    edited[0].claude_cache_ttl = Some(super::model::ClaudeCacheTtl::OneHour);
     edited[0].mirror_coding_group_id = Some("premium".into());
     let input: ProviderUpdateInput = serde_json::from_value(json!({
         "id": account.id,
@@ -180,6 +182,10 @@ fn mirrorcoding_account_model_settings_project_to_groups_and_survive_refresh() {
         assert_eq!(group.models[0].context_window, 200_000);
         assert_eq!(group.models[0].max_tokens, 12_000);
         assert_eq!(group.models[0].temperature, Some(0.7));
+        assert_eq!(
+            group.models[0].claude_cache_ttl,
+            Some(super::model::ClaudeCacheTtl::OneHour)
+        );
         assert_eq!(
             group.models[0].mirror_coding_group_id.as_deref(),
             Some(group.mirror_coding.as_ref().unwrap().group_id.as_str())
@@ -198,6 +204,10 @@ fn mirrorcoding_account_model_settings_project_to_groups_and_survive_refresh() {
         Some("premium")
     );
     assert_eq!(account.models[0].temperature, Some(0.7));
+    assert_eq!(
+        account.models[0].claude_cache_ttl,
+        Some(super::model::ClaudeCacheTtl::OneHour)
+    );
     assert_eq!(account.models[0].context_window, 200_000);
 }
 
@@ -445,6 +455,7 @@ fn model_bindings_roundtrip_and_legacy_model_migrates_on_read() {
                     supports_documents: None,
                     available_for_subagents: Some(true),
                     native_web_search: None,
+                    claude_cache_ttl: None,
                     mirror_coding_group_id: None,
                     temperature: None,
                     api_style: None,
@@ -463,6 +474,7 @@ fn model_bindings_roundtrip_and_legacy_model_migrates_on_read() {
                     supports_documents: Some(false),
                     available_for_subagents: None,
                     native_web_search: None,
+                    claude_cache_ttl: None,
                     mirror_coding_group_id: None,
                     temperature: None,
                     api_style: None,
@@ -575,6 +587,7 @@ fn binding_with_alias(id: &str, alias: Option<&str>) -> ModelBinding {
         supports_documents: None,
         available_for_subagents: None,
         native_web_search: None,
+        claude_cache_ttl: None,
         mirror_coding_group_id: None,
         temperature: None,
         api_style: None,
@@ -593,6 +606,24 @@ fn normalize_model_bindings_trims_aliases_and_drops_blank_ones() {
     assert_eq!(normalized[1].alias, None);
     assert_eq!(normalized[2].alias, None);
     assert_eq!(normalized[3].alias, None);
+}
+
+#[test]
+fn claude_cache_duration_survives_normalization_and_json_round_trip() {
+    for ttl in ["5m", "1h"] {
+        let mut value =
+            serde_json::to_value(binding_with_alias("claude-sonnet-4-6", None)).unwrap();
+        value["claudeCacheTtl"] = json!(ttl);
+        let binding: ModelBinding = serde_json::from_value(value).unwrap();
+        let normalized = normalize_model_bindings(&[binding]);
+        assert_eq!(
+            serde_json::to_value(&normalized[0]).unwrap()["claudeCacheTtl"],
+            ttl
+        );
+    }
+    let mut invalid = serde_json::to_value(binding_with_alias("claude-sonnet-4-6", None)).unwrap();
+    invalid["claudeCacheTtl"] = json!("24h");
+    assert!(serde_json::from_value::<ModelBinding>(invalid).is_err());
 }
 
 #[test]
@@ -1761,6 +1792,7 @@ fn binding_with_limits(id: &str, context_window: u32, max_tokens: u32) -> ModelB
         supports_documents: None,
         available_for_subagents: None,
         native_web_search: None,
+        claude_cache_ttl: None,
         mirror_coding_group_id: None,
         temperature: None,
         api_style: None,

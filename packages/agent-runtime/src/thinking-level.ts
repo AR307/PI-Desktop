@@ -74,6 +74,8 @@ export type ModelConfig = {
    * when this is true.
    */
   webSearch?: boolean;
+  /** Per-model Claude Messages prompt-cache preference. */
+  claudeCacheTtl?: "5m" | "1h";
   headers?: Record<string, string>;
   compat?: Record<string, unknown>;
   /**

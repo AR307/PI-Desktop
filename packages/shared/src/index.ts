@@ -73,6 +73,7 @@ export * from "./tray-sessions.js";
 export * from "./window-chrome.js";
 export * from "./native-web-search.js";
 export * from "./native-web-search-transport.js";
+export * from "./claude-cache.js";
 export * from "./header-value.js";
 export * from "./mirrorcoding-fast.js";
 export * from "./secret-refs.js";

@@ -3,6 +3,7 @@ import { promptWithQuotes } from "@pi-desktop/shared";
 import { returnToParent } from "./return-to-parent.js";
 import { highestThinkingLevel, isReturnToParent } from "@pi-desktop/shared";
 import { delegationGuidance, delegationHandoffGuidance, delegationSystemPrompt, resolveDelegationThinking, shouldHandOffDelegations } from "./ultra-policy.js";
+import { claudeCacheOptions } from "./claude-cache.js";
 import { assertMirrorCodingFast, withMirrorCodingFast } from "./mirrorcoding-fast.js";
 import { assistantReplay, canRestorePartialResponse, responseContentFacts, responseDiagnostics, responseOutcome, responseOutcomeError, restoredAssistantBlocks } from "./response-outcome.js";
 import { upstreamRequestDiagnostics, type RequestDiagnostics } from "./request-diagnostics.js";
@@ -2181,6 +2182,7 @@ export class DesktopAgentRuntime {
           withOpenCodeSessionHeaders(
             {
               ...options,
+              ...claudeCacheOptions(m, this.provider.modelConfig, options),
               ...(this.provider.temperature !== undefined && options?.temperature === undefined
                 ? { temperature: this.provider.temperature }
                 : {}),

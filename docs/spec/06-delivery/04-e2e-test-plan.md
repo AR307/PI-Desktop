@@ -1,5 +1,24 @@
 # 04. E2E Test Plan
 
+## Claude prompt-cache duration
+
+Run **node scripts/e2e-claude-cache.mjs** from the task worktree after building
+Host, shared packages, runtime bundle and Electron. Reuse the existing toolchain
+via PI_DESKTOP_HOST_BIN, PI_E2E_ELECTRON and PI_E2E_PLAYWRIGHT if necessary.
+Only the local HTTP model endpoint is simulated; profiles and screenshots stay
+isolated and retained. No real account, paid API or installed app is exercised.
+
+| ID | User sequence and required result |
+| --- | --- |
+| E2E-CLAUDE-CACHE-01 | Settings -> Models -> provider -> Claude Advanced. Select 1 hour by keyboard, save, send a chat and inspect actual cache_control markers for ttl: 1h. |
+| E2E-CLAUDE-CACHE-02 | Restart the same isolated profile; the setting stays 1 hour. A non-Claude model has no Claude-cache selector. |
+| E2E-CLAUDE-CACHE-03 | Change to 5 minutes, save, send again and verify no 1h marker remains. Capture settings and chat screenshots. |
+| E2E-CLAUDE-CACHE-04 | Seed local account catalog metadata without authorization, then change and save the MirrorCoding model's cache duration through its real settings component. Inspect Host-persisted value. |
+
+Runtime HTTP tests also cover delegate requests, explicit no-cache requests and
+unaffected non-Claude/non-Anthropic routes. Host tests cover strict enum parsing,
+normalization, JSON persistence and MirrorCoding account refresh projection.
+
 ## Selected references and temporary side chat
 
 Run `node scripts/e2e-selection-side-chat.mjs` from the request worktree with

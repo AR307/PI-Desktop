@@ -1,5 +1,24 @@
 # PI-Desktop MirrorCoding Edition
 
+## 2026-10-21 - Per-model Claude prompt-cache duration
+
+- Add a native advanced-model dropdown for five-minute and one-hour Claude
+  caching on Anthropic Messages, shared by API services and MirrorCoding.
+- Store the optional model preference in Host-owned provider JSON and carry
+  it through provider copy/import, account refresh and runtime model binding.
+- Use the existing Pi adapter for cache markers. Main sessions and delegates
+  receive short/long retention; explicit no-cache summarization is unchanged.
+- Cover native settings selection, saving, restart and actual request bodies
+  with an isolated Electron journey and local HTTP model. No paid API is used.
+- No server changes, push, merge, release or installer packaging are included.
+- Validation: 122 targeted runtime/shared tests, 37 desktop configuration
+  tests and 66 Host provider tests passed. Workspace TypeScript builds,
+  desktop typecheck, native Host/Electron builds, Biome lint, Rust format and
+  clippy checks passed. Real Electron covered API-provider and MirrorCoding
+  settings, keyboard selection, persistence/restart, actual 1h/5m HTTP bodies
+  and dark/wide plus light/narrow screenshots. Full repository suites and
+  production cache billing/hit behavior were not exercised.
+
 ## 2026-10-19 - Desktop package candidates on Windows and macOS
 
 - Package the synchronized 0.21.0-beta.4 desktop without changing Android 0.20.4.

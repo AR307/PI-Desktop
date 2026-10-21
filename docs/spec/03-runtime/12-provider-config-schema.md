@@ -1,5 +1,28 @@
 # 12. Provider Config Schema
 
+## Claude prompt-cache duration
+
+The optional **models[].claudeCacheTtl** selects the Claude prompt-cache
+lifetime for Anthropic Messages. Advanced model settings exposes **5 minutes**
+(default) and **1 hour**, including MirrorCoding model settings. The provider
+must support the selected duration. This is not a local disk-cache preference
+or an OpenAI prompt-cache-retention setting.
+
+- **5m** or an absent preference uses Pi's cacheRetention: "short", producing
+  cache_control: { "type": "ephemeral" } (the five-minute default).
+- **1h** uses cacheRetention: "long", producing
+  cache_control: { "type": "ephemeral", "ttl": "1h" }. An explicit user choice
+  enables the adapter's long-cache capability even on a proxy.
+- The adapter owns cache-marker placement on system, tool and message blocks;
+  Desktop does not rewrite transcripts or add another cache-marker pass.
+- Main sessions, temporary side chats and subagents use their own effective
+  model binding. Explicit no-cache requests, including compaction summaries,
+  remain uncached. Non-Claude and non-Anthropic wires are not changed.
+- The field is optional JSON in the existing provider configuration. No SQL
+  schema change, data rewrite or migration is needed. Host deserialization and
+  provider-sync import reject unknown durations. Copying providers, saving,
+  restarting and refreshing MirrorCoding catalogs preserve the selection.
+
 ## 1. Storage location
 
 Owned by Rust host DB/settings store.
@@ -108,7 +131,8 @@ Tables (canonical DDL in [04-data-storage](04-data-storage.md) §4.3–4.4, §4.
           },
           "supportsImages": { "type": ["boolean", "null"] },
           "supportsDocuments": { "type": ["boolean", "null"] },
-          "availableForSubagents": { "type": "boolean", "default": false }
+          "availableForSubagents": { "type": "boolean", "default": false },
+          "claudeCacheTtl": { "enum": ["5m", "1h"] }
         }
       }
     },

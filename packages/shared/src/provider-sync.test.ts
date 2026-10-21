@@ -13,6 +13,16 @@ function payload() {
 const provider = { ...payload().providers[0]!.input, id: "local-1", enabled: true, hasSecret: true, supportsReasoning: true, supportedThinkingLevels: ["off", "high"], createdAt: "1", updatedAt: "1" } as ProviderPublic;
 
 describe("provider sync boundary", () => {
+  it.each(["5m", "1h"])("preserves Claude cache duration %s", (claudeCacheTtl) => {
+    const input = payload();
+    Object.assign(input.providers[0]!.input.models[0]!, { claudeCacheTtl });
+    expect(parseProviderImportPayload(input).providers[0]!.input.models![0]!.claudeCacheTtl).toBe(claudeCacheTtl);
+  });
+  it("rejects unsupported Claude cache durations", () => {
+    const input = payload();
+    Object.assign(input.providers[0]!.input.models[0]!, { claudeCacheTtl: "24h" });
+    expect(() => parseProviderImportPayload(input)).toThrow("Invalid provider import payload");
+  });
   it("preserves current model settings and meaningful zero values", () => {
     const input = payload();
     expect(parseProviderImportPayload(input)).toEqual(input);

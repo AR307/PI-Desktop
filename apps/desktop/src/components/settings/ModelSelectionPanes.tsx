@@ -19,6 +19,7 @@ import {
   formatTokenCount,
   modelMatchesFilter,
   nativeWebSearchSupportedOn,
+  supportsClaudeCacheTtl,
   publishedThinkingLevels,
   resolveBindingDefaultThinkingLevel,
   sortThinkingLevels,
@@ -946,6 +947,26 @@ export function ModelSelectionPanes({
                       </div>
                     </div>
                     {renderBindingExtra?.(binding, updateBinding, busy)}
+                    {supportsClaudeCacheTtl(binding.id, binding.apiStyle ?? apiStyle, info?.family) ? (
+                      <div className="provider-chosen-thinking-default">
+                        <span className="provider-chosen-field-label">
+                          {t("settings.claudeCacheTtl")}
+                          <HelpIcon label={t("settings.claudeCacheTtlHint")} />
+                        </span>
+                        <SettingsMenuSelect
+                          label={t("settings.claudeCacheTtl")}
+                          value={binding.claudeCacheTtl ?? "5m"}
+                          disabled={busy}
+                          options={[
+                            { id: "5m", label: t("settings.claudeCache5m") },
+                            { id: "1h", label: t("settings.claudeCache1h") },
+                          ]}
+                          onChange={(id) => {
+                            if (id === "5m" || id === "1h") updateBinding(binding.id, { claudeCacheTtl: id });
+                          }}
+                        />
+                      </div>
+                    ) : null}
                     <div className="provider-chosen-capabilities">
                       <span className="provider-chosen-thinking-label">
                         {t("settings.modelCapabilities")}

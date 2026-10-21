@@ -101,6 +101,7 @@ export function modelConfigWithBinding(
         | "supportsImages"
         | "supportsDocuments"
         | "nativeWebSearch"
+        | "claudeCacheTtl"
       >
     | null,
 ): ModelConfig {
@@ -185,6 +186,7 @@ export function modelConfigWithBinding(
     ...(Object.keys(thinkingLevelMap).length > 0 ? { thinkingLevelMap } : {}),
     ...modalityOverride(model, binding),
     ...(binding.nativeWebSearch === true ? { webSearch: true } : {}),
+    claudeCacheTtl: binding.claudeCacheTtl,
   };
 }
 

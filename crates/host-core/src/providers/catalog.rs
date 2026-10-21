@@ -81,6 +81,7 @@ pub(crate) fn normalize_model_bindings(bindings: &[ModelBinding]) -> Vec<ModelBi
                 supports_documents: binding.supports_documents,
                 available_for_subagents: binding.available_for_subagents,
                 native_web_search: binding.native_web_search,
+                claude_cache_ttl: binding.claude_cache_ttl,
                 mirror_coding_group_id: binding
                     .mirror_coding_group_id
                     .as_deref()
@@ -119,6 +120,7 @@ fn legacy_model_binding(model_id: Option<String>) -> Vec<ModelBinding> {
                 supports_documents: None,
                 available_for_subagents: None,
                 native_web_search: None,
+                claude_cache_ttl: None,
                 mirror_coding_group_id: None,
                 temperature: None,
                 api_style: None,
@@ -508,6 +510,7 @@ mod tests {
             supports_documents: None,
             available_for_subagents: None,
             native_web_search: None,
+            claude_cache_ttl: None,
             mirror_coding_group_id: None,
             temperature: None,
             api_style: None,

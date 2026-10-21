@@ -36,6 +36,7 @@ import {
   resolveApiStyle,
   normalizeApiStyle,
   resolveNativeWebSearch,
+  isClaudeModel,
   nativeWebSearchTransport,
   deepseekRequestCompat,
   zhipuRequestCompat,
@@ -456,6 +457,10 @@ export function buildProviderModel(
     compat: {
       ...(sessionAffinityCompat(provider, binding.api, baseUrl) ?? {}),
       ...compat,
+      ...(binding.api === "anthropic-messages" &&
+        isClaudeModel(provider.modelId, catalog?.family) && catalog?.claudeCacheTtl === "1h"
+        ? { supportsLongCacheRetention: true }
+        : {}),
       ...transcriptCompat(catalog, provider.modelId, binding.api, baseUrl),
     },
     ...(Object.keys(modelHeaders).length > 0 ? { headers: modelHeaders } : {}),
