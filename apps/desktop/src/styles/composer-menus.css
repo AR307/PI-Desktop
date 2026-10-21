@@ -786,3 +786,25 @@
 }
 
 .composer-fast-setting > small { display: block; padding: 0 12px 10px; max-width: 320px; color: var(--ds-text-secondary); font-size: 11px; line-height: 1.5; }
+
+.composer-claude-cache {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px 12px 4px;
+  border-top: 1px solid var(--ds-border-subtle);
+}
+
+.composer-claude-cache-label {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  color: var(--ds-text-secondary);
+  font-size: var(--text-xs);
+}
+
+.composer-claude-cache .settings-segment { flex-shrink: 0; }
+.composer-claude-cache .settings-segment-item { min-height: 26px; padding: 3px 8px; }

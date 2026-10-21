@@ -13,6 +13,7 @@ import {
 import { SettingsToggle, TooltipButton } from "../../../components/ui";
 import type { useComposerModelMenu } from "./hooks/useComposerModelMenu";
 import { ThinkingLevelSlider } from "./ThinkingLevelSlider";
+import { ComposerClaudeCache } from "./ComposerClaudeCache";
 
 type ModelMenuController = ReturnType<typeof useComposerModelMenu>;
 
@@ -148,6 +149,12 @@ export function ComposerModelPicker({
               commit={commitThinkingLevel}
             />
           ) : null}
+          {!imageMode && <ComposerClaudeCache
+            key={`${selectedProviderId}:${selectedModelId}`}
+            providerId={selectedProviderId}
+            modelId={selectedModelId}
+            disabled={controlsBlocked}
+          />}
         </div>
       ) : (
         <>

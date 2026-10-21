@@ -14,6 +14,9 @@ isolated and retained. No real account, paid API or installed app is exercised.
 | E2E-CLAUDE-CACHE-02 | Restart the same isolated profile; the setting stays 1 hour. A non-Claude model has no Claude-cache selector. |
 | E2E-CLAUDE-CACHE-03 | Change to 5 minutes, save, send again and verify no 1h marker remains. Capture settings and chat screenshots. |
 | E2E-CLAUDE-CACHE-04 | Seed local account catalog metadata without authorization, then change and save the MirrorCoding model's cache duration through its real settings component. Inspect Host-persisted value. |
+| E2E-CLAUDE-CACHE-05 | On the main page select Claude in the model/reasoning menu, choose 1 hour beneath the reasoning slider and send. Inspect actual HTTP cache markers, advanced-settings synchronization and restart persistence. Choose 5 minutes by keyboard and send again; no 1h marker remains. |
+| E2E-CLAUDE-CACHE-06 | Switch to a non-Claude model and back: the cache row hides and the previous Claude preference survives. Preserve a typed draft and reasoning choice; capture dark/wide and light/narrow menus. |
+| E2E-CLAUDE-CACHE-07 | Select a locally seeded MirrorCoding group in the main-page model menu, change cache duration there and verify the account binding and projected group agree. No production authentication or model request is made. |
 
 Runtime HTTP tests also cover delegate requests, explicit no-cache requests and
 unaffected non-Claude/non-Anthropic routes. Host tests cover strict enum parsing,

@@ -8,6 +8,16 @@ lifetime for Anthropic Messages. Advanced model settings exposes **5 minutes**
 must support the selected duration. This is not a local disk-cache preference
 or an OpenAI prompt-cache-retention setting.
 
+The main-page model/reasoning menu also exposes the same two choices below
+the reasoning slider whenever the selected binding supports Claude caching.
+The control remains available when reasoning is off. Changes save immediately
+to the provider/model binding, apply on the next turn and stay synchronized
+with advanced settings; they are not per-session reasoning settings. For
+MirrorCoding group selections, the account binding owns the preference and
+Host projects it to group rows. Non-Claude, non-Anthropic, image-mode and
+plugin-owned models do not expose this editable control. Saving does not
+change the selected model, reasoning level, provider default, draft or session.
+
 - **5m** or an absent preference uses Pi's cacheRetention: "short", producing
   cache_control: { "type": "ephemeral" } (the five-minute default).
 - **1h** uses cacheRetention: "long", producing

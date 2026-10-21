@@ -1,5 +1,27 @@
 # PI-Desktop MirrorCoding Edition
 
+## 2026-10-21 - Main-page Claude cache selector
+
+- Add the shared segmented control beneath the model menu's reasoning slider.
+  Five-minute and one-hour choices save immediately to the existing model
+  binding; reasoning-off models remain eligible. Drafts and reasoning are
+  independent of the cache preference. No new session field or protocol.
+- Resolve MirrorCoding selections to their account-owned configuration and
+  let Host project settings to group providers. Exclude non-Claude wires,
+  image mode and plugin-owned immutable provider rows.
+- Keep persistence in a focused component and selection in a pure helper;
+  do not enlarge the Composer store or duplicate runtime cache policy.
+- Extend isolated Electron coverage to main-page model/cache selection,
+  outgoing HTTP markers, settings synchronization, restart, keyboard input,
+  MirrorCoding projection and dark/wide plus light/narrow rendering.
+- Validation: 25 targeted selection/menu/provider-copy tests, desktop
+  typecheck, Electron production build, Biome lint, style-token check and
+  agent-policy/PR-base checks passed. The real Electron journey passed using
+  a local HTTP endpoint, with unchanged Host/runtime builds reused from the
+  cache-duration candidate. Full repository suites and production cache
+  hits/billing were not exercised; no paid account or running user app used.
+- No server changes, push, merge, release or installer packaging.
+
 ## 2026-10-21 - Per-model Claude prompt-cache duration
 
 - Add a native advanced-model dropdown for five-minute and one-hour Claude

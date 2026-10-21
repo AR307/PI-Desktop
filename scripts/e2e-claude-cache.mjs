@@ -114,6 +114,45 @@ const choose = async (label, keyboard = false) => {
   assert.equal(saved.providers.find(p => p.id === provider.id).models.find(m => m.id === modelId).claudeCacheTtl, label === "1 hour" ? "1h" : "5m");
   await page.locator('[data-nav="back-to-app"]').click();
 };
+const openComposerMenu = async () => {
+  const trigger = page.locator(".composer-model-thinking-chip").first();
+  if (await trigger.getAttribute("aria-expanded") !== "true") await trigger.click();
+  return page.locator(".composer-model-thinking-menu");
+};
+const selectComposerModel = async (id, mirrorCoding = false) => {
+  const menu = await openComposerMenu();
+  await menu.locator(".composer-menu-entry").filter({ has: page.locator(".composer-menu-entry-label", { hasText: /^Model$/ }) }).click();
+  await menu.locator("input").fill(id);
+  const option = menu.locator(".composer-model-option").filter({ has: page.locator(".composer-model-label", { hasText: id }) });
+  await option.and(menu.getByRole(mirrorCoding ? "menuitem" : "menuitemradio")).first().click();
+  if (mirrorCoding) await menu.locator(".mirrorcoding-group-option").filter({ hasText: "Fixture" }).click();
+  await menu.locator(".composer-menu-root").waitFor();
+  return menu;
+};
+const chooseComposerCache = async (ttl, keyboard = false, selectedProviderId = provider.id) => {
+  const menu = await openComposerMenu();
+  const choice = menu.getByRole("radio", { name: ttl === "1h" ? "1 hour" : "5 minutes", exact: true });
+  if (keyboard) { await choice.focus(); await page.keyboard.press("Space"); }
+  else await choice.click();
+  await page.waitForFunction(({ ttl }) => {
+    const row = document.querySelector(".composer-claude-cache");
+    return row?.getAttribute("aria-busy") === "false" &&
+      row.querySelector('[aria-checked="true"]')?.textContent === (ttl === "1h" ? "1 hour" : "5 minutes");
+  }, { ttl });
+  const saved = await invoke("providersList");
+  assert.equal(saved.providers.find(p => p.id === selectedProviderId).models.find(m => m.id === modelId).claudeCacheTtl, ttl);
+  assert.equal(await page.locator(".composer-model-thinking-chip").first().getAttribute("aria-expanded"), "true");
+};
+const captureComposerMenu = async (name) => {
+  const menu = await openComposerMenu();
+  const menuBox = await menu.boundingBox();
+  const controls = await menu.getByRole("radiogroup", { name: "Claude cache duration" }).boundingBox();
+  const viewport = await page.evaluate(() => ({ width: innerWidth, height: innerHeight }));
+  assert.ok(menuBox.x >= 0 && menuBox.y >= 0 && menuBox.x + menuBox.width <= viewport.width + 1);
+  assert.ok(controls.x >= menuBox.x && controls.x + controls.width <= menuBox.x + menuBox.width + 1);
+  assert.ok(controls.y + controls.height <= viewport.height);
+  await page.screenshot({ path: join(scratch, name + ".png") });
+};
 function markers(value) {
   return value && typeof value === "object" ? Object.entries(value).flatMap(([key, child]) => key === "cache_control" ? [child] : markers(child)) : [];
 }
@@ -130,8 +169,29 @@ const send = async (ttl) => {
 };
 try {
   await launch();
-  await choose("1 hour", true);
+  let menu = await selectComposerModel("gpt-5");
+  assert.equal(await menu.locator(".composer-claude-cache").count(), 0);
+  menu = await selectComposerModel(modelId);
+  const input = page.locator('.composer-input[contenteditable="true"]').first();
+  await page.keyboard.press("Escape");
+  await input.fill("Keep my unsent draft");
+  await openComposerMenu();
+  const reasoning = await menu.getByRole("slider").inputValue();
+  await chooseComposerCache("1h", true);
+  assert.equal(await input.innerText(), "Keep my unsent draft");
+  assert.equal(await menu.getByRole("slider").inputValue(), reasoning);
+  await captureComposerMenu("composer-dark-1h");
+  await selectComposerModel("gpt-5");
+  assert.equal(await menu.locator(".composer-claude-cache").count(), 0);
+  await selectComposerModel(modelId);
+  assert.equal(await menu.getByRole("radio", { name: "1 hour", exact: true }).getAttribute("aria-checked"), "true");
+  await page.keyboard.press("Escape");
   await send("1h");
+  await chooseComposerCache("5m");
+  await page.keyboard.press("Escape");
+  await send("5m");
+  await chooseComposerCache("1h");
+  await page.keyboard.press("Escape");
   await close();
   await launch();
   const row = await openModel();
@@ -142,6 +202,12 @@ try {
   await page.getByRole("button", { name: "Cancel", exact: true }).click();
   await page.locator('[data-nav="back-to-app"]').click();
   await choose("5 minutes");
+  menu = await openComposerMenu();
+  assert.equal(await menu.getByRole("radio", { name: "5 minutes", exact: true }).getAttribute("aria-checked"), "true");
+  await chooseComposerCache("1h");
+  await chooseComposerCache("5m", true);
+  await captureComposerMenu("composer-light-5m");
+  await page.keyboard.press("Escape");
   await send("5m");
   await page.screenshot({ path: join(scratch, "chat-requests.png") });
   // Seed only local account metadata: no login, production token or MC request.
@@ -153,19 +219,42 @@ try {
   }] });
   await host.stop();
   await launch();
+  // Signed-out startup disables managed routes. Enable only these synthetic
+  // rows through real IPC, then reload the renderer to read the local catalog.
+  const localCatalog = await invoke("providersList");
+  for (const p of localCatalog.providers.filter(p => p.mirrorCoding?.accountId === 901)) {
+    await invoke("providersUpdate", { id: p.id, enabled: true });
+  }
+  await page.reload();
+  await page.locator('.composer-input[contenteditable="true"]').first().waitFor();
+  await page.locator(".startup-splash").waitFor({ state: "hidden" });
+  menu = await selectComposerModel(modelId, true);
+  const metadata = await invoke("providersList");
+  const accountId = metadata.providers.find(p => p.mirrorCoding?.scope === "account").id;
+  await chooseComposerCache("1h", false, accountId);
+  const projected = (await invoke("providersList")).providers.filter(p => p.mirrorCoding?.accountId === 901);
+  assert.ok(projected.length >= 2);
+  for (const p of projected) assert.equal(p.models.find(m => m.id === modelId).claudeCacheTtl, "1h");
+  await captureComposerMenu("composer-mirrorcoding");
+  await page.keyboard.press("Escape");
   await page.locator('[data-nav="settings"]').click();
   await page.getByRole("button", { name: "Models", exact: true }).click();
   const account = page.locator(".mirrorcoding-model-configs");
   await account.locator(".provider-chosen-advanced-toggle").click();
   const accountSelect = account.getByRole("button", { name: "Claude cache duration", exact: true });
+  assert.equal(await accountSelect.innerText(), "1 hour");
   await accountSelect.click();
-  await page.getByRole("option", { name: "1 hour", exact: true }).click();
+  await page.getByRole("option", { name: "5 minutes", exact: true }).click();
   await account.getByRole("button", { name: "Save", exact: true }).click();
   await page.getByText("AI provider saved", { exact: true }).waitFor();
   const accountSaved = await invoke("providersList");
   const accountProvider = accountSaved.providers.find(p => p.mirrorCoding?.scope === "account");
-  assert.equal(accountProvider.models.find(m => m.id === modelId).claudeCacheTtl, "1h");
+  assert.equal(accountProvider.models.find(m => m.id === modelId).claudeCacheTtl, "5m");
   await page.screenshot({ path: join(scratch, "mirrorcoding-cache.png") });
+  await page.locator('[data-nav="back-to-app"]').click();
+  menu = await openComposerMenu();
+  assert.equal(await menu.getByRole("radio", { name: "5 minutes", exact: true }).getAttribute("aria-checked"), "true");
+  console.log("PASS composer model selection, immediate cache save, keyboard, draft/reasoning preservation and two-way settings sync");
   console.log("PASS settings selection, keyboard, persistence, restart, non-Claude exclusion, 1h and 5m real requests");
   console.log("PASS MirrorCoding account model settings save without production authentication");
 } catch (error) {

@@ -1,3 +1,9 @@
+## Unreleased - Claude cache duration in the composer
+
+- Select five-minute or one-hour Claude prompt caching directly below the
+  reasoning slider in the main-page model menu. The choice saves immediately
+  and shares the model preference with advanced settings and MirrorCoding.
+
 ## Unreleased - Upstream v0.21.0-beta.4 synchronization
 
 - Integrate the upstream sidebar submenus, background commands, plugin and

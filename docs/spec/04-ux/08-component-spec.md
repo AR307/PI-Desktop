@@ -3240,6 +3240,14 @@ reasoning-level control.
 - The combined menu closes on outside mousedown or Escape. In a submenu,
   Up/Down moves the highlighted row, Enter selects from the model search/list,
   and Left returns to the root.
+- For an editable Claude binding on Anthropic Messages, the menu root shows
+  a compact **Claude cache duration** segmented control below reasoning, with
+  **5 minutes** and **1 hour**. It remains visible at reasoning off and saves
+  immediately without closing the menu or changing the draft or session.
+  Settings and the composer share one provider/model preference; MirrorCoding
+  groups write through their account-owned binding. Pending saves disable the
+  segments, failures show the existing error toast, and unsuccessful saves do
+  not display a new selection. Keyboard activation and Escape remain native.
 - The permission chip remains visible beside the mode selector. Agent and Plan
   show the effective Ask / Accept edits / Auto posture. Goal keeps the same
   geometry but is fixed to the localized Auto label and cannot open a menu;
