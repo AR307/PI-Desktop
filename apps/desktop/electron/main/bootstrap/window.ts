@@ -41,7 +41,11 @@ import {
   installWindows11CornerController,
   usesWindows11NativeCorners,
 } from "../window-native-corners";
-import { applyMainWindowBackground, mainWindowBackgroundOptions } from "../window-background";
+import {
+  applyMainWindowBackground,
+  macosWindowSurfaceOptions,
+  mainWindowBackgroundOptions,
+} from "../window-background";
 import { recoverRendererAfterGone } from "../renderer-recovery";
 
 function windowsIconPath(): string | undefined {
@@ -83,6 +87,13 @@ export type WindowLifecycleState = {
   tray: Tray | null;
   closeBehavior: CloseBehavior;
   developerMode: boolean;
+  /**
+   * macOS surface this process launched with: `true` keeps the vibrancy
+   * material behind a transparent window, `false` paints an opaque one. It is
+   * read once before the window is created and is not the live preference —
+   * `settings.macosWindowTranslucency` is.
+   */
+  macosWindowTranslucency: boolean;
   pluginLauncherWindow: BrowserWindow | null;
   host: HostProcess | null;
 };
@@ -203,10 +214,15 @@ export async function createWindow({
       ? {
           titleBarStyle: "hiddenInset" as const,
           trafficLightPosition: MAC_TRAFFIC_LIGHT_POSITION,
-          vibrancy: "sidebar" as const,
-          visualEffectState: "followWindow" as const,
-          transparent: true,
-          backgroundColor: "#00000000",
+          // The default opaque surface avoids continuous WindowServer
+          // recomposition while the Electron window is visible (issue #1064).
+          // `settings.macosWindowTranslucency` opts back into the vibrancy
+          // material, and it is only readable here: Electron fixes
+          // `transparent` when the window is created.
+          ...macosWindowSurfaceOptions(
+            windowState.macosWindowTranslucency,
+            initialWindowBackground,
+          ),
         }
       : {
           frame: false,
@@ -248,13 +264,19 @@ export async function createWindow({
       installWindowShape(window, DEFAULT_WINDOW_CORNER_RADIUS, screen);
     }
   }
-  applyMainWindowBackground(
-    window,
-    process.platform,
-    initialWindowBackground,
-    windows11NativeCorners,
-    initialWindowBackground,
-  );
+  // A translucent macOS window owns its transparent backing and the native
+  // vibrancy material; painting the host palette here would flatten the glass
+  // and quietly make the setting look broken. The opaque surface still takes
+  // the colour on every platform.
+  if (!(process.platform === "darwin" && windowState.macosWindowTranslucency)) {
+    applyMainWindowBackground(
+      window,
+      process.platform,
+      initialWindowBackground,
+      windows11NativeCorners,
+      initialWindowBackground,
+    );
+  }
   suppressLinuxFramelessSystemMenu(window);
   const initialBounds = window.getBounds();
   windowState.workPanelBaseBounds = restoredBounds

@@ -40,9 +40,16 @@ export type WindowIpcDependencies = {
   markMenuRendererReady: (window: BrowserWindow) => boolean;
   executeNativeMenuAction: (action: NativeMenuAction) => unknown;
   setTraySessionPreferences: (preferences: TraySessionPreferences) => Promise<void>;
+  isMacosWindowTranslucent: () => boolean;
 };
 
-/** Register renderer-drawn window chrome and work-panel geometry channels. */
+/**
+ * Register renderer-drawn window chrome and work-panel geometry channels.
+ *
+ * `isMacosWindowTranslucent` reports the surface the running window was
+ * created with: a translucent window leaves its pixels to the native vibrancy
+ * material, so a theme colour must not paint over it.
+ */
 export function registerWindowIpc({
   registrar,
   getMainWindow,
@@ -57,6 +64,7 @@ export function registerWindowIpc({
   respondLifecycleDialog,
   executeNativeMenuAction,
   setTraySessionPreferences,
+  isMacosWindowTranslucent,
 }: WindowIpcDependencies): void {
   const { handle, handleWithEvent } = registrar;
   handleWithEvent(IPC.invoke.traySetSessionPreferences, async (event, input: unknown) => {
@@ -133,7 +141,12 @@ export function registerWindowIpc({
         errorCode: ErrorCodes.INVALID_ARGUMENT,
       });
     }
-    if (process.platform === "darwin") return { applied: false, theme };
+    // A translucent macOS window keeps its pixels transparent over the native
+    // vibrancy material; painting the theme colour would flatten the glass.
+    // The default opaque surface takes the colour like every other platform.
+    if (process.platform === "darwin" && isMacosWindowTranslucent()) {
+      return { applied: false, theme };
+    }
     const mainWindow = getMainWindow();
     if (!mainWindow || mainWindow.isDestroyed()) {
       throw new Error("main window unavailable");
@@ -168,8 +181,14 @@ export function registerWindowIpc({
     ) {
       throw new Error("unsupported window control action");
     }
+    // A window outside macOS has no vibrancy surface: report `false` so the
+    // renderer never reads "not applicable" as "translucent".
+    const macosWindowTranslucency =
+      process.platform === "darwin" && isMacosWindowTranslucent();
     const mainWindow = getMainWindow();
-    if (!mainWindow || mainWindow.isDestroyed()) return { maximized: false };
+    if (!mainWindow || mainWindow.isDestroyed()) {
+      return { maximized: false, macosWindowTranslucency };
+    }
     switch (input.action as WindowControlAction) {
       case "getState":
         break;
@@ -186,6 +205,9 @@ export function registerWindowIpc({
     }
     return {
       maximized: !mainWindow.isDestroyed() && mainWindow.isMaximized(),
+      // The surface this window was created with, so a Settings switch can tell
+      // whether the stored preference has taken effect (#1064 / ADR 0332).
+      macosWindowTranslucency,
     };
   });
 

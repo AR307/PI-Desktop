@@ -5,7 +5,7 @@ import { highestThinkingLevel, isReturnToParent } from "@pi-desktop/shared";
 import { delegationGuidance, delegationHandoffGuidance, delegationSystemPrompt, resolveDelegationThinking, shouldHandOffDelegations } from "./ultra-policy.js";
 import { claudeCacheOptions } from "./claude-cache.js";
 import { assertMirrorCodingFast, withMirrorCodingFast } from "./mirrorcoding-fast.js";
-import { assistantReplay, canRestorePartialResponse, responseContentFacts, responseDiagnostics, responseOutcome, responseOutcomeError, restoredAssistantBlocks } from "./response-outcome.js";
+import { assistantReplay, removeTrailingEmptyAssistantMessages, canRestorePartialResponse, responseContentFacts, responseDiagnostics, responseOutcome, responseOutcomeError, restoredAssistantBlocks } from "./response-outcome.js";
 import { upstreamRequestDiagnostics, type RequestDiagnostics } from "./request-diagnostics.js";
 import {
   MAX_MUTATION_RECOVERY_FAILURES, BASH_PATCH_FAILURE_KEY,
@@ -6639,18 +6639,10 @@ export class DesktopAgentRuntime {
     this.activeProviderRetryAttempt = retryAttempt;
     this.pendingProviderRetry = undefined;
 
-    const messages = [...this.agent.state.messages];
-    if (messages.at(-1)?.role !== "assistant") {
-      throw new Error("Cannot retry a provider stream without its failed assistant message");
-    }
     // A failed stream can be represented by more than one trailing assistant
-    // message after a tool round. Remove the whole failed suffix before
-    // continuing; pi-agent-core rejects any assistant-terminated transcript.
-    while (messages.at(-1)?.role === "assistant") {
-      const last = messages.at(-1);
-      if (last?.role !== "assistant" || responseContentFacts(last).meaningful) break;
-      messages.pop();
-    }
+    // tool round. Keep meaningful partial output and system deltas while
+    // removing empty failed responses; compaction may leave no assistant tail.
+    const messages = removeTrailingEmptyAssistantMessages(this.agent.state.messages);
     this.setAgentMessages(messages);
 
     this.providerRetryInProgress = true;

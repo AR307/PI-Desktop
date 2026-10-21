@@ -128,6 +128,68 @@ test("tool details do not add a second visual indent", () => {
   assert.match(stylesSource, /\.subagent-topology-node > \.tool-row-body,[\s\S]*?margin-left:\s*38px;/);
 });
 
+
+test("the turn process and the levels it reveals share one left edge", () => {
+  // A nested group header sits on the same vertical line as the turn header that
+  // reveals it. Indentation used to carry that hierarchy; it is now carried by
+  // type size and colour, so a stray padding here would silently bring the
+  // staircase back.
+  const turnBody = stylesSource.match(/\.turn-process-body \{([^}]*)\}/)?.[1];
+  assert.ok(turnBody);
+  assert.match(turnBody, /padding-left:\s*0;/);
+  const groupedBody = stylesSource.match(
+    /\.process-activity-group\.grouped > \.process-activity-body \{([^}]*)\}/,
+  )?.[1];
+  assert.ok(groupedBody);
+  assert.match(groupedBody, /padding-inline-start:\s*0;/);
+  // Both disclosure headers use the tool-row inline geometry: content at the
+  // prose edge, fill four pixels into the gutter.
+  const activityHeader = stylesSource.match(/\n\.tool-activity-header \{([^}]*)\}/)?.[1];
+  assert.ok(activityHeader);
+  assert.match(activityHeader, /margin:\s*0 -4px;/);
+  assert.match(activityHeader, /padding:\s*2px 4px;/);
+});
+
+test("nested process levels keep a subtle type and colour hierarchy", () => {
+  // The turn title stays at the base size; the nested group is smaller and
+  // quieter, and a run row uses the leaf size while keeping readable colour.
+  const nested = stylesSource.match(
+    /\.process-activity-group > \.tool-activity-header \{([^}]*)\}/,
+  )?.[1];
+  assert.ok(nested);
+  assert.match(nested, /font-size:\s*var\(--text-sm\);/);
+  assert.match(nested, /color:\s*var\(--ds-text-muted\);/);
+  const runName = stylesSource.match(
+    /\.tool-row-head\.is-run \.tool-row-name \{([^}]*)\}/,
+  )?.[1];
+  assert.ok(runName);
+  assert.match(runName, /font-size:\s*var\(--text-sm\);/);
+});
+
+test("collapse rails keep separate zero-padding gutter lanes", () => {
+  const turnRail = stylesSource.match(
+    /\.turn-process-body > \.disclosure-collapse-rail \{([^}]*)\}/,
+  )?.[1];
+  assert.ok(turnRail);
+  assert.match(turnRail, /left:\s*-32px;/);
+  assert.match(turnRail, /width:\s*14px;/);
+  const groupRail = stylesSource.match(
+    /\.process-activity-body > \.disclosure-collapse-rail \{([^}]*)\}/,
+  )?.[1];
+  assert.ok(groupRail);
+  assert.match(groupRail, /left:\s*-18px;/);
+  assert.match(groupRail, /width:\s*14px;/);
+  const messageRow = stylesSource.match(/\.message-row \{([^}]*)\}/)?.[1];
+  assert.ok(messageRow);
+  assert.match(messageRow, /overflow-clip-margin:\s*34px;/);
+});
+
+test("the header never echoes the item it is working on", () => {
+  // Long shell commands and search queries pushed the counts off the row when the
+  // header previewed them, so the live tail preview is gone entirely.
+  assert.doesNotMatch(stylesSource, /\.tool-activity-preview/);
+});
+
 /*
  * The width regression this guards: a content-sized `inline-flex` disclosure
  * header stopped at its own label, so a tool call never used the conversation
@@ -331,7 +393,7 @@ test("user-message file chips reuse the composer chip node", () => {
 test("stopping a turn undoes an unanswered prompt or settles the partial reply", async () => {
   const storeSource = await readStoreSource();
   assert.match(storeSource, /const submittedDraft = runtime\.submittedComposerDrafts\.get\(sessionId\)/);
-  assert.match(storeSource, /resolveComposerSmartStop\(state\.messages, submittedDraft\)/);
+  assert.match(storeSource, /resolveComposerSmartStop\(state\.activeSessionId === sessionId \? state\.messages : state\.retainedTranscripts\[sessionId\] \?\? \[\], submittedDraft\)/);
   assert.match(storeSource, /composerPrefill:\s*\{ \.\.\.fullStop\.draft, sessionId \}/);
   assert.match(storeSource, /submittedDraft\?\.resolveAbort\?\.\(true\)/);
   assert.match(storeSource, /submittedDraft\?\.resolveAbort\?\.\(false\)/);
@@ -342,7 +404,7 @@ test("stopping a turn undoes an unanswered prompt or settles the partial reply",
   // live rows, never from the renderer's paged, display-capped window (D299).
   assert.match(
     storeSource,
-    /const merged = mergeLiveSessionMessages\(fullMessages, get\(\)\.messages\)/,
+    /const merged = mergeLiveSessionMessages\(fullMessages, get\(\)\.activeSessionId === sessionId \? get\(\)\.messages : get\(\)\.retainedTranscripts\[sessionId\] \?\? \[\]\)/,
   );
   assert.match(storeSource, /resolveComposerSmartStop\(merged, submittedDraft\)/);
   assert.match(
@@ -374,7 +436,7 @@ test("editing a user prompt regenerates it and keeps the old branch reachable", 
   const storeSource = await readStoreSource();
   // Edit lives on the user turn (the prompt is what gets rewritten), not on
   // the assistant answer.
-  assert.match(transcriptSource, /editUserMessage\(message\.id, next, message\.attachments\)/);
+  assert.match(transcriptSource, /editUserMessage\(message\.id, next, message\.attachments, paneSessionId\)/);
   assert.match(transcriptSource, /className="message-edit-input selectable"/);
   assert.match(transcriptSource, /chat\.editMessage/);
   assert.match(transcriptSource, /const retryEdit = async \(\)/);
@@ -388,7 +450,7 @@ test("editing a user prompt regenerates it and keeps the old branch reachable", 
   assert.match(transcriptSource, /const editSeed =\s*\(editableUserMessage && message\.command\) \|\| \(message\.content \|\| ""\);/);
   // Same branch mechanics as regenerate, so main archives the replaced turn
   // as a revision the pager can walk back to.
-  assert.match(storeSource, /editUserMessage:\s*async \(messageId, content, attachments\)/);
+  assert.match(storeSource, /editUserMessage:\s*async \(messageId, content, attachments, targetSessionId\)/);
   // The cut is named by message identity: a window offset plus an index into
   // the deduplicated renderer array are different coordinate spaces.
   assert.match(storeSource, /truncateFromMessageId,/);
@@ -634,7 +696,7 @@ test("regenerate history pager and stable revision family are wired", async () =
   assert.match(transcriptSource, /chat\.revisionPager/);
   assert.match(
     transcriptSource,
-    /const showRevisionPager = editableUserMessage && revisionCount > 1;/,
+    /const showRevisionPager = editableUserMessage && !isSideChat && revisionCount > 1;/,
   );
   assert.match(
     transcriptSource,

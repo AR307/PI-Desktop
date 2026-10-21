@@ -160,6 +160,14 @@ Settings is a **full-window page** that replaces the app sidebar + main chrome (
     shared Lucide icon scales in proportion without a reload. Window Zoom
     In/Out/Reset stays independent. The UI never asks for a px value
     (D343 / ADR 0180)
+  - **Translucent window** (macOS only): one switch for the native window
+    surface (ADR 0332). On — and absent — keeps the shipped `sidebar` vibrancy
+    material behind a transparent backing; off paints the opaque surface that
+    frees the window from WindowServer's per-frame recomposition. It persists as
+    `AppSettings.macosWindowTranslucency` and is applied when the main window is
+    created, so the row shows a restart hint while the stored value differs from
+    the surface this process launched with instead of pretending to change the
+    live window. Other platforms do not render the row.
   - **Auto language detection** resolves the OS locale through the main process
     (`app.getLocale()`) rather than the renderer's `navigator.language`, and the
     Auto option shows the detected language inline (e.g. "Currently 简体中文")
@@ -276,8 +284,9 @@ Settings is a **full-window page** that replaces the app sidebar + main chrome (
   control column.
 - **Defaults** card: the host-backed default operating mode (Agent / Plan / Goal),
   command shell selection, Link open destination, context usage display
-  (remaining or used), the Show thinking toggle, Enter-to-send control, the
-  infinite provider retry switch, and the large text paste threshold. The
+  (remaining or used), the Show thinking toggle, the Transcript display
+  segmented control, Enter-to-send control, the infinite provider retry switch,
+  and the large text paste threshold. The
   retry switch is off by default and explains that network/transient provider
   failures keep retrying until success; Stop still cancels the turn and the
   setting may continue API usage while enabled. Link open destination uses the Work panel browser by default
@@ -300,16 +309,32 @@ Settings is a **full-window page** that replaces the app sidebar + main chrome (
   prompt-enhancement preferences is specified in
   `04-ux/12-prompt-enhancement.md`.
 - **Show thinking** is a toggle that persists as the optional `showThinking`
-  boolean in host-owned settings. Off keeps the live thinking indicator visible
-  and hides completed reasoning rows and excerpts; stored reasoning is retained
-  and reappears when the toggle is turned back on. It affects presentation only,
-  not model reasoning configuration, and it does not control turn-process or
-  activity-group folding: active processes start open and untouched completed
-  processes fold by default regardless of the toggle. The legacy
-  `thinkingDisplayMode` field (`detailed` / `compact`) is retained only for
-  persisted-settings compatibility and is no longer exposed; an absent or
+  boolean in host-owned settings. Off hides completed reasoning rows and, while
+  reasoning is actively streaming, leaves only the whole-run TextShimmer
+  `Thinking` indicator; a collapsed row shows that indicator without an excerpt.
+  Stored reasoning is retained and reappears when the toggle is turned back on.
+  With it on, Thinking rows default expanded in Flat and Commands first, while
+  Fully folded keeps the released live-only auto-open exception. It affects
+  presentation only, not model reasoning configuration, and it does not control
+  turn-process or activity-group folding: active processes start open and
+  untouched completed processes fold by default regardless of the toggle. The
+  legacy `thinkingDisplayMode` field (`detailed` / `compact`) is retained only
+  for persisted-settings compatibility and is no longer exposed; an absent or
   unknown value shows reasoning and an explicit `compact` hides it. Settings
   search indexes the row.
+- **Transcript display** is a segmented control in Defaults immediately after
+  **Show thinking**. It persists the optional `transcriptDisplayMode` field as
+  `flat`, `command-first`, or `fully-folded`, with the labels **Flat**,
+  **Commands first**, and **Fully folded**; an absent or unknown value resolves
+  to **Fully folded**, the layout released in v0.20.0. **Flat** renders one
+  outer process disclosure with no nested activity groups. **Commands first**
+  keeps activity groups but lifts `Bash`/run rows into standalone rows, and a
+  normal assistant progress message or a command ends a group. **Fully folded**
+  keeps commands inside their groups and lets only ordinary progress text split
+  them. All three render exactly one process disclosure, change presentation
+  only, and are read at render time, so switching repaints the transcript
+  immediately. The deprecated `keepCommandsExpanded` boolean is no longer
+  exposed and is not read for rendering. Settings search indexes the row.
 - The **Command shell** row in Defaults uses the host-discovered catalog of native
   PowerShell 5.1, PowerShell 7, cmd, Git Bash, and Bash with IDs
   `windows-powershell`, `windows-pwsh`, `cmd`, `git-bash`, and

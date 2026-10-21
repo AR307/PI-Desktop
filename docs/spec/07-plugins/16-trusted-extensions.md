@@ -348,6 +348,10 @@ additions. Returning a different string, including an empty string, deliberately
 replaces the current prompt. Missing or non-string prompt fields, exceptions,
 timeouts, and unreturned input mutations retain the last accepted prompt.
 Cancelled dispatches return no result; late completions cannot change it.
+The user-run payload also carries `messageType: "user"` and `prompt`, matching
+the Pi 1.3 discriminator. This is additive to the legacy shim surface; it does
+not enable `sendMessage` or custom-message runs. Native Pi sessions continue
+using the upstream SDK event union and lifecycle.
 
 Each turn starts this chain from its freshly composed base prompt, so additions
 do not accumulate across turns. The same ordered handlers, base, and returned

@@ -130,6 +130,17 @@ try {
   await imageVisible("expanding the process does not duplicate the image");
   await page.locator(".turn-process > .tool-activity-header").click();
   await imageVisible("collapsing the process keeps the image visible");
+  for (const mode of ["flat", "command-first", "fully-folded"]) {
+    await invoke("settings/set", { ...await invoke("settings/get"), transcriptDisplayMode: mode });
+    await page.reload();
+    await ready();
+    await selectSession();
+    await imageVisible(`${mode}: completed image stays visible exactly once`);
+    await page.locator(".turn-process > .tool-activity-header").click();
+    for (const button of await page.locator('.turn-process .process-activity-group > [aria-expanded="false"]').all()) await button.click();
+    await imageVisible(`${mode}: expanding process does not duplicate the result`);
+    await page.locator(".turn-process > .tool-activity-header").click();
+  }
   await page.getByRole("button", { name: "预览图片", exact: true }).click();
   await page.getByRole("dialog", { name: "预览图片" }).waitFor();
   await page.screenshot({ path: join(output, "preview-dark.png") });

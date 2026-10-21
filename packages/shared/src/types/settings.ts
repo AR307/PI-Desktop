@@ -39,6 +39,8 @@ export type JevKeyCheckResult = {
  */
 export type CloseBehavior = "ask" | "tray" | "quit";
 
+export type TranscriptDisplayMode = "flat" | "command-first" | "fully-folded";
+
 export type AppSettings = {
   mobileSync?: MobileSyncSettings | null;
   /** MirrorCoding first-run dialog has been completed or skipped. */
@@ -81,6 +83,16 @@ export type AppSettings = {
   promptEnhancementThinkingLevel?: ThinkingLevel;
   defaultPermissionMode?: GlobalPermissionMode;
   theme: ThemePreference;
+  /**
+   * macOS only: keep the native `sidebar` vibrancy material behind a
+   * transparent window surface. This is the shipped look, so absent and `true`
+   * both mean translucent; `false` paints an opaque surface, which keeps the
+   * window out of WindowServer's per-frame recomposition path (#1064) at the
+   * cost of the desktop blur. Other platforms ignore it. Electron fixes
+   * `transparent` when the window is created, so a change applies on the next
+   * launch.
+   */
+  macosWindowTranslucency?: boolean;
   /** UI language; `auto` (and absent) follows the OS locale. */
   language?: "auto" | "en" | "zh-CN" | "zh-TW" | "tr" | "de" | "es" | "fr" | "ko" | "pt-BR";
   /**
@@ -102,6 +114,22 @@ export type AppSettings = {
    * export, or execution, and it does not control turn-process folding.
    */
   showThinking?: boolean;
+  /**
+   * How the assistant turn's process is grouped in the transcript.
+   *
+   * - `flat`: one outer process disclosure, no nested activity groups.
+   * - `command-first`: run rows stay standalone; other activity groups.
+   * - `fully-folded`: the v0.20.0 layout; run rows join activity groups.
+   *
+   * Absent means `fully-folded`, preserving the released transcript layout.
+   * This is presentation only and never changes tool execution or stored data.
+   */
+  transcriptDisplayMode?: TranscriptDisplayMode;
+  /**
+   * @deprecated Replaced by `transcriptDisplayMode`. Retained for persisted
+   * settings and older clients; current rendering no longer reads it.
+   */
+  keepCommandsExpanded?: boolean;
   /**
    * @deprecated Retained for persisted-settings compatibility. New writes use
    * `showThinking`; this field is read only as a fallback when `showThinking`
@@ -178,13 +206,14 @@ export type AppSettings = {
   preventScreenSleep?: boolean;
   /**
    * Sidebar project "running" affordances. The master switch gates both
-   * sub-switches; absent means disabled, so a fresh install shows a clean
-   * sidebar until the user opts in.
+   * sub-switches; absent means enabled — the renderer normalizes
+   * `!== false` to on, so a fresh install shows the running badge and rail
+   * until the user turns them off (#1749).
    */
   sidebarRunningIndicators?: boolean;
-  /** Count badge beside a project name. Only honored while the master is on. */
+  /** Count badge beside a project name. On unless explicitly disabled. */
   sidebarRunningBadge?: boolean;
-  /** Activity rail down the project group. Only honored while the master is on. */
+  /** Activity rail down the project group. On unless explicitly disabled. */
   sidebarRunningRail?: boolean;
   /**
    * Last-reply date shown at the right edge of session rows. Absent means

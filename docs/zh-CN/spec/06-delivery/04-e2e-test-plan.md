@@ -25,6 +25,19 @@
 
 ---
 
+### E2E-PI-130-kernel-upgrade
+
+- **Preconditions:** Pi 1.3.0 with migrated patches, isolated fixture state, and
+  no real credentials. Submit malformed tool JSON followed by a corrected call,
+  test literal Unicode escapes, resume same/foreign-model thinking, and run two
+  turns with extensions that guard `messageType === "user"`.
+- **Expected:** No malformed call reaches Host execution; raw errors reach the
+  model, corrected calls succeed, foreign thinking is omitted, same-model
+  reasoning survives, and prompt additions remain ordered without accumulating.
+  Existing hosted-search, native-session, MCP, and cancellation suites remain
+  authoritative. See the English source and `docs/project/pi-130-adoption.md`
+  for exact coverage and candidate validation.
+
 ### E2E-LEGACY-DICTATION-idle-model-release
 
 - **前提：** 通过 `VoiceService` 接口测试保留的本地 Dictation 服务，使用确定性的
@@ -508,6 +521,24 @@ task-candidate E2E 从请求工作树运行，但使用主工作区已经准备�
 - **验收**：B（模型配置）、F（运行时提供商请求）
 - **里程碑**：M2
 - **状态**：单元覆盖（行级模型标头、请求上下文标头、Anthropic Messages Bearer 认证与令牌轮换）；真实 Copilot 账户旅程待验证
+
+#### E2E-005K：OpenCode Go Claude 模型使用目录发布的 Anthropic 线路
+
+- **前提条件**：使用内置预设配置 OpenCode Go；确定性目录 fixture 包含
+  `claude-haiku-5-5`，其声明 `api: "anthropic_messages"` 和 OpenCode Anthropic
+  根 `baseUrl`，另有一个 DeepSeek Chat Completions 对照模型。
+- **步骤**：1）选择 Claude Haiku，通过捕获 fixture 发送文本回合。2）记录请求 URL
+  和适配器请求体。3）换成 DeepSeek 对照模型重复。4）将相同目录元数据放到自定义
+  OpenAI 兼容提供商上重复。
+- **预期**：OpenCode Claude 使用 Anthropic 适配器并访问 `/zen/go/v1/messages`，不再
+  发往 Chat Completions，也不返回 `ModelProtocolUnsupported`。DeepSeek 保持
+  `/chat/completions`。自定义提供商即使匹配到外部目录 API，仍使用保存的 wire 格式与
+  Base URL。单元覆盖位于 `packages/agent-runtime/src/provider-binding.test.ts`。
+- **链接规格**：`03-runtime/11-provider-model-system.md`、
+  `03-runtime/13-model-catalog-and-selection.md`、issue #1728
+- **验收**：F（运行时提供商请求）
+- **里程碑**：M2
+- **状态**：单元覆盖；真实端点场景草稿
 
 #### E2E-MODELS-list-layout：受限窗口中的模型列表可完整浏览
 
@@ -1340,27 +1371,36 @@ task-candidate E2E 从请求工作树运行，但使用主工作区已经准备�
 - **先决条件**：已配置提供商并打开项目；回合可以包含进度文字、多个搜索／工具／思考
   条目，以及失败或被拒工具。
 - **步骤**：1) 流式输出进度段落 A、多项搜索片段、进度段落 B，以及带相邻 Bash 行的
-  多项命令片段。2) 检查已展开的活动组；在更多输出到达时手动收起该组。3) 完成回合并
-  比较未操作与用户接管的组，确认所有组都收起时 Bash 行仍保持可见。4) 展开一个已完成组
-  和其中一个条目，复制输出，收起并重新展开该组，再独立打开同级组。5) 分别检查单项片段，
-  以及最后一个活动组的字面最后一项为工具／搜索、思考、失败工具和被拒工具。6) 关闭并重新
-  打开 `Show thinking`，检查活动思考、失败后恢复及完成状态。7) 在保留窗格内重新挂载行，
-  然后重载渲染器并重新打开会话。
-- **预期**：按时间顺序排列的可折叠过程片段把末尾回答留在其外。活动组展开，并且只在用户
-  未操作时于完成后收起；其他已完成组默认收起。Bash／run 别名被排除在所有过程披露之外，
-  即使所有组都收起也保持可见。单项没有组包装。没有任何条目载荷会自动展开：工具／搜索行
-  在用户打开之前保持标题行，最后一个活动组的字面最后一项也不例外，而思考项保留自身的
-  叶子默认值。当 `Show thinking` 关闭时，活动思考指示器保持可见，已完成的推理正文与摘要
-  被隐藏，空的纯思考容器被省略；重新打开时恢复。父级、子级和同级选择彼此独立；
-  收起／重新展开父级会保留后代，流式更新和完成不会覆盖用户接管的选择。保留窗格中的重新
-  挂载保留选择；渲染器重启重新应用默认值，但工具名称、参数、结果和状态仍会恢复。组标题
-  显示有界运行和问题摘要，不会把整个回合标记为失败。
+  多项命令片段。2) 检查已展开的活动组；在更多输出到达时手动收起该组。3) 完成回合，
+  确认恰好一个过程披露拥有全部回答前的行；收起它并确认其下的组与命令行一并收起，再
+  重新展开并确认组选择恢复。4) 展开一个已完成组和其中一个条目，复制输出，收起并重新
+  展开该组，再独立打开同级组。5) 在 `过程显示` 的「平铺显示」「命令工具优先」
+  「全折叠显示」之间切换，检查分组、组边界、命令行的渲染位置以及披露数量。6) 分别检查
+  单项片段，以及最后一个活动组的字面最后一项为工具／搜索、思考、失败工具和被拒工具。
+  7) 关闭并重新打开 `Show thinking`，检查活动思考、失败后恢复及完成状态。8) 在保留窗格内
+  重新挂载行，然后重载渲染器并重新打开会话。
+- **预期**：一个回合只渲染一个过程披露，其中包含全部回答前的行，`Bash`／run 行也不例外；
+  末尾回答、助手错误和中止后的末尾文字留在披露之外，待处理操作也一样。活动组默认展开，
+  并且只在用户未操作时于完成后收起；其他已完成组默认收起。收起回合披露会一并收起其下
+  的组与命令行，重新展开则恢复用户的组选择。「全折叠显示」（默认）中，命令行留在所属组内，
+  只有普通助手进度文字会拆分活动组；「命令工具优先」中，命令行作为组旁的独立行渲染，
+  相邻调用保持分离，详情在打开前保持收起，普通助手进度消息或命令会结束当前组；
+  「平铺显示」中不渲染嵌套组，各行在外层披露内保持转录顺序。所有模式都只渲染一个披露。
+  单项没有组包装。除显示模式的思考默认值外，没有任何条目载荷会自动展开：工具／搜索行在
+  用户打开之前保持标题行，而思考项绝不会选择更早的工具。回合标题按 `Running`、`Finished`、
+  `Stopped` 或 `Failed` 报告结果，失败与停止优先于正常完成，当前步骤为推理时显示
+  `Thinking`，绝不回显当前命令；转录未记录时长时不显示时长。当 `Show thinking` 关闭时，
+  不再渲染任何已完成的推理行，仅在推理流式输出期间保留活动的 TextShimmer `Thinking`
+  指示器；重新打开时恢复。父级、子级和同级选择彼此独立；收起／重新展开父级会保留后代，
+  流式更新和完成不会覆盖用户接管的选择。保留窗格中的重新挂载保留选择；渲染器重启重新
+  应用默认值，但工具名称、参数、结果和状态仍会恢复。组标题显示有界运行和问题摘要，不会
+  把整个回合标记为失败。
 - **链接规格**：`04-ux/01-ui-ia.md`、`04-ux/07-ui-design-system.md`、
   `04-ux/08-component-spec.md`、`04-ux/09-interaction-patterns.md`
 - **验收**：C（聊天流）、E（工具）、F（持久性）
 - **里程碑**：M3
-- **状态**：草案。2026-09-20 的嵌套披露变更仅把本场景作为静态源码／设计审查的
-  预期行为；该范围不新增或运行单元、组件、集成、浏览器、Electron 或 E2E 测试。
+- **状态**：草案。单元与样式检查覆盖显示模式、思考默认值与标题规则；本场景仍是转录
+  重新加载的预期人工行为。
 
 #### E2E-TRANSCRIPT-invalid-utf8-window-remains-readable
 
@@ -3802,6 +3842,8 @@ IPC 请求无法关闭。
     上下文；压缩／重试等待期间，界面保留同一个助手气泡并保持运行态；
     压缩后只重试一次，第二次溢出不循环。第一次可恢复溢出不发终态错误消息或
     `error` 事件；只有重试／压缩失败时才以 `CONTEXT_TOO_LARGE` 或真实终态错误收口。
+  - 如果压缩已经用摘要或保留的用户消息替换了失败的助手，而之后发生可重试的提供程序流失败，
+    重试会保留当前压缩后的转录本并调用 `continue()`；不会因为缺少失败助手而触发守卫错误（issue #1768）。
   - 如果自动摘要生成失败，则持久保留尾部回退
     附加检查点，运行保持活动状态，并有一个警告解释
     旧模型上下文被减少；该检查点的转录行显示
@@ -5162,6 +5204,7 @@ eleven-tool-round desktop paths are verified by
   6. 设置界面状态更新为已连接及工具数量，弹出成功提示，并显示 OAuth 徽标。
   7. 访问令牌过期时，`UserMcpRuntime` 透明使用 refresh token 换取新令牌，无需用户重新交互。
   8. 通过 `mcp.transfer` 迁移服务器时，自动将 OAuth 令牌迁移至新 ID 下。
+- **无 DCR 的情况**：如果授权服务器元数据缺少 `registration_endpoint`，且没有可复用的客户端，点击“授权”不会打开浏览器。错误事件包含 `MCP_OAUTH_DCR_UNAVAILABLE`，设置页会显示本地化恢复指引，建议向服务器运营方索取客户端 ID，或改用支持 DCR 的服务器。
 - **链接规格**：`03-runtime/01-ipc-protocol.md`、ADR 0283、ADR 0142
 - **验收**：E（工具和权限）、安全性
 - **里程碑**：M5
@@ -5312,6 +5355,32 @@ eleven-tool-round desktop paths are verified by
   （`apps/desktop/test/composer-file-reference-display.test.mjs`）；文件模式行
   布局由 `scripts/e2e-composer-autocomplete.mjs` 覆盖；完整的用户界面
   旅程草稿（适用变更合入前需在具备条件的环境中运行 E2E）
+
+#### E2E-COMPOSER-deep-file-mentions：`@` 能找到大型工作区里的深层文件
+
+- **先决条件**：应用程序正在一个索引被截断（超过 8000 个文件和目录）的工作区中使用
+  Agent 会话运行，其中有一个脚本位于数千个浅层资源之下的几层目录里——例如 Unity
+  项目的 `Assets/_Game/Scripts/Gameplay/Player/FeatureController.cs`。工作区在 git
+  管理下和不在 git 管理下各运行一次。
+- **步骤**：1) 输入 `@` 并检查脚注。2) 输入脚本名称后停顿。3) 用 Enter 接受该脚本的行。
+  4) 快速把查询改成几个不同的前缀。5) 在小工作区和远程会话中重复。
+- **预期**：
+  - 只输入 `@` 时列出索引并显示截断脚注。
+  - 停顿后深层脚本作为一行出现，排序与其他匹配一致；这次搜索返回后脚注消失；被
+    `.gitignore` 或忽略集排除的文件从不出现。
+  - 接受后插入与其他引用相同的文件芯片。
+  - 行永远不属于更早的查询。搜索进行中菜单保留本地匹配。
+  - 小工作区不发出搜索请求；远程会话保持使用快照并保留脚注。
+- **链接规格**：`04-ux/08-component-spec.md` §11.8、`03-runtime/01-ipc-protocol.md`
+  §13c、`08-meta/decisions-log.md`（D124、D669）、ADR 0024
+- **接受**：C（对话和直播），质量
+- **里程碑**：M5
+- **状态**：单元覆盖（`packages/host-runtime/src/fs-index.test.ts` 覆盖 git 与遍历两种
+  清单、忽略规则、目录以及结果上限）；渲染层旅程——停顿后搜索、合并、接受、过期
+  结果、脚注以及完整索引路径——由
+  `apps/desktop/test/composer-deep-file-search-user-path.test.mjs` 在真实 Electron
+  渲染器中覆盖。针对大型真实目录树的完整桌面旅程为草稿（适用变更合入前需在具备
+  条件的环境中运行 E2E）。
 
 #### E2E-102b：未答复的停止恢复紧凑的文件参考草稿
 
@@ -5781,6 +5850,7 @@ eleven-tool-round desktop paths are verified by
 ## 8. 可追溯性矩阵
 | 验收 | 应用场景 |
 |---|---|
+| B / Security / Quality — Optional provider client certificate requests | E2E-PROVIDER-optional-client-certificate |
 | C / E / F / Quality / Security — Session Todo checklist | E2E-CHAT-session-todo-checklist |
 | C / E / Security / Quality — Live Voice 四阶段交互 | E2E-LIVE-VOICE-four-stage-ui |
 | C / F — Hourly task updates | E2E-SCHEDULED-manual-to-hourly |
@@ -5817,6 +5887,8 @@ eleven-tool-round desktop paths are verified by
 | 品质 | E2E-SETTINGS-inline-capability-imports、E2E-CHAT-running-status-survives-output-pauses、E2E-032、E2E-033、E2E-039、E2E-043、E2E-044、E2E-045、E2E-046、E2E-047、E2E-048、E2E-048c、E2E-048A、E2E-049、E2E-050、E2E-053、E2E-055、 E2E-056、E2E-057、E2E-058、E2E-059、E2E-060、E2E-061、E2E-062、E2E-063、E2E-064、E2E-065、E2E-066、E2E-067、E2E-068、E2E-069、 E2E-070、E2E-071、E2E-072、E2E-073、E2E-074、E2E-075、E2E-076、E2E-077、E2E-078、E2E-079、E2E-080、E2E-081、E2E-082、E2E-083、 E2E-084、E2E-085、E2E-086、E2E-092、E2E-093、E2E-094、E2E-095、E2E-096、E2E-097、E2E-098、E2E-099、E2E-100、E2E-101、E2E-102、 E2E-102a、E2E-102b、E2E-103、E2E-AGENTS-001、E2E-024N、E2E-024O、E2E-059a、E2E-060b、E2E-060c、E2E-060d、E2E-061a、E2E-073a、E2E-111、 E2E-114、E2E-117、E2E-118、E2E-119、E2E-120、E2E-122、E2E-123、E2E-142、E2E-143、E2E-144、E2E-145、E2E-146、E2E-147、E2E-148、E2E-150、E2E-151、E2E-153、E2E-194、E2E-195、E2E-199、E2E-200、E2E-201、E2E-202、E2E-203、E2E-204、E2E-209、E2E-210、E2E-UPDATE-preference-and-once-only-reminder、E2E-250、E2E-PLUGIN-imported-pi-package-skills、E2E-SUBAGENT-resume-a-settled-delegation |
 | 品质（侧边栏菜单定位） | E2E-021c |
 | 品质（项目排序） | E2E-253 |
+| 品质（工作面板标签关闭按钮可见性） | E2E-WORK-PANEL-active-tab-close-visibility |
+| C / E / G / Quality — Pi kernel upgrade | E2E-PI-130-kernel-upgrade |
 | C — 对话和直播（输入法斜杠别名） | E2E-255 |
 | E——工具和权限（Skill 常驻） | E2E-254 |
 | 品质（Skill 常驻与输入法斜杠别名） | E2E-254、E2E-255 |
@@ -5828,6 +5900,7 @@ eleven-tool-round desktop paths are verified by
 | C / 质量 / 安全（对话 MP4 附件） | E2E-CHAT-mp4-attachment-opens-in-system-player |
 | G——插件（聊天文件引用） | E2E-CHAT-file-ref-opens-the-surface-that-owns-it、E2E-PLUGIN-file-view-collapse-persists |
 | 品质（聊天文件引用） | E2E-CHAT-shorthand-file-ref-opens-the-matching-file、E2E-CHAT-file-ref-opens-the-surface-that-owns-it、E2E-PLUGIN-file-view-collapse-persists |
+| C / 品质（Composer 深层文件引用） | E2E-COMPOSER-deep-file-mentions |
 | G——插件（项目文件夹根） | E2E-PLUGIN-file-view-switches-folder-per-project |
 | 安全性（项目文件夹根） | E2E-PLUGIN-file-view-switches-folder-per-project |
 | 品质（项目文件夹根） | E2E-PLUGIN-file-view-switches-folder-per-project |
@@ -5882,6 +5955,7 @@ eleven-tool-round desktop paths are verified by
 | M6+（Windows 更新缓存） | E2E-260 |
 | M6+（独立会话通信） | E2E-SESSION-independent-top-level-communication、E2E-SESSION-hover-card-model-and-links |
 | M5（聊天文件引用） | E2E-CHAT-shorthand-file-ref-opens-the-matching-file、E2E-CHAT-file-ref-opens-the-surface-that-owns-it |
+| M5（Composer 深层文件引用） | E2E-COMPOSER-deep-file-mentions |
 | M5（对话 MP4 附件） | E2E-CHAT-mp4-attachment-opens-in-system-player |
 | M6+（聊天文件引用） | E2E-PLUGIN-file-view-collapse-persists |
 | M6+（项目文件夹根） | E2E-PLUGIN-file-view-switches-folder-per-project |
@@ -8518,6 +8592,16 @@ runner 会在运行时的隔离临时目录中生成六个插件形态 fixture�
 - **验收**：品质
 - **状态**：Windows 原生回归由 `scripts/e2e-work-panel-drag.mjs`（`pnpm test:e2e:work-panel-drag`）覆盖；macOS/Linux 原生拖动尚未验证。
 
+### E2E-WORK-PANEL-active-tab-close-visibility
+
+- **前提条件**：在 Windows 上打开桌面会话，将工作面板调整到支持的窄宽度，并创建一个名称较长的文件或插件标签，使标签容器宽于可见的横向标签栏。
+- **步骤**：激活发生溢出的标签，读取标签容器及其 `.work-panel-tab-close` 矩形与标签栏 client 视口的关系。在两个溢出标签之间切换，并分别将标签栏滚向两端后重复检查。
+- **预期**：激活标签时，整个标签容器及其关闭按钮都会滚动到可见标签栏内。关闭按钮无需中键、键盘快捷键或扩大面板即可看见并命中。
+- **链接规格**：`04-ux/07-ui-design-system.md` §10，issue #1762
+- **验收**：品质
+- **里程碑**：M6 之后桌面壳维护
+- **状态**：渲染器源契约回归由 `apps/desktop/test/work-panel.test.mjs` 覆盖；`scripts/e2e-work-panel-drag.mjs` 的 Windows 探针也会在原生命中测试阶段前检查激活标签关闭按钮的矩形。
+
 #### E2E-LAYOUT-sidebar-project-group-fold
 
 - **前提条件**：通过宿主预置四个保留的侧边栏项目分组：一个横跨四个日期桶共五个会话，一个只有单个会话，一个没有任何会话，一个带十个已固定会话。未设置 `prefers-reduced-motion`。
@@ -9208,32 +9292,55 @@ Follow the [current S3 acceptance scenario](/spec/06-delivery/04-e2e-test-plan#e
 ### E2E-CHAT-turn-process-and-thinking-display
 
 - **先决条件：** 一个回合包含进度段落 A、多次搜索及思考、进度段落 B、多条命令及
-  思考和最终回答；`Show thinking` 偏好开启与关闭两种状态；旧版消息级转录搜索目标。
-- **步骤：** 确认活动组默认展开，让同一回合在无人操作时完成，并确认组收起。另一个
-  回合中，明确展开已完成组，并确认后续更新仍保留该选择。关闭 `Show thinking`，确认
-  活动思考指示器仍然可见、已完成的推理行和摘要消失且不残留空的纯思考容器；再重新打开，
-  确认已完成的推理行恢复。收起所有组，确认 Bash／run 行仍保持可见。检查嵌套路径，包括
-  相互独立的组／条目切换、父级收起与恢复、单项片段、字面最后一项选择、失败／被拒／恢复、
-  保留窗格重新挂载、Bash 行保持独立（包括相邻 Bash 行）且其详情在打开前保持收起，以及
-  旧版搜索定位。
-- **预期：** 按时间顺序排列的可折叠过程片段把最终回答、助手错误、中止后的末尾文字和待处理
-  操作留在过程之外。活动组默认展开；未操作的组在回合完成时收起，用户明确选择的状态继续
-  保留。这些组默认值不依赖 `Show thinking` 偏好。Bash／run 别名被排除在所有过程披露之外，
-  作为独立行渲染，即使所有组都收起也保持可见；相邻 Bash 行各自独立，Bash 行的详情在用户
-  打开前保持收起。`Show thinking` 关闭时，活动思考指示器保持可见，已完成的推理行和摘要
-  被隐藏，空的纯思考容器被省略；重新打开时恢复。单项没有组。没有任何条目载荷会自动展开：
-  工具／搜索行在用户打开之前保持收起，而思考项保留自身的叶子默认值。父级、子级和同级
-  状态相互独立；窗格拥有的用户选择跨更新、偏好切换和重新挂载保留，渲染器重启后重新应用
-  默认值。搜索只展开拥有目标消息的过程片段和活动组，每个请求应用一次；条目级精确定位不在
-  本次范围内，被偏好隐藏的推理会保持隐藏，直到用户打开 `Show thinking`。已保存的
-  `showThinking` 跨重启保留；缺失值回退到旧版 `thinkingDisplayMode`（`compact` 隐藏，
+  思考和最终回答；`Show thinking` 偏好开启与关闭两种状态；`过程显示` 偏好分别为
+  「平铺显示」「命令工具优先」「全折叠显示」；重启后保留已保存的设置；旧版消息级
+  转录搜索目标。
+- **步骤：** 确认活动组默认展开，让同一回合在无人操作时完成，并确认过程收起，只剩最终
+  回答（以及错误或待处理操作面）。另一个回合中，明确展开已完成组，并确认后续更新仍保留
+  该选择；随后收起回合披露并确认组随之收起，再重新展开并确认组选择恢复。在「全折叠显示」
+  中，确认命令行留在所属活动组内，且只有普通助手进度文字会拆分活动组。在「命令工具优先」
+  中，确认 `Bash`／run 行作为组旁的独立行渲染，普通助手进度消息或命令会结束当前组，
+  相邻调用保持分离，思考行默认展开。在「平铺显示」中，确认不渲染嵌套活动组，外层披露按
+  转录顺序列出工具、命令、思考和进度行，工具详情保持收起。在每种模式中确认回合只渲染
+  一个外层披露，收起它会隐藏、重新展开会恢复其下的行。关闭 `Show thinking`，确认不再
+  渲染任何已完成的推理行，仅在推理流式输出期间保留整段运行的 TextShimmer `Thinking`
+  指示器，不使用转圈、脉冲圆点或逐字符动画，减少动态效果时保持静态；重新打开后确认
+  已完成的推理行恢复。分别选择每个 `过程显示` 值并重启，确认设置保留；移除已保存的值，
+  确认默认使用「全折叠显示」。确认标题分别显示执行中、已完成、已停止或失败，执行期间
+  压缩上下文与恢复会各自命名，未记录时长时不显示时长，且绝不回显当前命令。检查嵌套路径，
+  包括相互独立的组／条目切换、父级收起与恢复、单项片段、字面最后一项选择、失败／被拒／
+  恢复、保留窗格重新挂载、命令行详情在打开前保持收起，以及旧版搜索定位。
+- **预期：** 一个回合只渲染一个过程披露，包含全部回答前的行，最终回答、助手错误、中止后
+  的末尾文字和待处理操作留在披露之外；没有最终回答文字时，过程标题和这些错误或待处理
+  操作面仍然保留。未被操作的披露在完成时收起。「平铺显示」中没有嵌套活动组，活动工具、
+  命令、思考和进度行按转录顺序排列，工具详情保持收起。「命令工具优先」中，`Bash`／run 行
+  作为组旁的独立行，相邻调用保持分离，普通助手进度消息或命令会结束当前组，因此中间进度
+  段落和每条命令都会开启新组。「全折叠显示」（默认）中，命令行留在所属组内，只有普通
+  助手进度文字会拆分活动组，因此中间进度段落会结束前一组，后续活动开启新组。只有在至少
+  两个可见项时才显示组；单项没有组。思考行在「平铺显示」与「命令工具优先」中默认展开；
+  「全折叠显示」保留已发布的例外：较早的行保持收起，只有最后一个活动行在其为当前步骤时
+  展开，完成后收起。用户明确选择的状态继续保留，并在外层披露重新展开时恢复；这些组默认值
+  不依赖 `Show thinking` 偏好。回合标题按执行中、已完成、已停止、失败的顺序报告，失败与
+  停止优先于正常完成，当前步骤为推理时显示 `Thinking`，执行期间压缩上下文和恢复会各自
+  命名，未记录时长时不显示时长，且绝不回显当前命令。嵌套组标题与命令行共用回合标题的
+  左边缘。`Show thinking` 关闭时，不再渲染任何已完成的推理行，仅在推理流式输出期间保留
+  整段运行的 TextShimmer `Thinking` 指示器；重新打开时恢复。除显示模式的思考默认值外，
+  没有任何条目载荷会自动展开：工具／搜索行在用户打开之前保持收起。父级、子级和同级状态
+  相互独立；窗格拥有的用户选择跨更新、偏好切换和重新挂载保留，渲染器重启后重新应用默认值。
+  搜索只展开拥有目标消息的回合过程，以及存在时的活动组，每个请求应用一次；条目级精确定位
+  不在本次范围内，被偏好隐藏的推理会保持隐藏，直到用户打开 `Show thinking`。已保存的
+  `transcriptDisplayMode` 跨重启保留，缺失或未知值解析为「全折叠显示」；已保存的
+  `showThinking` 跨重启保留，缺失值回退到旧版 `thinkingDisplayMode`（`compact` 隐藏，
   `detailed`／未知／缺失显示）。
 - **2026-09-20 变更的验证范围：** 本次变更只包含多级折叠与活动组呈现；精确转录搜索
   定位不在本次范围内，保持原有搜索行为。
-- **自动化：** `pnpm test:e2e:transcript` 覆盖默认及运行中到完成时的过程披露行为；
-  `pnpm test:e2e:transcript-disclosure` 验证手动展开状态保留和视口锚定；
-  `apps/desktop/test/turn-process.test.mjs` 覆盖过程默认值，
-  `apps/desktop/test/thinking-visibility.test.mjs` 覆盖 `showThinking`／旧版解析优先级。
+- **自动化：** `pnpm test:e2e:transcript` 覆盖「命令工具优先」与「全折叠显示」布局
+  以及运行中到完成时的过程披露行为；`pnpm test:e2e:transcript-disclosure` 验证手动
+  展开状态保留和视口锚定；`apps/desktop/test/turn-process.test.mjs` 覆盖模式分段，
+  `apps/desktop/test/transcript-display-modes-ui.test.mjs` 覆盖渲染层模式接线、
+  思考默认值与 TextShimmer，`apps/desktop/test/transcript-display-mode-settings.test.mjs`
+  覆盖设置行与搜索索引，`apps/desktop/test/settings-roundtrip.test.mjs` 覆盖规范化、
+  写入校验与全折叠默认值。
 - **规格：** 04-ux/06-settings-ia、04-ux/08-component-spec、
   04-ux/09-interaction-patterns；ADR turn-process-and-thinking-display。
 ### E2E-CONTEXT-estimate-calibration-stays-safe

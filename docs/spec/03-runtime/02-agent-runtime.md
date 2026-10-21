@@ -230,6 +230,12 @@ independent recovered outages must not eventually stop because earlier tool
 rounds consumed the budget. One-shot completions still use one bounded budget
 for their single response. Persistent failures remain bounded and abortable.
 
+When compaction has already replaced a failed assistant with a summary or
+retained user message, a retry uses that current compacted transcript. It
+removes any trailing assistant rows if present, but does not require an
+assistant message at the transcript tail before calling `continue()` (issue
+#1768).
+
 Before surfacing a pre-stream `PROVIDER_ERROR` for HTTP 400/422 whose message
 ends in `(no body)`, the runtime makes at most one silent repair attempt with
 the generated output-limit fields removed: `max_tokens`,

@@ -64,7 +64,7 @@ async function markdownLinkInteractionProbe(
     useAppStore.setState({
       activeSessionId: "markdown-link-probe",
       page: "chat",
-      settings: { ...initialState.settings, linkOpenTarget: "workpanel" },
+      settings: { ...initialState.settings, linkOpenTarget: "workpanel", transcriptDisplayMode: "command-first" },
       openUrlInWorkPanel: (url) => openedUrls.push(url),
     });
     flushSync(() =>
@@ -361,6 +361,7 @@ globalThis.resetContextOverflowRecoveryProbe = async () => {
       enterToSend: true,
       onboardingDismissed: false,
       smoothStreaming: false,
+      transcriptDisplayMode: "command-first",
     },
   });
 };
@@ -423,6 +424,7 @@ globalThis.transcriptRenderProbe = async () => {
       enterToSend: true,
       onboardingDismissed: false,
       smoothStreaming: false,
+      transcriptDisplayMode: "command-first",
     },
   });
   const container = document.createElement("div");
@@ -510,7 +512,7 @@ globalThis.transcriptRenderProbe = async () => {
     );
 
     // A standalone Bash row is not an activity group: it updates through its own
-    // rendered command, outside every process disclosure.
+    // rendered command, as a row of the turn's single process disclosure.
     const bashMessages = (command: string): UiMessage[] => [
       message("bash-user", "user", "Run"),
       message("bash-row", "tool", "", {
@@ -525,8 +527,11 @@ globalThis.transcriptRenderProbe = async () => {
     const bashRow = container.querySelector<HTMLElement>('[data-message-id="bash-row"]');
     assert(bashRow, "the standalone Bash row did not render");
     assert(
-      bashRow.closest(".turn-process") === null,
-      "the Bash row must render outside every process disclosure",
+      bashRow.closest(".turn-process") !== null &&
+        bashRow.closest(".turn-process") ===
+          container.querySelector(".turn-process") &&
+        bashRow.closest(".process-activity-group") === null,
+      "the Bash row must render inside the turn's one process, outside every group",
     );
     assert(container.textContent?.includes("printf before"), "the Bash command did not render");
     globalThis.__activityGroupRenders = [];

@@ -1671,3 +1671,14 @@ messages. Full source identities remain in structured references and tooltips.
 The renderer-only update preserves drafts, sending and temporary-chat lifetime.
 Real Electron coverage checks the appearance, keyboard/source/removal paths,
 narrow panes and both themes; see docs/selection-side-chat-validation.md.
+
+## 2026-10-21 - Desktop beta.5 upstream integration
+
+Integrated upstream b73b6dfae97ec4daacb4cea000b0a7bbba7ea27d and Pi 1.3.0.
+Preserved selected references, temporary side chat, account benefits, Claude
+cache duration controls, and generated images outside collapsed process rows.
+Retry cleanup now skips system deltas and removes only empty assistant tails,
+preserving meaningful output and completed tools after compaction.
+Windows packages are built locally; macOS arm64/x64 use the artifact-only
+Actions lane. Android remains on its existing release. Validation and artifact
+results are recorded in docs/releases/0.21.0-beta.5-validation.md.

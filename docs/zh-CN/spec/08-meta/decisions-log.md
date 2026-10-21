@@ -54,7 +54,7 @@
 | D656 | 隔离宿主持续拒绝的 outbox 追加，避免整队停摆 | **修订 ADR 0041 / D318 / D444 / D597：当 `session.appendMessage` 或 `session.recordUsage` 返回的错误无法归类为重复消息 ID、`PERMISSION_DENIED:` 毒行或外键孤立行时，不再结束本次 flush，而是在同一 Host 代内按有界退避重试（5 秒起、翻倍、上限 60 秒）。同一队头连续第五次失败后，该追加被移入应用自有的死信文件 `session-message-outbox.dead-letter.json`（保留载荷、sessionId、隔离时间与宿主错误；只保留最新 256 条，超出丢弃最旧并记 warn），随后继续排空后续条目，因此单条被拒追加不再长期占用 FIFO 队头、填满 1024 条上限或导致所有会话写入失败。Host 重启属于新代，会立即重试该队头。隔离条目永不自动重放，`session.delete` 会连同该会话的隔离条目一起删除。协议版本、存储架构与队列文件格式均不变。** | 一条 `stream did not contain valid UTF-8` 追加在队头滞留 14.8 小时，期间 `session.persistence.outbox.is.full` 触发 5990 次，导致所有会话的写入直到重启前全部失败；此前只有三类错误有排空出口，其余错误被永久当作瞬时错误（#1560）。 |
 | D657 | 让内置浏览器打开工作区外的本地文件 | **修订 ADR 0170：通过绝对路径或 `file:` URL 可打开任意已存在的本地普通文件，本地文件页面也可导航到其他已存在的本地文件。相对输入仍以工作区为根；HTTP(S) 页面只保留此前工作区内文件链接的权限。缺失文件、目录与远程文件 authority 仍被阻止。`BrowserPreview` 与 sidecar 继续使用工作区根解析。公开的 `pi.browser.navigate` API 在高风险 `browser.cdp` 权限下采用相同策略。见 ADR 0328、E2E-059、`04-ux/08-component-spec.md` 与 `05-security/01-security.md`。** | 用户需要检查项目外的本地 HTML，而工作区范围内的 Agent 文件工具和远程页面导航仍须保留原有边界（#1627）。 |
 | D659 | 重新打开归档项目后恢复侧栏显示 | **修订 D093 / D455：成功明确激活项目时，清除该规范化路径的渲染层归档标记并持久化，使用户从「项目归档」点击「打开」、通过「添加项目」再次选择同一目录，或打开项目会话后，都能在主页侧边栏看到该项目。仅选择归档详情行而未激活，以及普通会话刷新，都不改变归档状态。不更改 Host/项目/会话存储或协议。见 ADR 0294、E2E-264 与 issue #1653。** | 用户明确重新打开项目后，活动工作区虽已切换，但按路径存储的归档展示标记仍在，导致项目从侧栏隐藏。 |
-| D661 | 分段回合过程与独立的思考偏好 | **取代 D633 / D651 与 `turn-process-and-thinking-display` ADR 中记录的 `Detailed` / `Compact` 显示模式行为与单一整体过程披露：回合渲染为按时间顺序排列的可折叠过程片段，Bash 与 run 别名位于所有折叠容器之外（回合级过程披露与任何普通活动组），即使所有组都收起也保持可见，且过程／组折叠默认值不依赖思考偏好。偏好为可选的布尔值 `AppSettings.showThinking`；缺失或非布尔值回退到旧版 `thinkingDisplayMode` 字段（`compact` 隐藏，`detailed`／未知／缺失显示），该旧字段仅为持久化设置兼容性保留。`showThinking` 加入可移植应用字段，因此会像旧字段一样同步；其余 Host 协议、持久化 schema、权限或插件契约不变。见修订后的 ADR、`04-ux/06-settings-ia.md`、`04-ux/08-component-spec.md`、`04-ux/09-interaction-patterns.md` 与 E2E-CHAT-turn-process-and-thinking-display。** | 单一扁平容器让较长的工具／搜索序列难以浏览，并把推理可见性与过程折叠挤进同一个二值开关；独立布尔值加上始终可见的 Bash 行，让命令密集的回合保持可读又不遮挡回答。 |
+| D661 | 分段回合过程与独立的思考偏好 *（由 D668 修订）* | **取代 D633 / D651 与 `turn-process-and-thinking-display` ADR 中记录的 `Detailed` / `Compact` 显示模式行为与单一整体过程披露：回合渲染为按时间顺序排列的可折叠过程片段，Bash 与 run 别名位于所有折叠容器之外（回合级过程披露与任何普通活动组），即使所有组都收起也保持可见，且过程／组折叠默认值不依赖思考偏好。偏好为可选的布尔值 `AppSettings.showThinking`；缺失或非布尔值回退到旧版 `thinkingDisplayMode` 字段（`compact` 隐藏，`detailed`／未知／缺失显示），该旧字段仅为持久化设置兼容性保留。`showThinking` 加入可移植应用字段，因此会像旧字段一样同步；其余 Host 协议、持久化 schema、权限或插件契约不变。见修订后的 ADR、`04-ux/06-settings-ia.md`、`04-ux/08-component-spec.md`、`04-ux/09-interaction-patterns.md` 与 E2E-CHAT-turn-process-and-thinking-display。** | 单一扁平容器让较长的工具／搜索序列难以浏览，并把推理可见性与过程折叠挤进同一个二值开关；独立布尔值加上始终可见的 Bash 行，让命令密集的回合保持可读又不遮挡回答。 |
 | D662 | 插件在工作面板 Browser 中打开受范围限制的 HTML | **在 `fs.read` 下新增 `pi.fs.openInBrowser(pathFromRoot)`。宿主执行插件常规的读取路径包含、受保护路径、凭据拒绝名单、声明范围与项目注册文件夹检查；仅接受已存在的 `.html`、`.htm`、`.xhtml` 文件。验证后，Main 请求渲染进程为当前本地会话创建 Browser 资源标签页。Browser 插件必须启用。此操作不授予 `browser.cdp`，不改变 BrowserPreview 或本地文件导航策略，也不新增 host-core 协议或持久化状态。见 ADR 0330、`07-plugins/03-plugin-api.md`、`07-plugins/13-plugin-permissions-matrix.md`、`04-ux/08-component-spec.md` 与 E2E-153。** | 文件管理器需要在应用内预览 HTML；如果授予插件 `browser.cdp`，也会暴露无关的页面检查与控制能力。 |
 
 ## B. 辅助实现默认值
@@ -335,6 +335,8 @@
 | D602 | 崩溃转储留在数据目录 | **Electron 的 Crashpad 报告器在 `ready` 之前以本地模式启动（`uploadToServer: false`）。转储放在 `<data_dir>/crash-dumps`，而不是 Electron 默认的 `userData` crashDumps 路径，因此 `PI_DESKTOP_DATA_DIR` profile 不会与其它安装共用转储。下一次持有单实例锁的启动会为新于 `crash-dumps.json` 的转储写一条 `diagnostics` 记录，按 Crashpad `ptype` 分类：任一新转储属于 browser/main 进程则为 `error`，已恢复的 renderer/GPU/utility 崩溃为 `warn`。host-core 与 sidecar 崩溃仍走监督器路径。不上传，不改 IPC，不改 schema。** | 崩溃留下的 minidump 无人读取。Crashpad 也会记录已恢复的渲染进程崩溃，因此下次启动用 `error` 声称上次运行已死是错的；而数据目录之外的转储会逃出 `PI_DESKTOP_DATA_DIR` 隔离。 |
 | D619 | 复制公式得到的是它的 TeX 源码 | **仅渲染层：当选区覆盖到渲染出来的公式时，`text/plain` 从 MathML `annotation` 写出——行内 `$…$`，块级 `$$…$$` 独占行，也就是 `lib/latex-math.ts` 把 `\(…\)` 和 `\[…\]` 归一到的那组定界符，且每组定界符都像代码段的围栏那样加长到盖过公式内部出现的最长同字符串——而不是 KaTeX 画的那两棵树。落在公式内部的切口会扩展成整个公式。只有公式被改写：归约后的克隆经由 `Selection.toString()`——复制自己跑的那个序列化器——读回，因此同处一个选区的正文、列表、表格和代码块保留平台自己的读法，包括 `innerText` 会写出、而复制本就会略过的 `user-select: none` 界面零件。不含公式的选区，以及在选区所在位置之外触发的复制，整份交回平台。只写一种 flavour：`text/plain`。接管事件同时丢掉了平台的 `text/html`，且不再写回——归约后的克隆是应用自己的标记，写回去会带上文本读法已略过的 `user-select: none` 界面零件；而改为携带渲染结果则会把每个公式粘贴两遍，因为隐藏 MathML 树的只有 KaTeX 自己的样式表，样式表不会随剪贴板一起走。只有一个由外壳持有的文档级 `copy` 监听器，记录区的右键复制经由同一个模块读取同一个选区。** | 公式粘出来是它的字形，而且每棵渲染树各一份，无法带进 LaTeX 文档或别的 Markdown 编辑器（issue #414）。ADR 0268 当年移除「引用」的理由正是 OS 剪贴板可以替代，那剪贴板就得真的装着源码。 |
 | D620 | pi-ai 内置的 API-key 服务成为命名预设 | **向 `NAMED_ENDPOINT_PRESETS` 新增十五条命名预设——Ant Ling、Baseten、Cerebras、Hugging Face、Meta（`responses`）、MiniMax（国际）、Moonshot AI（国际）、NVIDIA、OpenCode Zen、Vercel AI Gateway、Qwen Token 套餐（`alibaba-token-plan`）、Qwen Token 套餐（中国）、小米 Token 套餐（中国/欧洲/新加坡）——各自使用官方主机名；models.dev 键与 pi-ai 提供方 id 不同的那几条，把 pi-ai id 保留为别名。八个内置提供方仍作例外并写明原因：Amazon Bedrock、Azure OpenAI、Cloudflare AI Gateway、Cloudflare Workers AI、Google Vertex AI（URL 里带账户或区域），GitHub Copilot 与 OpenAI Codex（以厂商账号行提供），以及 Radius（这里的 `pi_messages` 仅限账号）。pi-ai 升级后若某提供方既未被覆盖也不在例外中，`packages/agent-runtime/src/pi-ai-provider-sync.test.ts` 会失败。不改协议、存储或 IPC。** | pi-ai 其他能力本就可达，但服务目录的 API-key 一半靠手工维护，已经跟库自带的提供方列表脱节（ADR 0307）。 |
+| D668 | 每回合一个过程披露，并提供三种转录显示模式 | **修订 D661 / `turn-process-and-thinking-display` ADR：每个回合渲染一个顶层过程披露，包含回答前的全部行；回答留在披露之外。`AppSettings.transcriptDisplayMode` 选择布局：`flat` 不渲染嵌套活动组，`command-first` 将 `Bash`／run 行作为活动组旁的独立行，`fully-folded`（缺失或无效值的默认）让命令留在所属组内，且只有普通助手进度文字会拆分活动组。该模式在渲染时读取，因此切换后立即重绘——投影缓存只以消息和压缩为键。披露标题按失败／停止／执行中／已完成的优先级报告，且绝不回显当前条目；披露与它展开的层级共用一条左边缘。`transcriptDisplayMode` 加入可移植应用字段；`keepCommandsExpanded` 已弃用，仅为持久化设置兼容性保留，不再暴露，也不再参与渲染读取。无 Host 协议、持久化 schema、权限或插件契约变更。见修订后的 ADR、`04-ux/06-settings-ia.md`、`04-ux/08-component-spec.md`、`04-ux/09-interaction-patterns.md` 与 E2E-CHAT-turn-process-and-thinking-display。** | 按时间顺序的分段把同一回合拆成答案上方多个并列披露，而布尔命令折叠偏好只能表达两种布局；三种模式覆盖平铺、命令优先与已发布的分组视图，且不改变工具收到的内容或持久化内容。 |
+| D669 | `@` 查询越过被截断的文件索引 | **修订 D124：8000 条的 `fs/index` 快照被截断时，非空的 `@` 查询会在输入停顿后，通过只读的 Electron 通道 `pi-desktop/fs/search` 在该根目录的完整清单中搜索，最好的 50 行与本地匹配合并。完整的索引从不搜索。远程会话保持使用快照。不改变主机 RPC、存储或 schema。** |
 
 ## M0. 模型目录决策
 
@@ -386,7 +388,7 @@
 | D334 | 受约束的聊天内图片显示 | **修订桌面 `fs/read` 仅工作区条款：`fs/read`、`fs/reveal` 和 `fs/open` 共用 `resolveOpenablePath`（工作区、`<data_dir>/scratch/`、`<data_dir>/attachments/`，以及 `attachments/<sha256>` blob）。读取会 `realpath` 目标。** | 聊天需要内联图片，但不能把任意绝对路径交给渲染器。 |
 | D336 | 由宿主代发的插件补全与会话上下文 | **修订 D019：插件在授予 `session.read` 时可经 `pi.session.getLlmContext()` 读取进行中工具会话的面向模型转录，并在授予相应权限时经 `pi.agent.complete()` 跑一次性补全。见 ADR 0174。** | 插件需要第二意见补全，但不能自己拿提供商凭据。 |
 | D340 | 用户可配置的出站代理 | **设置 → 通用 → 网络把代理暴露为系统 / 直连 / 自定义。自定义接受 http/https/socks5 URL 和绕过列表，持久化为可选 `AppSettings.networkProxy`。Chromium `session.setProxy` 覆盖内置浏览器和 `net.fetch`；sidecar 经 undici dispatcher 应用。见 ADR 0177 与 E2E-190。** | Node fetch 忽略操作系统代理，Clash/V2Ray/SOCKS5 用户能浏览却不能调模型。 |
-| D342 | 从本地智能体存储导入模型配置 | **修订 D007：设置 → 导入仍不自动导入 `~/.pi`。显式模型配置卡片扫描 Claude Code、Codex、OpenCode、Pi 和 CC Switch 提供商行，列出不含密钥的草稿，并由 `modelConfig/importRun` 经 `providers.create` 复制 API 密钥。等价提供商（规范化 base URL + API 风格 + 同一凭据）被跳过。见 ADR 0179、ADR 0188 与 E2E-209。设置入口和会话导入 UI 后由 D645 / ADR 0319 修订：模型导入现位于模型页，设置页不再提供会话导入。** | 用户已经从这些存储导入会话，否则要在模型页重打同样的端点和密钥。 |
+| D342 | 从本地智能体存储导入模型配置 | **修订 D007：设置 → 导入仍不自动导入 `~/.pi`。显式模型配置卡片扫描 Claude Code、Codex、OpenCode、Pi 和 CC Switch 提供商行，列出不含密钥的草稿，并由 `modelConfig/importRun` 经 `providers.create` 复制 API 密钥。Pi 扫描还会读取 `~/.pi/agent/auth.json` 的 API 密钥，并与 Pi 缓存的 `models-store.json` 目录配对，使只存在于 auth.json 的提供商也能列出；两个文件都描述同一提供商时 `models.json` 仍为准。等价提供商（规范化 base URL + API 风格 + 同一凭据）被跳过。见 ADR 0179、ADR 0188 与 E2E-209。设置入口和会话导入 UI 后由 D645 / ADR 0319 修订：模型导入现位于模型页，设置页不再提供会话导入。** | 用户已经从这些存储导入会话，否则要在模型页重打同样的端点和密钥。 |
 | D351 | 模型配置导入保留不同凭据 | **修订 D342 / ADR 0179：导入提供商仅在规范化端点、API 风格和凭据都匹配时视为等价。同一端点不同 API 密钥创建独立提供商行，并仍可在 Composer 中选择。Electron main 经宿主密钥边界解析已有 API 密钥。见 ADR 0188 与 E2E-209。** | CC Switch 在同一网关端点存多个账户；仅按端点幂等会静默丢掉除第一个以外的配置。 |
 | D344 | 由主进程拥有的文件选择能力 | **修订 D197 / D334：Composer 原生文件和图片选择器把选中的绝对路径留在 Electron main，用短时、绑定发送者、一次性令牌保护。`composer/importFiles` 只接受该令牌和持久会话 id；渲染器从不提供源路径。MVP 文件选择器只提供常规文件。见 ADR 0181 与 E2E-102h。** | 渲染器 IPC 不是用户点击门禁：导入载荷接受任意绝对路径会变成本地文件外泄原语。 |
 | D314 | 已发布语言注册表与语言选择器 | **修订 D073：界面语言列在 `@pi-desktop/i18n`（`en`、`zh-CN`、`zh-TW`、`tr`）。本地名称永不翻译。设置 → 常规的语言是可搜索选择器（跟随系统 + 注册表），不再是三张预览卡。插件标签保持 `en` + `zh-CN` 契约；没有插件翻译的外壳语言使用英语回退；产品更新日志跟随每个已发布产品语言。见 ADR 0160、ADR 0182 与 E2E-091。** | 预览卡无法扩展到两种以上语言；注册表让添加语言无需重写外观卡即可发货。 |
@@ -5513,3 +5515,41 @@ Markdown 源码，不是 `text/html` 负载；对禁用行内 HTML 的外部编�
 - 数量徽标保留运行状态的可发现性，同时避免动画轨道成为默认界面。不需要更改持久化
   schema 或迁移。设置读取通过渲染层 API 规范化应用这些默认值。见
   `04-ux/01-ui-ia.md`、`04-ux/06-settings-ia.md` 与 E2E-266。
+
+## 2026-10-21 —— 每回合一个过程披露与三种转录显示模式（D668）
+
+- D668 修订 D661 / `turn-process-and-thinking-display` ADR：每个回合现在渲染一个顶层
+  过程披露，包含回答前的全部行。命令行不再是披露的同级；末尾回答、助手错误、中止后的
+  末尾文字和待处理操作面留在披露之外。
+- `AppSettings.transcriptDisplayMode` 选择布局。`flat` 不渲染嵌套活动组，按转录顺序列出
+  各行。`command-first` 保留活动组，但把 `Bash`／run 行提升为独立行，普通进度消息或命令
+  会结束当前组。`fully-folded` 是缺失或无效值的默认，让命令行留在所属组内，只有普通助手
+  进度文字会拆分活动组。该模式在渲染时读取，因此切换后立即重绘。
+- `showThinking` 开启时，`flat` 与 `command-first` 中的思考行默认展开；`fully-folded`
+  保留已发布的例外，只有最后一个活动行在其为当前步骤时展开。关闭偏好时不再渲染任何
+  已完成的推理行，仅在推理流式输出期间保留整段运行的 TextShimmer `Thinking` 指示器。
+- `keepCommandsExpanded` 已弃用，仅为持久化设置兼容性保留；不再暴露，也不再参与渲染
+  读取。披露标题、左边缘与窗格拥有的披露记忆保持不变。
+- 已由 `apps/desktop/test/turn-process.test.mjs`、
+  `apps/desktop/test/transcript-display-modes-ui.test.mjs`、
+  `apps/desktop/test/transcript-display-mode-settings.test.mjs` 与
+  `apps/desktop/test/settings-roundtrip.test.mjs` 覆盖。见修订后的 ADR、
+  `04-ux/06-settings-ia.md`、`04-ux/08-component-spec.md`、
+  `04-ux/09-interaction-patterns.md` 与 E2E-CHAT-turn-process-and-thinking-display。
+
+## 2026-10-19 —— `@` 查询越过被截断的文件索引（D669）
+
+- `fs/index` 快照只保留最浅的 8000 个条目，菜单也只在这份快照里模糊过滤。在大项目里
+  ——例如每个资源都带一个 `.meta` 文件的 Unity 项目——藏在几层目录下的脚本根本不在
+  快照中，无论怎么输入都找不到，尽管截断脚注提示用户继续输入（issue #1781）。
+- 快照被截断时，非空查询现在会在输入停顿 150 ms 后同时发给 `fs/search`。主进程用与
+  渲染器相同的打分，在它为索引已经构建好的清单（`git ls-files`）上排序；若索引来自
+  目录遍历，则改为一次更深的遍历（遵守同一忽略集，最多 200,000 个条目或 2 秒），
+  返回最好的 50 行。菜单把它们与本地匹配合并；较早查询的结果会被丢弃。
+- 完整的索引从不搜索，小项目行为不变。列表可能不完整时截断脚注保留。远程会话继续
+  使用快照，因为远程文件协议没有搜索操作。不需要打包原生列文件工具（ripgrep、bfs）：
+  git 本来就能列出整个仓库，搜索 60,000 个路径只需几毫秒。
+- 由 `packages/host-runtime/src/fs-index.test.ts` 与
+  `apps/desktop/test/composer-deep-file-search-user-path.test.mjs` 覆盖。见
+  `03-runtime/01-ipc-protocol.md` §13c、`04-ux/08-component-spec.md` §11.8 与
+  E2E-COMPOSER-deep-file-mentions。

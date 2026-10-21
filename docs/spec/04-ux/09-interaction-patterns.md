@@ -917,30 +917,43 @@ may be retained while exactly one workspace supplies the visible shell context.
 
 - Tool activity starts as a lightweight collapsed item row. Failed and denied
   calls keep their issue in the row header and do not auto-expand their payload.
-- One unified presentation gives each loaded assistant turn chronological
-  collapsible process segments. They contain thinking, tools, hosted searches and
-  intermediate progress text; the trailing answer, assistant errors and stopped
-  trailing text remain outside them.
+- One unified presentation gives each loaded assistant turn a single collapsible
+  process disclosure. It contains thinking, tools, hosted searches, intermediate
+  progress text and the turn's `Bash`/run rows; the trailing answer, assistant
+  errors and stopped trailing text remain outside it. The `Transcript display`
+  mode selects the layout: `flat` has no nested groups, `command-first` lifts
+  commands into standalone rows, and `fully-folded` (the default) keeps commands
+  inside their groups.
 - A contiguous activity segment receives a group disclosure only when it has at
-  least two visible items under the current thinking preference. Progress text or a
-  Bash row ends the segment, a singleton uses its item disclosure directly, and
-  hidden thinking does not create a redundant group. Existing Task topology remains
-  separate. Bash and run aliases are excluded from every process disclosure —
-  neither a turn-level process disclosure nor a group — and stay standalone rows
-  that remain visible even when every group is collapsed; adjacent Bash rows each
-  remain standalone.
+  least two visible items under the current thinking preference, and only in
+  `command-first` or `fully-folded`. In `fully-folded`, ordinary assistant
+  progress text ends the segment; in `command-first`, a normal assistant progress
+  message or a command ends it. A singleton uses its item disclosure directly,
+  hidden thinking does not create a redundant group, and existing Task topology
+  remains separate. No mode adds a second top-level disclosure or leaves a run
+  row outside the process.
 - The active ordinary group starts open and closes when it completes only if
   untouched; completed groups otherwise start closed, and an untouched active group
   with any recorded failed/denied tool remains open through recovery. These group
-  defaults do not depend on the thinking preference. Bash rows stay visible
-  regardless of any group's collapsed state.
-- No item payload opens itself: a tool, hosted-search or plan call stays a header
-  row until the user opens it, including the literal final item of the last
-  activity group. Group defaults are unchanged, so a final thinking item never
-  causes a backward scan. When `Show thinking` is off, every item payload stays
-  closed and completed reasoning text/excerpts are hidden while the live thinking
-  indicator remains visible; stored reasoning is retained and reappears when the
-  preference is turned back on.
+  defaults do not depend on the thinking preference. Closing the turn's disclosure hides
+  every group and run row under it without erasing their choices; reopening
+  restores the groups the user had opened.
+- The turn header reports `Failed`, `Stopped`, `Running`, or `Finished` in that
+  precedence, names compaction and recovery while those stages are live, reads
+  `Thinking` while the live step is reasoning, omits the duration when the
+  transcript recorded none, and never echoes the current command or query. A
+  nested group header and a run row share its left edge; hierarchy is carried by
+  type size and colour rather than indentation.
+- No item payload opens itself, except the display mode's Thinking default: a
+  tool, hosted-search or plan call stays a header row until the user opens it,
+  including the literal final item of the last activity group. Group defaults are
+  unchanged, so a final thinking item never causes a backward scan. With
+  `Show thinking` on, Thinking rows default expanded in Flat and Commands first and
+  collapse only on user action; Fully folded keeps the released live-only
+  auto-open exception. A collapsed row shows only the Thinking indicator, with no
+  excerpt. With `Show thinking` off, no completed reasoning row renders; only a
+  live whole-run TextShimmer `Thinking` indicator remains while reasoning streams.
+  Stored reasoning is retained and reappears when the preference is turned back on.
 - Activating a group or item header toggles only that level. Closing a parent
   preserves child state, reopening restores it, and sibling groups remain
   independent. Opening a parent is never an expand-all action.
@@ -949,7 +962,7 @@ may be retained while exactly one workspace supplies the visible shell context.
   content the user opened, focused or selected. Choices survive preference
   changes, singleton-to-group growth and remounts while the retained session pane
   lives.
-- Search/navigation opens the process segment and activity group that own the named
+- Search/navigation opens the turn process and activity group that own the named
   message, once per reveal request. Item-level targeting is not part of this
   change. Reasoning hidden by the preference stays hidden until the user turns
   `Show thinking` on. Closing search does not collapse the revealed path.
@@ -1464,7 +1477,7 @@ Project drag/drop follows these patterns:
   a multi-line draft: the bottom reserve is padding on the transcript content, so
   the content is observed on its border box and the newest turn moves up with
   the composer instead of sliding behind it (D287).
-- A manual disclosure — process segment, activity group, tool/search/thinking item,
+- A manual disclosure — turn process, activity group, tool/search/thinking item,
   delegate brief, or error detail — holds the reading position of the scroller
   that owns it (issue #324). Only the initiating level claims the anchor; marking
   the containing group user-owned does not claim its scroll position. The title is

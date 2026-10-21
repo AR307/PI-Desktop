@@ -77,6 +77,11 @@ entitled to it.
   API style is the selected gateway format and takes precedence over a model's
   published adapter; named and OAuth providers may keep a model-level wire API
   pin when their catalog requires it.
+- The built-in OpenCode Go preset also honors a models.dev Claude entry's
+  explicit `anthropic_messages` API and distinct Anthropic `baseUrl` together;
+  the runtime then reaches the catalog route's `/v1/messages` endpoint. Custom
+  endpoints and foreign relay matches keep their saved provider API and base
+  URL.
 - A custom model ID is always accepted, so a gateway without a `/models` route
   stays usable.
 

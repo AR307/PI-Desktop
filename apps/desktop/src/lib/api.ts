@@ -426,12 +426,22 @@ export type SessionHistoryReadOptions = {
   contentLimit?: number;
 };
 
+type TranscriptDisplayMode = NonNullable<AppSettings["transcriptDisplayMode"]>;
+
+function isTranscriptDisplayModeValue(value: unknown): value is TranscriptDisplayMode {
+  return value === "flat" || value === "command-first" || value === "fully-folded";
+}
+
 export function normalizeSettings(settings: AppSettings): AppSettings {
   return {
     ...settings,
     sidebarRunningIndicators: settings.sidebarRunningIndicators !== false,
     sidebarRunningBadge: settings.sidebarRunningBadge !== false,
     sidebarRunningRail: settings.sidebarRunningRail === true,
+    keepCommandsExpanded: settings.keepCommandsExpanded !== false,
+    transcriptDisplayMode: isTranscriptDisplayModeValue(settings.transcriptDisplayMode)
+      ? settings.transcriptDisplayMode
+      : "fully-folded",
     defaultMode: normalizeMode((settings as { defaultMode?: unknown }).defaultMode),
     infiniteProviderRetry:
       (settings as { infiniteProviderRetry?: unknown }).infiniteProviderRetry === true,
@@ -470,6 +480,14 @@ export function validateSettingsWrite(settings: AppSettings): AppSettings {
     typeof settings.showThinking !== "boolean"
   ) {
     throw Object.assign(new Error("showThinking is invalid"), {
+      errorCode: "INVALID_PARAMS",
+    });
+  }
+  if (
+    Object.prototype.hasOwnProperty.call(settings, "transcriptDisplayMode") &&
+    !isTranscriptDisplayModeValue(settings.transcriptDisplayMode)
+  ) {
+    throw Object.assign(new Error("transcriptDisplayMode is invalid"), {
       errorCode: "INVALID_PARAMS",
     });
   }
@@ -552,6 +570,8 @@ export function validateSettingsWrite(settings: AppSettings): AppSettings {
     "sidebarRunningBadge",
     "sidebarRunningRail",
     "sidebarSessionTime",
+    "macosWindowTranslucency",
+    "keepCommandsExpanded",
   ] as const) {
     if (
       Object.prototype.hasOwnProperty.call(value, key) &&
@@ -710,6 +730,9 @@ export const api = {
     projectPath?: string | null;
     /** Renderer-side counter: a slower push must never undo a newer one. */
     seq?: number;
+    /** Identifies the renderer load: a reload restarts the counter, and the
+     * main-side high-water mark restarts with it (#1753). */
+    bootId?: string;
   }) => invoke<{ ok: boolean }>(IPC.invoke.pluginSessionActive, input),
   listSessions: () =>
     invoke<{ sessions: SessionSummary[] }>(IPC.invoke.sessionList).then((result) => ({
@@ -1645,6 +1668,8 @@ export const api = {
   fsOpen: (path: string, mimeType?: string, sessionId?: string) =>
     invoke(IPC.invoke.fsOpen, { path, mimeType, ...(sessionId ? { sessionId } : {}) }),
   fsIndex: (sessionId?: string) => invoke<FsIndexResult>(IPC.invoke.fsIndex, { ...(sessionId ? { sessionId } : {}) }),
+  fsSearch: (sessionId: string | undefined, query: string) =>
+    invoke<FsIndexResult>(IPC.invoke.fsSearch, { ...(sessionId ? { sessionId } : {}), query }),
   /**
    * Complete a file reference from chat text to a real file (D320 follow-up).
    * The main process owns the root order — project, session scratch,
@@ -1673,7 +1698,10 @@ export const api = {
       { theme, color, cornerRadius },
     ),
   windowControl: (action: WindowControlAction) =>
-    invoke<{ maximized: boolean }>(IPC.invoke.windowControl, { action }),
+    invoke<{ maximized: boolean; macosWindowTranslucency: boolean }>(
+      IPC.invoke.windowControl,
+      { action },
+    ),
   getCloseBehavior: () =>
     invoke<{ behavior: CloseBehavior; supported: boolean }>(
       IPC.invoke.closeBehaviorGet,
@@ -1824,6 +1852,79 @@ export const api = {
       });
     });
   },
+  /**
+   * A plugin offered one line for the composer, or the main process ordered
+   * whatever is on screen dropped (`pi.composer.suggest`, ADR 0333).
+   *
+   * The shell answers every offer over `pluginComposerSuggestionResult`, because
+   * only the renderer knows whether the draft can take it. A malformed message
+   * is ignored — nothing here decides whether a plugin's suggestion is valid.
+   */
+  onPluginComposerSuggestion: (
+    listener: (
+      event:
+        | {
+            kind: "offer";
+            requestId: string;
+            pluginId: string;
+            sessionId: string;
+            turnId?: string;
+            text: string;
+            expiresAt: number;
+          }
+        | { kind: "clear"; pluginId?: string; sessionId?: string },
+    ) => void,
+  ) => {
+    if (!window.piDesktop?.on) return () => undefined;
+    return window.piDesktop.on(IPC.event.pluginComposerSuggestion, (payload) => {
+      const event = payload as {
+        kind?: unknown;
+        requestId?: unknown;
+        pluginId?: unknown;
+        sessionId?: unknown;
+        turnId?: unknown;
+        text?: unknown;
+        expiresAt?: unknown;
+      };
+      if (event?.kind === "clear") {
+        listener({
+          kind: "clear",
+          ...(typeof event.pluginId === "string" && event.pluginId
+            ? { pluginId: event.pluginId }
+            : {}),
+          ...(typeof event.sessionId === "string" && event.sessionId
+            ? { sessionId: event.sessionId }
+            : {}),
+        });
+        return;
+      }
+      if (
+        event?.kind !== "offer" ||
+        typeof event.requestId !== "string" ||
+        typeof event.pluginId !== "string" ||
+        typeof event.sessionId !== "string" ||
+        typeof event.text !== "string" ||
+        typeof event.expiresAt !== "number"
+      ) {
+        return;
+      }
+      listener({
+        kind: "offer",
+        requestId: event.requestId,
+        pluginId: event.pluginId,
+        sessionId: event.sessionId,
+        ...(typeof event.turnId === "string" && event.turnId ? { turnId: event.turnId } : {}),
+        text: event.text,
+        expiresAt: event.expiresAt,
+      });
+    });
+  },
+  /** The shell's answer to one composer suggestion the main process is waiting on. */
+  pluginComposerSuggestionResult: (input: {
+    requestId: string;
+    shown: boolean;
+    reason?: string;
+  }) => invoke<{ ok: boolean }>(IPC.invoke.pluginComposerSuggestionResult, input),
   onBrowserOpenFile: (listener: (event: { path: string }) => void) => {
     if (!window.piDesktop?.on) return () => undefined;
     return window.piDesktop.on(IPC.event.browserOpenFile, (payload) => {

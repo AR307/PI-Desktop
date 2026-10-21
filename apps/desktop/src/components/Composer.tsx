@@ -57,6 +57,7 @@ import { useComposerCompletions } from "../features/chat/composer/hooks/useCompo
 import { useComposerDraft } from "../features/chat/composer/hooks/useComposerDraft";
 import { useComposerInputHistory } from "../features/chat/composer/hooks/useComposerInputHistory";
 import { usePluginComposerBridge } from "../features/chat/composer/hooks/usePluginComposerBridge";
+import { useComposerSuggestion } from "../features/chat/composer/hooks/useComposerSuggestion";
 import { useComposerSubmit } from "../features/chat/composer/hooks/useComposerSubmit";
 import { useComposerTransforms } from "../features/chat/composer/hooks/useComposerTransforms";
 import { ComposerInput } from "../features/chat/composer/ComposerInput";
@@ -519,6 +520,9 @@ export function Composer({
 
   // Plugin draft and attachment actions reach this composer while it takes input.
   usePluginComposerBridge({ ...draft, inputBlocked, enabled: localToolsAllowed && !targetSessionId });
+  // A plugin may have offered one line for this empty draft; it shows in the
+  // placeholder layer and `Tab` takes it (ADR 0333).
+  const suggestion = useComposerSuggestion();
 
   // Keep the transcript's bottom reserve in sync with the composer's real
   // height (it grows with multi-line input) so the last message sits just
@@ -609,6 +613,7 @@ export function Composer({
             enterToSend={enterToSend}
             runActive={runActive}
             composerAc={completions.ac}
+            suggestion={targetSessionId ? null : suggestion}
             onPaste={pasteClipboardFiles}
             onAcceptCompletion={completions.acceptCompletion}
             onSubmit={(steering) => void submitFromComposer(steering)}

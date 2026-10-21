@@ -593,6 +593,8 @@ UI 可能会显示层级提示，但默认情况下不得硬阻止未知模型�
 
 目录条目还可以额外固定模型级 wire API（例如 `api: "openai-responses"`）。当该 API 与 provider 的协议族兼容时，它优先于 provider 级 `apiStyle`（因此 `opencode_go` 下的 responses-only 模型会走 Responses adapter 而非 Chat Completions）。外部 catalog 的异构 wire API（例如 relay 端点上匹配到的 `google-generative-ai` 或 `anthropic-messages`）不会覆盖 OpenAI-compatible provider 配置的 wire style（issue #1310）；没有模型级固定时保持 provider 级风格不变。
 
+对于内置 OpenCode Go 行，目录条目若明确发布独立的 Anthropic Messages 路由，则有一个文档化例外：models.dev 的 Claude 条目同时声明 `api: "anthropic_messages"` 和 OpenCode Anthropic 根 `baseUrl` 时，agent-runtime 使用这组目录 API 与地址，最终访问 `/v1/messages`。该例外只适用于命名的 OpenCode Go 预设；自定义端点和外部 relay 匹配到的目录记录仍使用保存的 provider API 与 Base URL。
+
 ### 16.1 Responses 流终止（pi-ai 补丁）
 
 OpenAI Responses 适配器会把 `response.completed` 和

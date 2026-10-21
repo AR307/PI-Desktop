@@ -24,6 +24,9 @@ import {
   type TurnProcessRunSegment,
 } from "../../../lib/turn-process";
 import { sessionAllows } from "../../../lib/remote-session-safety";
+import { resolveShowThinking } from "../../../lib/thinking-visibility";
+import { resolveTranscriptDisplayMode } from "../../../lib/transcript-display-mode";
+import { cachedVisibleProcessSteps } from "../../../lib/transcript-activity-summary";
 import { useSlotSessionId } from "../../../plugins/renderer-slots/use-slots";
 import { useAppStore } from "../../../stores/app-store";
 import { IconBranch, IconReview } from "../../../components/icons";
@@ -283,6 +286,10 @@ export const AssistantTurn = memo(function AssistantTurn({
     ? slotMessage("assistant", { ...actionMessage, content }) : undefined,
   [complete, actionMessage, content]);
   const streaming = isActive && summary.streaming;
+  // The same preference the nested levels read: hidden reasoning is not a
+  // visible step of the turn's process.
+  const showThinking = useAppStore((state) => resolveShowThinking(state.settings));
+  const hideThinking = !showThinking;
   /*
     The turn owns the menu for its whole subtree, the answer rows it renders
     included: Regenerate and Branch act on the turn's answer message, so a menu
@@ -352,7 +359,24 @@ export const AssistantTurn = memo(function AssistantTurn({
   statusesRef.current = turnDelegationStatuses;
   timingsRef.current = turnDelegationTimings;
   const { process, responses } = summary;
-  const segments = useMemo(() => segmentTurnProcess(process), [process]);
+  // Read at render time, never at entry-build time: the projection cache is keyed
+  // by messages and compactions only, so a grouping decision made there would
+  // stay stale until new messages arrived. Segmenting here makes the preference
+  // apply on the next paint.
+  const displayMode = useAppStore((state) => resolveTranscriptDisplayMode(state.settings));
+  const segments = useMemo(
+    () => segmentTurnProcess(process, displayMode),
+    [process, displayMode],
+  );
+  // The one disclosure exists if it reveals anything at all. This uses the same
+  // helper the activity rows use: progress text counts, completed thinking is
+  // hidden under the preference, and a live reasoning indicator still counts.
+  // Content facts come from the per-message cache, so a streaming delta reads
+  // only its own message body rather than every earlier one.
+  const visibleSteps = useMemo(
+    () => cachedVisibleProcessSteps(process, hideThinking, isActive),
+    [process, hideThinking, isActive],
+  );
   // The live tail is the turn's actual last part. A process chunk opens and
   // reports live state only while it owns that part, so a superseded thinking
   // chunk cannot keep a false "Thinking" header once a Bash call or a separate
@@ -370,25 +394,29 @@ export const AssistantTurn = memo(function AssistantTurn({
       aria-label={t("chat.assistantMessage")}
     >
       <div className="message-col">
-        {segments.map((segment) => {
-          if (segment.kind === "run") {
-            return <StandaloneRunRow key={`run-${segment.key}`} segment={segment} />;
-          }
-          const ownsActiveTail =
-            activePart !== undefined && segment.parts.includes(activePart);
-          return (
-            <TurnProcess
-              key={`process-${segment.key}`}
-              turnId={segment.key}
-              processParts={segment.parts}
-              turnParts={entry.parts}
-              isActive={isActive && ownsActiveTail}
-              delegationStatuses={turnDelegationStatuses}
-            >
-              <AssistantTurnParts parts={segment.parts} {...partContext} />
-            </TurnProcess>
-          );
-        })}
+        {process.length > 0 ? (
+          <TurnProcess
+            turnId={entry.id}
+            processParts={process}
+            turnParts={entry.parts}
+            visibleSteps={visibleSteps}
+            isActive={isActive}
+            delegationStatuses={turnDelegationStatuses}
+            failed={summary.hasError}
+            activity={runtimeActivity}
+          >
+            {segments.map((segment) => {
+              if (segment.kind === "run") {
+                return <StandaloneRunRow key={`run-${segment.key}`} segment={segment} />;
+              }
+              return (
+                <AssistantTurnParts key={`process-${segment.key}`} parts={segment.parts} {...partContext} />
+              );
+            })}
+          </TurnProcess>
+        ) : null}
+        {/* The answer stays outside the process disclosure: it is what the turn
+            produced, not part of what it did. */}
         <AssistantTurnParts parts={responses} {...partContext} />
         {generatedImages}
         {!isActive && metaMessage ? (

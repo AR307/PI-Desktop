@@ -9,10 +9,10 @@ boundaries must keep that split clear as upstream packages evolve.
 ## 2. Current ownership
 
 The sidecar pins `@earendil-works/pi-agent-core`, `pi-ai`, and
-`pi-coding-agent` together at exactly `1.1.0`; Desktop's `pi-ai` and `pi-mcp`
+`pi-coding-agent` together at exactly `1.3.0`; Desktop's `pi-ai` and `pi-mcp`
 development dependencies use the same release. Target-release package patches
 remain narrow compatibility deltas and are listed with their audited behavior
-in `docs/project/pi-110-adoption.md`.
+in `docs/project/pi-130-adoption.md`.
 
 - `@earendil-works/pi-agent-core` supplies the agent loop and its stable agent,
   event, and tool types. Agent Runtime owns desktop-specific compaction,
@@ -31,7 +31,7 @@ in `docs/project/pi-110-adoption.md`.
   host-core checkpoint-compaction path, and durable session store do not use
   the package's AgentSession.
 
-The extension shim is a versioned compatibility subset, not the full 1.1.0
+The extension shim is a versioned compatibility subset, not the full 1.3.0
 coding-agent API. Its legacy `VERSION` marker remains sourced from
 `TRUSTED_EXTENSION_KERNEL_VERSION` and intentionally identifies the modeled
 0.87.1 extension surface.
@@ -96,6 +96,14 @@ Do not move removed `pi-agent-core` APIs there as a shortcut.
   persists through host-core.
 - Cancellation, provider retry, hosted-search validation, tool ordering, and
   extension discovery retain their current behavior.
+- Pi 1.3 drops prior-model thinking from provider replay instead of converting
+  it to visible text; same-model DeepSeek reasoning remains intact. Malformed
+  final tool JSON fails validation before Host execution, with raw arguments
+  returned to the model for correction.
+- The removed experimental assistant-frame codec is not restored. Desktop
+  continues consuming assistant stream events and final messages.
+- The shim marks user `before_agent_start` events with `messageType: "user"`;
+  custom-message runs remain unsupported by that shim.
 - Any future switch to `pi-durable` is independently reviewed because it
   changes the runtime/session lifecycle and cannot be inferred from a package
   version update.

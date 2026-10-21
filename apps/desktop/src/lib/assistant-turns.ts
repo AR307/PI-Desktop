@@ -93,10 +93,11 @@ function isDelegationStartActivity(item: AssistantActivityItem): boolean {
 }
 
 /**
- * A `Bash` call or a run alias renders as a standalone row outside any process
- * or activity-group disclosure (ADR turn-process-and-thinking-display).
- * Adjacent Bash rows each stay standalone, so a run item neither joins the
- * preceding segment nor absorbs the next one.
+ * A `Bash` call or a run alias is a run row (ADR
+ * turn-process-and-thinking-display). With commands expanded it renders as its
+ * own row inside the turn's process disclosure; with commands folded it stays in
+ * the activity group it ran among. Adjacent calls are still built as separate
+ * activity parts, so entry topology does not depend on the preference.
  */
 export function isStandaloneRunActivity(
   item: AssistantActivityItem,

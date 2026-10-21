@@ -19,7 +19,7 @@
  *   already stopped calling tools. Only user Stop or `TaskStop` aborts it.
  */
 
-import { assistantReplay, responseContentFacts, responseDiagnostics, responseOutcome, responseOutcomeError } from "./response-outcome.js";
+import { assistantReplay, removeTrailingEmptyAssistantMessages, responseContentFacts, responseDiagnostics, responseOutcome, responseOutcomeError } from "./response-outcome.js";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
@@ -622,17 +622,10 @@ export class SubagentRun {
     const retryError = this.pendingProviderRetry;
     if (!retryError) return;
     this.pendingProviderRetry = undefined;
-    const messages = [...this.agent.state.messages];
-    if (messages.at(-1)?.role !== "assistant") {
-      throw new Error("Cannot retry a subagent provider stream without its failed assistant message");
-    }
     // A failed provider stream can leave more than one assistant row after a
-    // tool round. Remove the entire failed suffix before continuing.
-    while (messages.at(-1)?.role === "assistant") {
-      const last = messages.at(-1);
-      if (last?.role !== "assistant" || responseContentFacts(last).meaningful) break;
-      messages.pop();
-    }
+    // tool round. Keep meaningful partial output and system deltas while
+    // removing empty failed responses; compaction may leave no assistant tail.
+    const messages = removeTrailingEmptyAssistantMessages(this.agent.state.messages);
     this.agent.state.messages = messages;
     this.providerRetryInProgress = true;
     try {

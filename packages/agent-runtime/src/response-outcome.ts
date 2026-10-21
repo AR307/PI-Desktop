@@ -1,3 +1,4 @@
+import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import type { AssistantMessage } from "@earendil-works/pi-ai";
 import type { AssistantReplay, ResponseDiagnostics, UiMessage } from "@pi-desktop/shared";
 import type { ClassifiedAgentError } from "./agent-errors.js";
@@ -29,6 +30,20 @@ export function responseContentFacts(message: Pick<AssistantMessage, "content">)
     }
   }
   return { textLength, thinkingLength, toolCallCount, meaningful };
+}
+
+/** Retry empty failures across system deltas without dropping completed work. */
+export function removeTrailingEmptyAssistantMessages(
+  messages: readonly AgentMessage[],
+): AgentMessage[] {
+  const result = [...messages];
+  for (let index = result.length - 1; index >= 0; index--) {
+    const message = result[index];
+    if (message.role === "system") continue;
+    if (message.role !== "assistant" || responseContentFacts(message).meaningful) break;
+    result.splice(index, 1);
+  }
+  return result;
 }
 
 /** Provider termination takes precedence over content; never infer token limits. */
