@@ -1,3 +1,10 @@
+## Unreleased - Agent image result visibility
+
+- Keep authorized-account image results in the final reply area instead of
+  hiding them when tool processing collapses. Expanding details does not
+  duplicate images; preview, save, references and saved-history display remain
+  available without generating again.
+
 ## Unreleased - Claude cache duration in the composer
 
 - Select five-minute or one-hour Claude prompt caching directly below the

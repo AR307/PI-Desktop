@@ -35,6 +35,7 @@ import {
 } from "./shared";
 import { activityItemsEqual } from "./ActivityGroup";
 import { GeneratedImages } from "./GeneratedImages";
+import { ImageResult, imageResultFromMessage } from "../../images/ImageResult";
 import { MessageRow } from "./MessageRow";
 import { ReviewChangeCard } from "../../../components/ReviewChangeCard";
 import { ToolRow } from "./ToolRow";
@@ -317,9 +318,14 @@ export const AssistantTurn = memo(function AssistantTurn({
   const toolsRef = useRef(summary.tools);
   const tools = reuseReferences(toolsRef.current, summary.tools);
   toolsRef.current = tools;
-  const generatedImages = useMemo(() => tools
-    .filter((message) => message.toolName === "GenerateImages")
-    .map((message) => <GeneratedImages key={message.id} message={message} />), [tools]);
+  const generatedImages = useMemo(() => tools.map((message) => {
+    if (imageResultFromMessage(message)) {
+      return <ImageResult key={message.id} message={message} />;
+    }
+    return message.toolName === "GenerateImages"
+      ? <GeneratedImages key={message.id} message={message} />
+      : null;
+  }), [tools]);
   // Delegation status/timing depends on actual tool messages, never on thinking
   // or text and never on a Task's attached child transcript identity.
   const delegationItems = useMemo(() => tools.map((message) => ({ kind: "tool" as const, message })), [tools]);

@@ -18693,6 +18693,29 @@ increment and production update publication require later service validation.
 - Runner: apps/desktop/test/e2e/images/acceptance.mjs. Real Electron/Rust/agent
   wiring uses only a local HTTP provider fixture; it is not paid-provider QA.
 
+### Agent image results outside collapsed process details
+
+- Authorize a fresh isolated desktop against the local image catalog. Ask the
+  chat Agent to generate an image without opening Image mode. Wait for both
+  the saved `GenerateImage` result and the final reply; leave the automatically
+  completed process collapsed. Its image must be visible in the reply area.
+- Expand the process and its tool group, then collapse it. Exactly one result
+  card remains outside those disclosures. Open/close the preview, save the PNG,
+  and add it as a reference while preserving an existing draft. Repeated use
+  of the same reference does not duplicate its chip.
+- Reload and restart, select the original conversation, and verify that its
+  saved image remains visible without another generation request. Inspect
+  dark/wide and light/narrow layouts and retain screenshots.
+- Select a separately configured chat/image provider and generate two images
+  through `GenerateImages`. Its existing single gallery and two thumbnails
+  remain visible when collapsed and are not duplicated when expanded.
+- Driver: `pnpm test:e2e:agent-image-result`
+  (`apps/desktop/test/e2e/images/agent-result.mjs`). Uses the real desktop,
+  preload, Host, Agent and filesystem with local model/account fixtures only.
+  `PI_TEST_PLAYWRIGHT`, `PI_TEST_ELECTRON` and `PI_DESKTOP_HOST_BIN` select the
+  existing host toolchain. `PI_TEST_OUTPUT` selects an isolated evidence/profile
+  directory; it must be new for each run. Artifacts are retained for review.
+
 ## Upstream integration: temporary chats and background commands
 
 - Start a detached Bash command from a temporary side chat. Only its own

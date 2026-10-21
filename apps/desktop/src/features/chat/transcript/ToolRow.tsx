@@ -589,7 +589,7 @@ function HostToolRow({
           {statusLabel}
         </span>
       ) : null}
-      {imageResult ? <ImageResult message={message} /> : null}
+      {!imagesInTurn && imageResult ? <ImageResult message={message} /> : null}
       {!imageResult && blocks && blocks.length > 0 ? (
         <div className="tool-row-body" id={detailsId} ref={disclosure.bodyRef} {...disclosure.bodyEvents}>
           <DisclosureCollapseRail

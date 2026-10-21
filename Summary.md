@@ -1,5 +1,31 @@
 # PI-Desktop MirrorCoding Edition
 
+## 2026-10-21 - Keep Agent-generated images visible in replies
+
+- Fix the authorized-account `GenerateImage` result being hidden when a
+  completed turn automatically collapses its process. Promote its existing
+  image card alongside configured `GenerateImages` galleries in AssistantTurn;
+  ToolRow suppresses the duplicate only when its containing turn owns it.
+- Reuse the existing image parser, card and actions. No provider, runtime,
+  permissions, stored-message format or generation/retry behavior changes.
+  Historical results render from the saved tool payload without regeneration.
+- Add `test:e2e:agent-image-result`: real isolated Electron, Host and Agent
+  execution against local account/model fixtures. The old renderer fails with
+  a successfully saved but hidden image; the fixed renderer passes 18 checks
+  covering collapse/expand, preview, save, draft-preserving references,
+  reload/restart, both image-tool contracts, and light/dark narrow/wide views.
+- Validation: 26 targeted transcript tests, desktop typecheck, renderer
+  production build, configured Biome lint, style tokens, policy sync and
+  PR-base checks passed. Reuse the existing Node/Electron dependencies and
+  unchanged Host/runtime builds; no install, paid service or user profile used.
+- The older all-in-one `scripts/e2e-image-chat.mjs` driver stopped before image
+  generation at its AI-settings hit-target assertion; it is not counted as a
+  pass. The new focused native journey separately verifies that driver's
+  configured-provider image contract without unrelated settings navigation.
+  Full repository suites, packaging and live-provider generation were not run.
+- No server changes, push, merge or release. Test profiles and screenshots
+  remain in the task worktree's ignored artifact directory for review.
+
 ## 2026-10-21 - Main-page Claude cache selector
 
 - Add the shared segmented control beneath the model menu's reasoning slider.
