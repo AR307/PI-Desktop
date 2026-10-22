@@ -15,6 +15,9 @@
 - Extend acceptance to automatic-recovery restart/native metadata retention and
   clicking Stop during the real Electron retry wait, with onboarding dismissed
   through its normal control before visual verification.
+- Release the suppressed turn lifecycle when Stop cancels a retry wait after
+  a partial row has already been retained. Verify caller cancellation behavior
+  rather than AbortSignal identity now that the watchdog composes signals.
 
 ## 2026-10-21 - Keep Agent-generated images visible in replies
 

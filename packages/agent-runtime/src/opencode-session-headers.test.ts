@@ -273,14 +273,23 @@ describe("completeOneShot OpenCode headers", () => {
   it("forwards caller cancellation to the provider stream", async () => {
     const controller = new AbortController();
     let captured: SimpleStreamOptions | undefined;
-    await completeOneShot(provider, { systemPrompt: "s", messages: [] }, "off", {
+    const completion = completeOneShot(provider, { systemPrompt: "s", messages: [] }, "off", {
       signal: controller.signal,
       stream: (_model, _context, options) => {
         captured = options;
-        return streamFor(assistantOk());
+        const stream = createAssistantMessageEventStream();
+        options?.signal?.addEventListener("abort", () => {
+          const error: AssistantMessage = { ...assistantOk(), stopReason: "aborted" };
+          stream.push({ type: "error", reason: "aborted", error });
+          stream.end(error);
+        }, { once: true });
+        return stream;
       },
     });
-    expect(captured?.signal).toBe(controller.signal);
+    expect(captured?.signal?.aborted).toBe(false);
+    controller.abort();
+    expect(captured?.signal?.aborted).toBe(true);
+    await expect(completion).rejects.toMatchObject({ errorCode: "TURN_ABORTED" });
   });
 
   it("does not attach OpenCode headers to a generic Completions provider", async () => {

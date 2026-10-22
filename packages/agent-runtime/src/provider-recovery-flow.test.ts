@@ -194,6 +194,7 @@ describe("recovery boundaries across request owners", () => {
         await vi.advanceTimersByTimeAsync(60000);
         expect(f.requests()).toBe(1);
         expect(f.events.some(e => e.event.type === "error" && e.event.error.code === "STREAM_FAILED")).toBe(false);
+        if (owner === "session") expect(f.events.filter(e => e.event.type === "agent_end")).toHaveLength(1);
       } finally { await f.runtime.dispose(); }
     });
 

@@ -6680,10 +6680,21 @@ export class DesktopAgentRuntime {
       await this.agent.continue();
       await this.waitForIdleAndSteering();
     } finally {
+      const cancelledWhileWaiting = this.runCancelled && this.suppressProviderRetryRunEnd && !this.turnEndEmitted;
       this.providerRetryAbort = undefined;
       this.activeProviderRetryAttempt = 0;
       this.providerRetryInProgress = false;
       this.suppressProviderRetryRunEnd = false;
+      if (cancelledWhileWaiting) {
+        // The failed run's lifecycle was suppressed and no replacement run
+        // started. Stop must release that held lifecycle even when its partial
+        // assistant was already retained and there is no open message to end.
+        this.finalizeCurrentAssistant("aborted");
+        const subagentUsage = this.turnSubagentUsage;
+        this.turnSubagentUsage = undefined;
+        this.emit({ type: "turn_end", ...(subagentUsage ? { subagentUsage } : {}) });
+        await this.handleAgentEvent({ type: "agent_end", messages: [] });
+      }
     }
   }
 
