@@ -198,10 +198,12 @@ session and builtin subagents use the same controller and policy.
 error, lifecycle `error`, `turn_end`, `agent_end`, or duplicate assistant
 bubble reaches the UI. A normalized `status` event identifies the retry
 backoff so the user can tell that the turn is still active. The visible
-assistant message id is reused when an output-free retry starts, retaining no substantive
-content in one bubble. End events are emitted once by the final successful or
-exhausted attempt. An abort during the wait cancels the timer and prevents the
-next provider request.
+assistant message id is reused when an output-free retry starts. A delivered
+fragment is retained in its completed row, and the resumed response gets a new
+row under the same turn. Terminal turn/agent events are emitted once by the final
+successful or exhausted attempt. An abort during the wait cancels the timer,
+prevents the next provider request, and releases the suppressed terminal
+lifecycle even when the retained fragment no longer has an open assistant row.
 
 The delay follows the OpenCode-style order `retry-after-ms`, `retry-after`
 seconds, `retry-after` HTTP-date, then exponential backoff. The fallback starts
@@ -232,9 +234,10 @@ for their single response. Persistent failures remain bounded and abortable.
 
 When compaction has already replaced a failed assistant with a summary or
 retained user message, a retry uses that current compacted transcript. It
-removes any trailing assistant rows if present, but does not require an
-assistant message at the transcript tail before calling `continue()` (issue
-#1768).
+removes empty failed assistant rows, retains replayable partial output, and
+does not require an assistant message at the transcript tail (issue #1768).
+Section 5e defines the model-only continuation used when retained assistant
+output would otherwise prevent Pi from calling `continue()`.
 
 Before surfacing a pre-stream `PROVIDER_ERROR` for HTTP 400/422 whose message
 ends in `(no body)`, the runtime makes at most one silent repair attempt with
@@ -255,10 +258,10 @@ because it paces one failed request rather than a synchronized rate-limit burst.
 A server-stated delay wins outright, including one shorter than the scheduled
 wait.
 
-Only the failed request is replayed. The session, its transcript, and its tool
-state are untouched: the failed assistant is removed from the next model context
-and the same visible message id is reused, so a retry never restarts the turn or
-re-runs a completed tool call.
+Only the interrupted response is resumed. The session and completed tool state
+are retained: an output-free failure is removed from model context and reuses
+its visible message id; substantive output is retained as described in section
+5e. Recovery never restarts the turn or re-runs an already completed tool call.
 
 The application setting `infiniteProviderRetry` is off by default. When enabled,
 the main session and its builtin subagents skip only the ten-retry ceiling for

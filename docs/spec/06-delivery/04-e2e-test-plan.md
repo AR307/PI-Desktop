@@ -16,8 +16,10 @@ Retain screenshots, requests, durable messages and lifecycle events.
   and complete eleven successful tool rounds with separate transient outages.
   Completed tools are not replayed and their results remain in the final request.
 - Click Stop during a partial-stream retry wait: preserve the fragment, settle
-  the turn once, and issue no second model request. Dismiss onboarding through
-  its normal Skip control before taking unobscured screenshots.
+  the turn once, and issue no second model request. Expect the existing
+  `TURN_ABORTED` cancellation event, no provider error card, and an idle editable
+  composer. Dismiss onboarding through its normal Skip control before taking
+  unobscured screenshots.
 - Runtime user-path tests additionally cover session/delegate/one-shot owners,
   native Messages signatures, unfinished tool arguments, stalled streams,
   cancellation during recovery, infinite retry beyond the finite budget,

@@ -20,6 +20,10 @@
   rather than AbortSignal identity now that the watchdog composes signals.
 - Assert the existing `TURN_ABORTED` cancellation contract and an idle composer
   after clicking Stop; cancellation remains distinct from provider error cards.
+- Validation passed: 601 tests in 13 runtime suites, runtime TypeScript build,
+  configured lint, PR-base check, and all eight isolated Electron journeys.
+  See `docs/interrupted-stream-recovery-validation.md` for the tested candidate,
+  screenshots, regression evidence, unchanged retry limits, and release scope.
 
 ## 2026-10-21 - Keep Agent-generated images visible in replies
 
