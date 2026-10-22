@@ -20,7 +20,7 @@ import {
   agentThinkingLevel as agentThinkingLevelFor,
   omitThinkingModel as withOmittedThinking,
 } from "./thinking-level.js";
-import { captureProviderResponse, carriesRetryDelayHeaders, createProviderRetryStream } from "./provider-retry.js";
+import { captureProviderResponse, carriesRetryDelayHeaders, createProviderRetryStream, streamIdleTimeoutMs, withStreamIdleTimeout } from "./provider-retry.js";
 import type { AgentOptions } from "@earendil-works/pi-agent-core";
 import type { SubagentThinkingLevel } from "@pi-desktop/shared";
 import { upstreamRequestDiagnostics, type RequestDiagnostics } from "./request-diagnostics.js";
@@ -128,10 +128,14 @@ export function subagentModelBinding(opts: {
         baseUrl: m.baseUrl,
         sessionId: opts.sessionId,
       });
-      return createProviderRetryStream(
+      const stallAbort = new AbortController();
+      const retryStream = createProviderRetryStream(
         m,
         context,
-        withMirrorCodingFast(sessionOptions, opts.provider),
+        withMirrorCodingFast({
+          ...sessionOptions,
+          signal: AbortSignal.any([...(options?.signal ? [options.signal] : []), stallAbort.signal]),
+        }, opts.provider),
         (retryOptions) => accountModelStream(m, () =>
           omitThinking
             ? models.stream(omitThinkingModel, context, retryOptions)
@@ -147,6 +151,7 @@ export function subagentModelBinding(opts: {
           failure: () => retry.failure,
         },
       );
+      return withStreamIdleTimeout(retryStream, m, streamIdleTimeoutMs(), () => stallAbort.abort());
     },
     getApiKey: async () => requestKey || undefined,
   } satisfies Pick<AgentOptions, "streamFn" | "getApiKey"> & {

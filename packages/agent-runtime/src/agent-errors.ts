@@ -462,7 +462,7 @@ export function classifyAgentError(err: unknown): ClassifiedAgentError {
   // cause, and that turn must read as stopped, not as a compaction failure.
   if (
     explicitlyAborted ||
-    /\babort/i.test(rawMessage)
+    /^(?:(?:request aborted|the operation was aborted)[.!]?\s*$|turn aborted\b|user (?:cancelled|canceled|aborted)\b)/i.test(rawMessage.trim())
   ) {
     return result("TURN_ABORTED", false);
   }

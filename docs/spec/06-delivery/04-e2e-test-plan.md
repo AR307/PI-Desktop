@@ -1,5 +1,27 @@
 # 04. E2E Test Plan
 
+## Interrupted provider response continuation (2026-10-23)
+
+Run `node scripts/e2e-provider-recovery.mjs` against the task candidate with
+an isolated profile and the local HTTP/SSE fixture. `PI_E2E_ELECTRON` and
+`PI_DESKTOP_HOST_BIN` may reference the host's existing development binaries.
+Retain screenshots, requests, durable messages and lifecycle events.
+
+- Send through Chat Completions, receive partial text, disconnect, and recover
+  without clicking Continue. Prior text remains; no terminal error appears.
+- Send through Responses, receive reasoning, then `upstream_stream_read_error`
+  or `basispoint request timeout`. Both automatically recover, retain reasoning,
+  and persist only the user's actual submission, with one terminal lifecycle.
+- Recover setup failures, exhaust the finite budget and manually Continue once,
+  and complete eleven successful tool rounds with separate transient outages.
+  Completed tools are not replayed and their results remain in the final request.
+- Runtime user-path tests additionally cover session/delegate/one-shot owners,
+  native Messages signatures, unfinished tool arguments, stalled streams,
+  cancellation during recovery, infinite retry beyond the finite budget,
+  shared setup/stream budgets, and permanent authorization failures.
+
+No live model endpoint, account, server deployment or active user profile is used.
+
 ## Claude prompt-cache duration
 
 Run **node scripts/e2e-claude-cache.mjs** from the task worktree after building

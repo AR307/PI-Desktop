@@ -1,5 +1,18 @@
 # PI-Desktop MirrorCoding Edition
 
+## 2026-10-23 - Resume interrupted provider responses automatically
+
+- Remove the post-content retry veto in main/side-chat and delegate runtimes.
+  Preserve partial text/thinking rows and completed tool results; resume through
+  the existing Agent loop with native replayable context and no unfinished calls.
+- Cover request/stream timeouts, disconnects and provider-aborted streams without
+  confusing them with user Stop. Extend stream-stall recovery to delegates and
+  one-shot completions while preserving existing budgets and permanent errors.
+- Validate real adapter/Agent user paths and isolated Electron Responses and
+  Completions recovery. The regression baseline failed six partial-response
+  scenarios before the fix. Server, active profiles and release publication
+  remain outside this change; detailed results belong in the validation record.
+
 ## 2026-10-21 - Keep Agent-generated images visible in replies
 
 - Fix the authorized-account `GenerateImage` result being hidden when a

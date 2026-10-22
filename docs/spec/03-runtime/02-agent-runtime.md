@@ -316,9 +316,14 @@ required protocol terminator or broken stream keeps its underlying failure code.
 Unknown stop reasons and unavailable usage fields are not invented or inferred
 from elapsed time or character count.
 
-Once a request produces text, thinking or tool content, no automatic replay is
-allowed, including under infinite retry. Output-free temporary failures still
-use section 5d budgets and Retry-After. Neither a lower reasoning level nor an
+Temporary failures retry automatically even after text, thinking or tool-call
+fragments arrive. Section 5d budgets and Retry-After apply across setup and stream
+failures; partial content never replenishes a budget. Infinite retry continues
+until recovery or user Stop. Retain delivered fragments as ordinary transcript
+rows, retain valid native text/thinking and completed tools in model context,
+and discard unfinished calls. Add a runtime-only continuation to model context
+when its retained tail is an assistant; do not fabricate a user submission in
+the visible or persisted transcript. Neither a lower reasoning level nor an
 alternative model, group or protocol is selected to conceal an interrupted turn.
 Legal tool-result continuations and approved Plan/Goal progress steps are not
 failed-request replays and keep their existing behavior.
@@ -332,7 +337,14 @@ system instruction and no incomplete tool execution. Completed tool results are
 preserved. Unsigned partial thinking is display-only. Mobile Continue preserves
 an unsent draft even when delivery confirmation is delayed by reconnection.
 
-One-shot completions and delegates use the same outcome classification. The
+One-shot completions and delegates use the same outcome classification and
+transient stream recovery, including the zero-event stream watchdog. A one-shot
+call has no published partial output or tools and retries its original context.
+Provider/SDK aborts without caller cancellation are interruptions, not user Stop;
+explicit local cancellation markers and caller signals remain authoritative.
+Unauthorized, invalid-request, local preparation and certificate failures stay
+terminal. Normally completed thinking-only and explicit output-limit responses
+retain their existing explicit Continue behavior. The
 runtime's existing lifecycle drain runs pending empty retries after idle, at
 most once, without leaving suppression flags active. Diagnostics record the
 actual wire path, protocol, model, group, reasoning/output parameters, reported

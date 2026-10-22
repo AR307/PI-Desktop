@@ -65,6 +65,20 @@ const server = createServer(async (req, res) => {
       content: [],
     };
     emit("response.created", { response });
+    if (["thinking-interrupt", "thinking-timeout"].includes(scenario.mode) && nth === 1) {
+      const reasoning = { id: "rs_fixture", type: "reasoning", summary: [] };
+      emit("response.output_item.added", { output_index: 0, item: reasoning });
+      emit("response.reasoning_summary_part.added", { item_id: reasoning.id, output_index: 0, summary_index: 0, part: { type: "summary_text", text: "" } });
+      emit("response.reasoning_summary_text.delta", { item_id: reasoning.id, output_index: 0, summary_index: 0, delta: "PARTIAL_699 retained reasoning" });
+      scenario.breakStream = () => {
+        emit("response.failed", { response: { ...response, status: "failed", error: {
+          code: scenario.mode === "thinking-timeout" ? "timeout" : "upstream_stream_read_error",
+          message: scenario.mode === "thinking-timeout" ? "basispoint request timeout" : "Upstream response stream was interrupted (code: upstream_stream_read_error)",
+        } } });
+        res.end();
+      };
+      return;
+    }
     emit("response.output_item.added", { output_index: 0, item });
     emit("response.content_part.added", {
       item_id: item.id,
@@ -131,7 +145,9 @@ const debugServer = createServer();
 await new Promise((r) => debugServer.listen(0, "127.0.0.1", r));
 const debugPort = debugServer.address().port;
 await new Promise((r) => debugServer.close(r));
-const { appDir, electronBinary } = resolveElectronBinary(root);
+const { appDir, electronBinary } = process.env.PI_E2E_ELECTRON
+  ? { appDir: join(root, "apps/desktop"), electronBinary: process.env.PI_E2E_ELECTRON }
+  : resolveElectronBinary(root);
 const env = {
   ...process.env,
   PI_DESKTOP_DATA_DIR: join(artifacts, "data"),
@@ -264,7 +280,8 @@ async function run(name, mode, style = "chat_completions") {
   await waitFor(
     async () => {
       const text = await bodyText();
-      if (scenario.breakStream && text.includes("PARTIAL_699")) {
+      const events = await evaluate("window.__events699");
+      if (scenario.breakStream && (text.includes("PARTIAL_699") || events.some(e => e.event?.message?.thinking?.includes("PARTIAL_699")))) {
         await screenshot(`${name}-partial`);
         scenario.breakStream();
         scenario.breakStream = undefined;
@@ -274,7 +291,6 @@ async function run(name, mode, style = "chat_completions") {
         statuses.push(text);
         await screenshot(`${name}-retry`);
       }
-      const events = await evaluate("window.__events699");
       return events.some(
         (e) => e.sessionId === session.id && e.event?.type === "agent_end",
       );
@@ -296,7 +312,7 @@ async function run(name, mode, style = "chat_completions") {
   await screenshot(`${name}-settled`);
   await waitFor(async () => {
     const text = await bodyText();
-    return mode === "stream" ? text.includes("STREAM_FAILED") && text.includes("PARTIAL_699") : mode === "always"
+    return mode === "always"
       ? text.includes("NETWORK_ERROR")
       : text.includes("RECOVERED_699");
   }, "final UI");
@@ -358,9 +374,6 @@ async function continueAfterFailure(record) {
   assert.equal(record.continuation.requests, 1);
   const continued = await ipc("sessionGet", { id: record.sessionId });
   assert(continued.session.messages.filter(message => message.role === "user").length >= 2, "Continue appends a user message");
-  if (record.mode === "stream") {
-    assert(continued.session.messages.some(message => message.content === "PARTIAL_699" && message.status === "error"), "Partial response is not regenerated away");
-  }
   assert(!record.continuation.events.some((e) => e.event?.type === "error"));
   await writeFile(join(artifacts, "results.json"), JSON.stringify(results, null, 2));
 }
@@ -400,10 +413,12 @@ try {
   await ipc("settingsSet", { ...settings, language: "zh-CN", autoGenerateTitle: false });
   console.log("ARTIFACTS", artifacts);
   await run("01-network-recovery", "recover");
-  await continueAfterFailure(await run("02-stream-recovery", "stream"));
+  await run("02-stream-recovery", "stream");
   await run("03-responses-recovery", "recover", "responses");
   await continueAfterFailure(await run("04-network-exhaustion", "always"));
   await run("05-cumulative-budget", "cumulative");
+  await run("06-responses-thinking-interrupt", "thinking-interrupt", "responses");
+  await run("07-responses-thinking-timeout", "thinking-timeout", "responses");
   const summary = verifyProviderRecovery(results);
   await writeFile(
     join(artifacts, "verified-summary.json"),

@@ -19,7 +19,7 @@
  *   already stopped calling tools. Only user Stop or `TaskStop` aborts it.
  */
 
-import { assistantReplay, removeTrailingEmptyAssistantMessages, responseContentFacts, responseDiagnostics, responseOutcome, responseOutcomeError } from "./response-outcome.js";
+import { assistantReplay, prepareProviderRetryMessages, responseContentFacts, responseDiagnostics, responseOutcome, responseOutcomeError } from "./response-outcome.js";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
@@ -600,7 +600,7 @@ export class SubagentRun {
     error: ReturnType<typeof classifyAgentError>,
     phase: "request" | "stream",
   ): number | undefined {
-    if (this.retryState.meaningful || !error.retriable) return undefined;
+    if (this.runSignal().aborted || !error.retriable || error.details?.origin === "local") return undefined;
     const infinite = this.opts.infiniteProviderRetry === true;
     if (error.code === "PROVIDER_RATE_LIMITED") {
       if (!infinite && this.providerRateLimitRetryAttempt >= PROVIDER_RATE_LIMIT_MAX_RETRIES) {
@@ -625,8 +625,9 @@ export class SubagentRun {
     // A failed provider stream can leave more than one assistant row after a
     // tool round. Keep meaningful partial output and system deltas while
     // removing empty failed responses; compaction may leave no assistant tail.
-    const messages = removeTrailingEmptyAssistantMessages(this.agent.state.messages);
+    const messages = prepareProviderRetryMessages(this.agent.state.messages);
     this.agent.state.messages = messages;
+    this.retryState.meaningful = false;
     this.providerRetryInProgress = true;
     try {
       const delayMs =
@@ -641,7 +642,7 @@ export class SubagentRun {
               this.retryState.headers,
             );
       await delayWithAbort(delayMs, this.runSignal());
-      if (this.opts.signal?.aborted) return;
+      if (this.runSignal().aborted) return;
       await this.agent.continue();
       await this.agent.waitForIdle();
     } finally {
@@ -824,6 +825,7 @@ export class SubagentRun {
           this.providerRetryInProgress = false;
           this.emit({ type: "message_update", message: this.currentAssistant });
         } else {
+          this.providerRetryInProgress = false;
           this.emit({ type: "message_start", message: this.currentAssistant });
         }
         break;
@@ -886,7 +888,7 @@ export class SubagentRun {
         // Truncation owns the resumable partial report, not a sticky provider
         // failure. A later valid tool continuation can finish that report.
         const truncated = !aborted && outcome === "truncated";
-        const failed = !aborted && (stopReason === "error" || outcome === "thinking-only" || outcome === "empty");
+        const failed = !aborted && (outcome === "interrupted" || outcome === "thinking-only" || outcome === "empty");
         let classifiedError: ReturnType<typeof classifyAgentError> | undefined;
         let retryAttempt: number | undefined;
         if (outcome === "empty" && !aborted) {
@@ -938,6 +940,18 @@ export class SubagentRun {
             stopReason === "length" || stopReason === "max_tokens";
         }
         if (retryAttempt !== undefined) {
+          if (this.retryState.meaningful) {
+            this.emit({ type: "message_end", message: {
+              ...(this.currentAssistant ?? this.newAssistantRow()),
+              content: content.hasText ? content.text : (this.currentAssistant?.content ?? ""),
+              ...(content.hasThinking && content.thinking ? { thinking: content.thinking } : {}),
+              status: "complete",
+              assistantReplay: assistantReplay(message),
+              ...(messageUsage ? { usage: messageUsage } : {}),
+            } });
+            this.currentAssistant = undefined;
+            break;
+          }
           this.currentAssistant = {
             ...(this.currentAssistant ?? this.newAssistantRow()),
             content: content.hasText

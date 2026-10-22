@@ -5,7 +5,7 @@ import { highestThinkingLevel, isReturnToParent } from "@pi-desktop/shared";
 import { delegationGuidance, delegationHandoffGuidance, delegationSystemPrompt, resolveDelegationThinking, shouldHandOffDelegations } from "./ultra-policy.js";
 import { claudeCacheOptions } from "./claude-cache.js";
 import { assertMirrorCodingFast, withMirrorCodingFast } from "./mirrorcoding-fast.js";
-import { assistantReplay, removeTrailingEmptyAssistantMessages, canRestorePartialResponse, responseContentFacts, responseDiagnostics, responseOutcome, responseOutcomeError, restoredAssistantBlocks } from "./response-outcome.js";
+import { assistantReplay, prepareProviderRetryMessages, retainedAssistantForRetry, canRestorePartialResponse, responseContentFacts, responseDiagnostics, responseOutcome, responseOutcomeError, restoredAssistantBlocks } from "./response-outcome.js";
 import { upstreamRequestDiagnostics, type RequestDiagnostics } from "./request-diagnostics.js";
 import {
   MAX_MUTATION_RECOVERY_FAILURES, BASH_PATCH_FAILURE_KEY,
@@ -2160,7 +2160,7 @@ export class DesktopAgentRuntime {
         this.providerHasContent = false;
         this.providerRequestDiagnostics = undefined;
         this.providerRequestId = undefined;
-        if (!this.currentAssistant) this.providerRequestAttempts = 0;
+        if (!this.currentAssistant && !this.providerRetryInProgress) this.providerRequestAttempts = 0;
         this.providerResponseStatus = undefined;
         this.providerRetryHeaders = undefined;
         this.providerRequestBytes = undefined;
@@ -6465,7 +6465,7 @@ export class DesktopAgentRuntime {
     error: ReturnType<typeof classifyAgentError>,
     phase: "request" | "stream",
   ): number | undefined {
-    if (this.providerHasContent || !error.retriable || error.details?.origin === "local") return undefined;
+    if (this.runCancelled || !error.retriable || error.details?.origin === "local") return undefined;
     const infinite = this.infiniteProviderRetry;
     if (error.code === "PROVIDER_RATE_LIMITED") {
       if (
@@ -6642,7 +6642,7 @@ export class DesktopAgentRuntime {
     // A failed stream can be represented by more than one trailing assistant
     // tool round. Keep meaningful partial output and system deltas while
     // removing empty failed responses; compaction may leave no assistant tail.
-    const messages = removeTrailingEmptyAssistantMessages(this.agent.state.messages);
+    const messages = prepareProviderRetryMessages(this.agent.state.messages);
     this.setAgentMessages(messages);
 
     this.providerRetryInProgress = true;
@@ -6673,6 +6673,7 @@ export class DesktopAgentRuntime {
       });
       await delayWithAbort(delayMs, this.providerRetryAbort.signal);
       if (this.disposed) throw new Error("runtime disposed");
+      if (this.runCancelled) return;
       // The failed attempt has already finished. Only its lifecycle events
       // are suppressed; the retry must close the visible run normally.
       this.suppressProviderRetryRunEnd = false;
@@ -8293,6 +8294,7 @@ export class DesktopAgentRuntime {
             this.progressTurnRerunInProgress = false;
             this.emit({ type: "message_update", message: this.currentAssistant });
           } else {
+            this.providerRetryInProgress = false;
             this.emit({ type: "message_start", message: this.currentAssistant });
           }
           this.applyHostedSearch(event.message);
@@ -8386,7 +8388,7 @@ export class DesktopAgentRuntime {
             effectiveModelContextWindow(this.model) || DEFAULT_CONTEXT_WINDOW,
           );
           const aborted = stopReason === "aborted" || localError?.causeName === "AbortError";
-          const failed = !aborted && (stopReason === "error" || overflow);
+          const failed = !aborted && (outcome === "interrupted" || overflow);
           const errorMessage =
             failed &&
             typeof (event.message as any).errorMessage === "string" &&
@@ -8613,6 +8615,23 @@ export class DesktopAgentRuntime {
           ) {
             this.pendingProviderRetry = diagnosticError;
             this.suppressProviderRetryRunEnd = true;
+            if (this.providerHasContent) {
+              // Close the retained fragment without ending the turn. The next
+              // attempt gets its own row so streaming cannot erase prior work.
+              const retained = retainedAssistantForRetry(event.message);
+              if (retained) this.appendLiveEntry(assistantId, retained);
+              this.emit({ type: "message_end", message: {
+                ...this.currentAssistant,
+                content: nextText,
+                ...(nextThinking ? { thinking: nextThinking } : {}),
+                status: "complete",
+                assistantReplay: assistantReplay(event.message),
+                ...(usage ? { usage } : {}),
+              } });
+              this.currentAssistant = undefined;
+              this.streamStartedAt = undefined;
+              break;
+            }
             this.currentAssistant = {
               ...this.currentAssistant,
               content: nextText,

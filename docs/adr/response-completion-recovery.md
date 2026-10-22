@@ -23,9 +23,13 @@ request is not retried with another protocol, group or model.
 Response outcome belongs to the agent runtime, not Electron or the UI. A small
 classifier considers cancellation, transport/protocol failure and explicit
 output-length termination before content. A completed, truly empty response
-may retry once per submission. Text, thinking, redacted native thinking and
-tool activity prevent automatic replay, even with infinite provider retry.
-Pre-content temporary failures keep the existing budgets and Retry-After.
+may retry once per submission. The 2026-10-23 amendment replaces the original
+post-content stop policy: transient interruptions/timeouts recover automatically
+with the existing budgets and Retry-After, including under infinite retry.
+Retain partial transcript rows instead of replacing them. Keep valid native
+output and completed tool results in context, discard unfinished calls, and add
+a model-only continuation when Pi cannot continue from an assistant tail.
+The continuation does not become a visible or persisted user submission.
 Valid tool rounds and internal completion notices keep their existing semantics.
 
 The user may explicitly continue a partial response by appending a new user
@@ -44,9 +48,12 @@ interface is needed.
 
 Fixed thinking budgets, forced reasoning downgrades, extra timeouts and more
 retries do not establish why a provider stopped; they were rejected. A custom
-SSE translator would duplicate pi and was also rejected. Users now explicitly
-continue interrupted work; they no longer receive an invisible automatic
-replacement. Persisting minimal native blocks adds metadata to existing rows.
+SSE translator would duplicate pi and was also rejected. The original blanket
+post-content ban caused even one thinking delta to disable transient recovery.
+Automatic continuation now preserves that work rather than replacing it. Stop
+and permanent errors still terminate. Normally completed thinking-only and
+explicit output-limit responses still offer explicit Continue. Persisting minimal
+native blocks uses the existing metadata; no new storage contract is introduced.
 
 This decision supersedes the post-content replay and thinking-only retry
 portions of ADR 0050, ADR 0128 and runtime spec section 5e. It does not disable

@@ -3,6 +3,7 @@ import { Type } from "typebox";
 import type { AgentEventEnvelope } from "@pi-desktop/shared";
 import { DesktopAgentRuntime } from "./runtime.js";
 import { SubagentRun } from "./subagent.js";
+import { completeOneShot } from "./one-shot-complete.js";
 import type { RuntimeProviderConfig } from "./provider-binding.js";
 
 const provider: RuntimeProviderConfig = {
@@ -16,18 +17,22 @@ const provider: RuntimeProviderConfig = {
   supportedThinkingLevels: ["off"],
 };
 
-type Failure = "network" | "rate-limit" | "stream";
-type Step = Failure | "tool" | "success" | "partial-stream" | "thinking-only" | "length" | "empty";
+type Failure = "network" | "rate-limit" | "stream" | "timeout";
+type Step = Failure | "tool" | "success" | "partial-stream" | "partial-timeout" | "thinking-stream" | "thinking-only" | "length" | "empty" | "stalled" | "unauthorized";
 
 /** Real provider adapter and agent loop; replace only fetch and the host edge. */
-function fixture(steps: Step[]) {
+function fixture(steps: Step[], infiniteProviderRetry = false, signal?: AbortSignal) {
   let requests = 0;
   let reads = 0;
   const events: AgentEventEnvelope[] = [];
-  const fetch = vi.fn(async (): Promise<Response> => {
+  const bodies: string[] = [];
+  const fetch = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
+    bodies.push(String(init?.body));
     const step = steps[requests++];
     if (!step) throw new Error("Unexpected provider request");
     if (step === "network") throw new TypeError("fetch failed");
+    if (step === "timeout") throw Object.assign(new Error("Connection timed out"), { name: "TimeoutError" });
+    if (step === "unauthorized") return new Response("Invalid API key", { status: 401 });
     if (step === "rate-limit")
       return new Response("Rate limited", {
         status: 429,
@@ -46,19 +51,22 @@ function fixture(steps: Step[]) {
               },
             ],
           }
-        : step === "thinking-only" ? { role: "assistant", reasoning_content: "Retained thinking" }
-        : { role: "assistant", content: ["stream", "empty"].includes(step) ? "" : step === "partial-stream" ? "partial" : "Recovered" };
+        : ["thinking-only", "thinking-stream"].includes(step) ? { role: "assistant", reasoning_content: "Retained thinking" }
+        : { role: "assistant", content: ["stream", "empty"].includes(step) ? "" : step.startsWith("partial-") ? "partial" : "Recovered" };
     const chunk = (value: unknown, finish: string | null) =>
       `data: ${JSON.stringify({ id: "completion", object: "chat.completion.chunk", created: 1, model: "fixture-model", choices: [{ index: 0, delta: value, finish_reason: finish }] })}\n\n`;
-    if (step === "stream" || step === "partial-stream") {
+    if (["stream", "partial-stream", "thinking-stream", "partial-timeout", "stalled"].includes(step)) {
       let sent = false;
       return new Response(
         new ReadableStream<Uint8Array>({
+          start(controller) {
+            if (step === "stalled") init?.signal?.addEventListener("abort", () => controller.error(new Error("connection closed")), { once: true });
+          },
           pull(controller) {
             if (!sent) {
               sent = true;
               controller.enqueue(new TextEncoder().encode(chunk(delta, null)));
-            } else controller.error(new Error("terminated"));
+            } else if (step !== "stalled") controller.error(new Error(step === "partial-timeout" ? "upstream request timeout" : "Upstream response stream was interrupted (code: upstream_stream_read_error)"));
           },
         }),
         { headers: { "content-type": "text/event-stream" } },
@@ -77,6 +85,7 @@ function fixture(steps: Step[]) {
     mode: "agent",
     provider,
     thinkingLevel: "off",
+    infiniteProviderRetry,
     commandShell: {
       id: "bash",
       label: "Bash",
@@ -108,6 +117,8 @@ function fixture(steps: Step[]) {
     task: "Read fixture",
     provider,
     thinkingLevel: "off",
+    infiniteProviderRetry,
+    signal,
     systemPrompt: "Read and report",
     tools: [
       {
@@ -123,7 +134,7 @@ function fixture(steps: Step[]) {
     ],
     onEvent: (event) => events.push(event),
   });
-  return { runtime, subagent, events, requests: () => requests, reads: () => reads };
+  return { runtime, subagent, events, bodies, requests: () => requests, reads: () => reads };
 }
 
 async function settle<T>(promise: Promise<T>): Promise<T> {
@@ -148,11 +159,97 @@ async function settle<T>(promise: Promise<T>): Promise<T> {
 afterEach(() => {
   vi.unstubAllGlobals();
   vi.useRealTimers();
+  vi.unstubAllEnvs();
+});
+
+describe("recovery boundaries across request owners", () => {
+  for (const owner of ["session", "subagent", "one-shot"] as const) {
+    const start = (f: ReturnType<typeof fixture>, signal?: AbortSignal): Promise<unknown> => owner === "session"
+      ? f.runtime.prompt("Finish the report.") : owner === "subagent" ? f.subagent.run()
+      : completeOneShot(provider, { messages: [{ role: "user", content: "Report.", timestamp: 1 }] }, "off", { signal });
+
+    it(`${owner} recovers a stalled partial stream rather than hanging or stopping`, async () => {
+      vi.useFakeTimers();
+      vi.stubEnv("PI_DESKTOP_STREAM_IDLE_TIMEOUT_MS", "30000");
+      const f = fixture(["stalled", "success"]);
+      try {
+        const result = await settle(start(f));
+        expect(f.requests()).toBe(2);
+        if (owner === "one-shot") expect(result).toMatchObject({ text: "Recovered" });
+        else expect(f.events.some(e => e.event.type === "message_end" && e.event.message.status === "complete" && e.event.message.content === "Recovered")).toBe(true);
+      } finally { await f.runtime.dispose(); }
+    });
+
+    it(`${owner} cancels a partial-stream recovery without another request`, async () => {
+      vi.useFakeTimers();
+      const controller = new AbortController();
+      const f = fixture(["partial-timeout"], false, controller.signal);
+      try {
+        const running = start(f, controller.signal).catch(error => error);
+        await vi.advanceTimersByTimeAsync(0);
+        expect(f.requests()).toBe(1);
+        controller.abort();
+        if (owner === "session") await f.runtime.abort();
+        await settle(running);
+        await vi.advanceTimersByTimeAsync(60000);
+        expect(f.requests()).toBe(1);
+        expect(f.events.some(e => e.event.type === "error" && e.event.error.code === "STREAM_FAILED")).toBe(false);
+      } finally { await f.runtime.dispose(); }
+    });
+
+    it(`${owner} keeps unauthorized requests terminal`, async () => {
+      vi.useFakeTimers();
+      const f = fixture(["unauthorized"]);
+      try {
+        await settle(start(f).catch(error => error));
+        expect(f.requests()).toBe(1);
+      } finally { await f.runtime.dispose(); }
+    });
+
+    it(`${owner} shares its finite budget across partial streams and setup failures`, async () => {
+      vi.useFakeTimers();
+      const f = fixture(Array.from({ length: 11 }, (_, index) => index % 2 ? "timeout" : "partial-stream"));
+      try {
+        await settle(start(f).catch(error => error));
+        expect(f.requests()).toBe(11);
+        expect(f.reads()).toBe(0);
+        if (owner === "session") expect(f.events.filter(e => e.event.type === "agent_end")).toHaveLength(1);
+      } finally { await f.runtime.dispose(); }
+    });
+  }
+
+  for (const owner of ["session", "subagent"] as const) {
+    it(`${owner} replenishes recovery only after successful tool progress, not partial output`, async () => {
+      vi.useFakeTimers();
+      const f = fixture([
+        ...Array.from({ length: 11 }, (): Step[] => ["partial-stream", "tool"]).flat(),
+        "partial-timeout", "success",
+      ]);
+      try {
+        if (owner === "session") await settle(f.runtime.prompt("Read repeatedly then report."));
+        else expect((await settle(f.subagent.run())).status).toBe("completed");
+        expect(f.reads()).toBe(11);
+        expect(f.requests()).toBe(24);
+        expect(f.events.filter(e => e.event.type === "error")).toHaveLength(0);
+      } finally { await f.runtime.dispose(); }
+    });
+
+    it(`${owner} honors infinite retry after partial content beyond the finite budget`, async () => {
+      vi.useFakeTimers();
+      const f = fixture([...Array<Step>(12).fill("partial-stream"), "success"], true);
+      try {
+        if (owner === "session") await settle(f.runtime.prompt("Report."));
+        else expect((await settle(f.subagent.run())).status).toBe("completed");
+        expect(f.requests()).toBe(13);
+        expect(f.events.filter(e => e.event.type === "error")).toHaveLength(0);
+      } finally { await f.runtime.dispose(); }
+    });
+  }
 });
 
 describe("provider recovery through real agent loops (#699)", () => {
   for (const owner of ["session", "subagent"] as const) {
-    for (const failure of ["network", "rate-limit", "stream"] as const) {
+    for (const failure of ["network", "rate-limit", "stream", "timeout"] as const) {
       it(`${owner} recovers independent ${failure} outages across eleven successful tool rounds`, async () => {
         vi.useFakeTimers();
         const f = fixture([
@@ -268,7 +365,7 @@ describe("provider recovery through real agent loops (#699)", () => {
 
 describe("non-destructive completion recovery through real provider adapters", () => {
   for (const owner of ["session", "subagent"] as const) {
-    for (const [step, code] of [["thinking-only", "MODEL_THINKING_ONLY"], ["length", "MODEL_OUTPUT_TRUNCATED"], ["partial-stream", "STREAM_FAILED"]] as const) {
+    for (const [step, code] of [["thinking-only", "MODEL_THINKING_ONLY"], ["length", "MODEL_OUTPUT_TRUNCATED"]] as const) {
       it(owner + " keeps " + step + " without replay", async () => {
         const f = fixture([step]);
         try {
@@ -276,9 +373,31 @@ describe("non-destructive completion recovery through real provider adapters", (
           else expect((await f.subagent.run()).status).toBe("failed");
           expect(f.requests()).toBe(1);
           const ended = f.events.flatMap(e => e.event.type === "message_end" && e.event.message.role === "assistant" ? [e.event.message] : []);
-          expect(ended.at(-1)).toMatchObject({ status: "error", error: { code }, responseDiagnostics: { end: step === "length" ? "truncated" : step === "partial-stream" ? "interrupted" : "thinking-only" } });
+          expect(ended.at(-1)).toMatchObject({ status: "error", error: { code }, responseDiagnostics: { end: step === "length" ? "truncated" : "thinking-only" } });
           expect(ended.at(-1)?.thinking || ended.at(-1)?.content).toBeTruthy();
           expect(f.reads()).toBe(0);
+        } finally { await f.runtime.dispose(); }
+      });
+    }
+    for (const failure of ["partial-stream", "partial-timeout", "thinking-stream"] as const) {
+      it(`${owner} automatically continues ${failure} after a completed tool without losing output or repeating the tool`, async () => {
+        vi.useFakeTimers();
+        const f = fixture(["tool", failure, "network", failure, "success"]);
+        try {
+          if (owner === "session") await settle(f.runtime.prompt("Read then finish the report."));
+          else expect((await settle(f.subagent.run())).status).toBe("completed");
+          expect(f.requests()).toBe(5);
+          expect(f.reads()).toBe(1);
+          expect(f.events.filter(e => e.event.type === "error")).toHaveLength(0);
+          const ended = f.events.flatMap(e => e.event.type === "message_end" ? [e.event.message] : []);
+          expect(ended.filter(m => m.status === "error")).toHaveLength(0);
+          expect(ended.at(-1)).toMatchObject({ content: "Recovered", status: "complete" });
+          expect(ended.some(m => failure === "thinking-stream" ? m.thinking === "Retained thinking" : m.content === "partial")).toBe(true);
+          const finalContext = JSON.parse(f.bodies.at(-1) ?? "{}").messages;
+          expect(finalContext.filter((m: { role: string }) => m.role === "tool")).toHaveLength(1);
+          expect(JSON.stringify(finalContext)).toContain("fixture contents");
+          if (failure !== "thinking-stream") expect(JSON.stringify(finalContext)).toContain("partial");
+          if (owner === "session") expect(f.events.filter(e => e.event.type === "agent_end")).toHaveLength(1);
         } finally { await f.runtime.dispose(); }
       });
     }

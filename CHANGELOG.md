@@ -1,3 +1,10 @@
+## Unreleased - Interrupted response recovery
+
+- Automatically retry transient stream interruptions and timeouts even after
+  thinking or text has arrived, retaining prior output and completed tools.
+- Apply stream-stall recovery to delegated and one-shot model requests; preserve
+  user Stop, permanent error handling and configured retry limits.
+
 ## Unreleased - Agent image result visibility
 
 - Keep authorized-account image results in the final reply area instead of
