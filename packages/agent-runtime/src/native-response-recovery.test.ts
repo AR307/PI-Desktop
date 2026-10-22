@@ -205,8 +205,8 @@ for (const step of ["interrupted", "thinking-interrupted", "tool-interrupted"] a
   });
 }
 
-it("restarts and continues with signed thought and completed tool results, without rerunning the tool", async () => {
-  const f = nativeFixture(["tool", "thinking", "answer"]);
+for (const automatic of [false, true]) it(`${automatic ? "automatic" : "explicit"} continuation survives restart with signed thought and completed tools`, async () => {
+  const f = nativeFixture(automatic ? ["tool", "thinking-interrupted", "answer", "answer"] : ["tool", "thinking", "answer"]);
   const first = f.runtime();
   const history: UiMessage[] = [];
   try {
@@ -236,16 +236,16 @@ it("restarts and continues with signed thought and completed tool results, witho
       status: "complete",
       createdAt: new Date().toISOString(),
     });
-    expect(f.requests).toHaveLength(2);
+    expect(f.requests).toHaveLength(automatic ? 3 : 2);
   } finally {
     await first.agent.dispose();
   }
   const resumed = f.runtime(history);
   try {
     await resumed.agent.prompt("Continue with the answer.");
-    expect(f.requests).toHaveLength(3);
+    expect(f.requests).toHaveLength(automatic ? 4 : 3);
     expect(f.executions()).toBe(1);
-    const body = JSON.stringify(f.requests[2].body.messages);
+    const body = JSON.stringify(f.requests.at(-1)?.body.messages);
     expect(body).toContain("fixture-native-signature");
     expect(body).toContain("Completed tool result");
     expect(body).toContain("Continue with the answer.");

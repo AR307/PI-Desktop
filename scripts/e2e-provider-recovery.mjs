@@ -110,7 +110,7 @@ const server = createServer(async (req, res) => {
       },
     });
     res.end();
-  } else if (scenario.mode === "stream" && nth === 1) {
+  } else if (["stream", "stream-stop"].includes(scenario.mode) && nth === 1) {
     chunk({ role: "assistant", content: "PARTIAL_699" });
     // Wait for the screenshot observer to confirm partial content reached the UI.
     scenario.breakStream = () => res.destroy();
@@ -290,6 +290,9 @@ async function run(name, mode, style = "chat_completions") {
         retryShot = true;
         statuses.push(text);
         await screenshot(`${name}-retry`);
+        if (mode === "stream-stop") {
+          await evaluate("document.querySelector('.composer-shell .stop-btn').click()");
+        }
       }
       return events.some(
         (e) => e.sessionId === session.id && e.event?.type === "agent_end",
@@ -303,7 +306,7 @@ async function run(name, mode, style = "chat_completions") {
     return detail.session?.messages?.some(
       (m) =>
         m.role === "assistant" &&
-        (m.status === "error" || m.content?.includes("RECOVERED_699")),
+        (m.status === "error" || m.content?.includes("RECOVERED_699") || (mode === "stream-stop" && m.content === "PARTIAL_699")),
     );
   }, "durable final assistant");
   // Windows may occlude the test window during a long outage. Bring the
@@ -312,7 +315,7 @@ async function run(name, mode, style = "chat_completions") {
   await screenshot(`${name}-settled`);
   await waitFor(async () => {
     const text = await bodyText();
-    return mode === "always"
+    return mode === "stream-stop" ? text.includes("PARTIAL_699") : mode === "always"
       ? text.includes("NETWORK_ERROR")
       : text.includes("RECOVERED_699");
   }, "final UI");
@@ -411,6 +414,13 @@ try {
   );
   const settings = await ipc("settingsGet");
   await ipc("settingsSet", { ...settings, language: "zh-CN", autoGenerateTitle: false });
+  await waitFor(() => evaluate(`(() => {
+    const skip = [...document.querySelectorAll('button')].find(button => /^(暂时跳过|Skip for now)$/i.test(button.textContent.trim()));
+    if (!skip) return false;
+    skip.click();
+    return true;
+  })()`), "fresh-profile onboarding Skip");
+  await waitFor(async () => !(await bodyText()).includes("暂时跳过"), "onboarding dismissed");
   console.log("ARTIFACTS", artifacts);
   await run("01-network-recovery", "recover");
   await run("02-stream-recovery", "stream");
@@ -419,6 +429,7 @@ try {
   await run("05-cumulative-budget", "cumulative");
   await run("06-responses-thinking-interrupt", "thinking-interrupt", "responses");
   await run("07-responses-thinking-timeout", "thinking-timeout", "responses");
+  await run("08-stop-during-recovery", "stream-stop");
   const summary = verifyProviderRecovery(results);
   await writeFile(
     join(artifacts, "verified-summary.json"),

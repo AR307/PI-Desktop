@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 export function verifyProviderRecovery(cases) {
-  assert.equal(cases.length, 7);
-  const expectedCounts = [3, 2, 3, 11, 24, 2, 2];
+  assert.equal(cases.length, 8);
+  const expectedCounts = [3, 2, 3, 11, 24, 2, 2, 1];
   const expectedDelays = [1000, 2000, 4000, 8000, 8000, 8000, 8000, 8000, 8000, 8000];
   const summary = cases.map((result, index) => {
     const events = result.events
@@ -22,7 +22,13 @@ export function verifyProviderRecovery(cases) {
       1,
       `${result.name}: one terminal lifecycle`,
     );
-    if (index === 1 || index >= 5) {
+    if (index === 7) {
+      assert.equal(errors.length, 0);
+      assert.equal(retries.length, 1);
+      assert(assistants.some(message => message.content === "PARTIAL_699"));
+      assert(!result.text.includes("RECOVERED_699"));
+      assert(!result.text.includes("STREAM_FAILED"));
+    } else if (index === 1 || index >= 5) {
       assert.equal(errors.length, 0);
       assert.equal(retries.length, 1);
       assert(assistants.some(message => (index === 1 ? message.content === "PARTIAL_699" : message.thinking?.includes("PARTIAL_699")) && message.status === "complete"));

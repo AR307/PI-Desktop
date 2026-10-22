@@ -12,6 +12,9 @@
   Completions recovery. The regression baseline failed six partial-response
   scenarios before the fix. Server, active profiles and release publication
   remain outside this change; detailed results belong in the validation record.
+- Extend acceptance to automatic-recovery restart/native metadata retention and
+  clicking Stop during the real Electron retry wait, with onboarding dismissed
+  through its normal control before visual verification.
 
 ## 2026-10-21 - Keep Agent-generated images visible in replies
 
