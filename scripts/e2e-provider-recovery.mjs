@@ -294,13 +294,19 @@ async function run(name, mode, style = "chat_completions") {
           await evaluate("document.querySelector('.composer-shell .stop-btn').click()");
         }
       }
-      return events.some(
+      const ended = events.some(
         (e) => e.sessionId === session.id && e.event?.type === "agent_end",
       );
+      return ended && (mode !== "stream-stop" || events.some(
+        (e) => e.sessionId === session.id && e.event?.type === "error" && e.event.error.code === "TURN_ABORTED",
+      ));
     },
     `${name} terminal lifecycle`,
     150000,
   );
+  if (mode === "stream-stop") {
+    await waitFor(() => evaluate("!document.querySelector('.composer-shell .stop-btn') && Boolean(document.querySelector('.composer-input[contenteditable=true]'))"), "Stop returns composer to idle");
+  }
   await waitFor(async () => {
     const detail = await ipc("sessionGet", { id: session.id });
     return detail.session?.messages?.some(

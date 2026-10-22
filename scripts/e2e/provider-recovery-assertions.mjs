@@ -23,11 +23,14 @@ export function verifyProviderRecovery(cases) {
       `${result.name}: one terminal lifecycle`,
     );
     if (index === 7) {
-      assert.equal(errors.length, 0);
+      // Stop is a normal cancellation event, not a provider failure card.
+      assert.deepEqual(errors.map(event => event.error.code), ["TURN_ABORTED"]);
       assert.equal(retries.length, 1);
       assert(assistants.some(message => message.content === "PARTIAL_699"));
+      assert(!assistants.some(message => message.status === "error"));
       assert(!result.text.includes("RECOVERED_699"));
       assert(!result.text.includes("STREAM_FAILED"));
+      assert(!result.text.includes("TURN_ABORTED"));
     } else if (index === 1 || index >= 5) {
       assert.equal(errors.length, 0);
       assert.equal(retries.length, 1);
