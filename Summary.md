@@ -32,9 +32,22 @@
   The documentation and locale tests pass locally. The beta.7 VitePress build
   exposed two broken relative links in the new Chinese mirror; both are fixed
   and the full docs build now passes. Beta.8 passed build/typecheck/lint and
-  docs checks but exposed a stale assertion in the pre-existing WorkPanel
-  source-contract test; updated that assertion to cover the current side-drawer
-  width expression. Beta.6 through beta.8 tags remain unchanged.
+  docs checks but exposed stale source-contract assertions in the pre-existing
+  WorkPanel and subagent tests; update those assertions to cover the current
+  side-drawer and side-chat tab expressions. Beta.6 through beta.9 tags remain
+  unchanged.
+- Repair release-preflight tests against the current product contracts rather
+  than changing working application behavior: session-addressed composers,
+  retained side-chat/subagent tabs, quoted queue drafts, Host/shared schema
+  agreement and the bundled DeepSeek model metadata.
+- Reuse the existing fail-on-recycle Electron fixture for Node and Vite Main
+  imports, teach the TypeScript test hook to load JSX, and disable unused Vite
+  development watchers. Exercise real bridge, approval, queue, session and Live
+  Work paths; the combined targeted run passes 205 tests in 28 files.
+- The Windows full-suite baseline also exposed POSIX-only shell/SSH/signing
+  fixtures and two isolated Electron user-path timeouts. These are not recorded
+  as passes. Validate the complete Linux CI candidate on the request branch
+  before creating another release tag; no release gate is skipped or weakened.
 
 ## 2026-10-21 - Keep Agent-generated images visible in replies
 

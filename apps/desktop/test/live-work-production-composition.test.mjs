@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
-import { createServer } from "vite";
+import { createMainTestServer as createServer } from "./helpers/main-test-server.mjs";
 import { IPC } from "@pi-desktop/shared";
 import { codexDelegationFeedback, codexWorkFeedbackMessage, parseCodexMessage } from "@pi-desktop/voice-runtime/live";
 import { createProductionWorkHarness, settleUntil, WORK_INSTRUCTION, WORK_RESULT, WORK_SESSION_ID } from "./helpers/live-work-production.mjs";

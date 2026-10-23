@@ -9,6 +9,7 @@ const here = dirname(fileURLToPath(import.meta.url));
 // Node strips the types itself; the hook only supplies the `.ts` extension the
 // bundler-style relative imports omit.
 register(pathToFileURL(join(here, "helpers/ts-import-hooks.mjs")));
+register(new URL("./helpers/native-session-electron-hook.mjs", import.meta.url));
 
 // Exercise the real plan runtime, the real turn coordination state and the real
 // Agent Host bridge, without booting Electron or making a provider request.

@@ -34,8 +34,10 @@ test("plan approval exposes only the artifact and remembers the selected mode", 
   assert.match(approvalBar, /proposal\.title/);
   assert.match(
     approvalBar,
-    /preferredFileWorkPanelTab\(artifactPath, pluginViews\)/,
+    /preferredFileWorkPanelTab\(path, pluginViews\)/,
   );
+  assert.match(approvalBar, /session\?\.sideChatWorkspacePath/);
+  assert.match(approvalBar, /session\?\.sideChatParentId \?\? proposal\.sessionId/);
   assert.match(approvalBar, /openWorkPanelTabForSession/);
   assert.match(approvalBar, /const isPending = proposal\.status === "pending"/);
   assert.match(approvalBar, /PLAN_APPROVAL_DEFAULT_MODE/);

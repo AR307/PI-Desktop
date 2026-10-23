@@ -71,9 +71,15 @@ function loadComponent(name, extras = {}) {
 }
 
 const origin = loadComponent("SessionMessageOrigin");
+const quotes = loadComponent("../MessageQuotes", {
+  "../../components/icons": new Proxy({}, { get: () => Icon }),
+  "../../components/ui": { TooltipButton, Tooltip: ({ children }) => children },
+  "./message-quotes.css": {},
+});
 const { MessageRow } = loadComponent("MessageRow", {
   "./SessionMessageOrigin": origin,
   "./extra-attachments": { getExtraMessageAttachments },
+  "../MessageQuotes": quotes,
 });
 const userMessage = {
   id: "incoming-row",

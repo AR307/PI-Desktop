@@ -73,7 +73,8 @@ test("mode selector reserves the longest localized label width", () => {
 });
 
 test("mode chip cross-fades on switch and pulses while planning is live", () => {
-  assert.match(composerSource, /data-planning=\{planningLive \? "true" : undefined\}/);
+  assert.match(composerSource, /const isPlanning = planningLive && mode !== "image";/);
+  assert.match(composerSource, /data-planning=\{isPlanning \? "true" : undefined\}/);
   assert.match(composerSource, /className="composer-mode-chip-face"/);
   assert.match(
     composerSource,

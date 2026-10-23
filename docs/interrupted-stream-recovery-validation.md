@@ -136,5 +136,48 @@ screenshots are not used as final visual evidence.
 - No `verify:ui:*` command, active user instance, or user data cleanup was used.
 - Documentation-only changes after the candidate do not change tested executable
   behavior.
-- Local commits only. Nothing pushed, merged, or released. An installed beta.5
-  does not acquire this fix until a later build is delivered.
+- At the initial implementation handoff, changes were local only. Subsequent
+  beta.6 through beta.9 release attempts failed preflight before packaging. An
+  installed beta.5 does not acquire this fix until a later build is delivered.
+
+## Release-preflight follow-up (2026-10-23)
+
+The release verification failures also included stale Desktop test contracts
+and test loaders that crossed the native Electron boundary. This follow-up
+changes test code only; it does not alter production runtime/UI behavior,
+retry limits, permissions, storage, server code or mobile code.
+
+- Update source-contract assertions for the existing session-addressed Composer,
+  quote-aware drafts, side-chat panel routing and current model metadata. Compare
+  the shared schema version with the Host declaration instead of an obsolete
+  fixed version.
+- Add behavior coverage for switching away from and back to a panel containing
+  both subagent and side-chat tabs. Preserve either selected tab.
+- Exercise queue edit, draft restoration and resubmission with a selected
+  reference, in addition to the existing image/file/text cases.
+- Use the existing fail-on-recycle Electron fixture in Main imports through
+  both Node and Vite. Unexpected native recycle-bin access still throws. Teach
+  the existing TypeScript loader to resolve and transform TSX. Disable unused
+  development watchers so unrelated temporary profiles cannot break tests.
+
+Actual local checks:
+
+| Check | Result |
+| --- | --- |
+| Combined 28 affected Desktop suites, from `apps/desktop` | 205 passed, zero failures or skips |
+| Desktop `tsc -p apps/desktop/tsconfig.json --noEmit` | Passed |
+| `node scripts/check-style-tokens.mjs` | Passed |
+| Documentation/locale tests | 13 passed |
+| `node scripts/check-release-docs.mjs 0.21.0` | Passed |
+| `node scripts/check-pr-base-main.mjs` | Passed against `5f272b38bf540251263623f8b94818545d94f78b` |
+
+The full Windows Desktop baseline, before these repairs, reported 4,257 tests:
+4,147 passed, 102 failed and 8 skipped. Besides the repaired failures, it exposed
+POSIX shell/SSH/signing fixtures, a Unix admin-socket fixture, one POSIX path
+assertion and isolated Composer-file-search/config-sync Electron timeouts.
+These failures are not reported as passing and are not silenced with skips.
+Logs are retained under `.tmp/release-preflight/` in the request worktree.
+
+The complete Linux CI run must validate the pushed request candidate before a
+new release tag is created. No installer or updater feed is claimed from these
+targeted checks, and no new tag is used merely to probe release verification.

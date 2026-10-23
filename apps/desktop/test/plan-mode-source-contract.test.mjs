@@ -255,7 +255,7 @@ test("pending approval keeps the draft while gating every composer control", () 
 test("composer configuration is retained on the draft when no session is active", () => {
   assert.match(
     storeSource,
-    /const sessionId = get\(\)\.activeSessionId;[\s\S]*?if \(!sessionId\) \{[\s\S]*?draftConfiguration: \{[\s\S]*?mode: config\.mode,[\s\S]*?thinkingLevel: config\.thinkingLevel,/,
+    /const sessionId = targetSessionId \?\? get\(\)\.activeSessionId;[\s\S]*?if \(!sessionId\) \{[\s\S]*?draftConfiguration: \{[\s\S]*?mode: config\.mode,[\s\S]*?thinkingLevel: config\.thinkingLevel,/,
   );
   assert.match(composerSource, /disabled=\{controlsBlocked\}/);
 });

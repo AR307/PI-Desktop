@@ -65,7 +65,8 @@ test("composer send/stop button follows draft content and the visible session's 
     "Stop and Send should be the two mutually exclusive branches of one slot",
   );
   assert.match(composer, /const runActive = isRunning \|\| executionActive;/);
-  assert.match(composer, /const isRunning = useAppStore\(\(s\) => s\.isRunning\);/);
+  assert.match(composer, /const activeSessionId = targetSessionId \?\? globalSessionId;/);
+  assert.match(composer, /const isRunning = useAppStore\(\(s\) => activeSessionId \? !!s\.runningSessions\[activeSessionId\] : false\);/);
   assert.match(submitSlot, /stopGenerating/);
   assert.match(submitSlot, /onClick=\{\(\) => void abort\(\)\}/);
   assert.doesNotMatch(composerRight, /\{runActive \? \(/);
@@ -178,12 +179,13 @@ test("editing a queued prompt needs an empty composer and restores its draft", (
     /const handleEditQueuedPrompt = \(id: string\) => \{[\s\S]{0,400}?readLiveDraft\(\)\.trim\(\)[\s\S]{0,200}?chat\.editQueuedPromptBusy[\s\S]{0,200}?return;[\s\S]{0,200}?editQueuedPrompt\(id\);/,
   );
   assert.match(composer, /editQueuedPrompt=\{handleEditQueuedPrompt\}/);
-  assert.match(queueSlice, /editQueuedPrompt: \(promptId\) => \{[\s\S]*composerPrefill: restored/);
+  assert.match(queueSlice, /editQueuedPrompt: \(promptId, targetSessionId\) => \{\s*const sessionId = targetSessionId \?\? get\(\)\.activeSessionId;[\s\S]*composerPrefill: restored/);
   // `item.content` is token-stripped, so the row's captured draft is restored.
   assert.match(
     queueSlice,
     /text: item\.draft\.text,[\s\S]*fileReferences: item\.draft\.fileReferences\.map\(/,
   );
+  assert.match(queueSlice, /quotes: item\.draft\.quotes,/);
   assert.doesNotMatch(queueSlice, /text: item\.content/);
 });
 
@@ -256,7 +258,7 @@ test("send clears the composer before the round trip and restores a rejected dra
   assert.ok(restore.length > 0, "restoreDraftForKey not found");
   // Text typed after the failed send wins; a session the user left keeps the
   // draft in its cache slot for the next switch back.
-  assert.match(restore, /if \(valueRef\.current\.trim\(\)\) return;/);
+  assert.match(restore, /if \(valueRef\.current\.trim\(\) \|\| quotesRef\.current\.length\) return;/);
   assert.match(restore, /if \(currentKey !== key\) \{[\s\S]*?writeComposerDraft\(key, snapshot\);/);
   assert.match(restore, /setValue\(restored\.text\);/);
   assert.match(restore, /setCursor\(restored\.text\.length\);/);
@@ -271,7 +273,7 @@ test("mode slash prefixes send the trailing prompt and retain failed drafts", ()
   assert.match(submit, /const isModeCommand =/);
   assert.match(
     submit,
-    /if \(isModeCommand && commandBody\)[\s\S]*?await runPaletteCommand\(command\.id\);[\s\S]*?const accepted = await sendPrompt\([\s\S]*?draft\.draftSnapshot\(visibleCommandBody\)[\s\S]*?if \(accepted\) draft\.clearDraftForKey\(submittedDraftKey, submittedDraftRevision, submittedDraft\);/,
+    /if \(isModeCommand && commandBody\)[\s\S]*?await runPaletteCommand\(command\.id, activeSessionId \?\? undefined\);[\s\S]*?const accepted = await sendPrompt\([\s\S]*?draft\.draftSnapshot\(visibleCommandBody\)[\s\S]*?if \(accepted\) draft\.clearDraftForKey\(submittedDraftKey, submittedDraftRevision, submittedDraft\);/,
   );
   assert.match(
     submit,
@@ -279,7 +281,7 @@ test("mode slash prefixes send the trailing prompt and retain failed drafts", ()
   );
   assert.match(
     submit,
-    /const submittedDraftRevision = draft\.draftRevision\(submittedDraftKey\);\s*const submittedDraft = draft\.draftSnapshot\(rawText\);[\s\S]*?draft\.clearDraftForKey\(submittedDraftKey, submittedDraftRevision, submittedDraft\);\s*const accepted = steering\s*\?\s*await steerPrompt\(inlineContent, submittedDraft\)\s*:\s*await sendPrompt\(\s*inlineContent,\s*submittedDraft,\s*activeSessionId \?\? undefined,\s*captureAcceptedSession,\s*\);\s*if \(!accepted\) draft\.restoreDraftForKey\(submittedDraftKey, submittedDraft\);/,
+    /const submittedDraftRevision = draft\.draftRevision\(submittedDraftKey\);\s*const submittedDraft = draft\.draftSnapshot\(rawText\);[\s\S]*?draft\.clearDraftForKey\(submittedDraftKey, submittedDraftRevision, submittedDraft\);\s*const accepted = steering\s*\?\s*await steerPrompt\(inlineContent, submittedDraft, activeSessionId \?\? undefined\)\s*:\s*await sendPrompt\(\s*inlineContent,\s*submittedDraft,\s*activeSessionId \?\? undefined,\s*captureAcceptedSession,\s*\);\s*if \(!accepted\) draft\.restoreDraftForKey\(submittedDraftKey, submittedDraft\);/,
   );
   assert.match(store, /draft\?: ComposerDraftSnapshot/);
   const sendPrompt = queueSlice.slice(

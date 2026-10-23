@@ -3,6 +3,7 @@ import test from "node:test";
 import { fileURLToPath } from "node:url";
 import { register } from "node:module";
 register(new URL("./helpers/ts-import-hooks.mjs", import.meta.url));
+register(new URL("./helpers/native-session-electron-hook.mjs", import.meta.url));
 const { createComposerCommandService } = await import("../electron/main/ipc/composer-ipc.ts");
 
 const record = (id, extra = {}) => ({ id, label: "Documentation", transport: "http", enabled: true, createdAt: "", updatedAt: "", ...extra });

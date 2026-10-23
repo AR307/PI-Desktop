@@ -37,13 +37,16 @@ test("Plan and Goal artifact runtime uses the terminating submit contract", asyn
 });
 
 test("Electron retains the stable Plan IPC names and protocol v11", async () => {
-  const [protocol, main] = await Promise.all([
+  const [protocol, database, main] = await Promise.all([
     readRoot("packages/shared/src/protocol.ts"),
+    readRoot("crates/host-core/src/db.rs"),
     readMainSourceSync(),
   ]);
 
   assert.match(protocol, /PROTOCOL_VERSION = 11/);
-  assert.match(protocol, /SCHEMA_VERSION = 16/);
+  const schemaVersion = database.match(/pub const SCHEMA_VERSION: i64 = (\d+);/)?.[1];
+  assert.ok(schemaVersion, "Host database schema version must be declared");
+  assert.match(protocol, new RegExp(`SCHEMA_VERSION = ${schemaVersion}\\b`));
   assert.match(protocol, /plansPending:/);
   assert.match(protocol, /plansResolve:/);
   assert.match(protocol, /plansChanged:/);

@@ -2,6 +2,11 @@ import { readAppSource, readStoreSource, readTranscriptSource } from "./helpers/
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
+import {
+  emptyWorkPanelContext,
+  subagentWorkPanelTab,
+  switchWorkPanelContextState,
+} from "../src/lib/work-panel-tabs.ts";
 
 const tabSource = await readFile(
   new URL("../src/components/workpanel/SubagentTranscriptTab.tsx", import.meta.url),
@@ -52,18 +57,41 @@ test("a topology node opens a real subagent tab in the work panel", () => {
   // The overlay state and its actions are gone: closing happens per tab.
   assert.doesNotMatch(storeSource, /subagentPanel/);
   assert.doesNotMatch(storeSource, /toggleSubagentPanel|closeSubagentPanel/);
-  assert.match(tabsSource, /\| "plugin"\s*\|\s*"subagent";/);
-  assert.match(
-    tabsSource,
-    /export function subagentWorkPanelTab\(\s*delegationId: string,\s*agentName\?: string,\s*\): WorkPanelTab \{/,
-  );
-  assert.match(tabsSource, /id: `subagent:\$\{delegationId\}`/);
-  assert.match(tabsSource, /tab\.kind === "subagent"\)/);
-  // Retained runtime state must survive the session-switch sanitizer.
+  assert.deepEqual(subagentWorkPanelTab("delegate-1", "Planner"), {
+    id: "subagent:delegate-1",
+    kind: "subagent",
+    resource: "delegate-1",
+    label: "Planner",
+  });
   assert.match(tabsSource, /export function subagentTabDisplayLabels\(/);
-  assert.match(tabsSource, /tab\.kind === "subagent"\)/);
-  // Retained runtime state must survive the session-switch sanitizer.
-  assert.match(tabsSource, /export function subagentTabDisplayLabels\(/);
+});
+
+test("switching sessions retains subagent and side-chat tabs and their selection", () => {
+  const delegate = subagentWorkPanelTab("delegate-1", "Planner");
+  const sideChat = {
+    id: "side-chat:child-1",
+    kind: "side-chat",
+    resource: "child-1",
+  };
+
+  for (const activeTab of [delegate, sideChat]) {
+    const parentPanel = {
+      ...emptyWorkPanelContext(),
+      open: true,
+      tabs: [delegate, sideChat],
+      activeTabId: activeTab.id,
+    };
+    const away = switchWorkPanelContextState({}, "parent", parentPanel, "other");
+    assert.deepEqual(away.visible, emptyWorkPanelContext());
+
+    const returned = switchWorkPanelContextState(
+      away.contexts,
+      "other",
+      away.visible,
+      "parent",
+    );
+    assert.deepEqual(returned.visible, parentPanel);
+  }
 });
 
 test("the work panel renders the delegation tab like every other resource", () => {

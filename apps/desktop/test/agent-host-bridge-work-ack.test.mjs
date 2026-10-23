@@ -1,22 +1,13 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { dirname } from "node:path";
-import { fileURLToPath } from "node:url";
-import { createServer } from "vite";
+import { register } from "node:module";
 import { IPC } from "@pi-desktop/shared";
 
-const here = dirname(fileURLToPath(import.meta.url));
+register(new URL("./helpers/ts-import-hooks.mjs", import.meta.url));
+register(new URL("./helpers/native-session-electron-hook.mjs", import.meta.url));
+const { createAgentHostBridge } = await import("../electron/main/agent-host-bridge.ts");
 
-test("AgentHost work controls require explicit structured acknowledgements", async (t) => {
-  const server = await createServer({
-    root: dirname(here),
-    configFile: false,
-    server: { middlewareMode: true, hmr: false, ws: false },
-    appType: "custom",
-    optimizeDeps: { noDiscovery: true, include: [] },
-  });
-  t.after(() => server.close());
-  const { createAgentHostBridge } = await server.ssrLoadModule("/electron/main/agent-host-bridge.ts");
+test("AgentHost work controls require explicit structured acknowledgements", async () => {
   let response;
   const bridge = createAgentHostBridge({
     channels: IPC.invoke,

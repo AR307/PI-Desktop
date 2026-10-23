@@ -11,7 +11,7 @@ import { fileURLToPath } from "node:url";
 test("a steering response preserves a background delegation after parent settlement", async () => {
   const vite = await createServer({
     root: fileURLToPath(new URL("..", import.meta.url)), configFile: false,
-    server: { middlewareMode: true, hmr: false, ws: false },
+    server: { middlewareMode: true, hmr: false, ws: false, watch: null },
     esbuild: { jsx: "automatic" }, appType: "custom",
     optimizeDeps: { noDiscovery: true, include: [] },
   });

@@ -1,11 +1,12 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { dirname } from "node:path";
-import { fileURLToPath } from "node:url";
-import { createServer } from "vite";
+import { register } from "node:module";
 import { IPC } from "@pi-desktop/shared";
 
-const here = dirname(fileURLToPath(import.meta.url));
+register(new URL("./helpers/ts-import-hooks.mjs", import.meta.url));
+register(new URL("./helpers/native-session-electron-hook.mjs", import.meta.url));
+const { createAgentHostBridge } = await import("../electron/main/agent-host-bridge.ts");
+const { registerAgentIpc } = await import("../electron/main/ipc/agent-ipc.ts");
 
 const askRequest = {
   requestId: "ask_1",
@@ -32,16 +33,7 @@ function ingestAsk(bridge) {
   });
 }
 
-test("resolveAskByRequestId settles the Host input so the card does not come back", async (t) => {
-  const server = await createServer({
-    root: dirname(here),
-    configFile: false,
-    server: { middlewareMode: true, hmr: false, ws: false },
-    appType: "custom",
-    optimizeDeps: { noDiscovery: true, include: [] },
-  });
-  t.after(() => server.close());
-  const { createAgentHostBridge } = await server.ssrLoadModule("/electron/main/agent-host-bridge.ts");
+test("resolveAskByRequestId settles the Host input so the card does not come back", async () => {
   const calls = [];
   const bridge = createAgentHostBridge({
     channels: IPC.invoke,
@@ -69,16 +61,7 @@ test("resolveAskByRequestId settles the Host input so the card does not come bac
   assert.deepEqual((await bridge.pendingInteractiveRequests("s1")).asks, []);
 });
 
-test("resolveAskByRequestId returns null for unknown requests", async (t) => {
-  const server = await createServer({
-    root: dirname(here),
-    configFile: false,
-    server: { middlewareMode: true, hmr: false, ws: false },
-    appType: "custom",
-    optimizeDeps: { noDiscovery: true, include: [] },
-  });
-  t.after(() => server.close());
-  const { createAgentHostBridge } = await server.ssrLoadModule("/electron/main/agent-host-bridge.ts");
+test("resolveAskByRequestId returns null for unknown requests", async () => {
   let invoked = 0;
   const bridge = createAgentHostBridge({
     channels: IPC.invoke,
@@ -112,17 +95,7 @@ test("resolveAskByRequestId returns null for unknown requests", async (t) => {
  * The mocked `invoke` above cannot see that wiring, so this test assembles the
  * real handler.
  */
-test("a Host-owned answer does not re-enter its own IPC handler", async (t) => {
-  const server = await createServer({
-    root: dirname(here),
-    configFile: false,
-    server: { middlewareMode: true, hmr: false, ws: false },
-    appType: "custom",
-    optimizeDeps: { noDiscovery: true, include: [] },
-  });
-  t.after(() => server.close());
-  const { createAgentHostBridge } = await server.ssrLoadModule("/electron/main/agent-host-bridge.ts");
-  const { registerAgentIpc } = await server.ssrLoadModule("/electron/main/ipc/agent-ipc.ts");
+test("a Host-owned answer does not re-enter its own IPC handler", async () => {
 
   // The handler table `invokeIpc` dispatches into (register.ts:502).
   const handlers = new Map();

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
-import { createServer } from "vite";
+import { createMainTestServer as createServer } from "./helpers/main-test-server.mjs";
 
 async function loadScope(t) {
   const server = await createServer({

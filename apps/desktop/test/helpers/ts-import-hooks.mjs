@@ -3,8 +3,8 @@
  *
  * Node strips the types itself, but the sources use bundler-style relative
  * imports: extensionless specifiers (`./plugin-mcp`) and `.js` specifiers that
- * only exist as `.ts` on disk. ESM resolution rejects both, so the exact
- * specifier is tried first and the TypeScript sibling second — a real `.js`
+ * only exist as `.ts` or `.tsx` on disk. ESM resolution rejects both, so the exact
+ * specifier is tried first and the TypeScript siblings second — a real `.js`
  * or `.mjs` file still wins, and nothing that already resolved changes.
  *
  * Register with:
@@ -23,6 +23,29 @@ export async function resolve(specifier, context, next) {
         ? null
         : `${specifier}.ts`;
     if (typescript === null) throw error;
-    return next(typescript, context);
+    try {
+      return await next(typescript, context);
+    } catch {
+      return next(`${typescript.slice(0, -3)}.tsx`, context);
+    }
   }
+}
+
+/** Node strips TypeScript, but JSX needs the same automatic transform as Vite. */
+export async function load(url, context, next) {
+  if (!url.endsWith(".tsx")) return next(url, context);
+  const [{ readFile }, { default: ts }] = await Promise.all([
+    import("node:fs/promises"),
+    import("typescript"),
+  ]);
+  const source = await readFile(new URL(url), "utf8");
+  const result = ts.transpileModule(source, {
+    fileName: new URL(url).pathname,
+    compilerOptions: {
+      target: ts.ScriptTarget.ESNext,
+      module: ts.ModuleKind.ESNext,
+      jsx: ts.JsxEmit.ReactJSX,
+    },
+  });
+  return { format: "module", source: result.outputText, shortCircuit: true };
 }
