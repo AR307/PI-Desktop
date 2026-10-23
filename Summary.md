@@ -29,8 +29,9 @@
 - Repair beta.6 release preflight documentation failures without changing
   runtime behavior: add the missing decision-log rationales, restore ADR/spec
   indexes, and add the Chinese selected-reference spec and updated E2E mirrors.
-  The documentation tree and locale test suites pass locally; beta.6 remains
-  unchanged, and a new beta tag is required for another release attempt.
+  The documentation and locale tests pass locally. The beta.7 VitePress build
+  exposed two broken relative links in the new Chinese mirror; both are fixed
+  and the full docs build now passes. Beta.6 and beta.7 tags remain unchanged.
 
 ## 2026-10-21 - Keep Agent-generated images visible in replies
 

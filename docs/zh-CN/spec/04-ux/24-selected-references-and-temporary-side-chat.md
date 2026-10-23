@@ -38,4 +38,4 @@ Host schema 26 增加父子生命周期归属与排队引用元数据。既有�
 
 ## 验证
 
-见 [E2E 计划](../../06-delivery/04-e2e-test-plan.md#selected-references-and-temporary-side-chat)及[架构决策](../../../adr/temporary-side-chat-runtime.md)。执行结果和平台限制记录在[本地验证](../../selection-side-chat-validation.md)中。
+见 [E2E 计划](../06-delivery/04-e2e-test-plan.md#selected-references-and-temporary-side-chat)及[架构决策](../../../adr/temporary-side-chat-runtime.md)。执行结果和平台限制记录在[本地验证](../../../selection-side-chat-validation.md)中。
