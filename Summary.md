@@ -48,6 +48,10 @@
   fixtures and two isolated Electron user-path timeouts. These are not recorded
   as passes. Validate the complete Linux CI candidate on the request branch
   before creating another release tag; no release gate is skipped or weakened.
+- Repair the trusted-extensions Electron fixture after CI showed its first-run
+  welcome dialog covering Settings navigation. Mark onboarding complete in the
+  isolated seed and assert the dialog is closed before opening Settings; the
+  real plugin OAuth journey remains covered. The Electron run passes 57/57.
 
 ## 2026-10-21 - Keep Agent-generated images visible in replies
 

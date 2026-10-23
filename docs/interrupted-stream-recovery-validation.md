@@ -127,6 +127,29 @@ event. It was corrected to require that contract and reject provider error cards
 then the complete native suite was rerun successfully. Initial onboarding-overlay
 screenshots are not used as final visual evidence.
 
+## Trusted extensions CI harness correction
+
+The GitHub run `39962984750` also failed the Trusted Extensions Electron suite:
+the fresh test profile opened the first-run MirrorCoding welcome dialog, which
+covered the Settings navigation button before the OAuth scenario. This was a
+test-fixture setup failure, not a provider-recovery failure. The isolated seed
+now marks onboarding complete, and the driver confirms the dialog is closed
+before navigating to Settings. The real plugin OAuth sign-in, refresh,
+cancellation, and sign-out journey remains exercised.
+
+The documented `pnpm test:e2e:trusted-extensions` entry could not start because
+pnpm rejected the existing `node_modules` junction as a workspace-hoist
+directory. No dependencies were installed or changed. The same E2E runner was
+executed directly with the existing Node, Electron, desktop build, and Host
+binary. Result: 57/57 assertions passed; runner exit code 0. The tested tree was
+`fbf791380cec5af60c22c2237297df3d2b602ef2` plus the two test-fixture edits,
+based on `origin/main` `5f272b38bf540251263623f8b94818545d94f78b`.
+
+The same 13 runtime suites listed above were rerun on this tree: all 601 tests
+passed, with no skips or failures. Syntax checks for both edited `.mjs` files,
+the PR-base check, and `git diff --check` also passed. The earlier complete
+Windows baseline limitations still apply; this is not a new full-suite result.
+
 ## Limits and delivery state
 
 - No live or paid provider API was called; production incident resolution is not
