@@ -241,7 +241,7 @@ test("work panel uses the fixed-window internal dock", () => {
   assert.match(panelSource, /exitAnimationReady && "is-exiting"/);
   assert.match(panelSource, /if \(!exitAnimationReady\) return/);
   assert.match(panelSource, /animationName\.startsWith\("work-panel-out"\)/);
-  assert.match(panelSource, /const renderPanelWidth = layout\.panelWidth/);
+  assert.match(panelSource, /const renderPanelWidth = sideDrawer \? .*: layout\.panelWidth/);
   assert.match(panelSource, /setWidth\(drag\.currentWidth\)/);
   // The panel remains a fixed-width in-flow shell sibling; its flex allocation
   // is animated with the dock so the main pane does not jump before motion.
@@ -370,10 +370,10 @@ test("work panel starts closed with no tabs and persists width only", () => {
 
 test("closing the final tab keeps the panel open for the New launcher", () => {
   const closeBlock = storeSource.slice(
-    storeSource.indexOf("closeWorkPanelTab: (tabId) =>"),
+    storeSource.indexOf("closeWorkPanelTab: async (tabId) =>"),
     storeSource.indexOf(
       "openWorkPanelTabForSession:",
-      storeSource.indexOf("closeWorkPanelTab: (tabId) =>"),
+      storeSource.indexOf("closeWorkPanelTab: async (tabId) =>"),
     ),
   );
   assert.doesNotMatch(closeBlock, /closePanel/);
@@ -387,7 +387,7 @@ test("work panel width is renderer-owned inside the fixed window", () => {
   assert.equal(MAIN_PANE_MIN_WIDTH, 450);
   assert.equal(WORK_PANEL_DEFAULT_WIDTH, 360);
   assert.equal(WORK_PANEL_MIN_WIDTH, 244);
-  assert.match(panelSource, /const renderPanelWidth = layout\.panelWidth/);
+  assert.match(panelSource, /const renderPanelWidth = sideDrawer \? .*: layout\.panelWidth/);
   assert.match(panelSource, /setWidth\(drag\.currentWidth\)/);
   assert.match(panelSource, /startWidth \+ drag\.startClientX - event\.clientX/);
   assert.doesNotMatch(panelSource, /api\.setWorkPanelChatWidth/);
@@ -664,8 +664,8 @@ test("the shell budgets the three columns inside the fixed client area", () => {
     globalStyles,
     /\.chat-surface,[\s\S]*?\.route-page \{[^}]*min-width:\s*var\(--ds-main-pane-min-width, 450px\);/s,
   );
-  assert.match(panelSource, /const renderPanelWidth = layout\.panelWidth/);
-  assert.match(panelSource, /maxWidth: layout\.maxPanelWidth/);
+  assert.match(panelSource, /const renderPanelWidth = sideDrawer \? .*: layout\.panelWidth/);
+  assert.match(panelSource, /maxWidth: sideDrawer \? budgetWidth - 16 : layout\.maxPanelWidth/);
   assert.match(panelSource, /sidebarOccupiesBudget = !sidebarCollapsed \|\| sidebarExiting/);
   assert.match(panelSource, /layout\.shouldCollapseSidebar\) onAutoCollapseSidebar/);
   assert.match(appSource, /onAutoCollapseSidebar=\{autoCollapseSidebar\}/);

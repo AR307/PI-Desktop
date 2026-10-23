@@ -31,7 +31,10 @@
   indexes, and add the Chinese selected-reference spec and updated E2E mirrors.
   The documentation and locale tests pass locally. The beta.7 VitePress build
   exposed two broken relative links in the new Chinese mirror; both are fixed
-  and the full docs build now passes. Beta.6 and beta.7 tags remain unchanged.
+  and the full docs build now passes. Beta.8 passed build/typecheck/lint and
+  docs checks but exposed a stale assertion in the pre-existing WorkPanel
+  source-contract test; updated that assertion to cover the current side-drawer
+  width expression. Beta.6 through beta.8 tags remain unchanged.
 
 ## 2026-10-21 - Keep Agent-generated images visible in replies
 
