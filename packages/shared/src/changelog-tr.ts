@@ -20,6 +20,7 @@ export const trEntries: ChangelogEntry[] = [
       "Yerel HTML çıktılarını oluşturan oturumun içinde açın.",
       "Geniş Markdown tablolarını sohbet düzenini bozmadan kaydırın.",
       "Bir araç aşırı büyük bir görsel döndürse bile konuşmayı kullanmaya devam edin.",
+      "Model akışı kesildiğinde veya zaman aşımına uğradığında, alınan metin ve tamamlanan araç sonuçları korunarak yanıt otomatik sürdürülür.",
     ],
   },
   {

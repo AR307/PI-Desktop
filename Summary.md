@@ -2,6 +2,8 @@
 
 ## 2026-10-23 - Resume interrupted provider responses automatically
 
+- Refresh the models.dev snapshot and localized 0.21.0 in-app notes before the
+  beta.6 cut so the prerelease documents the recovery behavior.
 - Remove the post-content retry veto in main/side-chat and delegate runtimes.
   Preserve partial text/thinking rows and completed tool results; resume through
   the existing Agent loop with native replayable context and no unfinished calls.

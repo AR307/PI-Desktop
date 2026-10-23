@@ -20,6 +20,7 @@ export const esEntries: ChangelogEntry[] = [
       "Abre artefactos HTML locales dentro de la sesión que los creó.",
       "Desplázate por tablas Markdown anchas sin alterar el diseño de la conversación.",
       "Las conversaciones siguen funcionando si una herramienta devuelve una imagen demasiado grande.",
+      "Las respuestas se reanudan automáticamente tras interrupciones o tiempos de espera del flujo del modelo, conservando el texto y los resultados de herramientas ya completados.",
     ],
   },
   {

@@ -20,6 +20,7 @@ export const ptBREntries: ChangelogEntry[] = [
       "Abra artefatos HTML locais na conversa que os criou.",
       "Role tabelas Markdown largas sem afetar o layout da conversa.",
       "A conversa continua utilizável quando uma ferramenta retorna uma imagem grande demais.",
+      "As respostas são retomadas automaticamente após interrupções ou tempos limite no fluxo do modelo, preservando o texto recebido e os resultados de ferramentas concluídas.",
     ],
   },
   {

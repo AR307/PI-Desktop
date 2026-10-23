@@ -20,6 +20,7 @@ export const deEntries: ChangelogEntry[] = [
       "Lokale HTML-Artefakte öffnen sich in der Sitzung, in der sie erstellt wurden.",
       "Breite Markdown-Tabellen lassen sich horizontal scrollen, ohne das Gesprächslayout zu stören.",
       "Auch nach einem zu großen Tool-Bild bleibt die Unterhaltung bedienbar.",
+      "Nach Unterbrechungen oder Zeitüberschreitungen im Modellstream wird automatisch fortgesetzt; bereits ausgegebener Text und abgeschlossene Tool-Ergebnisse bleiben erhalten.",
     ],
   },
   {

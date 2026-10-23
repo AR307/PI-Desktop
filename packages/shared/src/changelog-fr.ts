@@ -20,6 +20,7 @@ export const frEntries: ChangelogEntry[] = [
       "Ouvrez les artefacts HTML locaux dans la conversation qui les a créés.",
       "Faites défiler les tableaux Markdown larges sans déformer la conversation.",
       "La conversation reste utilisable lorsqu’un outil renvoie une image trop volumineuse.",
+      "Les réponses reprennent automatiquement après une interruption ou un délai d’attente du flux du modèle, sans perdre le texte déjà reçu ni les résultats d’outils terminés.",
     ],
   },
   {
