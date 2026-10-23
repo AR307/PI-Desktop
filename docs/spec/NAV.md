@@ -63,6 +63,7 @@
 - [10-workbuddy-benchmark-ux.md](04-ux/10-workbuddy-benchmark-ux.md)
 - [11-asktool-question-card.md](04-ux/11-asktool-question-card.md)
 - [12-prompt-enhancement.md](04-ux/12-prompt-enhancement.md)
+- [24-selected-references-and-temporary-side-chat.md](04-ux/24-selected-references-and-temporary-side-chat.md)
 
 ## 5. Security
 - [README.md](05-security/README.md)

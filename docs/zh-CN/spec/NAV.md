@@ -66,6 +66,7 @@
 - [10-workbuddy-benchmark-ux.md](/zh-CN/spec/04-ux/10-workbuddy-benchmark-ux)
 - [11-asktool-question-card.md](/zh-CN/spec/04-ux/11-asktool-question-card)
 - [12-prompt-enhancement.md](/zh-CN/spec/04-ux/12-prompt-enhancement)
+- [24-selected-references-and-temporary-side-chat.md](/zh-CN/spec/04-ux/24-selected-references-and-temporary-side-chat)
 
 ## 5. 安全性
 - [README.md](/zh-CN/spec/05-security/README)

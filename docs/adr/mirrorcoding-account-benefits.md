@@ -1,7 +1,10 @@
-# MirrorCoding account benefits in Electron main
+# ADR mirrorcoding-account-benefits: MirrorCoding account benefits in Electron main
 
 Date: 2026-10-18
-Status: Accepted for client implementation; server contract pending
+
+## Status
+
+Accepted for client implementation; server contract pending
 
 ## Context
 

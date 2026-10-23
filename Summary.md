@@ -26,6 +26,11 @@
   configured lint, PR-base check, and all eight isolated Electron journeys.
   See `docs/interrupted-stream-recovery-validation.md` for the tested candidate,
   screenshots, regression evidence, unchanged retry limits, and release scope.
+- Repair beta.6 release preflight documentation failures without changing
+  runtime behavior: add the missing decision-log rationales, restore ADR/spec
+  indexes, and add the Chinese selected-reference spec and updated E2E mirrors.
+  The documentation tree and locale test suites pass locally; beta.6 remains
+  unchanged, and a new beta tag is required for another release attempt.
 
 ## 2026-10-21 - Keep Agent-generated images visible in replies
 
