@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import test from "node:test";
@@ -11,8 +11,6 @@ const root = join(dirname(fileURLToPath(import.meta.url)), "../../..");
 const viewEntry =
   process.env.PI_FILE_MANAGER_VIEW ??
   join(root, "apps/desktop/resources/plugins/pi.file-manager/views/index.html");
-const electronBinary =
-  process.env.PI_DESKTOP_ELECTRON_BIN ?? resolveElectronBinary(root).electronBinary;
 
 const preloadFixture = String.raw`
 const { contextBridge } = require("electron");
@@ -217,6 +215,8 @@ test(
         : false,
   },
   async () => {
+    const electronBinary =
+      process.env.PI_DESKTOP_ELECTRON_BIN ?? resolveElectronBinary(root).electronBinary;
     const temp = await mkdtemp(join(tmpdir(), "pi-file-manager-theme-"));
     try {
       await writeFile(join(temp, "preload.cjs"), preloadFixture);
@@ -256,8 +256,9 @@ test(
       assert.equal(report.ok, true, output.slice(-6000));
       assertTheme(report.result.dark, "dark");
       assertTheme(report.result.light, "light");
+      await writeFile(join(temp, "report.json"), JSON.stringify(report, null, 2));
     } finally {
-      await rm(temp, { recursive: true, force: true });
+      console.log("File Manager theme evidence: " + temp);
     }
   },
 );

@@ -1857,3 +1857,8 @@ results are recorded in docs/releases/0.21.0-beta.5-validation.md.
   MirrorCoding server code and production profiles are unchanged.
 - Record exact candidate validation and publication results in the release report;
   earlier feature-test results are not presented as current integration evidence.
+- Resolve the File Manager theme fixture's Electron binary only after its
+  display precondition. Run the real light/dark user path in the existing
+  virtual-display CI lane and retain isolated fixture evidence for diagnosis.
+- Exclude the independent October 11 outbox and October 13-14 RPC recovery
+  branches from this release, as confirmed by the user on October 25.
