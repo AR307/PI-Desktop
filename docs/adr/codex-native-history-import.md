@@ -1,6 +1,6 @@
-# Explicit native Codex import with separate history and continuation
+# ADR: Explicit native Codex import with separate history and continuation
 
-Status: Implemented candidate
+- Status: Implemented candidate
 
 ## Context
 

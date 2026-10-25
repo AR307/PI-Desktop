@@ -10090,3 +10090,20 @@ host-created files. The full app's file-preview viewer is covered separately.
   stubbed). Rust provider tests independently verify real SQLite persistence;
   `provider-reasoning-effort.test.ts` captures requests from the real pi-ai
   adapter with fixture SSE responses. No live gateway credentials are required.
+
+## Codex 原生导入（2026-10-25）
+
+| ID | 用户路径和预期结果 |
+| --- | --- |
+| E2E-CODEX-ENTRY | 首次显示置顶卡片但不扫描；侧栏与项目归档打开同一向导。 |
+| E2E-CODEX-DISMISS | 取消/Esc 保留显示并恢复焦点；仅本次关闭跨导航和重载，重启恢复；永久关闭跨重启；设置可恢复。 |
+| E2E-CODEX-SELECT | 扫描受控目录，选择单会话，导入并查看原生历史；默认不全选且来源不变。 |
+| E2E-CODEX-CONTINUE | 导入后经受控模型追问、实际读写、Host/runtime 重启后继续，旧工具不执行。 |
+| E2E-CODEX-COMPLEX | 301 项、分页库加 rollout、分叉链、回滚压缩、中文、图片、未知或缺失记录及部分恢复确认。 |
+| E2E-CODEX-LIFECYCLE | 取消后以新身份重试，完成项保留，重复导入不覆盖；未绑定 cwd 阻止执行。 |
+| E2E-CODEX-VISUAL | 隔离 Electron 中测试生产组件、明暗主题、窄窗口、独立滚动和键盘焦点，并保留截图。 |
+| E2E-CODEX-PARTIAL | 仅有一个续聊导入操作；支持单项和批量保留可用上下文；无仅历史按钮；无上下文时要求修复来源。 |
+| E2E-CODEX-SEGMENTS | 流式 Zstd、区分物理分段与逻辑会话，多个分叉无继承消息 ID 冲突。 |
+| E2E-CODEX-REAL | 明确授权后只读真实来源并导入隔离存储；重启、跳过重复、正常及窄窗口审阅；续聊只用回环受控端点，工具限制测试目录，私有证据不提交。 |
+
+命令及边界见 [Codex 导入验证](/testing/codex-import-validation)。

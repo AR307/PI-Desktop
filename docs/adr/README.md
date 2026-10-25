@@ -407,4 +407,4 @@ Each ADR includes:
 
 | model-reasoning-effort-override | [Model reasoning effort override](model-reasoning-effort-override.md) | Proposed |
 
-- [Explicit native Codex history import](codex-native-history-import.md)
+| codex-native-history-import | [Explicit native Codex history import](codex-native-history-import.md) | Implemented candidate |

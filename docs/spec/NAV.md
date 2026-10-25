@@ -115,3 +115,5 @@
 - [Android companion and scoped desktop sync](/spec/03-runtime/23-mobile-companion)
 
 - [Ultra collaboration](/spec/03-runtime/ultra-collaboration)
+
+- [Explicit Codex history import](03-runtime/codex-native-import.md)

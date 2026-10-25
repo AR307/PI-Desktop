@@ -2,6 +2,10 @@
 
 ## 2026-10-25 - Upstream integration acceptance corrections
 
+- Register the Codex import ADR and spec in the documentation catalogs and add
+  the matching Chinese spec/E2E table. Locale checks cover 92 pairs and the
+  whole-tree check covers 646 pages without relaxing either documentation gate.
+
 - Complete the real side-chat lifecycle journey using Playwright actionability
   rather than stale screen coordinates after viewport changes. Background-only
   close confirmation, cancellation, queued-work cleanup and restart all pass.

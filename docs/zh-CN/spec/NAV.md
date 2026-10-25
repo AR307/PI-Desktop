@@ -118,3 +118,5 @@
 - [安卓伴侣与限定范围的桌面同步](/zh-CN/spec/03-runtime/23-mobile-companion)
 
 - [Ultra 协作](/zh-CN/spec/03-runtime/ultra-collaboration)
+
+- [显式导入 Codex 历史](03-runtime/codex-native-import.md)
