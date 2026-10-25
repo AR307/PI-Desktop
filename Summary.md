@@ -9,6 +9,10 @@
   aligned with current imports and behavior; make GenUI fixture paths portable.
 - Windows 0.21.0 packaged startup passes with bundled Host protocol 11 and 800
   session records. macOS packaging and final release publication remain pending.
+- Show isolated Electron fixture windows without taking focus so animation-frame
+  user journeys run on Windows. Deep file search and S3 settings now pass;
+  preserve their temporary evidence instead of deleting it. The bounded native
+  Host suite passes 1062 tests with one ignored.
 
 - Align terminal live-message projection with upstream empty-assistant
   persistence so Smart Stop restores an unanswered side-chat draft after a

@@ -9,7 +9,7 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { createRequire } from "node:module";
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -221,6 +221,7 @@ app.whenReady().then(async () => {
   win.webContents.on("console-message", (event) => console.error(event.message));
   try {
     await win.loadFile(path.join(__dirname, "index.html"));
+    win.showInactive();
     console.log("DEEP_FILE_SEARCH_PROBE " + JSON.stringify(await win.webContents.executeJavaScript("window.deepFileSearchProbe()")));
     app.exit(0);
   } catch (error) { console.error(error?.stack ?? error); app.exit(1); }
@@ -253,6 +254,6 @@ app.whenReady().then(async () => {
     assert.equal(result.passed, true);
     assert.deepEqual(result.queries, ["FeatureController", "Feat", "Save", "Missing", "Broken"]);
   } finally {
-    await rm(temp, { recursive: true, force: true });
+    console.log("Retained isolated file search evidence: " + temp);
   }
 });
