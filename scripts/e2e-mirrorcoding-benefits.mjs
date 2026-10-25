@@ -36,10 +36,14 @@ let posts = 0;
 let refreshes = 0;
 let rejectAccess = false;
 let requests = 0;
+const walletVisits = [];
+let walletOpenFails = false;
 const body = {
   success: true,
   data: {
-    permissions: { subscriptions_read: true, check_in: true },
+    permissions: { subscriptions_read: true, check_in: true, wallet_read: true },
+    wallet_balance: 2500000,
+    quota_per_yuan: 100000,
     quota_per_unit: 500000,
     quota_unit: "credits",
     subscriptions: [
@@ -107,6 +111,7 @@ const server = createHttpServer(async (req, res) => {
     posts++;
     body.data.check_in.checked_in = true;
     body.data.check_in.reward = 250000;
+    body.data.wallet_balance += 250000;
     return reply(200, body);
   }
   if (req.url === "/api/pi-desktop/account/benefits" && req.method === "GET")
@@ -165,11 +170,12 @@ window.piDesktop={platform:'win32',invoke:(channel,...args)=>window.fixtureInvok
 await i18n.use(initReactI18next).init({lng:'zh-CN',resources:{'zh-CN':{translation:zhCN}},interpolation:{escapeValue:false}});
 const connected={status:'connected',sync:'success',pendingRevocation:false,account:{id:42,displayName:'Fixture'},authorizationExpiresAt:9999999999999};
 useMirrorCoding.setState({account:connected});
-window.fixtureAccount=(signedIn)=>useMirrorCoding.setState({account:signedIn?connected:{status:'signed_out',sync:'idle',pendingRevocation:false}});
+window.fixtureAccount=(signedIn,id=42)=>useMirrorCoding.setState({account:signedIn?{...connected,account:{...connected.account,id}}:{status:'signed_out',sync:'idle',pendingRevocation:false}});
 document.documentElement.dataset.theme='dark';
 const props={...TOOLBAR_PROPS,t:i18n.t.bind(i18n),contextUsage:null,modelLabel:'gpt-6-astra',thinkingLabel:'medium'};
 const view = createRoot(document.getElementById('root'));
-window.fixtureSettings = () => view.render(<AccountBenefitsSettings/>);
+window.fixtureSettings = (show=true) => view.render(<div style={{height:'100vh',padding:24,display:'flex',alignItems:'flex-end'}}>{show&&<div style={{position:'absolute',top:20,left:24,maxWidth:480}}><AccountBenefitsSettings/></div>}<div className='composer-stack' style={{width:'100%'}}><div className='composer'><div style={{padding:18,color:'var(--ds-text-muted)'}}>随便问问</div><ComposerToolbar {...props}/></div></div></div>);
+window.fixtureSettings(false);
 window.fixtureComposerWidth = (width, side) => view.render(
   <div className={side ? 'side-chat-pane' : ''} style={{position:'relative',width,height:500}}>
     <div className='composer-dock composer-dock-docked'>
@@ -180,7 +186,6 @@ window.fixtureComposerWidth = (width, side) => view.render(
     </div>
   </div>
 );
-view.render(<div style={{height:'100vh',padding:24,display:'flex',alignItems:'flex-end'}}><div className='composer-stack' style={{width:'100%'}}><div className='composer'><div style={{padding:18,color:'var(--ds-text-muted)'}}>随便问问</div><ComposerToolbar {...props}/></div></div></div>);
 `;
 const vite = await createServer({
   root: join(root, "apps/desktop"),
@@ -230,6 +235,11 @@ try {
   });
   await page.exposeFunction("fixtureInvoke", async (channel, ...args) => {
     try {
+      if (channel === "pi-desktop/browser/openExternal") {
+        if (walletOpenFails) throw new Error("Browser unavailable");
+        walletVisits.push(args[0].url);
+        return { ok: true, data: { ok: true } };
+      }
       const handler = handlers.get(channel);
       assert(handler, `Unexpected channel ${channel}`);
       return { ok: true, data: await handler({ sender: "main-fixture" }, ...args) };
@@ -240,7 +250,36 @@ try {
   await page.goto(`http://127.0.0.1:${vite.httpServer.address().port}/benefits-test`);
   const trigger = page.locator(".mc-quota-trigger");
   const bar = page.locator("[data-testid=subscription-quota-bar]");
+  const wallet = page.locator(".mc-wallet-trigger");
+  const settings = page.locator(".settings-card-block");
+  const walletDialog = page.getByRole("dialog", { name: "前往钱包？" });
   await page.waitForFunction(() => document.querySelector(".mc-quota-track.is-green"));
+  assert.match(await wallet.textContent(), /25.00/);
+  const walletBounds = await wallet.boundingBox();
+  const barBounds = await trigger.boundingBox();
+  assert(walletBounds.x + walletBounds.width <= barBounds.x, "wallet must be left of the subscription bar");
+  await wallet.click();
+  await walletDialog.waitFor();
+  assert.equal(walletVisits.length, 0, "clicking balance must ask before navigation");
+  await page.screenshot({ path: join(artifacts, "wallet-confirm-dark.png") });
+  await walletDialog.getByRole("button", { name: "取消", exact: true }).click();
+  assert.equal(walletVisits.length, 0);
+  await wallet.focus();
+  await page.keyboard.press("Enter");
+  await walletDialog.waitFor();
+  await page.keyboard.press("Escape");
+  await walletDialog.waitFor({ state: "hidden" });
+  assert.equal(walletVisits.length, 0);
+  await wallet.click();
+  walletOpenFails = true;
+  await walletDialog.getByRole("button", { name: "前往钱包", exact: true }).click();
+  await walletDialog.getByRole("alert").waitFor();
+  assert.equal(walletVisits.length, 0);
+  walletOpenFails = false;
+  await walletDialog.getByRole("button", { name: "前往钱包", exact: true }).click();
+  await walletDialog.waitFor({ state: "hidden" });
+  assert.deepEqual(walletVisits, ["https://console.mirrorcoding.xyz/wallet"]);
+  findings.push("wallet before quota; cancel/Escape do not navigate; confirmed fixed wallet URL; failed open retries");
   assert.equal(await trigger.textContent(), "", "closed bar has no percentage text");
   await trigger.hover();
   await page.getByRole("tooltip").filter({ hasText: "80%" }).waitFor();
@@ -280,6 +319,7 @@ try {
   await dialog.getByRole("button", { name: "签到", exact: true }).click();
   await dialog.getByRole("button", { name: "今日已签到" }).waitFor();
   assert.equal(posts, 1);
+  assert.match(await wallet.textContent(), /27.50/, "check-in refreshes wallet without adding subscription quota");
   assert(await dialog.getByRole("button", { name: "今日已签到" }).isDisabled());
   await page.screenshot({ path: join(artifacts, "02-subscriptions-dark.png") });
   findings.push("hover, active subscriptions, expiry, check-in, one POST");
@@ -303,13 +343,21 @@ try {
   findings.push("yellow/red thresholds and OAuth 401 refresh");
   for (const state of ["unavailable", "forbidden", "offline"]) {
     mode = state;
-    await dialog.getByRole("button", { name: "刷新", exact: true }).click();
-    await dialog.getByRole("alert").waitFor();
-    assert.equal(await dialog.locator(".mc-subscription").count(), 0);
-    assert((await bar.getAttribute("class")).includes("is-unknown"));
+    const panel = state === "unavailable" ? dialog : settings;
+    await panel.getByRole("button", { name: "刷新", exact: true }).click();
+    await dialog.waitFor({ state: "hidden", timeout: 3000 });
+    await page.evaluate(() => window.fixtureSettings());
+    await settings.getByRole("alert").waitFor();
+    assert.equal(await settings.locator(".mc-subscription").count(), 0);
+    assert.equal(await bar.count(), 0, "failed data hides the subscription bar");
+    assert.equal(await wallet.textContent(), "余额 —", "failed data does not display stale or fake-zero balance");
   }
   mode = "ready";
-  await dialog.getByRole("button", { name: "刷新", exact: true }).click();
+  await settings.getByRole("button", { name: "刷新", exact: true }).click();
+  await settings.getByText("Pro Monthly", { exact: true }).waitFor();
+  await page.evaluate(() => window.fixtureSettings(false));
+  await page.evaluate(() => window.dispatchEvent(new Event("focus")));
+  await trigger.click();
   await dialog.getByText("Pro Monthly", { exact: true }).waitFor();
   await page.evaluate(() => (document.documentElement.dataset.theme = "light"));
   await page.setViewportSize({ width: 760, height: 640 });
@@ -323,15 +371,61 @@ try {
   const subscriptions = structuredClone(body.data.subscriptions);
   body.data.subscriptions = [];
   await dialog.getByRole("button", { name: "刷新", exact: true }).click();
-  await dialog.getByText("暂无有效订阅", { exact: true }).waitFor();
-  assert((await bar.getAttribute("class")).includes("is-unknown"));
+  await dialog.waitFor({ state: "hidden" });
+  await page.evaluate(() => window.fixtureSettings());
+  await settings.getByText("暂无有效订阅", { exact: true }).waitFor();
+  assert.equal(await bar.count(), 0, "no active plan hides the bar");
+  assert.match(await wallet.textContent(), /27.50/, "wallet remains visible without subscriptions");
+  const refreshAndWait = async () => {
+    await settings.getByRole("button", { name: "刷新", exact: true }).click();
+    await page.waitForFunction(() => !document.querySelector(".mc-benefits-panel[aria-busy=true]"));
+    await page.evaluate(() => window.dispatchEvent(new Event("focus")));
+    await page.waitForFunction(() => !document.querySelector(".mc-benefits-panel[aria-busy=true]"));
+  };
+  for (const remaining of [0, 49999, 50000, 50001]) {
+    body.data.subscriptions = [{ ...subscriptions[0], quota_used: subscriptions[0].quota_total - remaining }];
+    await refreshAndWait();
+    assert.equal(await bar.count(), remaining > 50000 ? 1 : 0, "strict per-subscription RMB threshold");
+  }
+  body.data.subscriptions = subscriptions.slice(0, 2).map(item => ({ ...item, quota_used: item.quota_total - 30000 }));
+  await refreshAndWait();
+  assert.equal(await bar.count(), 0, "two small plans must not combine to pass the threshold");
+  body.data.subscriptions = [{ ...subscriptions[0], expires_at: "2000-01-01T00:00:00Z" }];
+  await refreshAndWait();
+  assert.equal(await bar.count(), 0, "expired plans hide the bar");
+  body.data.wallet_balance = 0;
+  await refreshAndWait();
+  assert.match(await wallet.textContent(), /0.00/, "actual zero wallet balance remains visible");
+  delete body.data.wallet_balance;
+  delete body.data.quota_per_yuan;
+  delete body.data.permissions.wallet_read;
+  body.data.subscriptions = subscriptions;
+  await refreshAndWait();
+  assert.equal(await wallet.textContent(), "余额 —");
+  assert.equal(await bar.count(), 0, "missing conversion must not guess RMB value");
+  await page.evaluate(() => window.fixtureSettings(false));
+  await page.screenshot({ path: join(artifacts, "missing-wallet-fields-light.png") });
+  body.data.permissions.wallet_read = true;
+  body.data.wallet_balance = 2750000;
+  body.data.quota_per_yuan = 100000;
+  findings.push("zero wallet, missing fields, empty/expired/exhausted/threshold subscriptions, per-plan not aggregated");
   body.data.subscriptions = subscriptions;
   body.data.subscriptions[0].quota_total = null;
-  await dialog.getByRole("button", { name: "刷新", exact: true }).click();
-  await dialog.getByText("订阅额度不限量", { exact: true }).waitFor();
+  await page.evaluate(() => window.fixtureSettings());
+  await refreshAndWait();
+  await settings.getByText("订阅额度不限量", { exact: true }).waitFor();
   assert((await bar.getAttribute("class")).includes("is-green"));
   assert((await trigger.getAttribute("aria-label")).includes("订阅额度不限量"));
+  await page.evaluate(() => window.fixtureSettings(false));
+  await wallet.click();
+  await walletDialog.waitFor();
+  await page.evaluate(() => window.fixtureAccount(true, 43));
+  await walletDialog.waitFor({ state: "hidden" });
+  await wallet.click();
+  await walletDialog.waitFor();
   await page.evaluate(() => window.fixtureAccount(false));
+  await walletDialog.waitFor({ state: "hidden" });
+  await wallet.waitFor({ state: "hidden" });
   await trigger.waitFor({ state: "hidden" });
   await dialog.waitFor({ state: "hidden" });
   await page.evaluate(() => window.fixtureAccount(true));
@@ -347,7 +441,6 @@ try {
     window.fixtureAccount(true);
     window.fixtureSettings();
   });
-  const settings = page.locator(".settings-card-block");
   await settings.getByRole("button", { name: "签到", exact: true }).click();
   await settings.getByRole("button", { name: "今日已签到" }).waitFor();
   assert.equal(posts, 2, "settings uses the same explicit check-in flow");
@@ -393,6 +486,7 @@ try {
     }
   }
   findings.push("signed-in main/side toolbar parity at seven widths from 360 to 900px in dark/light");
+  findings.push("hidden quota closes popup; settings recovery remains usable; account switch closes wallet confirmation");
   assert.deepEqual(errors, []);
   findings.push("unavailable/denied/offline, narrow/light, keyboard, logout");
   const revision = (ref) =>

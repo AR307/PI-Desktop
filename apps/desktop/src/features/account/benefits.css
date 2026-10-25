@@ -1,3 +1,24 @@
+.mc-account-balances {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  flex: none;
+}
+.mc-wallet-trigger {
+  height: 28px;
+  padding: 0 6px;
+  border: 0;
+  background: transparent;
+  color: var(--ds-text-secondary);
+  font-size: var(--text-sm);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.mc-wallet-trigger:hover {
+  background: var(--ds-bg-active);
+  color: var(--ds-text-primary);
+}
 .mc-benefits-control {
   flex: none;
 }

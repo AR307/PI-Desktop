@@ -42,6 +42,13 @@ export function parseBenefits(value: unknown): MirrorCodingBenefits {
   const checkIn = record(data.check_in);
   const subscriptionsRead = bool(permissions.subscriptions_read);
   const checkInAllowed = bool(permissions.check_in);
+  const walletRead = permissions.wallet_read === undefined ? false : bool(permissions.wallet_read);
+  const walletBalance = data.wallet_balance ?? null;
+  if (walletBalance !== null && (!walletRead || typeof walletBalance !== "number" || !Number.isSafeInteger(walletBalance)))
+    throw new Error("invalid_response");
+  const quotaPerYuan = data.quota_per_yuan ?? null;
+  if (quotaPerYuan !== null && (typeof quotaPerYuan !== "number" || !Number.isFinite(quotaPerYuan) || quotaPerYuan <= 0))
+    throw new Error("invalid_response");
   const quotaPerUnit = quota(data.quota_per_unit);
   if (!quotaPerUnit || !Array.isArray(data.subscriptions)) throw new Error("invalid_response");
   const subscriptions = data.subscriptions.map((value) => {
@@ -67,6 +74,9 @@ export function parseBenefits(value: unknown): MirrorCodingBenefits {
   return {
     subscriptionsRead,
     checkInAllowed,
+    walletRead,
+    walletBalance,
+    quotaPerYuan,
     subscriptions,
     quotaPerUnit,
     quotaUnit: text(data.quota_unit),

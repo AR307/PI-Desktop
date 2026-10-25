@@ -12,6 +12,11 @@ export type MirrorCodingSubscription = {
 export type MirrorCodingBenefits = {
   subscriptionsRead: boolean;
   checkInAllowed: boolean;
+  walletRead: boolean;
+  /** Raw wallet quota, separate from subscription allowances; null is unknown. */
+  walletBalance: number | null;
+  /** Raw quota per CNY from the server's display conversion; never guessed. */
+  quotaPerYuan: number | null;
   subscriptions: MirrorCodingSubscription[];
   quotaPerUnit: number;
   quotaUnit: string;

@@ -9,7 +9,9 @@ import { subscriptionQuota } from "../src/features/account/benefits-model.ts";
 export const benefitsFixture = () => ({
   success: true,
   data: {
-    permissions: { subscriptions_read: true, check_in: true },
+    permissions: { subscriptions_read: true, check_in: true, wallet_read: true },
+    wallet_balance: 2500000,
+    quota_per_yuan: 100000,
     quota_per_unit: 500000,
     quota_unit: "credits",
     subscriptions: [
@@ -181,4 +183,54 @@ test("subscription permission denial cannot disclose plans", () => {
   assert.throws(() => parseBenefits(body), /invalid_response/);
   body.data.subscriptions = [];
   assert.equal(subscriptionQuota(parseBenefits(body)).tone, "unknown");
+});
+
+test("the bar requires one unexpired plan with more than half a yuan, not summed dust", () => {
+  const data = parseBenefits(benefitsFixture());
+  const first = data.subscriptions[0];
+  for (const [remaining, visible] of [[0, false], [49999, false], [50000, false], [50001, true]]) {
+    first.quotaUsed = first.quotaTotal - remaining;
+    assert.equal(subscriptionQuota(data).showBar, visible);
+  }
+  first.quotaUsed = first.quotaTotal - 30000;
+  data.subscriptions.push({ ...first, id: "another-small-plan" });
+  assert.equal(subscriptionQuota(data).showBar, false, "small balances do not combine into a qualifying plan");
+  first.quotaTotal = null;
+  assert.equal(subscriptionQuota(data).showBar, true, "active unlimited quota qualifies");
+  first.expiresAt = "2000-01-01T00:00:00Z";
+  assert.equal(subscriptionQuota(data).showBar, false);
+  data.subscriptions = [];
+  assert.equal(subscriptionQuota(data).showBar, false);
+});
+
+test("wallet balance is independent, includes zero, and never invents RMB conversion", () => {
+  const body = benefitsFixture();
+  let data = parseBenefits(body);
+  assert.equal(data.walletBalance, 2500000);
+  assert.equal(data.quotaPerYuan, 100000);
+  body.data.wallet_balance = 0;
+  assert.equal(parseBenefits(body).walletBalance, 0);
+  body.data.wallet_balance = -100000;
+  assert.equal(parseBenefits(body).walletBalance, -100000, "actual debt is not clamped to zero");
+  body.data.quota_per_yuan = 0.25;
+  assert.equal(parseBenefits(body).quotaPerYuan, 0.25, "conversion may be fractional");
+  delete body.data.wallet_balance;
+  delete body.data.quota_per_yuan;
+  delete body.data.permissions.wallet_read;
+  data = parseBenefits(body);
+  assert.equal(data.walletBalance, null);
+  assert.equal(data.quotaPerYuan, null);
+  assert.equal(subscriptionQuota(data).showBar, false);
+});
+
+test("wallet reads require consent and valid amounts and conversion", () => {
+  const body = benefitsFixture();
+  body.data.permissions.wallet_read = false;
+  assert.throws(() => parseBenefits(body), /invalid_response/);
+  body.data.wallet_balance = null;
+  assert.equal(parseBenefits(body).walletBalance, null);
+  for (const value of [0, -1, "100", NaN, Infinity]) {
+    body.data.quota_per_yuan = value;
+    assert.throws(() => parseBenefits(body), /invalid_response/);
+  }
 });

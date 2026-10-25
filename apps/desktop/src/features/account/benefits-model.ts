@@ -4,6 +4,10 @@ import type { MirrorCodingBenefits } from "@pi-desktop/shared";
 export function subscriptionQuota(data: MirrorCodingBenefits, now = Date.now()) {
   const subscriptions = data.subscriptions.filter((item) => Date.parse(item.expiresAt) > now);
   const unlimited = subscriptions.some((item) => item.quotaTotal === null);
+  const showBar = data.subscriptionsRead && subscriptions.some((item) =>
+    item.quotaTotal === null || (data.quotaPerYuan !== null &&
+      item.quotaTotal - item.quotaUsed > data.quotaPerYuan * 0.5),
+  );
   const total = subscriptions.reduce((sum, item) => sum + (item.quotaTotal ?? 0), 0);
   const remaining = subscriptions.reduce(
     (sum, item) => sum + Math.max(0, (item.quotaTotal ?? 0) - item.quotaUsed),
@@ -19,5 +23,5 @@ export function subscriptionQuota(data: MirrorCodingBenefits, now = Date.now()) 
         : (percent ?? 0) > 20
           ? "yellow"
           : "red";
-  return { subscriptions, unlimited, total, remaining, percent, tone };
+  return { subscriptions, unlimited, total, remaining, percent, tone, showBar };
 }

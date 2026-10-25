@@ -56,6 +56,7 @@ export function useAccountBenefits() {
   }, [identity, refresh]);
   return {
     connected,
+    identity,
     state: displayedIdentity.current === identity ? state : { status: "idle" as const },
     refresh,
   };

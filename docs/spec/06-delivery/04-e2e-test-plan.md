@@ -18901,11 +18901,21 @@ increment and production update publication require later service validation.
 
 ## MirrorCoding account benefits (client candidate)
 
+- Show the fixture wallet balance to the left of the bar, separately from plan
+  quota. Open wallet confirmation with pointer and keyboard; Cancel/Escape must
+  not navigate. Confirm opens only the fixed wallet URL. Browser-open failure
+  stays visible and can be retried. Account change closes the old dialog.
+- Hide the bar for no plans, expired/exhausted plans and remaining CNY 0.50 or
+  below. A single plan above CNY 0.50 qualifies; multiple smaller plans do not.
+  Unlimited active plans qualify. Missing wallet/conversion fields show unknown
+  balance and hide finite bars, without disabling check-in in Account settings.
+  A disappearing bar closes its open popup; recover through Account settings
+  without an unanchored overlay covering the composer.
 - Authorize a fixture account, inspect the real composer bar before the model
   picker, hover for percentage, open all active subscriptions and verify
   quota/expiry/reset/groups. Expired entries are omitted. Closed bar has no text.
 - Click daily check-in once; show the day's wallet reward and disable repeat
-  action. Subscription quota remains separate. Repeated main calls share
+  action. Wallet balance refreshes; subscription quota remains separate. Repeated main calls share
   pending work; an account switch cannot redirect a queued check-in.
 - Change finite usage through green/yellow/red, exercise no plans/unlimited,
   and force 401 refresh, permission denial, unavailable server and network

@@ -39,6 +39,11 @@
 
 ## Unreleased - MirrorCoding account benefits
 
+- Show wallet balance to the left of the subscription bar. Confirm before
+  opening the MirrorCoding wallet; Cancel and Escape keep the user in Pi.
+- Hide the bar unless an active plan individually has more than CNY 0.50
+  remaining, or is unlimited. Unknown wallet data is not shown as zero;
+  authoritative server wallet/CNY fields are required for monetary display.
 - Add a text-free subscription quota bar before the desktop model picker.
   Hover shows remaining percentage; click shows every active plan's quota,
   expiry and reset, plus a manual daily check-in action. Account settings

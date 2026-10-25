@@ -42,3 +42,18 @@ client's controlled acceptance does not prove server authorization or live
 billing. See [server requirements](../mirrorcoding-account-benefits-server-requirements.md)
 for the exact contract, rollout dependency and acceptance cases. No database,
 plugin, agent-tool or mobile protocol changes are needed.
+
+## 2026-10-25 wallet display amendment
+
+Reuse the same benefits response and main-owned parser for wallet read consent,
+raw wallet balance and authoritative CNY conversion. Keep the balance separate
+from subscription aggregation and claim rewards; no new endpoint or credential
+transport is needed. The composer only displays a subscription bar if a single
+active plan has more than CNY 0.50 remaining, or is unlimited.
+
+A small wallet control owns confirmation and external-navigation state, reusing
+the account dialog and existing browser API. It is keyed to account identity
+so a previous account's dialog cannot persist after switching accounts. Unknown
+values stay unknown; missing conversion does not invent an exchange rate.
+Settings retain access to subscription details even when the bar is hidden.
+The server extension is documented, not implemented or deployed by this change.

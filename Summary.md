@@ -1,5 +1,30 @@
 # PI-Desktop MirrorCoding Edition
 
+## 2026-10-25 - Wallet balance and useful subscription indicator
+
+- Extend the existing main-owned benefits projection with wallet read consent,
+  separate raw wallet balance and server-authoritative CNY conversion. No new
+  persistence, account credentials, backend code or deployment is introduced.
+- Add a compact wallet control before the composer subscription bar, using the
+  existing account dialog and external-browser API. Navigation requires explicit
+  confirmation; Cancel/Escape do not navigate and failures remain retryable.
+- Hide the bar unless an active plan independently has more than CNY 0.50 left
+  or is unlimited. Small plans cannot be added together to pass. Missing server
+  monetary fields stay unknown; Account settings still expose plans/check-in.
+- Update the standalone server handoff with exact field units, consent, null
+  handling and check-in refresh semantics. Subscription allowance is never used
+  as a substitute for wallet balance, and no exchange rate is guessed.
+- Extend service regressions and the real composer/settings browser acceptance
+  with monetary thresholds, wallet confirmation, failed-open retry, missing
+  fields, check-in balance refresh, themes, keyboard use and logout cleanup.
+  Tests use only local fixtures, not real accounts or paid models.
+- Validation passed: 15 benefits service tests, 39 i18n tests, shared/i18n builds,
+  Desktop typecheck, style-token check, scoped shared-type lint, and Electron
+  main/preload/renderer production build. Browser acceptance covers the real
+  composer with local HTTP/IPC handlers; dark/light screenshots were reviewed.
+  An orphaned popup regression was reproduced and fixed before final acceptance.
+  Native Electron transport, packaged installation and live wallet API acceptance
+  are not claimed; the existing user preview is not replaced by this task.
 ## 2026-10-23 - Resume interrupted provider responses automatically
 
 - Refresh the models.dev snapshot and localized 0.21.0 in-app notes before the

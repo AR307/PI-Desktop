@@ -5,6 +5,7 @@ import { Button, TooltipButton } from "../../components/ui";
 import { AnchoredMenu } from "../../components/settings/AnchoredMenu";
 import { subscriptionQuota } from "./benefits-model";
 import { useAccountBenefits } from "./useAccountBenefits";
+import { WalletBalanceControl } from "./WalletBalanceControl";
 import "./benefits.css";
 
 export function AccountBenefitsPanel({
@@ -129,14 +130,18 @@ export function AccountBenefitsPanel({
 /** Compact account-wide indicator before the composer model picker. */
 export function AccountBenefitsControl({ onOpen }: { onOpen(): void }) {
   const { t, i18n } = useTranslation();
-  const { connected, state, refresh } = useAccountBenefits();
+  const { connected, identity, state, refresh } = useAccountBenefits();
   const [open, setOpen] = useState(false);
-  useEffect(() => {
-    if (!connected) setOpen(false);
-  }, [connected]);
-  if (!connected) return null;
   const quota = state.data?.subscriptionsRead ? subscriptionQuota(state.data) : undefined;
   const known = state.status !== "error" && quota && quota.subscriptions.length > 0;
+  const showBar = Boolean(known && quota.showBar);
+  useEffect(() => {
+    setOpen(false);
+  }, [identity]);
+  useEffect(() => {
+    if (!showBar) setOpen(false);
+  }, [showBar]);
+  if (!connected) return null;
   const tooltip = !known
     ? t(
         state.error
@@ -153,43 +158,53 @@ export function AccountBenefitsControl({ onOpen }: { onOpen(): void }) {
           ),
         });
   return (
-    <AnchoredMenu
-      open={open}
-      onClose={() => setOpen(false)}
-      role="dialog"
-      label={t("accountBenefits.title")}
-      className="mc-benefits-control"
-      menuClassName="mc-benefits-popover"
-      side="top"
-      align="end"
-      trigger={(ref) => (
-        <TooltipButton
-          ref={ref}
-          className="icon-btn mc-quota-trigger"
-          tooltip={tooltip}
-          ariaLabel={`${t("accountBenefits.title")}: ${tooltip}`}
-          aria-haspopup="dialog"
-          aria-expanded={open}
-          onClick={() => {
-            if (!open) {
-              onOpen();
-              void refresh();
-            }
-            setOpen((value) => !value);
-          }}
-        >
-          <span
-            className={`mc-quota-track is-${known ? quota.tone : "unknown"}`}
-            aria-hidden="true"
-            data-testid="subscription-quota-bar"
+    <div className="mc-account-balances">
+      <WalletBalanceControl
+        key={identity}
+        data={state.status === "error" ? undefined : state.data}
+        onOpen={() => {
+          setOpen(false);
+          onOpen();
+        }}
+      />
+      <AnchoredMenu
+        open={open && showBar}
+        onClose={() => setOpen(false)}
+        role="dialog"
+        label={t("accountBenefits.title")}
+        className="mc-benefits-control"
+        menuClassName="mc-benefits-popover"
+        side="top"
+        align="end"
+        trigger={(ref) => showBar ? (
+          <TooltipButton
+            ref={ref}
+            className="icon-btn mc-quota-trigger"
+            tooltip={tooltip}
+            ariaLabel={`${t("accountBenefits.title")}: ${tooltip}`}
+            aria-haspopup="dialog"
+            aria-expanded={open}
+            onClick={() => {
+              if (!open) {
+                onOpen();
+                void refresh();
+              }
+              setOpen((value) => !value);
+            }}
           >
-            <span style={{ width: `${known ? (quota.unlimited ? 100 : quota.percent) : 0}%` }} />
-          </span>
-        </TooltipButton>
-      )}
-    >
-      <AccountBenefitsPanel state={state} refresh={refresh} />
-    </AnchoredMenu>
+            <span
+              className={`mc-quota-track is-${known ? quota.tone : "unknown"}`}
+              aria-hidden="true"
+              data-testid="subscription-quota-bar"
+            >
+              <span style={{ width: `${known ? (quota.unlimited ? 100 : quota.percent) : 0}%` }} />
+            </span>
+          </TooltipButton>
+        ) : null}
+      >
+        <AccountBenefitsPanel state={state} refresh={refresh} />
+      </AnchoredMenu>
+    </div>
   );
 }
 

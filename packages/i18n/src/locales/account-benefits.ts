@@ -1,4 +1,11 @@
 export const accountBenefitsEn = {
+  walletBalance: "Wallet balance: {{amount}}",
+  walletUnknown: "Balance —",
+  walletUnavailable: "Wallet balance is not available from the server yet.",
+  walletConfirmTitle: "Open your wallet?",
+  walletConfirmDescription: "Open the MirrorCoding wallet in your browser to view or top up your balance?",
+  walletOpen: "Open wallet",
+  walletOpenFailed: "Could not open the wallet. Please try again.",
   title: "Account subscriptions",
   refresh: "Refresh",
   checkIn: "Daily check-in",
@@ -27,6 +34,13 @@ export const accountBenefitsEn = {
   verification_required: "The server requires browser verification before check-in.",
 };
 export const accountBenefitsZhCN = {
+  walletBalance: "钱包余额：{{amount}}",
+  walletUnknown: "余额 —",
+  walletUnavailable: "服务端暂未提供钱包余额。",
+  walletConfirmTitle: "前往钱包？",
+  walletConfirmDescription: "是否在浏览器中打开 MirrorCoding 钱包，查看余额或充值？",
+  walletOpen: "前往钱包",
+  walletOpenFailed: "打开钱包失败，请重试。",
   title: "账号订阅",
   refresh: "刷新",
   checkIn: "每日签到",
@@ -54,6 +68,13 @@ export const accountBenefitsZhCN = {
   verification_required: "服务端要求先在浏览器中完成签到验证。",
 };
 export const accountBenefitsZhTW = {
+  walletBalance: "錢包餘額：{{amount}}",
+  walletUnknown: "餘額 —",
+  walletUnavailable: "伺服器暫未提供錢包餘額。",
+  walletConfirmTitle: "前往錢包？",
+  walletConfirmDescription: "是否在瀏覽器中開啟 MirrorCoding 錢包，查看餘額或儲值？",
+  walletOpen: "前往錢包",
+  walletOpenFailed: "開啟錢包失敗，請重試。",
   title: "帳號訂閱",
   refresh: "重新整理",
   checkIn: "每日簽到",
