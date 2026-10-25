@@ -3,7 +3,7 @@ import type { CodexImportResult } from "@pi-desktop/shared";
 import { Button } from "../../components/ui";
 
 export type ImportResult = CodexImportResult | { externalId: string; status: "failed"; warnings: string[] };
-export type ImportChoice = "normal" | "partial" | "history";
+export type ImportChoice = "normal" | "partial";
 
 function warningCategory(warning: string): string {
   if (/retained/i.test(warning)) return "retainedGap";
@@ -27,17 +27,15 @@ export function ImportResults({ results, title, busy, retry, open }: {
   return <section className="codex-import-results" aria-label={t("codexImport.resultsTitle")} aria-live="polite">
     <div className="codex-import-controls"><strong>{t("codexImport.resultsSummary", { done: confirmed, review: needsReview.length, failed: failed.length })}</strong></div>
     {needsReview.length > 0 && <p>{t("codexImport.reviewHint")}</p>}
-    {needsReview.length > 1 && <div className="codex-import-controls">
-      {!!recoverable.length && <Button variant="primary" disabled={busy} onClick={() => retry(recoverable.map((r) => r.externalId), "partial")}>{t("codexImport.confirmPartialAll", { count: recoverable.length })}</Button>}
-      <Button disabled={busy} onClick={() => retry(needsReview.map((r) => r.externalId), "history")}>{t("codexImport.confirmHistoryAll", { count: needsReview.length })}</Button>
+    {recoverable.length > 1 && <div className="codex-import-controls">
+      <Button variant="primary" disabled={busy} onClick={() => retry(recoverable.map((r) => r.externalId), "partial")}>{t("codexImport.confirmPartialAll", { count: recoverable.length })}</Button>
     </div>}
     {results.map((result) => <article key={result.externalId} className="codex-import-result" data-status={result.status}>
       <strong>{title(result.externalId)}</strong>
       <span>{t("codexImport." + result.status)}{"context" in result && result.status === "imported" ? " · " + t("codexImport.context_" + result.context) : ""}</span>
       {result.status === "needsConfirmation" && !result.availableContextMessages && <p>{t("codexImport.noContext")}</p>}
-      {result.status === "needsConfirmation" && <div className="codex-import-controls">
-        {(result.availableContextMessages ?? 0) > 0 && <Button variant="primary" disabled={busy} onClick={() => retry([result.externalId], "partial")}>{t("codexImport.confirmPartial")}</Button>}
-        <Button disabled={busy} onClick={() => retry([result.externalId], "history")}>{t("codexImport.confirmHistoryOnly")}</Button>
+      {result.status === "needsConfirmation" && (result.availableContextMessages ?? 0) > 0 && <div className="codex-import-controls">
+        <Button variant="primary" disabled={busy} onClick={() => retry([result.externalId], "partial")}>{t("codexImport.confirmPartial")}</Button>
       </div>}
       {!!result.warnings.length && <ul className="codex-import-warning-list">{[...new Set(result.warnings.map(warningCategory))].map((category) => <li key={category}>{t("codexImport." + category)}</li>)}</ul>}
       {!!result.warnings.length && <details><summary>{t("codexImport.technicalDetails", { count: result.warnings.length })}</summary>{result.warnings.map((warning) => <p key={warning}>{warning}</p>)}</details>}

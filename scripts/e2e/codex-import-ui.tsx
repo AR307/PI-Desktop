@@ -71,14 +71,16 @@ globalThis.codexImportProbe = async (stage) => {
     await until(() => document.querySelectorAll('.codex-import-result[data-status="needsConfirmation"]').length === 3 && !button(i18n.t("codexImport.confirmPartialAll", { count: 2 }))?.disabled, "batch review unavailable");
     assert(document.querySelector(".codex-import-results")?.textContent?.includes(i18n.t("codexImport.noContext")), "missing context lacks a clear explanation");
     assert(document.querySelectorAll(".codex-import-result details[open]").length === 0, "batch warning details expanded");
+    const actions = [...document.querySelectorAll<HTMLButtonElement>(".codex-import-results button")].map((action) => action.textContent?.trim());
+    assert(actions.length === 3 && actions.every((label) => label === i18n.t("codexImport.confirmPartial") || label === i18n.t("codexImport.confirmPartialAll", { count: 2 })), "review offers actions other than continuation import");
     click(button(i18n.t("codexImport.confirmPartialAll", { count: 2 })));
-    await until(() => document.querySelectorAll('.codex-import-result[data-status="imported"]').length === 2 && !button(i18n.t("codexImport.confirmHistoryOnly"))?.disabled, "bulk partial confirmation failed");
-    click(button(i18n.t("codexImport.confirmHistoryOnly")));
-    await until(() => document.querySelectorAll('.codex-import-result[data-status="imported"]').length === 3 && !button(i18n.t("common.close"))?.disabled, "history-only confirmation failed");
-    assert(document.querySelector(".codex-import-results")?.textContent?.includes(i18n.t("codexImport.context_historyOnly")), "history-only result not labelled");
-    return {ok:true,scenarios:["multi-item-review","bulk-partial-consent","missing-context-explanation","explicit-history-only"]};
+    await until(() => document.querySelectorAll('.codex-import-result[data-status="imported"]').length === 2 && !button(i18n.t("common.close"))?.disabled, "bulk partial confirmation failed");
+    const unavailable = document.querySelector('.codex-import-result[data-status="needsConfirmation"]');
+    assert(unavailable?.textContent?.includes("Review missing-context"), "unrecoverable conversation was silently imported");
+    assert(unavailable?.querySelectorAll("button").length === 0, "unrecoverable conversation offers an empty-context import");
+    return {ok:true,scenarios:["multi-item-review","bulk-partial-consent","missing-context-explanation","no-history-only-actions","no-empty-context-import"]};
   }
-  if (stage === "partial") {
+  if (stage === "partial" || stage === "partial-review") {
     click(button(i18n.t("codexImport.settingsAction")));
     await until(() => document.querySelectorAll(".codex-import-list .codex-import-row").length === 2, "partial source list missing");
     const row = [...document.querySelectorAll<HTMLElement>(".codex-import-list .codex-import-row")].find((r) => r.textContent?.includes("Imported second"))!;
@@ -88,10 +90,12 @@ globalThis.codexImportProbe = async (stage) => {
     click(button(i18n.t("codexImport.importSelected", { count: 1 })));
     await until(() => !!button(i18n.t("codexImport.confirmPartial")) && !button(i18n.t("codexImport.confirmPartial"))!.disabled, "partial confirmation unavailable");
     const action = button(i18n.t("codexImport.confirmPartial"))!;
+    assert(document.querySelectorAll(".codex-import-result button").length === 1, "review should offer only the continuation import action");
     const bounds = action.getBoundingClientRect();
     assert(bounds.height > 0 && bounds.top >= 0 && bounds.bottom < innerHeight, "recovery action is clipped");
     assert(!document.querySelector<HTMLDetailsElement>(".codex-import-result details")?.open, "technical warnings expanded by default");
     assert(button(i18n.t("codexImport.importSelected", { count: 0 }))?.disabled, "pending review permits repeat normal import");
+    if (stage === "partial-review") return { ok: true, scenarios: ["single-continuation-action", "review-visual"] };
     click(action);
     await until(() => !!document.querySelector('.codex-import-result[data-status="imported"]') && !button(i18n.t("common.close"))?.disabled, "partial import failed");
     assert(document.querySelector(".codex-import-result")?.textContent?.includes(i18n.t("codexImport.context_partial")), "partial recovery is presented as complete");

@@ -101,7 +101,7 @@ function Wizard() {
         const explicitPath = Object.prototype.hasOwnProperty.call(paths, id) ? paths[id] : undefined;
         const projectPath = explicitPath;
         try {
-          const result = await api.codexImportRun({ scanId: scan.scanId, runId: runId.current, externalId: id, projectPath, projectRoots: rootPaths, targetGroupId: target?.id, providerId: modelPair[0], modelId: modelPair[1], thinkingLevel: thinking || modelConfig?.defaultThinkingLevel || "off", historyOnly: choice === "history", allowPartialContext: choice === "partial" });
+          const result = await api.codexImportRun({ scanId: scan.scanId, runId: runId.current, externalId: id, projectPath, projectRoots: rootPaths, targetGroupId: target?.id, providerId: modelPair[0], modelId: modelPair[1], thinkingLevel: thinking || modelConfig?.defaultThinkingLevel || "off", allowPartialContext: choice === "partial" });
           if (result.status === "imported" && result.archived && result.sessionId) useAppStore.getState().archiveSession(result.sessionId);
           setResults((old) => [...old.filter((r) => r.externalId !== id), result]);
           if (result.status === "imported" || result.status === "skipped") {

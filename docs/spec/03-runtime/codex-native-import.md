@@ -91,9 +91,12 @@ Visible history and effective model context are separate projections:
 - Unsupported/missing context requires explicit confirmation before persistence.
   When recoverable messages exist, the user may keep them with
   `allowPartialContext`, producing a `partial` checkpoint and a notice describing
-  the gaps. Alternatively `historyOnly` imports visible history without retained
-  model context. If no usable context exists, only history-only import is offered.
-  Neither choice invents missing content or represents partial recovery as full.
+  the gaps. The wizard offers only continuation import, for single and bulk
+  confirmation. With no usable context it explains the missing source and asks
+  the user to select a complete source and rescan; it never silently imports
+  empty context. The Host `historyOnly` contract and existing imported history
+  are unchanged, but the wizard does not submit that option. Missing content is
+  not invented or represented as fully recovered.
 - Projected dynamic tool calls preserve their name, arguments, outputs and error
   status. Plans, delegated-agent activity and image activity remain historical
   references, never resumed tasks.
@@ -106,7 +109,7 @@ Visible history and effective model context are separate projections:
 Codex's local storage is an evolving external format. Interleaved automatic turns,
 future record kinds and unavailable fork segments are not proof of exact Codex
 runtime equivalence. The importer marks detected incomplete input for explicit
-partial-context or history-only import. It does not resume live tasks, shells or
+partial-context import when usable context exists. It does not resume live tasks, shells or
 delegated agents. Genuinely missing rollout files cannot be reconstructed from
 the visible-history projection alone.
 JSONL input is streamed, but a selected session's converted transcript, effective

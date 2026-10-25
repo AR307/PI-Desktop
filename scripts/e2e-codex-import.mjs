@@ -83,7 +83,7 @@ app.whenReady().then(async()=>{
 });
 `);
 const electronBinary = process.env.PI_DESKTOP_ELECTRON_BIN || resolveElectronBinary(root).electronBinary;
-for (const stage of ["card", "dismiss", "card-open", "first", "restart-visible", "restart-hidden", "partial", "bulk-review"]) {
+for (const stage of ["card", "dismiss", "card-open", "first", "restart-visible", "restart-hidden", "partial-review", "partial", "bulk-review"]) {
   const env = { ...process.env, CODEX_IMPORT_STAGE: stage }; delete env.ELECTRON_RUN_AS_NODE;
   const child = spawn(electronBinary, [join(evidence, "main.cjs")], { env, windowsHide: true, stdio: ["ignore", "pipe", "pipe"] });
   let output = ""; for (const stream of [child.stdout,child.stderr]) stream.on("data", d=> output+=d);

@@ -1,5 +1,16 @@
 # PI-Desktop MirrorCoding Edition
 
+## 2026-10-25 - Simplify Codex import to continuation only
+
+- Removed individual and bulk history-only actions from the import wizard.
+  Confirmation keeps available continuation context instead of offering a
+  competing archive-only choice. The renderer no longer submits historyOnly.
+- Updated English and Chinese guidance. A source with no recoverable context
+  explains how to choose a complete source and rescan, without creating an
+  empty-context conversation. Existing imported records remain unchanged.
+- Added Electron user-path regressions for single/bulk confirmation and missing
+  context; the single-action assertion fails against the previous UI.
+
 ## 2026-10-15 - Upstream integration, shared branding and account image tools
 
 - Integrated upstream 0.20.1 at 2eb333723 with the committed mobile redesign

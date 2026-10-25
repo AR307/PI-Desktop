@@ -1,5 +1,21 @@
 # Codex import candidate validation
 
+## Continuation-only wizard correction (2026-10-25)
+
+- Removed individual and bulk history-only choices from the wizard and the
+  corresponding renderer request path. Confirmation always retains available
+  continuation context. Sources with no usable context explain how to rescan
+  a complete source and are not silently imported as empty-context sessions.
+- The Electron single-action regression failed against the previous UI, then
+  passed with the correction. The real Renderer/Main/Host journey covers single
+  and bulk partial-context imports, cleared selections and missing-context
+  non-import. A dedicated review stage captures the remaining action in both
+  themes and at narrow width. Existing history-only Host data/contracts are
+  unchanged; the historical results below describe the earlier UI.
+- i18n build, Desktop typecheck, style-token check and whitespace validation
+  are the scoped static checks. The Host conversion logic is unchanged; this
+  correction does not claim new real-image or paid-provider acceptance.
+
 ## Real-source recovery and usability correction (2026-10-25)
 
 - User-authorized read-only scans of local Codex source found 1,893 candidates.

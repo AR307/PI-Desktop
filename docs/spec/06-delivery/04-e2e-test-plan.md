@@ -18336,10 +18336,10 @@ increment and production update publication require later service validation.
 | E2E-CODEX-DISMISS | Cancel/Escape restore focus and visibility; current-run dismissal survives navigation/reload but not restart; permanent dismissal survives restart; Settings restores it. |
 | E2E-CODEX-SELECT | Scan a controlled directory, select one conversation, import, inspect its native history; no default select-all and no source modification. |
 | E2E-CODEX-CONTINUE | Native import, controlled-model follow-up, actual read/write, Host/runtime restart and another follow-up retain effective context; historical tools never execute. |
-| E2E-CODEX-COMPLEX | 301 candidates, paginated DB plus rollout, fork chains, rollback/compaction, Chinese, images, incomplete/unknown records, missing files and explicit history-only confirmation. |
+| E2E-CODEX-COMPLEX | 301 candidates, paginated DB plus rollout, fork chains, rollback/compaction, Chinese, images, incomplete/unknown records and missing files with explicit partial-context confirmation. |
 | E2E-CODEX-LIFECYCLE | Cancel one batch and retry with a new identity; completed imports survive and duplicates never overwrite PI work; missing cwd blocks execution until bound. |
 | E2E-CODEX-VISUAL | Production Sidebar/import components in isolated Electron, compiled themes, narrow dialogs, independent list layout, keyboard focus and retained screenshots. |
-| E2E-CODEX-PARTIAL | Incomplete sources expose localized review actions above collapsed details; retain available context for one or several items, or explicitly choose history-only. Missing context offers no misleading partial option. Completed selections clear. |
+| E2E-CODEX-PARTIAL | Incomplete sources expose one continuation action above collapsed details; retain available context for one or several items. No individual or bulk history-only action exists. Missing context explains source repair without creating an empty-context conversation. Completed selections clear. |
 | E2E-CODEX-SEGMENTS | Stream Zstd segments, distinguish physical bases from logical threads including matching initial IDs, and import multiple forks without inherited-message collisions. |
 | E2E-CODEX-REAL | With explicit user authorization, read actual local source into isolated storage; import current and affected conversations, restart, skip duplicates, and inspect full AppShell list/review/open at normal and narrow widths. Capture continuation only at a controlled loopback endpoint with new tools confined to a fixture directory. Never commit private artifacts. |
 

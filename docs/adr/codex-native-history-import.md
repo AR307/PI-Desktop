@@ -32,9 +32,12 @@ plugin import contracts and Models/Skills/MCP import destinations are unchanged.
 
 Imported sessions continue independently with PI. Duplicate source IDs never
 overwrite them. Missing directories block continuation until explicitly bound.
-Unknown context requires explicit consent: retain usable context with a visible
-partial-recovery notice, or import history only. With no usable context, only the
-latter is available. Rejecting every incomplete source would discard useful
+Unknown context requires explicit consent to retain usable context with a visible
+partial-recovery notice. The wizard offers only continuation import, not an
+alternative that discards usable context. With no usable context, it explains
+the missing source and requests a complete source directory and rescan. Existing
+history-only sessions and the Host contract remain unchanged. Rejecting every
+incomplete source would discard useful
 native compaction results; silently claiming full restoration would mislead the
 user. No source credentials or permission grants become active.
 
