@@ -175,7 +175,8 @@ test("composer handles home drafts, deleted sessions, and async sends by key", (
   assert.match(composer, /HOME_DRAFT_KEY,/);
   assert.match(composer, /const clearDraftForKey = \(\s*key: string,\s*expectedRevision\?: number,\s*submitted\?: ComposerDraftSnapshot/);
   assert.match(composer, /deleteComposerDraft\(key\)/);
-  assert.match(composer, /draftKeyForSession\(useAppStore\.getState\(\)\.activeSessionId\)/);
+  assert.match(composer, /draftKeyRef\.current/);
+  assert.doesNotMatch(composer, /draftKeyForSession\(useAppStore\.getState\(\)\.activeSessionId\)/);
   assert.match(composer, /const submittedDraftKey = draftKey/);
   assert.match(composer, /clearDraftForKey\(submittedDraftKey, submittedDraftRevision, submittedDraft\)/);
   assert.match(composer, /readComposerDraftRevision\(key\) !== expectedRevision/);

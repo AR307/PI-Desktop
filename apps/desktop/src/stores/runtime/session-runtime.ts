@@ -135,6 +135,7 @@ export function createSessionRuntime({ get, set }: StoreAccess): SessionRuntime 
     messages: UiMessage[],
     window?: SessionHistoryWindow,
   ): void {
+    if (id.startsWith("side-") && !get().sessions.some((session) => session.id === id)) return;
     const normalized = dedupeSessionMessages(messages);
     sessionTranscriptCache.delete(id);
     sessionTranscriptCache.set(id, normalized);
@@ -225,8 +226,9 @@ export function createSessionRuntime({ get, set }: StoreAccess): SessionRuntime 
       }));
       return;
     }
-    const cached = sessionTranscriptCache.get(sessionId);
+    const cached = sessionTranscriptCache.get(sessionId) ?? state.retainedTranscripts[sessionId];
     if (cached) {
+      if (sessionId.startsWith("side-")) set((current) => ({ retainedTranscripts: { ...current.retainedTranscripts, [sessionId]: upsertLiveSessionMessage(cached, message) } }));
       sessionTranscriptCache.set(
         sessionId,
         upsertLiveSessionMessage(cached, message),
@@ -244,8 +246,9 @@ export function createSessionRuntime({ get, set }: StoreAccess): SessionRuntime 
       );
       return;
     }
-    const cached = sessionTranscriptCache.get(sessionId);
+    const cached = sessionTranscriptCache.get(sessionId) ?? state.retainedTranscripts[sessionId];
     if (cached?.includes(message)) {
+      if (sessionId.startsWith("side-")) set((current) => ({ retainedTranscripts: { ...current.retainedTranscripts, [sessionId]: removeLiveSessionMessage(cached, message.id) } }));
       sessionTranscriptCache.set(
         sessionId,
         removeLiveSessionMessage(cached, message.id),
@@ -359,6 +362,7 @@ export function createSessionRuntime({ get, set }: StoreAccess): SessionRuntime 
 
     const next = projectTranscriptEvent(current, envelope);
     if (next === current) return;
+    if (sessionId.startsWith("side-")) set((state) => ({ retainedTranscripts: { ...state.retainedTranscripts, [sessionId]: next } }));
     liveSessionTranscripts.add(sessionId);
     cacheSessionTranscript(
       sessionId,

@@ -1,4 +1,5 @@
 import i18n from "i18next";
+import { sideChatTranscriptActions } from "../../features/chat/side-chat-transcript";
 import { isRemoteSession, sessionAllows } from "../../lib/remote-session-safety";
 import type {
   UiMessage,
@@ -51,18 +52,19 @@ export function createTranscriptSlice({
   | "rollbackWorkspaceChange"
   | "abort"
 > {
+  const sideActions = sideChatTranscriptActions({ get, set }, runtime);
   const canEdit = () => {
     const state = get();
     return sessionAllows(state.sessions.find((session) => session.id === state.activeSessionId)
       ?? { id: state.activeSessionId ?? "" }, "canEditMessages");
   };
   return {
-    compactContext: async () => {
+    compactContext: async (targetSessionId) => {
       const state = get();
-      const sessionId = state.activeSessionId;
-      if (!sessionId || state.isRunning) return;
+      const sessionId = targetSessionId ?? state.activeSessionId;
+      if (!sessionId || state.runningSessions[sessionId]) return;
       set((current) => ({
-        isRunning: true,
+        isRunning: current.activeSessionId === sessionId ? true : current.isRunning,
         runningSessions: {
           ...current.runningSessions,
           [sessionId]: true,
@@ -90,7 +92,8 @@ export function createTranscriptSlice({
       }
     },
 
-    retryAssistantMessage: async (messageId) => {
+    retryAssistantMessage: async (messageId, sessionId) => {
+      if (sessionId?.startsWith("side-")) return sideActions.retry(sessionId, messageId);
       if (!canEdit()) return;
       const prepared = await prepareTranscriptAction({ get, set }, runtime, messageId);
       const state = get();
@@ -104,7 +107,7 @@ export function createTranscriptSlice({
         const candidate = state.messages[i];
         if (
           candidate.role === "user" &&
-          (candidate.content.trim() || candidate.attachments?.length)
+          (candidate.content.trim() || candidate.attachments?.length || candidate.quotes?.length)
         ) {
           userIndex = i;
           break;
@@ -115,7 +118,8 @@ export function createTranscriptSlice({
       await get().editUserMessage(root.id, root.content, root.attachments);
     },
 
-    prepareUserMessageEdit: async (messageId, signal) => {
+    prepareUserMessageEdit: async (messageId, signal, sessionId) => {
+      if (sessionId?.startsWith("side-")) return sideActions.prepare(sessionId, messageId, signal);
       if (!canEdit()) return null;
       const prepared = await prepareTranscriptAction({ get, set }, runtime, messageId, signal);
       const state = get();
@@ -124,7 +128,8 @@ export function createTranscriptSlice({
       return message?.role === "user" && !message.sessionMessage ? message : null;
     },
 
-    editUserMessage: async (messageId, content, attachments) => {
+    editUserMessage: async (messageId, content, attachments, targetSessionId) => {
+      if (targetSessionId?.startsWith("side-")) return sideActions.edit(targetSessionId, messageId, content, attachments);
       if (!canEdit()) return false;
       const prepared = await prepareTranscriptAction({ get, set }, runtime, messageId);
       const state = get();
@@ -139,7 +144,7 @@ export function createTranscriptSlice({
       if (userIndex < 0 || state.messages[userIndex].role !== "user") return false;
       if (
         !prompt &&
-        !(attachments ?? state.messages[userIndex].attachments)?.length
+        !(attachments ?? state.messages[userIndex].attachments)?.length && !state.messages[userIndex].quotes?.length
       ) {
         return false;
       }
@@ -163,6 +168,7 @@ export function createTranscriptSlice({
           })),
       );
 
+      optimisticMessage.quotes = state.messages[userIndex].quotes;
       set((current) => ({
         messages: [...kept, optimisticMessage],
         isRunning: true,
@@ -178,6 +184,7 @@ export function createTranscriptSlice({
         await api.prompt({
           sessionId,
           content: prompt,
+          quotes: state.messages[userIndex].quotes,
           messageId: optimisticMessage.id,
           viewingSessionId: viewingSessionIdForPrompt(get(), sessionId),
           attachments: promptAttachments,
@@ -243,7 +250,7 @@ export function createTranscriptSlice({
         const candidate = state.messages[i];
         if (
           candidate.role === "user" &&
-          (candidate.content.trim() || candidate.attachments?.length)
+          (candidate.content.trim() || candidate.attachments?.length || candidate.quotes?.length)
         ) {
           userIndex = i;
           break;
@@ -270,6 +277,7 @@ export function createTranscriptSlice({
         await api.prompt({
           sessionId,
           content: prompt,
+          quotes: state.messages[userIndex].quotes,
           viewingSessionId: viewingSessionIdForPrompt(get(), sessionId),
           attachments: promptAttachments,
           truncateFromMessageId,
@@ -306,7 +314,7 @@ export function createTranscriptSlice({
       if (!sessionId) return;
       if (state.sessionHistory[sessionId]?.hasMoreBefore) {
         const fullMessages = await runtime.loadFullSessionMessages(sessionId);
-        if (!fullMessages || get().activeSessionId !== sessionId) return;
+        if (!fullMessages || (get().activeSessionId !== sessionId && !sessionId.startsWith("side-"))) return;
         set((current) =>
           current.activeSessionId === sessionId
             ? {
@@ -359,10 +367,21 @@ export function createTranscriptSlice({
       if (!canEdit()) return;
       const sessionId = get().activeSessionId;
       if (!sessionId || get().isRunning) return;
-      const liveMessages = get().messages;
       const fullMessages = await runtime.loadFullSessionMessages(sessionId);
-      if (!fullMessages || get().activeSessionId !== sessionId) return;
-      const merged = mergeLiveSessionMessages(fullMessages, liveMessages);
+      // Re-read the store after the reload: writes that landed during the
+      // await (an aborted turn's final message_end, a late tool_end) exist
+      // only here, so merging the pre-await snapshot would erase them
+      // (#1614) — the same post-await read abort() below relies on. A turn
+      // that started during the reload also bails: no rewrite under a live
+      // stream.
+      if (
+        !fullMessages ||
+        get().activeSessionId !== sessionId ||
+        get().isRunning
+      ) {
+        return;
+      }
+      const merged = mergeLiveSessionMessages(fullMessages, get().messages);
       set((current) =>
         current.activeSessionId === sessionId
           ? {
@@ -451,9 +470,9 @@ export function createTranscriptSlice({
       }
     },
 
-    abort: async () => {
+    abort: async (targetSessionId) => {
       const stateBeforeAbort = get();
-      const sessionId = stateBeforeAbort.activeSessionId;
+      const sessionId = targetSessionId ?? stateBeforeAbort.activeSessionId;
       if (!sessionId) return;
       const target = stateBeforeAbort.sessions.find((session) => session.id === sessionId);
       if (!sessionAllows(target, "canStop")) return;
@@ -472,7 +491,7 @@ export function createTranscriptSlice({
         return;
       }
       const submittedDraft = runtime.submittedComposerDrafts.get(sessionId);
-      const preserveSteering = stateBeforeAbort.messages
+      const preserveSteering = (sessionId === stateBeforeAbort.activeSessionId ? stateBeforeAbort.messages : stateBeforeAbort.retainedTranscripts[sessionId] ?? [])
         .slice(submittedDraft?.messageCountBeforeSend ?? 0)
         .findLast((message) => message.role === "user")?.steering;
       const stoppedAtMs = Date.now();
@@ -501,7 +520,7 @@ export function createTranscriptSlice({
         ),
       }));
       const state = get();
-      if (state.activeSessionId !== sessionId) {
+      if (state.activeSessionId !== sessionId && !sessionId.startsWith("side-")) {
         submittedDraft?.resolveAbort?.(false);
         runtime.submittedComposerDrafts.delete(sessionId);
         set((current) => ({
@@ -511,35 +530,39 @@ export function createTranscriptSlice({
       }
       const smartStop = preserveSteering
         ? { kind: "settle" as const }
-        : resolveComposerSmartStop(state.messages, submittedDraft);
+        : resolveComposerSmartStop(state.activeSessionId === sessionId ? state.messages : state.retainedTranscripts[sessionId] ?? [], submittedDraft);
       if (smartStop.kind === "restore") {
         const fullMessages = await runtime.loadFullSessionMessages(sessionId);
-        if (!fullMessages || get().activeSessionId !== sessionId) {
+        if (!fullMessages || (get().activeSessionId !== sessionId && !sessionId.startsWith("side-"))) {
           submittedDraft?.resolveAbort?.(false);
           runtime.submittedComposerDrafts.delete(sessionId);
           return;
         }
-        const merged = mergeLiveSessionMessages(fullMessages, get().messages);
+        const merged = mergeLiveSessionMessages(fullMessages, get().activeSessionId === sessionId ? get().messages : get().retainedTranscripts[sessionId] ?? []);
         const fullStop = resolveComposerSmartStop(merged, submittedDraft);
         if (fullStop.kind === "restore") {
+          if (fullStop.kept.length < merged.length) {
+            try {
+              await api.replaceSessionMessages(sessionId, fullStop.kept);
+            } catch (error) {
+              submittedDraft?.resolveAbort?.(false);
+              runtime.submittedComposerDrafts.delete(sessionId);
+              get().showToast(error instanceof Error ? error.message : String(error), { variant: "error" });
+              return;
+            }
+          }
           runtime.submittedComposerDrafts.delete(sessionId);
           submittedDraft?.resolveAbort?.(true);
           const fullWindow = { messageStart: 0, hasMoreBefore: false };
           runtime.cacheSessionTranscript(sessionId, fullStop.kept, fullWindow);
           set((current) => ({
-            messages: fullStop.kept,
+            ...(current.activeSessionId === sessionId ? { messages: fullStop.kept } : {}),
+            retainedTranscripts: { ...current.retainedTranscripts, [sessionId]: fullStop.kept },
             sessionHistory: { ...current.sessionHistory, [sessionId]: fullWindow },
             composerPrefill: { ...fullStop.draft, sessionId },
-            isRunning: false,
+            isRunning: current.activeSessionId === sessionId ? false : current.isRunning,
             runningSessions: { ...current.runningSessions, [sessionId]: false },
           }));
-          if (fullStop.kept.length < merged.length) {
-            try {
-              await api.replaceSessionMessages(sessionId, fullStop.kept);
-            } catch {
-              // Best effort — the local transcript already reflects the undo.
-            }
-          }
           return;
         }
         set((current) =>
@@ -580,7 +603,8 @@ export function createTranscriptSlice({
           current.activeSessionId === sessionId
             ? stoppedRows(current.messages)
             : current.messages,
-        isRunning: false,
+        isRunning: current.activeSessionId === sessionId ? false : current.isRunning,
+        retainedTranscripts: { ...current.retainedTranscripts, [sessionId]: stoppedRows(current.retainedTranscripts[sessionId] ?? []) },
         runningSessions: { ...current.runningSessions, [sessionId]: false },
       }));
     },

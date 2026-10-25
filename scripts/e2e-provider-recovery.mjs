@@ -65,6 +65,20 @@ const server = createServer(async (req, res) => {
       content: [],
     };
     emit("response.created", { response });
+    if (["thinking-interrupt", "thinking-timeout"].includes(scenario.mode) && nth === 1) {
+      const reasoning = { id: "rs_fixture", type: "reasoning", summary: [] };
+      emit("response.output_item.added", { output_index: 0, item: reasoning });
+      emit("response.reasoning_summary_part.added", { item_id: reasoning.id, output_index: 0, summary_index: 0, part: { type: "summary_text", text: "" } });
+      emit("response.reasoning_summary_text.delta", { item_id: reasoning.id, output_index: 0, summary_index: 0, delta: "PARTIAL_699 retained reasoning" });
+      scenario.breakStream = () => {
+        emit("response.failed", { response: { ...response, status: "failed", error: {
+          code: scenario.mode === "thinking-timeout" ? "timeout" : "upstream_stream_read_error",
+          message: scenario.mode === "thinking-timeout" ? "basispoint request timeout" : "Upstream response stream was interrupted (code: upstream_stream_read_error)",
+        } } });
+        res.end();
+      };
+      return;
+    }
     emit("response.output_item.added", { output_index: 0, item });
     emit("response.content_part.added", {
       item_id: item.id,
@@ -96,7 +110,7 @@ const server = createServer(async (req, res) => {
       },
     });
     res.end();
-  } else if (scenario.mode === "stream" && nth === 1) {
+  } else if (["stream", "stream-stop"].includes(scenario.mode) && nth === 1) {
     chunk({ role: "assistant", content: "PARTIAL_699" });
     // Wait for the screenshot observer to confirm partial content reached the UI.
     scenario.breakStream = () => res.destroy();
@@ -131,7 +145,9 @@ const debugServer = createServer();
 await new Promise((r) => debugServer.listen(0, "127.0.0.1", r));
 const debugPort = debugServer.address().port;
 await new Promise((r) => debugServer.close(r));
-const { appDir, electronBinary } = resolveElectronBinary(root);
+const { appDir, electronBinary } = process.env.PI_E2E_ELECTRON
+  ? { appDir: join(root, "apps/desktop"), electronBinary: process.env.PI_E2E_ELECTRON }
+  : resolveElectronBinary(root);
 const env = {
   ...process.env,
   PI_DESKTOP_DATA_DIR: join(artifacts, "data"),
@@ -264,7 +280,8 @@ async function run(name, mode, style = "chat_completions") {
   await waitFor(
     async () => {
       const text = await bodyText();
-      if (scenario.breakStream && text.includes("PARTIAL_699")) {
+      const events = await evaluate("window.__events699");
+      if (scenario.breakStream && (text.includes("PARTIAL_699") || events.some(e => e.event?.message?.thinking?.includes("PARTIAL_699")))) {
         await screenshot(`${name}-partial`);
         scenario.breakStream();
         scenario.breakStream = undefined;
@@ -273,21 +290,29 @@ async function run(name, mode, style = "chat_completions") {
         retryShot = true;
         statuses.push(text);
         await screenshot(`${name}-retry`);
+        if (mode === "stream-stop") {
+          await evaluate("document.querySelector('.composer-shell .stop-btn').click()");
+        }
       }
-      const events = await evaluate("window.__events699");
-      return events.some(
+      const ended = events.some(
         (e) => e.sessionId === session.id && e.event?.type === "agent_end",
       );
+      return ended && (mode !== "stream-stop" || events.some(
+        (e) => e.sessionId === session.id && e.event?.type === "error" && e.event.error.code === "TURN_ABORTED",
+      ));
     },
     `${name} terminal lifecycle`,
     150000,
   );
+  if (mode === "stream-stop") {
+    await waitFor(() => evaluate("!document.querySelector('.composer-shell .stop-btn') && Boolean(document.querySelector('.composer-input[contenteditable=true]'))"), "Stop returns composer to idle");
+  }
   await waitFor(async () => {
     const detail = await ipc("sessionGet", { id: session.id });
     return detail.session?.messages?.some(
       (m) =>
         m.role === "assistant" &&
-        (m.status === "error" || m.content?.includes("RECOVERED_699")),
+        (m.status === "error" || m.content?.includes("RECOVERED_699") || (mode === "stream-stop" && m.content === "PARTIAL_699")),
     );
   }, "durable final assistant");
   // Windows may occlude the test window during a long outage. Bring the
@@ -296,7 +321,7 @@ async function run(name, mode, style = "chat_completions") {
   await screenshot(`${name}-settled`);
   await waitFor(async () => {
     const text = await bodyText();
-    return mode === "stream" ? text.includes("STREAM_FAILED") && text.includes("PARTIAL_699") : mode === "always"
+    return mode === "stream-stop" ? text.includes("PARTIAL_699") : mode === "always"
       ? text.includes("NETWORK_ERROR")
       : text.includes("RECOVERED_699");
   }, "final UI");
@@ -358,9 +383,6 @@ async function continueAfterFailure(record) {
   assert.equal(record.continuation.requests, 1);
   const continued = await ipc("sessionGet", { id: record.sessionId });
   assert(continued.session.messages.filter(message => message.role === "user").length >= 2, "Continue appends a user message");
-  if (record.mode === "stream") {
-    assert(continued.session.messages.some(message => message.content === "PARTIAL_699" && message.status === "error"), "Partial response is not regenerated away");
-  }
   assert(!record.continuation.events.some((e) => e.event?.type === "error"));
   await writeFile(join(artifacts, "results.json"), JSON.stringify(results, null, 2));
 }
@@ -398,12 +420,22 @@ try {
   );
   const settings = await ipc("settingsGet");
   await ipc("settingsSet", { ...settings, language: "zh-CN", autoGenerateTitle: false });
+  await waitFor(() => evaluate(`(() => {
+    const skip = [...document.querySelectorAll('button')].find(button => /^(暂时跳过|Skip for now)$/i.test(button.textContent.trim()));
+    if (!skip) return false;
+    skip.click();
+    return true;
+  })()`), "fresh-profile onboarding Skip");
+  await waitFor(async () => !(await bodyText()).includes("暂时跳过"), "onboarding dismissed");
   console.log("ARTIFACTS", artifacts);
   await run("01-network-recovery", "recover");
-  await continueAfterFailure(await run("02-stream-recovery", "stream"));
+  await run("02-stream-recovery", "stream");
   await run("03-responses-recovery", "recover", "responses");
   await continueAfterFailure(await run("04-network-exhaustion", "always"));
   await run("05-cumulative-budget", "cumulative");
+  await run("06-responses-thinking-interrupt", "thinking-interrupt", "responses");
+  await run("07-responses-thinking-timeout", "thinking-timeout", "responses");
+  await run("08-stop-during-recovery", "stream-stop");
   const summary = verifyProviderRecovery(results);
   await writeFile(
     join(artifacts, "verified-summary.json"),

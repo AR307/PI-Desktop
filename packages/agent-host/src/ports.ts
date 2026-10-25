@@ -1,3 +1,4 @@
+import type { MessageQuote } from "@pi-desktop/shared";
 import type {
   AgentPromptAttachment,
   AskToolResolution,
@@ -40,6 +41,7 @@ export type TurnStartRequest = {
   userMessageId?: string;
   voiceOrigin?: VoiceOrigin;
   attachments?: AgentPromptAttachment[];
+  quotes?: MessageQuote[];
   effectivePermissionMode: RacpPermissionMode;
   idempotencyKey?: string;
   principal: Principal;
@@ -58,6 +60,7 @@ export type TurnSteerRequest = {
   userMessageId?: string;
   voiceOrigin?: VoiceOrigin;
   attachments?: AgentPromptAttachment[];
+  quotes?: MessageQuote[];
   principal: Principal;
 };
 
@@ -86,6 +89,7 @@ export type QueuedTurnRecord = {
   userMessageId?: string;
   voiceOrigin?: VoiceOrigin;
   attachments?: AgentPromptAttachment[];
+  quotes?: MessageQuote[];
   effectivePermissionMode: RacpPermissionMode;
   idempotencyKey?: string;
   /** Stable hash of the input, so a reused key with different input is a conflict. */

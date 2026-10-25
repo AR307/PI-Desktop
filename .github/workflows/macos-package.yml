@@ -1,0 +1,94 @@
+name: macOS package (test builds)
+
+on:
+  push:
+    branches: ['codex/package-desktop-*']
+    paths:
+      - '.github/workflows/macos-package.yml'
+      - 'apps/desktop/**'
+      - 'packages/**'
+      - 'scripts/**'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+      - 'crates/**'
+      - 'pnpm-lock.yaml'
+      - 'pnpm-workspace.yaml'
+      - 'package.json'
+  workflow_dispatch:
+
+# Build-only lane for the fork: no tag, release upload or signing credentials.
+permissions:
+  contents: read
+
+concurrency:
+  group: macos-package-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  package:
+    name: macOS ${{ matrix.arch }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-15
+            arch: arm64
+            native_arch: arm64
+          - os: macos-15-intel
+            arch: x64
+            native_arch: x86_64
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    defaults:
+      run:
+        shell: bash
+    env:
+      CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: pnpm
+      - uses: dtolnay/rust-toolchain@1.90.0
+      - uses: Swatinem/rust-cache@v2
+      - name: Verify native build architecture
+        run: test "$(uname -m)" = '${{ matrix.native_arch }}'
+      - name: Install locked dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Build workspace and typecheck Desktop
+        run: |
+          pnpm --filter '@pi-desktop/desktop^...' --fail-if-no-match build
+          pnpm --filter @pi-desktop/desktop typecheck
+      - name: Build native Host and runtime bundle
+        run: |
+          cargo build --release --locked -p host-core
+          pnpm --filter @pi-desktop/agent-runtime bundle
+          pnpm --filter @pi-desktop/desktop build
+      - name: Package unsigned DMG and ZIP
+        working-directory: apps/desktop
+        run: pnpm exec electron-builder --mac --${{ matrix.arch }} --publish never
+      - name: Smoke test packaged application and Host
+        run: |
+          set -euo pipefail
+          app=$(find apps/desktop/release -maxdepth 2 -type d -name 'PI-Desktop.app' -print -quit)
+          test -n "$app"
+          file "$app/Contents/MacOS/PI-Desktop"
+          file "$app/Contents/Resources/bin/pi-desktop-host-core"
+          node scripts/e2e-packaged-boot.mjs "$app/Contents/MacOS/PI-Desktop"
+      - name: Record unsigned artifact scope
+        run: |
+          echo 'Unsigned, non-notarized macOS test packages. No GitHub Release was created.' >> "$GITHUB_STEP_SUMMARY"
+          echo "Commit: $GITHUB_SHA; architecture: ${{ matrix.arch }}" >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v7
+        with:
+          name: PI-Desktop-mac-${{ matrix.arch }}-${{ github.sha }}
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 14
+          path: |
+            apps/desktop/release/*.dmg
+            apps/desktop/release/*.zip
+            apps/desktop/release/*.blockmap
+            apps/desktop/release/*mac*.yml

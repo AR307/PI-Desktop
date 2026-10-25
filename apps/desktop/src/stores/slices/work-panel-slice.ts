@@ -1,3 +1,4 @@
+import { closeSideChat, confirmSideChatDiscard } from "../../features/chat/side-chat-service";
 import { api } from "../../lib/api";
 import { isRemoteSession } from "../../lib/remote-session-safety";
 import {
@@ -21,6 +22,7 @@ import {
 import {
   WORK_PANEL_COMPACT_MIN_WIDTH,
   WORK_PANEL_DEFAULT_WIDTH,
+  WORK_PANEL_MIN_WIDTH,
 } from "../../lib/work-panel-resize";
 import type { AppState } from "../app-state";
 import type { StoreAccess } from "./types";
@@ -33,11 +35,10 @@ export function loadWorkPanelWidth(): number {
     if (!raw) return WORK_PANEL_DEFAULT_WIDTH;
     const parsed = JSON.parse(raw) as Record<string, unknown>;
     const width = Number(parsed.width);
+    // Only the former sidebar-reopen path stored widths below the regular
+    // minimum; that width was lent to the sidebar, not chosen by the user.
     return Number.isFinite(width)
-      ? Math.max(
-          WORK_PANEL_COMPACT_MIN_WIDTH,
-          Math.round(width),
-        )
+      ? Math.max(WORK_PANEL_MIN_WIDTH, Math.round(width))
       : WORK_PANEL_DEFAULT_WIDTH;
   } catch {
     return WORK_PANEL_DEFAULT_WIDTH;
@@ -114,9 +115,11 @@ export function createWorkPanelSlice({
   | "collapseWorkPanel"
   | "resetWorkPanelContext"
   | "setWorkPanelWidth"
+  | "setWorkPanelYieldedWidth"
   | "openFileInWorkPanel"
   | "openUrlInWorkPanel"
   | "updateBrowserWorkPanelTab"
+  | "restoreBrowserWorkPanelTabs"
 > {
   let workPanelFileRequestSeq = 0;
   const nextFileRequest = (tab?: WorkPanelTab): WorkPanelContext["fileRequest"] => {
@@ -296,8 +299,23 @@ export function createWorkPanelSlice({
       };
     });
   },
-  closeWorkPanelTab: (tabId) => {
+  closeWorkPanelTab: async (tabId) => {
     const current = get();
+    const side = current.workPanelTabs.find((tab) => tab.id === tabId && tab.kind === "side-chat");
+    if (side?.resource) {
+      if (!(await confirmSideChatDiscard(side.resource))) return;
+      try { await closeSideChat(side.resource); }
+      catch (error) { get().showToast(String(error), { variant: "error" }); return; }
+      // The parent may have changed while its child stopped. Remove only that parent's tab.
+      if (get().activeSessionId !== current.activeSessionId && current.activeSessionId) {
+        set((state) => {
+          const context = state.workPanelContexts[current.activeSessionId!];
+          if (!context) return {};
+          return { workPanelContexts: { ...state.workPanelContexts, [current.activeSessionId!]: { ...context, ...closeWorkPanelTabState(context, tabId) } } };
+        });
+        return;
+      }
+    }
     if (current.activeSessionId && current.workPanelTabs.some((tab) => tab.id === tabId && tab.resource === "pi.browser/browser")) {
       void api.pluginViewClose("pi.browser", "browser", { sessionId: current.activeSessionId, tabId })
         .catch((error) => get().showToast(String(error), { variant: "error" }));
@@ -352,12 +370,19 @@ export function createWorkPanelSlice({
   setWorkPanelWidth: (width) => {
     const committedWidth = Math.round(width);
     set({
-      workPanelWidth: Math.max(
-        WORK_PANEL_COMPACT_MIN_WIDTH,
-        committedWidth,
-      ),
+      workPanelWidth: Math.max(WORK_PANEL_MIN_WIDTH, committedWidth),
+      // An explicit resize replaces any width lent to a reopened sidebar.
+      workPanelYieldedWidth: null,
     });
     saveWorkPanelWidth(get().workPanelWidth);
+  },
+  setWorkPanelYieldedWidth: (width) => {
+    const next =
+      width === null
+        ? null
+        : Math.max(WORK_PANEL_COMPACT_MIN_WIDTH, Math.round(width));
+    if (get().workPanelYieldedWidth === next) return;
+    set({ workPanelYieldedWidth: next });
   },
 
   openFileInWorkPanel: (path, mimeType, position) => {
@@ -375,6 +400,25 @@ export function createWorkPanelSlice({
         : tab);
       return { ...(visible ? { workPanelTabs: tabs } : {}),
         workPanelContexts: { ...state.workPanelContexts, [sessionId]: { ...context, tabs } } };
+    });
+  },
+  restoreBrowserWorkPanelTabs: (sessionId, pages) => {
+    if (!sessionId || isRemoteSession(get().sessions.find((session) => session.id === sessionId)) || sessionId.startsWith("remote:")) return;
+    set((state) => {
+      const visible = state.activeSessionId === sessionId && !isSessionSelectionPending(sessionId);
+      const context = visible ? currentWorkPanelContext(state) : state.workPanelContexts[sessionId] ?? emptyWorkPanelContext();
+      const retained = pages.flatMap((page): WorkPanelTab[] => {
+        const tabId = page.tabId;
+        if (page.sessionId !== sessionId || !tabId || context.tabs.some((tab) => tab.id === tabId)) return [];
+        return [{ ...browserPluginTab(), id: tabId, location: page.url, label: page.title || browserTabLabel(page.url) }];
+      });
+      const last = retained.at(-1);
+      if (!last) return {};
+      const next = { ...context, tabs: [...context.tabs, ...retained], activeTabId: context.activeTabId ?? last.id };
+      return {
+        workPanelContexts: { ...state.workPanelContexts, [sessionId]: next },
+        ...(visible ? { workPanelTabs: next.tabs, activeWorkPanelTabId: next.activeTabId } : {}),
+      };
     });
   },
   openUrlInWorkPanel: (url) => {

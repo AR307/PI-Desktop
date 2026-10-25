@@ -158,6 +158,11 @@ check("other plugins keep no owned provider rows", (providerList.providers ?? []
 // 4) plugin OAuth through the real Settings page, Host-rendered dialog, and
 // provider runtime. The plugin returns only synthetic fixture credentials.
 const ui = await connectUiRenderer(Number(process.env.E2E_CDP_PORT));
+await ui.until(
+  () => !document.querySelector(".mirrorcoding-dialog[open]"),
+  null,
+  "completed onboarding leaves the Settings navigation unobscured",
+);
 await ui.click('button[data-nav="settings"]');
 await ui.until(() => Boolean(document.querySelector(".settings-shell-full")), null, "Settings page");
 const openedModels = await ui.run((label) => {

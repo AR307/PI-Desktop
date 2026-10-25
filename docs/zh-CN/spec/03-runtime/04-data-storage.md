@@ -64,12 +64,15 @@ host-core 之前被解析为绝对路径。
  ├── review-changes/<sessionId>/<snapshotId>/
  │    ├── before          # bounded pre-tool bytes, when reversible
  │    └── meta.json       # path, hashes, diff state, and ownership
- └── scratch/<sessionId>/ # per-session agent temp files (D114), including
-                          # composer pasted files under pasted/ — deleted
-                          # with the session; startup sweep removes orphans
+ ├── scratch/<sessionId>/ # per-session agent temp files (D114), including
+ │                        # composer pasted files under pasted/ — deleted
+ │                        # with the session; startup sweep removes orphans
 
-                          # with the session; startup sweep removes orphans
-                          # and stale dirs
+ │                        # with the session; startup sweep removes orphans
+ │                        # and stale dirs
+ └── visualizations/<sessionId>/ # inline visualization .html fragments (D671) —
+                          # deleted with the session; startup sweep removes
+                          # orphans only, never by age
 ```
 
 一个数据库文件保持跨实体写入事务性（例如会话+
@@ -459,6 +462,9 @@ CREATE INDEX idx_session_import_origins_plugin
   删除原任务不会删除子任务的副本。未引用文件、截断点之后独有的输入和其他
   scratch 输出不复制；已过期的文件仍不可用，不新增跨任务读取授权。
   分支失败时清理已复制的输入及子任务转录本。
+- 分支只把复制的转录本所引用的 `visualizations/<sourceId>/` 片段复制到
+  `visualizations/<childId>/`，并改写这些 `::visualize` 路径；未引用的片段不复制。
+  卡片总是从所属会话的目录加载，所以删除原会话不影响分支（D671）。
 
 ### 4.6 turns — 每次 agent 运行一行
 
@@ -896,7 +902,7 @@ CREATE INDEX idx_artifacts_time ON artifacts(updated_at DESC);
 由 host-core 在与 `tool_execute` 审计行相同的事务中更新插入
 每当 Write/Edit（或声明文件效果的插件工具）成功时 -
 重复编辑更新 Write/Edit/`op`，每个会话每个文件保留一行。
-写入会话暂存目录 (D114) 被排除：工件列表
+写入会话暂存目录 (D114) 或会话可视化目录 (D671) 被排除：工件列表
 仅工作区可交付成果。
 
 ### 4.11 scheduled_tasks + task_runs — 自动化
@@ -1233,6 +1239,17 @@ outbox 排空。渲染器侧的停止绝不重写已有已开始回复的转录
 主机读取设置时会将缺失、格式错误或超出范围的值规范化为 600，设置写入则验证
 1–1,000,000 的整数范围。因此现有数据库会在读取时延迟获得默认值，不需要破坏性
 迁移或第二个设置存储。
+
+应用设置 JSON 还可选存储布尔值 `showThinking`，用于转录中的推理可见性。它是可移植的
+应用偏好，会像旧字段一样跨设备同步。缺失值回退到旧版 `thinkingDisplayMode` 字段
+（`compact` 隐藏，`detailed`／未知／缺失显示）；该旧字段仅为持久化设置兼容性保留，
+并作为该回退来源。应用设置 JSON 还可选存储 `transcriptDisplayMode`
+（`flat` | `command-first` | `fully-folded`），用于转录中的过程分组：`flat` 不渲染
+嵌套活动组，`command-first` 将 `Bash`／run 行作为活动组旁的独立行，`fully-folded`
+让每条命令留在其周围的组内。缺失或未知值在渲染层与主进程设置规范化中都归一化为
+`fully-folded`。它是可移植的应用偏好，只改变展示。已弃用的 `keepCommandsExpanded`
+布尔值仅为持久化设置兼容性保留；它不再在设置中暴露，也不再参与渲染读取。这些新增展示
+偏好既不重写已存推理，也不改变数据库 schema。
 
 应用设置 JSON 可能仍包含旧版本写入的提示词增强键。为支持回退和降级，宿主保留这些值，
 但不会再把它们作为有效偏好读取或写入。用户安装并授权独立的

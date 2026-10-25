@@ -25,6 +25,8 @@ import {
 import { createFrameBatcher } from "../../lib/frame-batcher";
 import {
   clearSessionAsks,
+  dropSessionAskDrafts,
+  dropToolCallAskDrafts,
   enqueueAsk,
   removeAskForToolCall,
 } from "../../lib/pending-asks";
@@ -148,6 +150,7 @@ export function createEventsSlice({
   return {
     applyTodosChanged: (snapshot: SessionTodoSnapshot) => {
       if (!isSessionTodoSnapshot(snapshot)) return;
+      if (snapshot.sessionId.startsWith("side-") && !get().sessions.some((session) => session.id === snapshot.sessionId)) return;
       set((state) => {
         const current = state.sessionTodos[snapshot.sessionId];
         if (current && current.revision >= snapshot.revision) return state;
@@ -156,6 +159,7 @@ export function createEventsSlice({
     },
     handlePlansChanged: (event) => {
       if (!event?.sessionId) return;
+      if (event.sessionId.startsWith("side-") && !get().sessions.some((session) => session.id === event.sessionId)) return;
       runtime.nextPlanSyncGeneration(event.sessionId);
       set((state) => {
         const previousCheckpoint = state.planCheckpoints[event.sessionId];
@@ -199,7 +203,7 @@ export function createEventsSlice({
       });
       projectCheckpointHistory(event.sessionId, event.proposal);
       const checkpoint = get().planCheckpoints[event.sessionId];
-      if (event.state === "awaiting_approval" && isPendingPlan(checkpoint)) {
+      if (event.state === "awaiting_approval" && isPendingPlan(checkpoint) && !event.sessionId.startsWith("side-")) {
         openPlanArtifact(
           checkpoint,
           get().openWorkPanelTabForSession,
@@ -218,6 +222,7 @@ export function createEventsSlice({
     },
 
     handleAgentEvent: (envelope) => {
+      if (envelope.sessionId.startsWith("side-") && !get().sessions.some((session) => session.id === envelope.sessionId)) return;
       if (envelope.event.type === "message_end") {
         const checkpoint = historyCheckpoints.get(envelope.sessionId);
         if (checkpoint) {
@@ -372,6 +377,11 @@ export function createEventsSlice({
             state.pendingAsks,
             envelope.sessionId,
           ),
+          askDrafts: dropSessionAskDrafts(
+            state.askDrafts,
+            state.pendingAsks,
+            envelope.sessionId,
+          ),
           latestTurnResults:
             event.type === "error" && event.error.code === "TURN_ABORTED"
               ? withoutRecordKey(state.latestTurnResults, envelope.sessionId)
@@ -422,7 +432,7 @@ export function createEventsSlice({
         projectCheckpointHistory(envelope.sessionId, event.proposal);
         if (event.state === "awaiting_approval") {
           const checkpoint = get().planCheckpoints[envelope.sessionId];
-          if (isPendingPlan(checkpoint)) {
+          if (isPendingPlan(checkpoint) && !envelope.sessionId.startsWith("side-")) {
             openPlanArtifact(
               checkpoint,
               get().openWorkPanelTabForSession,
@@ -463,10 +473,17 @@ export function createEventsSlice({
             envelope.sessionId,
             event.toolCallId,
           );
+          const askDrafts = dropToolCallAskDrafts(
+            state.askDrafts,
+            state.pendingAsks,
+            envelope.sessionId,
+            event.toolCallId,
+          );
           return pendingPermissions === state.pendingPermissions &&
-            pendingAsks === state.pendingAsks
+            pendingAsks === state.pendingAsks &&
+            askDrafts === state.askDrafts
             ? {}
-            : { pendingPermissions, pendingAsks };
+            : { pendingPermissions, pendingAsks, askDrafts };
         });
       }
 

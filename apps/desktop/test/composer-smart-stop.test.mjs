@@ -12,6 +12,14 @@ const draft = {
   ],
 };
 
+test("stopping an unanswered quoted request restores its sources and attachments", () => {
+  const quotes = [{ sessionId: "parent", messageId: "answer", text: "中文\nconst answer = 42;" }];
+  const quoted = { ...draft, quotes };
+  const sent = { ...message("user", draft.text), quotes };
+  assert.deepEqual(resolveComposerSmartStop([sent], { messageCountBeforeSend: 0, draft: quoted }), { kind: "restore", kept: [], draft: quoted });
+  assert.deepEqual(resolveComposerSmartStop([sent]), { kind: "restore", kept: [], draft: { text: draft.text, fileReferences: [], quotes } });
+});
+
 test("unanswered stop restores the structured draft and removes its user row", () => {
   const previous = message("assistant", "previous answer");
   const sent = message(

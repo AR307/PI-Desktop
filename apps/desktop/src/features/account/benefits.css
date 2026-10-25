@@ -1,0 +1,161 @@
+.mc-account-balances {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  flex: none;
+}
+.mc-wallet-trigger {
+  height: 28px;
+  padding: 0 6px;
+  border: 0;
+  background: transparent;
+  color: var(--ds-text-secondary);
+  font-size: var(--text-sm);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.mc-wallet-trigger:hover {
+  background: var(--ds-bg-active);
+  color: var(--ds-text-primary);
+}
+.mc-benefits-control {
+  flex: none;
+}
+.mc-quota-trigger {
+  display: flex;
+  align-items: center;
+  width: 84px;
+  min-width: 44px;
+  height: 28px;
+  padding: 8px;
+}
+.mc-quota-track {
+  display: block;
+  width: 100%;
+  height: 5px;
+  border-radius: var(--radius-xs);
+  overflow: hidden;
+  background: var(--ds-bg-active);
+}
+.mc-quota-track > span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--ds-text-muted);
+}
+.mc-quota-track.is-green > span {
+  background: var(--ds-success);
+}
+.mc-quota-track.is-yellow > span {
+  background: var(--ds-quota-warning);
+}
+.mc-quota-track.is-red > span {
+  background: var(--ds-error);
+}
+.mc-quota-track.is-red {
+  outline: 1px solid var(--ds-error);
+}
+.mc-quota-track.is-unknown {
+  border: 1px dashed var(--ds-text-muted);
+}
+.mc-benefits-popover {
+  position: fixed;
+  top: 0;
+  left: 0;
+  z-index: 40;
+  visibility: hidden;
+  pointer-events: none;
+  width: min(380px, calc(100vw - 16px));
+  max-height: min(520px, calc(100vh - 32px));
+  overflow-y: auto;
+  box-sizing: border-box;
+  padding: 16px;
+  border: 1px solid var(--ds-border-strong);
+  border-radius: var(--radius-md);
+  color: var(--ds-text-primary);
+  background: var(--ds-bg-elevated-opaque);
+  box-shadow: var(--ds-shadow-dialog);
+}
+.mc-benefits-popover.is-open {
+  visibility: visible;
+  pointer-events: auto;
+}
+.mc-benefits-panel {
+  display: grid;
+  gap: 14px;
+  min-width: 0;
+}
+.mc-benefits-heading,
+.mc-checkin {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+}
+.mc-benefits-panel h3,
+.mc-benefits-panel p {
+  margin: 0;
+}
+.mc-benefits-panel h3 {
+  font-size: var(--text-base);
+}
+.mc-benefits-panel p,
+.mc-benefits-panel small {
+  color: var(--ds-text-secondary);
+  font-size: var(--text-sm);
+  line-height: var(--leading-prose);
+  overflow-wrap: anywhere;
+}
+.mc-subscriptions {
+  display: grid;
+  gap: 12px;
+}
+.mc-subscription {
+  border-top: 1px solid var(--ds-border-default);
+  padding-top: 12px;
+}
+.mc-subscription strong {
+  font-size: var(--text-md);
+  overflow-wrap: anywhere;
+}
+.mc-benefits-panel .mc-benefits-error {
+  color: var(--ds-error);
+}
+@media (max-width: 900px) {
+  .mc-quota-trigger {
+    width: 52px;
+  }
+}
+@container composer-stack (max-width: 560px) {
+  .mc-quota-trigger {
+    width: 44px;
+  }
+  .composer-toolbar:has(.mc-account-balances) .composer-mode-chip {
+    width: 28px;
+    min-width: 28px;
+    max-width: 28px;
+    flex-basis: 28px;
+    justify-content: center;
+    padding: 0 !important;
+  }
+  .composer-toolbar:has(.mc-account-balances) .composer-mode-chip-label {
+    display: none;
+  }
+}
+@container composer-stack (max-width: 400px) {
+  .composer-toolbar:has(.mc-account-balances) {
+    padding-inline: 4px;
+    gap: 2px;
+  }
+  .mc-wallet-trigger {
+    max-width: 72px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    padding-inline: 2px;
+  }
+  .composer-toolbar:has(.mc-account-balances) .composer-left,
+  .composer-toolbar:has(.mc-account-balances) .composer-right {
+    gap: 2px;
+  }
+}

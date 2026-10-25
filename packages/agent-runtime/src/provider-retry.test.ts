@@ -74,6 +74,32 @@ function failedStream(
   return stream;
 }
 
+describe("provider interruption versus user cancellation", () => {
+  it("retries an SDK-aborted connection when the caller did not cancel", async () => {
+    const claim = vi.fn((error: ClassifiedAgentError) => error.retriable ? 1 : undefined);
+    let calls = 0;
+    const stream = createProviderRetryStream(model, context, {}, () => {
+      if (calls++) return successfulStream();
+      const inner = createAssistantMessageEventStream();
+      const error = assistantMessage({ stopReason: "aborted", errorMessage: "The operation was aborted due to timeout" });
+      inner.push({ type: "error", reason: "aborted", error });
+      inner.end(error);
+      return inner;
+    }, { claim, headers: () => undefined, sleep: async () => undefined });
+    expect((await stream.result()).stopReason).toBe("stop");
+    expect(calls).toBe(2);
+    expect(claim).toHaveBeenCalledWith(expect.objectContaining({ code: "TIMEOUT", retriable: true }), "request");
+  });
+
+  it("classifies remote abort text as transient but a caller Stop as cancellation", () => {
+    for (const message of ["upstream aborted connection", "stream aborted by peer", "basispoint timeout", "upstream_stream_read_error", "Request aborted due to timeout", "The operation was aborted due to timeout"]) {
+      expect(classifyProviderError(assistantMessage({ errorMessage: message }))).toMatchObject({ retriable: true });
+    }
+    expect(classifyProviderError(assistantMessage({ stopReason: "aborted" })))
+      .toMatchObject({ code: "TURN_ABORTED", retriable: false });
+  });
+});
+
 function successfulStream(): ReturnType<typeof createAssistantMessageEventStream> {
   const stream = createAssistantMessageEventStream();
   const message = assistantMessage({

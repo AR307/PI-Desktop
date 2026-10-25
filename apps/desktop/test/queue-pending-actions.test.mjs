@@ -202,7 +202,7 @@ test("pending queue actions stay locked until admission succeeds", async (t) => 
         assert.deepEqual(entries, []);
         assert.deepEqual(state.queuedPrompts["session-a"] ?? [], []);
         if (action === "editQueuedPrompt") {
-          assert.deepEqual(state.composerPrefill, { sessionId: "session-a", ...draft });
+          assert.deepEqual(state.composerPrefill, { sessionId: "session-a", quotes: draft.quotes, ...draft });
         }
       });
     }
@@ -257,13 +257,15 @@ test("editing a restored queue preserves attachments when resubmitted", async (t
     const { createQueueSlice } = await server.ssrLoadModule("/src/stores/slices/queue-slice.ts");
     const image = { path: "/scratch/icon.png", name: "icon.png", kind: "image", mimeType: "image/png" };
     const file = { path: "/scratch/notes.txt", name: "notes.txt", kind: "file", mimeType: "text/plain" };
-    for (const [name, content, attachments] of [
+    const quote = { sessionId: "parent", messageId: "source-message", text: "Keep the original context" };
+    for (const [name, content, attachments, quotes] of [
       ["image and file", "Review @/scratch/notes.txt with the image", [image, file]],
       ["image only", "", [image]],
       ["text only", "Review the plan", undefined],
+      ["quoted prompt", "Check this claim", undefined, [quote]],
     ]) {
       await t.test(name, async () => {
-        let entries = [{ id: "restored-turn", sessionId: "session-a", content, attachments,
+        let entries = [{ id: "restored-turn", sessionId: "session-a", content, attachments, quotes,
           position: 1, createdAt: "2026-09-23T00:00:00Z" }];
         let submitted;
         globalThis.window = { piDesktop: { invoke: async (channel, payload) => {
@@ -291,12 +293,13 @@ test("editing a restored queue preserves attachments when resubmitted", async (t
         slice.editQueuedPrompt("restored-turn");
         assert.deepEqual(entries, [], "editing removes the original queued entry");
         assert.deepEqual(state.composerPrefill, {
-          sessionId: "session-a", text: content, fileReferences: (attachments ?? []).map((attachment) =>
+          sessionId: "session-a", text: content, quotes, fileReferences: (attachments ?? []).map((attachment) =>
             attachment.kind === "file" ? { ...attachment, token: "@/scratch/notes.txt" } : attachment),
         }, "restored draft retains the Host's text and attachments");
         assert.equal(await slice.enqueuePrompt(state.composerPrefill.text, state.composerPrefill), true);
         assert.equal(submitted.content, content, "resubmitting must not rewrite serialized file references");
         assert.deepEqual(submitted.attachments ?? [], attachments ?? [], "resubmitting must keep the same attachments");
+        assert.deepEqual(submitted.quotes, quotes, "resubmitting must keep the selected references");
       });
     }
   } finally {

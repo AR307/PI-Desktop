@@ -40,7 +40,7 @@ export function useImageComposer(sessionId: string | undefined, mode: Mode, thin
       await state.configureActiveSession({
         mode: next === "image" ? "agent" : next,
         thinkingLevel,
-      });
+      }, sessionId);
       await save({ ...config, active: next === "image" });
     } catch (error) { report(error); }
   };

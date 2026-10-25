@@ -157,7 +157,7 @@ export function createSessionCoordination({
       }
       return {
         ...switchWorkPanelSession(state, undefined),
-        ...clearSessionPanes(),
+        ...clearSessionPanes(state),
         activeSessionId: undefined,
         selectingSessionId: undefined,
         messages: [],

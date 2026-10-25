@@ -92,9 +92,12 @@ are rejected. The stable installation lock prevents competing managed launches.
 Filesystem maintenance uses Electron's `original-fs`: archives such as `app.asar`
 inside session scratch or downloaded applications remain physical files, not
 virtual directories. Their bytes and adjacent `.asar.unpacked` directories migrate
-unchanged. Windows link types are read from the link's own filesystem attributes
-in one batch, not by following its target; dangling directory/file links remain
-links, and internal targets are relocated without requiring them to exist.
+unchanged. Windows links are classified in one batch by their reparse-point
+kind, preserving junctions as junctions and symbolic links as symbolic links.
+For a symbolic link whose target exists, the target's kind determines whether
+it is recreated as a directory or file link; for dangling or unavailable
+targets, the link's own directory attribute determines that type. Internal
+targets are relocated without requiring them to exist.
 Windows absolute link targets are lexically normalized before creation and
 verification, so trailing separators from junctions do not cause false failures. Copy
 failures include the source and destination paths in the existing local error
@@ -109,7 +112,7 @@ This does not recreate an unavailable custom storage volume during startup.
 Rust's offline `--relocate-data <old-root> <copied-root>` mode owns structured
 path relocation in the copied SQLite index, transcripts/revisions/checkpoints,
 outbox, installed plugin registry and agent capability metadata. It does not boot
-RPC, upgrade schemas, recover turns, or sweep scratch. It changes only known
+RPC, upgrade schemas, recover turns, or sweep scratch or visualizations. It changes only known
 path-bearing fields under the old root. External projects, dev/builtin plugins,
 narrative text, commands, source code, secrets, and arbitrary plugin-private formats
 are preserved. Credentials and their machine key migrate as bytes with their
@@ -125,6 +128,17 @@ atomically replaced. Errors keep the old profile active and visible in settings;
 retrying the same destination uses the failed job's ownership identity. A crash
 before publication leaves pending work to recopy from the source. An unavailable
 selected volume refuses startup rather than creating a blank profile elsewhere.
+If the managed installation's default data root is missing, startup pauses before
+loading app services and offers two recovery choices: create a fresh default data
+root or select an existing PI-Desktop storage root. The selected location must
+contain `data/pi.sqlite` or be the data directory containing `pi.sqlite`; its
+pointer is written only after validation. A sibling `browser/` directory is used
+when present, otherwise the installation's current browser root is retained.
+Dismissal exits without changing the pointer or creating a profile. Missing custom
+roots and pending cache/backup maintenance continue to refuse startup. A queued
+migration may resume with an absent default data root only when its browser root
+still exists, preserving first-install migration. An explicit `PI_DESKTOP_DATA_DIR`
+remains outside this recovery flow.
 Original directories remain explicit backups. Deleting these requires a separate
 settings confirmation after checking new-location functionality, including plugins
 that may own absolute references the host cannot safely rewrite. Backup cleanup
@@ -176,11 +190,14 @@ to an absolute path before it reaches host-core as a child-process variable.
  ├── review-changes/<sessionId>/<snapshotId>/
  │    ├── before          # bounded pre-tool bytes, when reversible
  │    └── meta.json       # path, hashes, diff state, and ownership
- └── scratch/<sessionId>/ # per-session agent temp files (D114), including
-                          # composer pasted files under pasted/ and replayed/
-                          # image fallbacks — deleted
-                          # with the session; startup sweep removes orphans
-                          # and stale dirs
+ ├── scratch/<sessionId>/ # per-session agent temp files (D114), including
+ │                        # composer pasted files under pasted/ and replayed/
+ │                        # image fallbacks — deleted
+ │                        # with the session; startup sweep removes orphans
+ │                        # and stale dirs
+ └── visualizations/<sessionId>/ # inline visualization .html fragments (D671) —
+                          # deleted with the session; startup sweep removes
+                          # orphans only, never by age
 ```
 
 One database file keeps cross-entity writes transactional (e.g. session +
@@ -396,9 +413,22 @@ CREATE TABLE kv (
 | `plugin:<id>` | per-plugin settings; uninstall = `DELETE WHERE ns = ?` |
 | `projectMemory` | durable user-authored context keyed by canonical project path; structured values contain `format: "entries-v1"`, visual `entries`, derived `content`, and `updatedAt` |
 
-The app settings JSON optionally stores `thinkingDisplayMode` (`detailed` or
-`compact`). Missing values retain detailed presentation. This additive display
-preference neither rewrites stored reasoning nor changes the database schema.
+The app settings JSON optionally stores `showThinking` (boolean) for transcript
+reasoning visibility. It is a portable application preference and synchronizes
+across devices like the legacy field. Missing values fall back to the legacy
+`thinkingDisplayMode` field (`compact` hides, `detailed`/unknown/absent shows),
+which is retained only for persisted-settings compatibility and as that
+fallback. The app settings JSON also optionally stores `transcriptDisplayMode`
+(`flat` | `command-first` | `fully-folded`) for transcript process grouping:
+`flat` renders no nested activity groups, `command-first` renders `Bash`/run rows
+as standalone rows beside activity groups, and `fully-folded` keeps each command
+inside the group around it. Missing or unknown values normalize to
+`fully-folded` in both the renderer and main-process settings normalizers. It is
+a portable application preference and changes presentation only. The deprecated
+`keepCommandsExpanded` boolean is retained only for persisted-settings
+compatibility; it is no longer exposed in Settings and no longer read for
+rendering. These additive display preferences neither rewrite stored reasoning
+nor change the database schema.
 
 The settings blob may still contain legacy prompt-enhancement keys from an
 earlier release. They are retained for rollback and downgrade compatibility,
@@ -679,6 +709,15 @@ CREATE INDEX idx_session_import_origins_plugin
   later-message inputs outside a bounded fork, and other scratch outputs are
   excluded. Missing expired inputs stay missing; no cross-session read grant
   is added. Handled fork failures remove copied inputs and child transcripts.
+- Forks copy only the `visualizations/<sourceId>/` fragments the copied
+  transcript references into `visualizations/<childId>/` and rewrite those
+  `::visualize` paths; unreferenced fragments stay behind. Cards always load
+  from the owning session's directory, so deleting the source session does not
+  affect the fork (D671).
+  Reference identity is the source session and file name, independent of the
+  old absolute data prefix, JSON escaping, or canonical alias spelling.
+  Relocating the data directory before forking must retain those child copies.
+  Cleanup and copying refuse redirected visualization base/session directories.
 
 ### 4.6 turns — one row per agent run
 
@@ -1175,8 +1214,8 @@ CREATE INDEX idx_artifacts_time ON artifacts(updated_at DESC);
 Upserted by host-core in the same transaction as the `tool_execute` audit row
 whenever Write/Edit (or a plugin tool declaring file effects) succeeds —
 repeat edits update `op`/`updated_at`, keeping one row per file per session.
-Writes into the session scratch directory (D114) are excluded: artifacts list
-workspace deliverables only.
+Writes into the session scratch directory (D114) or the session visualization
+directory (D671) are excluded: artifacts list workspace deliverables only.
 
 ### 4.11 scheduled_tasks + task_runs — automations
 
@@ -1794,11 +1833,35 @@ migration is required.
 
 ## 12. Native Pi session authority (ADR 0254)
 
-Native Pi v3 sessions under the Pi agent session root are a second, explicitly
-source-discriminated transcript authority owned by the Node agent sidecar. They
-are never inserted into SQLite and never copied to the Desktop transcript
-directory. `session.list` merges their projections with Rust-owned
-Desktop summaries, and `session.get` routes by the opaque `native-pi:` id.
+Native Pi v3 sessions are a second, explicitly source-discriminated transcript
+authority owned by the Node agent sidecar. They are never inserted into SQLite
+and never copied to the Desktop transcript directory. `session.list` merges
+their projections with Rust-owned Desktop summaries, and `session.get` routes
+by the opaque `native-pi:` id.
+
+Discovery always walks the Pi agent session root recursively
+(`<agentDir>/sessions`, default `~/.pi/agent/sessions`). It also scans, without
+recursion, each `sessionDir` the pinned coding-agent `SettingsManager` resolves:
+an absolute or `~` value from global settings, and the merged global-plus-project
+setting for each known local project. Session files in a subdirectory of a
+configured `sessionDir` are ignored by that scan. A relative path resolves
+from that project's working directory, not from the Desktop process cwd.
+Remote project ids are skipped, and at most 500 local project paths are
+considered. A configured directory whose real path is the default root, or
+is inside it, is not scanned again. A file is listed only when its real
+path stays inside the default root or one of those directories. A symlink
+that escapes is omitted, and an in-directory symlink alias of a session
+file is not a second row. A nested file under a custom `sessionDir` is
+omitted when that directory is outside the default root. A `sessionDir` inside the default root is not scanned again, and
+the recursive default walk can still list nested JSONL there. Detail, prompt,
+and fork authorize a file against the default root, the session directories for
+the current project list, and any session directory that already admitted a
+file in this process, so a later empty project list does not revoke an open of
+a session that was already discovered. A child fork is still published beside
+its parent. A project Desktop
+has not yet recorded does not contribute a relative `sessionDir`. An absolute
+global `sessionDir` is scanned even when no project is known.
+
 Discovery deduplicates native files that share the same JSONL `header.id`,
 keeping the projection with the newest transcript `updatedAt`. The selected
 file retains its path-derived opaque session id; duplicate files are not

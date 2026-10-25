@@ -176,6 +176,12 @@ export function createProviderCatalogRuntime({
       keepAwakeWhileRunning: (value as T & { keepAwakeWhileRunning?: unknown })
         .keepAwakeWhileRunning === true,
       jevEnabled: (value as T & { jevEnabled?: unknown }).jevEnabled === true,
+      transcriptDisplayMode:
+        (value as T & { transcriptDisplayMode?: unknown }).transcriptDisplayMode === "flat" ||
+        (value as T & { transcriptDisplayMode?: unknown }).transcriptDisplayMode === "command-first" ||
+        (value as T & { transcriptDisplayMode?: unknown }).transcriptDisplayMode === "fully-folded"
+          ? (value as T & { transcriptDisplayMode?: unknown }).transcriptDisplayMode
+          : "fully-folded",
       defaultCommandShell: isCommandShellId(value.defaultCommandShell)
         ? value.defaultCommandShell
         : defaultCommandShellForPlatform(process.platform),
@@ -194,6 +200,8 @@ export function createProviderCatalogRuntime({
       updatePreference?: unknown;
       lastNotifiedUpdateVersion?: unknown;
       networkProxy?: unknown;
+      macosWindowTranslucency?: unknown;
+      transcriptDisplayMode?: unknown;
     };
     if (
       Object.prototype.hasOwnProperty.call(value, "defaultCommandShell") &&
@@ -224,6 +232,24 @@ export function createProviderCatalogRuntime({
       typeof value.jevEnabled !== "boolean"
     ) {
       throw Object.assign(new Error("jevEnabled is invalid"), {
+        errorCode: ErrorCodes.INVALID_PARAMS,
+      });
+    }
+    if (
+      Object.prototype.hasOwnProperty.call(value, "transcriptDisplayMode") &&
+      value.transcriptDisplayMode !== "flat" &&
+      value.transcriptDisplayMode !== "command-first" &&
+      value.transcriptDisplayMode !== "fully-folded"
+    ) {
+      throw Object.assign(new Error("transcriptDisplayMode is invalid"), {
+        errorCode: ErrorCodes.INVALID_PARAMS,
+      });
+    }
+    if (
+      Object.prototype.hasOwnProperty.call(value, "macosWindowTranslucency") &&
+      typeof value.macosWindowTranslucency !== "boolean"
+    ) {
+      throw Object.assign(new Error("macosWindowTranslucency is invalid"), {
         errorCode: ErrorCodes.INVALID_PARAMS,
       });
     }

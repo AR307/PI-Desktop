@@ -134,6 +134,14 @@ completed. Missing configuration returns a structured error and a Settings → M
 navigation action. The same references render after session reload/restart.
 Image results and setup actions remain visible outside the turn's collapsible
 process details; opening tool details does not duplicate the image gallery.
+This applies to both configured `GenerateImages` results and authorized-account
+`GenerateImage` results (`image-generation` payloads). The latter retain their
+existing model/group label, preview, save, reference and download-retry actions
+in the reply area, even when the completed process closes automatically. Tool
+rows keep their status/details but do not render a second result card when the
+containing turn owns it. Standalone tool rows still render their own results.
+Reloading or restarting reads the saved result; showing it never regenerates an
+image or requires the assistant to repeat the result as Markdown.
 Markdown image references to generated absolute paths, including Windows drive
 paths, use the existing bounded host image reader. URL sanitization stays enabled;
 the host still rejects files outside its permitted workspace/scratch/attachment roots.
@@ -145,6 +153,9 @@ partial failures, authentication, timeout, unsafe paths, and bounded downloads.
 `node scripts/e2e-image-chat.mjs` exercises the full isolated desktop with local
 model/image HTTP fixtures: adjacent default settings, composer submission, batch
 previews, editing a generated file, collapsed results, and setup navigation.
+`pnpm test:e2e:agent-image-result` covers real account authorization, Agent tool
+execution, collapsed/expanded result visibility, preview/save/reference actions,
+reload/restart and the configured-provider gallery using local HTTP fixtures.
 Live verification is opt-in via `scripts/test-image-generation-live.mjs`, limited
 to one generation plus one edit and never a default test command.
 

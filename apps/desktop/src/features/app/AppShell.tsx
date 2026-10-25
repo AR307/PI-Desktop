@@ -1,4 +1,11 @@
-import { type CSSProperties, lazy, type ReactNode, Suspense, useEffect } from "react";
+import {
+  type CSSProperties,
+  lazy,
+  type ReactNode,
+  Suspense,
+  useEffect,
+  useState,
+} from "react";
 import { ConversationTopbar } from "../../components/ConversationTopbar";
 import { ExtensionPromptHost } from "../../components/ExtensionPromptDialog";
 import { PluginRendererHost } from "../../plugins/renderer-host/PluginRendererHost";
@@ -7,6 +14,7 @@ import {
   IconPanel,
   IconPanelOpen,
 } from "../../components/icons";
+import { LifecycleConfirmationDialog } from "../../components/LifecycleConfirmationDialog";
 import { ProjectCreateDialog } from "../../components/ProjectCreateDialog";
 import { SearchDialog } from "../../components/SearchDialog";
 import { Sidebar } from "../../components/Sidebar";
@@ -23,6 +31,8 @@ import { LiveVoiceStatusHost } from "../voice/live/LiveVoiceStatusHost";
 import { CollapsedTitlebarActions, RoutePending } from "./chrome";
 import { useAppShellRuntime } from "./useAppShellRuntime";
 import { MirrorCodingWelcome } from "../account/MirrorCodingWelcome";
+import { CodexImportDismissDialog } from "../codex-import/CodexImportCard";
+import { CodexImportWizard } from "../codex-import/CodexImportWizard";
 
 const SettingsPage = lazy(() =>
   import("../../pages/SettingsPage").then((module) => ({
@@ -92,8 +102,9 @@ export function AppShell() {
     startupRetrying,
     sidebarToggleShortcut,
     workPanelToggleTooltip,
-    workPanelWidth,
+    requestedWorkPanelWidth,
   } = useAppShellRuntime();
+  const [toastAnchor, setToastAnchor] = useState<HTMLElement | null>(null);
   useCopyTex();
 
   useEffect(() => {
@@ -113,7 +124,7 @@ export function AppShell() {
     containerWidth: shellWidth,
     sidebarWidth,
     sidebarCollapsed,
-    requestedPanelWidth: workPanelWidth,
+    requestedPanelWidth: requestedWorkPanelWidth,
     maximized: workPanelMaximized,
   }).panelWidth;
 
@@ -188,7 +199,7 @@ export function AppShell() {
             )}
 
             {!workPanelMaximized && (
-              <section className="main-pane">
+              <section ref={setToastAnchor} className="main-pane">
                 {page === "chat" ? (
                   <ConversationTopbar
                     sidebarCollapsed={sidebarCollapsed}
@@ -344,7 +355,7 @@ export function AppShell() {
           </Suspense>
         ) : null}
         <SearchDialog open={searchOpen} onClose={() => setSearchOpen(false)} />
-        <ToastHost />
+        <ToastHost anchorElement={page === "settings" ? null : toastAnchor} />
         <LiveVoiceStatusHost />
         <PluginRendererHost />
         <ExtensionPromptHost />
@@ -376,8 +387,11 @@ export function AppShell() {
       {(ready && !showSplash) || startupPhase !== "starting" ? (
         <WindowControls />
       ) : null}
+      <CodexImportDismissDialog />
+      <CodexImportWizard />
       <ProjectCreateDialog />
       {ready ? <MirrorCodingWelcome /> : null}
+      <LifecycleConfirmationDialog />
       {splash}
       {startupRecovery}
     </div>

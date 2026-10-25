@@ -5,6 +5,7 @@ import { useAppStore } from "../stores/app-store";
 import { buildToolPresentation } from "../lib/tool-presentation";
 import { ToolDetailBlocks } from "./ToolDetails";
 import { Button } from "./ui";
+import { focusSessionComposer } from "../lib/composer-quotes";
 
 export function PermissionCard({
   permission,
@@ -24,7 +25,7 @@ export function PermissionCard({
 
   const restoreComposerFocus = () => {
     window.requestAnimationFrame(() => {
-      document.querySelector<HTMLTextAreaElement>(".composer-input")?.focus();
+      focusSessionComposer(permission.sessionId);
     });
   };
 

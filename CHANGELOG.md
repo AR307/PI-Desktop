@@ -1,3 +1,65 @@
+## Unreleased - Interrupted response recovery
+
+- Automatically retry transient stream interruptions and timeouts even after
+  thinking or text has arrived, retaining prior output and completed tools.
+- Apply stream-stall recovery to delegated and one-shot model requests; preserve
+  user Stop, permanent error handling and configured retry limits.
+
+## Unreleased - Agent image result visibility
+
+- Keep authorized-account image results in the final reply area instead of
+  hiding them when tool processing collapses. Expanding details does not
+  duplicate images; preview, save, references and saved-history display remain
+  available without generating again.
+
+## Unreleased - Claude cache duration in the composer
+
+- Select five-minute or one-hour Claude prompt caching directly below the
+  reasoning slider in the main-page model menu. The choice saves immediately
+  and shares the model preference with advanced settings and MirrorCoding.
+
+## Unreleased - Upstream v0.21.0-beta.4 synchronization
+
+- Integrate the upstream sidebar submenus, background commands, plugin and
+  transcript improvements, and work-panel width recovery while retaining the
+  MirrorCoding fork's mobile, storage, image, account and side-chat features.
+- Keep background commands scoped to their conversation in both composers.
+  Closing a temporary side chat now confirms and stops its detached commands
+  before recycling its records without stopping parent-conversation work.
+- Preserve Image generation in the compact mode menu and keyboard navigation.
+
+## Unreleased - Side-chat layout
+
+- Simplify selected-text actions and annotations in main and side chat: compact
+  ghost actions, borderless reference disclosure, small remove icons and source
+  details on hover or keyboard focus instead of long IDs in the composer.
+- Remove the duplicate composer-height transcript mask in temporary side chats.
+  Main and side chat now share composer spacing, surface and responsive toolbar
+  layout, with non-overlapping signed-in controls at narrow widths.
+
+## Unreleased - MirrorCoding account benefits
+
+- Show wallet balance to the left of the subscription bar. Confirm before
+  opening the MirrorCoding wallet; Cancel and Escape keep the user in Pi.
+- Hide the bar unless an active plan individually has more than CNY 0.50
+  remaining, or is unlimited. Unknown wallet data is not shown as zero;
+  authoritative server wallet/CNY fields are required for monetary display.
+- Add a text-free subscription quota bar before the desktop model picker.
+  Hover shows remaining percentage; click shows every active plan's quota,
+  expiry and reset, plus a manual daily check-in action. Account settings
+  expose the same panel.
+- Add explicit permission, unavailable and verification states. Requires the
+  new MirrorCoding Pi account-benefit endpoints and consent; no server
+  deployment or client release is included.
+
+## Unreleased - Desktop selected references and temporary side chat
+
+- Select message text to attach source-aware references without replacing the
+  current draft. References survive sending, queue editing and Smart Stop.
+- Ask follow-up questions in a temporary WorkPanel Agent chat that inherits
+  current effective context and shares the main conversation's workspace.
+  Closing cancels its work and recycles temporary records, not project files.
+
 ## v0.20.4 (Android) - In-app update fixes
 
 - An APK downloaded for an earlier update was offered for installation again

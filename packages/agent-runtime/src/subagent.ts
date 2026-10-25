@@ -19,7 +19,7 @@
  *   already stopped calling tools. Only user Stop or `TaskStop` aborts it.
  */
 
-import { assistantReplay, responseContentFacts, responseDiagnostics, responseOutcome, responseOutcomeError } from "./response-outcome.js";
+import { assistantReplay, prepareProviderRetryMessages, responseContentFacts, responseDiagnostics, responseOutcome, responseOutcomeError } from "./response-outcome.js";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
@@ -69,6 +69,7 @@ import {
 } from "./subagent-context.js";
 import {
   dedupeToolCallMessages,
+  createToolCallIdentity,
   reportDuplicateToolCallDrop,
 } from "./tool-call-dedupe.js";
 import {
@@ -239,6 +240,7 @@ export { addUsage };
 /** One delegate execution. A resumed run is still a new instance; it is
  * seeded with the prior chain's messages rather than kept warm in memory. */
 export class SubagentRun {
+  private readonly uniqueToolCalls: ReturnType<typeof createToolCallIdentity>;
   private readonly agent: Agent;
   private readonly opts: SubagentRunOptions;
   private currentAssistant?: UiMessage;
@@ -276,6 +278,7 @@ export class SubagentRun {
 
   constructor(opts: SubagentRunOptions) {
     this.opts = opts;
+    this.uniqueToolCalls = createToolCallIdentity(opts.initialMessages ?? []);
     this.provider = opts.provider;
     this.thinkingLevel = opts.thinkingLevel;
     this.attemptedModels.add(`${opts.provider.id}/${opts.provider.modelId}`);
@@ -449,6 +452,7 @@ export class SubagentRun {
       sessionId: this.opts.sessionId,
       maxTokens: this.opts.definition.maxTokens,
       onUsage: usage => this.recordUsage(usage),
+      uniqueToolCalls: this.uniqueToolCalls,
     }, this.retryState);
   }
 
@@ -600,7 +604,7 @@ export class SubagentRun {
     error: ReturnType<typeof classifyAgentError>,
     phase: "request" | "stream",
   ): number | undefined {
-    if (this.retryState.meaningful || !error.retriable) return undefined;
+    if (this.runSignal().aborted || !error.retriable || error.details?.origin === "local") return undefined;
     const infinite = this.opts.infiniteProviderRetry === true;
     if (error.code === "PROVIDER_RATE_LIMITED") {
       if (!infinite && this.providerRateLimitRetryAttempt >= PROVIDER_RATE_LIMIT_MAX_RETRIES) {
@@ -622,18 +626,12 @@ export class SubagentRun {
     const retryError = this.pendingProviderRetry;
     if (!retryError) return;
     this.pendingProviderRetry = undefined;
-    const messages = [...this.agent.state.messages];
-    if (messages.at(-1)?.role !== "assistant") {
-      throw new Error("Cannot retry a subagent provider stream without its failed assistant message");
-    }
     // A failed provider stream can leave more than one assistant row after a
-    // tool round. Remove the entire failed suffix before continuing.
-    while (messages.at(-1)?.role === "assistant") {
-      const last = messages.at(-1);
-      if (last?.role !== "assistant" || responseContentFacts(last).meaningful) break;
-      messages.pop();
-    }
+    // tool round. Keep meaningful partial output and system deltas while
+    // removing empty failed responses; compaction may leave no assistant tail.
+    const messages = prepareProviderRetryMessages(this.agent.state.messages);
     this.agent.state.messages = messages;
+    this.retryState.meaningful = false;
     this.providerRetryInProgress = true;
     try {
       const delayMs =
@@ -648,7 +646,7 @@ export class SubagentRun {
               this.retryState.headers,
             );
       await delayWithAbort(delayMs, this.runSignal());
-      if (this.opts.signal?.aborted) return;
+      if (this.runSignal().aborted) return;
       await this.agent.continue();
       await this.agent.waitForIdle();
     } finally {
@@ -831,6 +829,7 @@ export class SubagentRun {
           this.providerRetryInProgress = false;
           this.emit({ type: "message_update", message: this.currentAssistant });
         } else {
+          this.providerRetryInProgress = false;
           this.emit({ type: "message_start", message: this.currentAssistant });
         }
         break;
@@ -893,7 +892,7 @@ export class SubagentRun {
         // Truncation owns the resumable partial report, not a sticky provider
         // failure. A later valid tool continuation can finish that report.
         const truncated = !aborted && outcome === "truncated";
-        const failed = !aborted && (stopReason === "error" || outcome === "thinking-only" || outcome === "empty");
+        const failed = !aborted && (outcome === "interrupted" || outcome === "thinking-only" || outcome === "empty");
         let classifiedError: ReturnType<typeof classifyAgentError> | undefined;
         let retryAttempt: number | undefined;
         if (outcome === "empty" && !aborted) {
@@ -945,6 +944,18 @@ export class SubagentRun {
             stopReason === "length" || stopReason === "max_tokens";
         }
         if (retryAttempt !== undefined) {
+          if (this.retryState.meaningful) {
+            this.emit({ type: "message_end", message: {
+              ...(this.currentAssistant ?? this.newAssistantRow()),
+              content: content.hasText ? content.text : (this.currentAssistant?.content ?? ""),
+              ...(content.hasThinking && content.thinking ? { thinking: content.thinking } : {}),
+              status: "complete",
+              assistantReplay: assistantReplay(message),
+              ...(messageUsage ? { usage: messageUsage } : {}),
+            } });
+            this.currentAssistant = undefined;
+            break;
+          }
           this.currentAssistant = {
             ...(this.currentAssistant ?? this.newAssistantRow()),
             content: content.hasText

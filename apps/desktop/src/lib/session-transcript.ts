@@ -89,15 +89,16 @@ export function projectMessageEnd(
       ]);
     }
   }
-  const failed =
-    event.message.status === "error" || event.message.status === "aborted";
   const empty =
     !(event.message.content || "").trim() &&
     !(event.message.thinking || "").trim();
-  // An image result is renderable content even when the row has no text: a
-  // cancelled generation keeps its card so a pending download stays
-  // retryable, matching the persisted-transcript projection.
-  return failed && empty && !event.message.error && !event.message.imageGeneration
+  // Match persistence for completed tool-only envelopes too. Otherwise a
+  // phantom live row makes Smart Stop's canonical transcript prefix differ.
+  // Structured tools, errors, steering and image cards remain meaningful.
+  const emptyAssistant = event.message.role === "assistant" && empty &&
+    !event.message.toolName && !event.message.toolCallId &&
+    !event.message.error && !event.message.steering && !event.message.imageGeneration;
+  return emptyAssistant
     ? removeLiveSessionMessage(next, event.message.id)
     : upsertLiveSessionMessage(next, event.message);
 }

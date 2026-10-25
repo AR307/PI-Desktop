@@ -256,7 +256,13 @@ const created = await call("providers.create", {
   defaultModelId: "stub-1",
 });
 const providerId = created.provider?.id ?? created.id;
-await call("settings.set", { language: "en", defaultProviderId: providerId, defaultModelId: "stub-1", defaultMode: "agent" });
+await call("settings.set", {
+  language: "en",
+  defaultProviderId: providerId,
+  defaultModelId: "stub-1",
+  defaultMode: "agent",
+  mirrorCodingWelcomeCompleted: true,
+});
 // Register the fixture plugins as development plugins; dev loads enable them
 // with their declared permissions. `proj` is limited to the fixture project.
 for (const [name, dir] of Object.entries(pluginDirs)) {

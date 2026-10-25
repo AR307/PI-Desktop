@@ -1,3 +1,4 @@
+import { SelectionActions } from "../SelectionActions";
 import { memo, useMemo, useRef, type MouseEvent as ReactMouseEvent } from "react";
 import { useTranslation } from "react-i18next";
 import type { PlanningState, UiMessage } from "@pi-desktop/shared";
@@ -19,6 +20,7 @@ import { TranscriptHistory, TranscriptTail } from "./AssistantTurn";
 import { collectLiveDelegationEntries } from "../../../lib/live-delegation-entries";
 import { reuseReadonlyMap } from "../../../lib/assistant-turns";
 import { useTranscriptScroll } from "./hooks/useTranscriptScroll";
+import { useTranscriptContinuation } from "../../../hooks/use-transcript-continuation";
 import type { TranscriptSearchTarget } from "../../../lib/transcript-reading";
 import type { RestoreTranscriptReading } from "../../../hooks/use-transcript-reading-position";
 import { TranscriptSearchContext } from "../../../lib/transcript-search-context";
@@ -158,6 +160,17 @@ function TranscriptBody({
     onRestoreReading,
   });
 
+  const continuationCursor = useAppStore((state) =>
+    sessionId ? state.transcriptViews[sessionId]?.messageEnd : undefined,
+  );
+  const automaticContinuation = readingWindow && !searchTarget;
+  useTranscriptContinuation({
+    scrollRef, contentRef, messages, onLoadNewer,
+    enabled: automaticContinuation && hasMoreAfter && paneVisible && !veilCovering,
+    cursor: continuationCursor,
+    loading: navigationLoading,
+  });
+
   const specializedActivity = agentActivity;
   const rawLiveDelegations = useMemo(
     () => collectLiveDelegationEntries(historyEntries, tailEntry, transcriptRunning),
@@ -242,6 +255,7 @@ function TranscriptBody({
       ref={wrapRef}
       data-transcript-settling={veilCovering ? "true" : undefined}
     >
+      {sessionId && !sessionId.startsWith("side-") && !sessionId.startsWith("native-pi:") && !sessionId.startsWith("remote:") ? <SelectionActions rootRef={wrapRef} sessionId={sessionId} visible={paneVisible} /> : null}
       {/* The minimap measures row positions against a rendered scroller. A
         * hidden pane has none, so measuring there would cache junk offsets and
         * reuse them on reveal. It is out of flow and re-measures on mount, so
@@ -293,7 +307,7 @@ function TranscriptBody({
               runtimeActivity={specializedActivity}
             />
           ) : null}
-          {hasMoreAfter ? (
+          {hasMoreAfter && !automaticContinuation ? (
             <button
               type="button"
               className="transcript-load-later"

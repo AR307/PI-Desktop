@@ -35,6 +35,7 @@ import {
   type SessionMeta,
 } from "../../lib/sidebar-preferences";
 import { api } from "../../lib/api";
+import { dropAskDraft } from "../../lib/pending-asks";
 import { isRemoteSession, safeSessionSummary, sessionAllows } from "../../lib/remote-session-safety";
 import { createRefreshCoordinator } from "../../lib/refresh-coordinator";
 import { openRemoteProjectSession, remoteProjectForSession } from "../../lib/remote-project-session";
@@ -173,7 +174,7 @@ export function createSessionSlice({
   const refreshSessionList = createRefreshCoordinator(async () => {
     const result = await api.listSessions();
     set((state) => {
-      const next = result.sessions.map(safeSessionSummary);
+      const next = [...result.sessions.map(safeSessionSummary), ...state.sessions.filter((session) => session.sideChatParentId)];
       const active = state.sessions.find((session) => session.id === state.activeSessionId);
       // A disconnected host may temporarily disappear from inventory; keep the
       // active identity fail-closed until an authoritative detail/list replaces it.
@@ -344,15 +345,24 @@ export function createSessionSlice({
           sessionId,
           pendingPermissions,
         );
+        const keptAskIds = new Set(pendingAsks.map((ask) => ask.requestId));
+        let askDrafts = state.askDrafts;
+        for (const ask of state.pendingAsks[sessionId] ?? []) {
+          if (!keptAskIds.has(ask.requestId)) {
+            askDrafts = dropAskDraft(askDrafts, ask.requestId);
+          }
+        }
         if (
           nextPendingAsks === state.pendingAsks &&
-          nextPendingPermissions === state.pendingPermissions
+          nextPendingPermissions === state.pendingPermissions &&
+          askDrafts === state.askDrafts
         ) {
           return {};
         }
         return {
           pendingAsks: nextPendingAsks,
           pendingPermissions: nextPendingPermissions,
+          askDrafts,
         };
       });
     },
@@ -778,8 +788,8 @@ export function createSessionSlice({
       }
     },
 
-    configureActiveSession: async (config) => {
-      const sessionId = get().activeSessionId;
+    configureActiveSession: async (config, targetSessionId) => {
+      const sessionId = targetSessionId ?? get().activeSessionId;
       if (!sessionId) {
         set((state) => ({
           draftConfiguration: {
@@ -804,6 +814,8 @@ export function createSessionSlice({
           session.id === sessionId
             ? {
                 ...result.session,
+                sideChatParentId: session.sideChatParentId,
+                sideChatWorkspacePath: session.sideChatWorkspacePath,
                 pinned: sessionIsPinned(sessionId, state.sessionMeta),
                 archived: sessionIsArchived(sessionId, state.sessionMeta),
               }

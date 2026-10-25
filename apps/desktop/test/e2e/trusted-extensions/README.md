@@ -20,6 +20,11 @@ it does not read or write the user's `~/.pi` profile. The driver prints one
 `PASS` / `FAIL` line per assertion and a `SUMMARY` before the runner reports
 its final exit status.
 
+The isolated settings seed marks the first-run MirrorCoding welcome as complete
+so the onboarding dialog cannot cover Settings navigation. The driver still
+exercises the plugin OAuth sign-in, refresh, cancellation, and sign-out flows
+through the real Settings UI.
+
 What the automated run proves:
 
 - plugin registration/discovery, capability and permission projection, project

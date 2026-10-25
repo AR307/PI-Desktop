@@ -34,3 +34,9 @@ host RPC, IPC, and persistence behavior unchanged.
   scope change clears the panel state.
 - Existing plugin session import contracts continue to own session ingestion.
 - No host protocol, plugin API, permission, or database migration is required.
+
+## 2026-10-25 amendment
+
+[Native Codex history import](codex-native-history-import.md) adds a scoped
+first-party Sidebar and Project archive entry. Other session import contracts
+and Models/Skills/MCP entrypoints retain this decision.

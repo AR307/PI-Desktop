@@ -3,7 +3,10 @@ use tempfile::tempdir;
 
 #[test]
 fn canonical_windows_project_paths_use_the_registered_drive_spelling() {
-    assert_eq!(normalize_project_path(r"\\?\C:\Users\fixture\project\"), "C:/Users/fixture/project");
+    assert_eq!(
+        normalize_project_path(r"\\?\C:\Users\fixture\project\"),
+        "C:/Users/fixture/project"
+    );
     assert_eq!(normalize_project_path("//?/D:/project/"), "D:/project");
     assert_eq!(normalize_project_path(r"C:\"), "C:/");
     assert_eq!(normalize_project_path("/srv/project/"), "/srv/project");
@@ -85,6 +88,28 @@ fn state_defaults_on_and_is_project_specific() {
         )
         .unwrap();
     assert!(orphaned.enabled("skills", CapabilityLevel::Global, "review", Some("/a")));
+}
+
+#[test]
+fn project_capability_state_matches_extended_length_drive_paths() {
+    let dir = tempdir().unwrap();
+    let mut state = CapabilityState::new(dir.path(), "skills");
+    state
+        .set_enabled(
+            "skills",
+            CapabilityLevel::Global,
+            "review",
+            Some("E:/work/app"),
+            false,
+        )
+        .unwrap();
+
+    assert!(!state.enabled(
+        "skills",
+        CapabilityLevel::Global,
+        "review",
+        Some(r"\\?\E:\work\app"),
+    ));
 }
 
 #[test]

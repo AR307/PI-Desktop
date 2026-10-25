@@ -1,8 +1,8 @@
 # Image generation
 
-PI-Desktop provides a fourth Composer task, Image generation. The mode button
-cycles Agent, Plan, Goal, Image; its chevron opens the same four choices with
-keyboard navigation and Escape dismissal. Entering Image exits planning through
+PI-Desktop provides a fourth Composer task, Image generation. The compact mode
+button opens one menu with Agent, Plan, Goal and Image; it does not cycle modes
+on click. The menu supports keyboard navigation and Escape dismissal. Entering Image exits planning through
 the existing session configuration. Chat model and thinking level remain stored
 on the session. Image model/group, declared options and active task are stored
 per session in `AppSettings.imageSessions` through Rust settings persistence.

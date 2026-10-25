@@ -1,3 +1,4 @@
+import type { MessageQuote } from "@pi-desktop/shared";
 import { basename } from "node:path";
 import { createHash } from "node:crypto";
 
@@ -130,6 +131,7 @@ export type HostQueueEntry = {
   userMessageId?: string;
   voiceOrigin?: VoiceOrigin;
   attachments?: unknown;
+  quotes?: MessageQuote[];
   permissionMode: string;
   position: number;
   priority?: number;
@@ -147,6 +149,7 @@ export function fromHostQueueEntry(entry: HostQueueEntry): QueuedTurnRecord {
     ...(entry.sessionMessageId ? { sessionMessageId: entry.sessionMessageId } : {}),
     ...(entry.userMessageId ? { userMessageId: entry.userMessageId } : {}),
     ...(entry.voiceOrigin ? { voiceOrigin: entry.voiceOrigin } : {}),
+    ...(entry.quotes ? { quotes: entry.quotes } : {}),
     ...(Array.isArray(entry.attachments) ? { attachments: entry.attachments as QueuedTurnRecord["attachments"] } : {}),
     effectivePermissionMode: permissionMode,
     ...(entry.idempotencyKey ? { idempotencyKey: entry.idempotencyKey } : {}),
@@ -177,6 +180,7 @@ export function createHostQueueStore(getHost: () => HostRpc | null): QueueStore 
         ...(record.userMessageId ? { userMessageId: record.userMessageId } : {}),
         ...(record.voiceOrigin ? { voiceOrigin: record.voiceOrigin } : {}),
         ...(record.attachments ? { attachments: record.attachments } : {}),
+        ...(record.quotes ? { quotes: record.quotes } : {}),
         permissionMode: record.effectivePermissionMode,
       });
     },

@@ -29,7 +29,7 @@ const provider: RuntimeProviderConfig = {
     cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
   },
 };
-type Step = "thinking" | "unsigned" | "length" | "interrupted" | "tool" | "broken-tool" | "answer";
+type Step = "thinking" | "unsigned" | "length" | "interrupted" | "thinking-interrupted" | "tool-interrupted" | "tool" | "broken-tool" | "answer";
 function nativeFixture(steps: Step[]) {
   const requests: Array<{ url: string; body: Record<string, unknown> }> = [];
   let executions = 0;
@@ -53,7 +53,7 @@ function nativeFixture(steps: Step[]) {
           usage: { input_tokens: 7, output_tokens: 0 },
         },
       });
-      if (step === "thinking" || step === "unsigned") {
+      if (step === "thinking" || step === "unsigned" || step === "thinking-interrupted") {
         body += emit("content_block_start", {
           index: 0,
           content_block: { type: "thinking", thinking: "" },
@@ -62,12 +62,12 @@ function nativeFixture(steps: Step[]) {
           index: 0,
           delta: { type: "thinking_delta", thinking: "Retained native thought" },
         });
-        if (step === "thinking")
+        if (step !== "unsigned")
           body += emit("content_block_delta", {
             index: 0,
             delta: { type: "signature_delta", signature: "fixture-native-signature" },
           });
-      } else if (step === "tool" || step === "broken-tool") {
+      } else if (step === "tool" || step === "broken-tool" || step === "tool-interrupted") {
         body += emit("content_block_start", {
           index: 0,
           content_block: { type: "tool_use", id: "call_fixture", name: "Read", input: {} },
@@ -92,7 +92,7 @@ function nativeFixture(steps: Step[]) {
           },
         });
       }
-      if (step !== "interrupted") {
+      if (!step.includes("interrupted")) {
         body += emit("content_block_stop", { index: 0 });
         body += emit("message_delta", {
           delta: {
@@ -149,7 +149,6 @@ afterEach(() => vi.unstubAllGlobals());
 for (const [step, code, end] of [
   ["thinking", "MODEL_THINKING_ONLY", "thinking-only"],
   ["length", "MODEL_OUTPUT_TRUNCATED", "truncated"],
-  ["interrupted", "STREAM_FAILED", "interrupted"],
   ["broken-tool", "MODEL_OUTPUT_TRUNCATED", "truncated"],
 ] as const) {
   it(
@@ -187,8 +186,27 @@ for (const [step, code, end] of [
   );
 }
 
-it("restarts and continues with signed thought and completed tool results, without rerunning the tool", async () => {
-  const f = nativeFixture(["tool", "thinking", "answer"]);
+for (const step of ["interrupted", "thinking-interrupted", "tool-interrupted"] as const) {
+  it(`native ${step} continues automatically while retaining completed tools and native output`, async () => {
+    const f = nativeFixture(["tool", step, "answer"]);
+    const r = f.runtime();
+    try {
+      await r.agent.prompt("Read then finish the report.");
+      expect(f.requests).toHaveLength(3);
+      expect(f.executions()).toBe(1);
+      expect(r.events.filter(e => e.event.type === "error")).toHaveLength(0);
+      expect(r.messages().at(-1)).toMatchObject({ status: "complete", content: "Explicit continuation completed" });
+      const finalContext = JSON.stringify(f.requests.at(-1)?.body.messages);
+      expect(finalContext).toContain("Completed tool result");
+      if (step === "thinking-interrupted") expect(finalContext).toContain("fixture-native-signature");
+      if (step === "interrupted") expect(finalContext).toContain("Partial native answer");
+      if (step === "tool-interrupted") expect(finalContext.match(/"type":"tool_use"/g)).toHaveLength(1);
+    } finally { await r.agent.dispose(); }
+  });
+}
+
+for (const automatic of [false, true]) it(`${automatic ? "automatic" : "explicit"} continuation survives restart with signed thought and completed tools`, async () => {
+  const f = nativeFixture(automatic ? ["tool", "thinking-interrupted", "answer", "answer"] : ["tool", "thinking", "answer"]);
   const first = f.runtime();
   const history: UiMessage[] = [];
   try {
@@ -218,16 +236,16 @@ it("restarts and continues with signed thought and completed tool results, witho
       status: "complete",
       createdAt: new Date().toISOString(),
     });
-    expect(f.requests).toHaveLength(2);
+    expect(f.requests).toHaveLength(automatic ? 3 : 2);
   } finally {
     await first.agent.dispose();
   }
   const resumed = f.runtime(history);
   try {
     await resumed.agent.prompt("Continue with the answer.");
-    expect(f.requests).toHaveLength(3);
+    expect(f.requests).toHaveLength(automatic ? 4 : 3);
     expect(f.executions()).toBe(1);
-    const body = JSON.stringify(f.requests[2].body.messages);
+    const body = JSON.stringify(f.requests.at(-1)?.body.messages);
     expect(body).toContain("fixture-native-signature");
     expect(body).toContain("Completed tool result");
     expect(body).toContain("Continue with the answer.");

@@ -3,6 +3,7 @@ import test from "node:test";
 import { fileURLToPath } from "node:url";
 import { register } from "node:module";
 register(new URL("./helpers/ts-import-hooks.mjs", import.meta.url));
+register(new URL("./helpers/native-session-electron-hook.mjs", import.meta.url));
 const { createComposerCommandService } = await import("../electron/main/ipc/composer-ipc.ts");
 
 const record = (id, extra = {}) => ({ id, label: "Documentation", transport: "http", enabled: true, createdAt: "", updatedAt: "", ...extra });
@@ -75,6 +76,7 @@ function promptFixture(commandService, projectPath = "/repo", remoteWorkspace) {
     logger: { app() {} }, vendorOAuth: {}, agentExtensions: {}, cancelSessionTools() {},
     persistenceOutbox: {}, dataDir: "/unused-for-no-attachments",
     activeTurns: new Map(), activeTurnUsages: new Map(), approvedExecutionIdsBySession: new Map(), claimedExecutionSessions: new Map(),
+    recordTurnStart() {},
     resolveAgentRuntimeLaunch: async () => ({
       projectPath, providerId: "provider", modelId: "model",
       sidecarParams: { sessionId: "target", provider: { modelConfig: { input: ["text"] } } },
@@ -277,4 +279,11 @@ test("remote workspace prompt and steering never resolve commands from the same 
   await fixture.prompt(`/${selected.name} inspect`);
   await fixture.steer(`/${selected.name} inspect again`);
   assert.deepEqual(roots, [null, null]);
+});
+
+test("remote sessions do not offer or expand the local-only visualize skill", async () => {
+  const catalog = service([], []);
+  const skillIds = (commands) => commands.flatMap((c) => c.kind === "skill" ? [c.skillId] : []);
+  assert.ok(skillIds(await catalog.buildComposerCommands(null)).includes("pi-desktop/visualize"));
+  assert.ok(!skillIds(await catalog.buildComposerCommands(null, { remote: true })).includes("pi-desktop/visualize"));
 });

@@ -44,6 +44,8 @@ export type SessionCapabilities = {
 };
 
 export type SessionSummary = {
+  sideChatParentId?: string;
+  sideChatWorkspacePath?: string;
   /** Saved next-turn MC Fast preference; new sessions start disabled. */
   ultra?: boolean;
   fast?: boolean;

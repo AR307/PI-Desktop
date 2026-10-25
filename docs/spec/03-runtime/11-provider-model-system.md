@@ -127,7 +127,14 @@ Non-official DeepSeek endpoints also set `requiresNonEmptyReasoningReplay` so
 missing reasoning is filled with a documented placeholder instead of `""`
 (OpenCode / third-party relays reject empty echoes after compaction; see
 ADR 0256 / #296). Official `deepseek.com` rows keep empty-string fill (#223).
-The overlay does not change `thinkingFormat`.
+Relay rows set `supportsReasoningEffort: false` because DeepSeek-family relays
+were reported rejecting the generic OpenAI `reasoning_effort` field (#1664).
+Official `deepseek.com` rows leave the flag to pi-ai, which sends
+`reasoning_effort` (low / high / max) next to `thinking: {type: "enabled"}` as
+DeepSeek documents, so the selected thinking level reaches the wire (#1821,
+D672). An explicit per-model `supportsReasoningEffort` selection (`send` or
+`omit`) still overrides this automatic rule on either kind of row. The overlay
+does not change `thinkingFormat`.
 
 Anthropic Messages requests set `forceAdaptiveThinking: true` when the
 models.dev record publishes a reasoning `effort` option and no
@@ -582,11 +589,14 @@ type ModelDescriptor = {
   and keep dialog actions outside the independently scrollable content
 - do not expose raw catalog compatibility internals or provider secrets
 - Settings → Models → Providers can scan and copy provider/model rows from
-  Claude Code, Codex, OpenCode, Pi, and CC Switch. The inline scan is explicit.
-  Stored API keys are copied into the host secret store; OAuth/subscription
-  grants are not. An equivalent provider (normalized URL + API style + same
-  credential) is skipped on re-import. Different credentials at one endpoint
-  remain independent providers. No protocol or schema version bump
+  Claude Code, Codex, OpenCode, Pi, and CC Switch. The Pi scan also reads
+  `auth.json` API keys and Pi's cached `models-store.json` catalog, so
+  providers connected through `pi /login` are listed even when `models.json`
+  has no block for them. The inline scan is explicit. Stored API keys are
+  copied into the host secret store; OAuth/subscription grants are not. An
+  equivalent provider (normalized URL + API style + same credential) is
+  skipped on re-import. Different credentials at one endpoint remain
+  independent providers. No protocol or schema version bump
   (D342 / ADR 0179 / ADR 0188 / D645).
 
 ### Model selector
@@ -712,6 +722,13 @@ adapter instead of Chat Completions. Foreign catalog wire APIs (such as
 `google-generative-ai` or `anthropic-messages` matched on an OpenAI-compatible
 relay) do not replace the provider's configured wire style (issue #1310).
 Without a model-level pin the provider-wide style applies.
+
+The built-in OpenCode Go row is a documented exception for catalog entries that
+publish a distinct Anthropic Messages route. For a models.dev Claude entry whose
+`api` is `anthropic_messages` and whose `baseUrl` is the OpenCode Anthropic root,
+agent-runtime uses that catalog API/base URL pair and reaches `/v1/messages`.
+This exception is limited to the named OpenCode Go preset; custom endpoints and
+foreign relay matches continue to use their saved provider API and base URL.
 
 This is the **universal escape hatch** guaranteeing market coverage beyond native integrations.
 

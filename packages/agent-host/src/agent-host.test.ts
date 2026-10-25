@@ -162,6 +162,23 @@ function build(options: { permissionMode?: SessionSummary["permissionMode"]; que
 }
 
 describe("AgentHost ingest", () => {
+  it("releases a closed session's queue, turn identities and retained event history", async () => {
+    const { host, runtime } = build();
+    const current = await host.startTurn(owner, { sessionId: "s1", input: { text: "current" }, context: { requestId: "current" } });
+    const queued = await host.startTurn(owner, { sessionId: "s1", admission: "queue", input: { text: "never run", quotes: [{ sessionId: "parent", messageId: "source", text: "quoted" }] }, context: { requestId: "queued" } });
+    expect(host.queueEntries("s1")[0]?.quotes?.[0]?.text).toBe("quoted");
+    const before = host.hub.stream("s1").cursor();
+    await host.clearSessionQueue("s1");
+    host.endTurn("s1", current.turn.id, "canceled");
+    await host.releaseSession("s1");
+    expect(runtime.prompts).toHaveLength(1);
+    expect(host.queue.size("s1")).toBe(0);
+    expect(host.hub.subscriptionCount()).toBe(0);
+    expect(host.hub.stream("s1").cursor().epoch).not.toBe(before.epoch);
+    expect(() => host.getTurn(current.turn.id)).toThrow();
+    expect(() => host.getTurn(queued.turn.id)).toThrow();
+  });
+
   it("provides live work state without reading transcript history", async () => {
     const { host, sessions } = build();
     expect(await host.workSnapshot("s1")).toMatchObject({ sessionId: "s1", mode: "agent", state: "idle", queue: [] });

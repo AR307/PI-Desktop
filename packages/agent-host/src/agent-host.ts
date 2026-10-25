@@ -1,3 +1,4 @@
+import type { MessageQuote } from "@pi-desktop/shared";
 import type {
   AgentEvent,
   AgentEventEnvelope,
@@ -95,6 +96,7 @@ export type QueueEntryView = {
   userMessageId?: string;
   voiceOrigin?: VoiceOrigin;
   attachments?: AgentPromptAttachment[];
+  quotes?: MessageQuote[];
   /** Set only for promoted entries; entries are already in delivery order. */
   priority?: number;
 };
@@ -108,6 +110,7 @@ export type StartTurnParams = {
   input: {
     text: string;
     attachments?: AgentPromptAttachment[];
+  quotes?: MessageQuote[];
     sessionMessageId?: string;
     /** Client-chosen id for the durable user row (D288). */
     userMessageId?: string;
@@ -542,6 +545,7 @@ export class AgentHost {
         ...(params.input.userMessageId ? { userMessageId: params.input.userMessageId } : {}),
         ...(params.input.voiceOrigin ? { voiceOrigin: params.input.voiceOrigin } : {}),
         ...(params.input.attachments ? { attachments: params.input.attachments } : {}),
+        ...(params.input.quotes ? { quotes: params.input.quotes } : {}),
         effectivePermissionMode,
         ...(idempotencyKey ? { idempotencyKey } : {}),
         inputHash,
@@ -565,6 +569,7 @@ export class AgentHost {
         ...(params.input.userMessageId ? { userMessageId: params.input.userMessageId } : {}),
         ...(params.input.voiceOrigin ? { voiceOrigin: params.input.voiceOrigin } : {}),
         ...(params.input.attachments ? { attachments: params.input.attachments } : {}),
+        ...(params.input.quotes ? { quotes: params.input.quotes } : {}),
         effectivePermissionMode,
         ...(idempotencyKey ? { idempotencyKey } : {}),
         principal,
@@ -911,6 +916,7 @@ export class AgentHost {
       ...(record.userMessageId ? { userMessageId: record.userMessageId } : {}),
       ...(record.voiceOrigin ? { voiceOrigin: record.voiceOrigin } : {}),
       ...(record.attachments ? { attachments: record.attachments } : {}),
+      ...(record.quotes ? { quotes: record.quotes } : {}),
       ...(record.priority !== undefined ? { priority: record.priority } : {}),
     }));
   }
@@ -945,6 +951,38 @@ export class AgentHost {
       return;
     }
     void this.drain(state.id);
+  }
+
+  /** Clear every input, including internal delegate reports, before disposal. */
+  async clearSessionQueue(sessionId: string): Promise<void> {
+    await this.withAdmission(sessionId, async () => {
+      for (const record of this.queue.list(sessionId)) {
+        await this.queue.remove(sessionId, record.id);
+      }
+      this.notifyQueue(sessionId);
+    });
+  }
+
+  /** Called after the owner cancels and settles a temporary runtime. */
+  async releaseSession(sessionId: string): Promise<void> {
+    await this.withAdmission(sessionId, async () => {
+      if (this.queue.size(sessionId) || this.runtime.isBusy?.(sessionId)) {
+        throw racpError("CONFLICT", "Session still has active work");
+      }
+      const state = this.states.get(sessionId);
+      for (const [alias, turn] of this.runtimeAliases) {
+        if (state?.turns.has(turn)) this.runtimeAliases.delete(alias);
+      }
+      for (const turn of state?.turns.keys() ?? []) this.turnIndex.delete(turn);
+      for (const [key, entry] of this.idempotency) {
+        if (entry.sessionId === sessionId) this.idempotency.delete(key);
+      }
+      this.states.delete(sessionId);
+      this.startingQueuedTurns.delete(sessionId);
+      this.drainPending.delete(sessionId);
+      this.approvals.releaseSession(sessionId);
+      this.hub.releaseSession(sessionId);
+    });
   }
 
   /** Let the queue of an idle session run, e.g. after the runtime became free. */
@@ -1018,7 +1056,8 @@ export class AgentHost {
 
   private async drainAdmitted(sessionId: string): Promise<void> {
       while (true) {
-        const state = this.state(sessionId);
+        const state = this.states.get(sessionId);
+        if (!state) return;
         if (this.queue.isHeld(sessionId) || this.isOccupied(state)) return;
         const head = this.queue.peek(sessionId);
         const headTurn = head ? this.ensureTurn(state, head.id) : undefined;
@@ -1039,6 +1078,7 @@ export class AgentHost {
             ...(record.userMessageId ? { userMessageId: record.userMessageId } : {}),
             ...(record.voiceOrigin ? { voiceOrigin: record.voiceOrigin } : {}),
             ...(record.attachments ? { attachments: record.attachments } : {}),
+            ...(record.quotes ? { quotes: record.quotes } : {}),
             effectivePermissionMode: record.effectivePermissionMode,
             ...(record.idempotencyKey ? { idempotencyKey: record.idempotencyKey } : {}),
             principal: { subject: record.principalSubject, roles: ["controller"] },
@@ -1137,6 +1177,7 @@ export class AgentHost {
           ...(head.userMessageId ? { userMessageId: head.userMessageId } : {}),
           ...(head.voiceOrigin ? { voiceOrigin: head.voiceOrigin } : {}),
           ...(head.attachments ? { attachments: head.attachments } : {}),
+          ...(head.quotes ? { quotes: head.quotes } : {}),
           principal: { subject: head.principalSubject, roles: ["controller"] },
         }));
       } catch {
@@ -1580,6 +1621,7 @@ export function hashInput(input: StartTurnParams["input"]): string {
   const encoded = JSON.stringify({
     text: input.text,
     attachments: input.attachments ?? [],
+    quotes: input.quotes ?? [],
     ...(input.sessionMessageId ? { sessionMessageId: input.sessionMessageId } : {}),
   });
   let hash = 5381;

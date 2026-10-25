@@ -1,30 +1,31 @@
-import { readStoreSource, readTranscriptSource, readMainSource } from "./helpers/source-contracts.mjs";
+import { readStoreSource, readTranscriptSource } from "./helpers/source-contracts.mjs";
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
+import { register } from "node:module";
+register(new URL("./helpers/ts-import-hooks.mjs", import.meta.url));
+const { projectMessageEnd } = await import("../src/lib/session-transcript.ts");
 
 const read = (path) =>
   readFile(new URL(`../${path}`, import.meta.url), "utf8");
 const readRoot = (path) =>
   readFile(new URL(`../../../${path}`, import.meta.url), "utf8");
 
-// The message_end projection (including the !event.message.error guard) lives
-// in src/lib/session-transcript.ts since the native side-chat re-keying.
-const readSessionTranscript = () => read("src/lib/session-transcript.ts");
-
 test("provider failures stay in the transcript as structured assistant messages", async () => {
-  const [runtime, store, main, sessionTranscript] = await Promise.all([
+  const [runtime, store] = await Promise.all([
     readRoot("packages/agent-runtime/src/runtime.ts"),
     readStoreSource(),
-    readMainSource(),
-    readSessionTranscript(),
   ]);
 
   assert.match(runtime, /error:\s*classifiedError,\s*isError:\s*true/);
   assert.match(runtime, /m\.status === "error" \|\| m\.isError \|\| m\.error/);
-  assert.match(sessionTranscript, /!event\.message\.error/);
+  const errorMessage = {
+    id: "provider-failure", role: "assistant", content: "", status: "error",
+    createdAt: "2026-10-25T00:00:00Z",
+    error: { code: "NETWORK_ERROR", message: "Connection interrupted" },
+  };
+  assert.deepEqual(projectMessageEnd([], { type: "message_end", message: errorMessage }), [errorMessage]);
   assert.match(store, /assistantErrorMessage\(event\.error\)/);
-  assert.match(main, /failed && empty && !event\.message\.error/);
 });
 
 test("assistant error messages expose readable provider details and one Continue action", async () => {

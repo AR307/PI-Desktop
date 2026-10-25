@@ -19,6 +19,7 @@ import {
   formatTokenCount,
   modelMatchesFilter,
   nativeWebSearchSupportedOn,
+  supportsClaudeCacheTtl,
   publishedThinkingLevels,
   resolveBindingDefaultThinkingLevel,
   sortThinkingLevels,
@@ -36,6 +37,7 @@ import {
 import { api } from "../../lib/api";
 import { Button, Field, HelpIcon, Input, Tooltip, TooltipButton, cx } from "../ui";
 import { IconClose, IconGripVertical, IconHelp, IconPlus, IconRefresh, IconSearch } from "../icons";
+import { ReasoningEffortSelect } from "./ReasoningEffortSelect";
 import { SettingsMenuSelect } from "./SettingsMenuSelect";
 import { filterChosenModels, hidesAddedBinding } from "./model-chosen-filter";
 import {
@@ -946,6 +948,32 @@ export function ModelSelectionPanes({
                       </div>
                     </div>
                     {renderBindingExtra?.(binding, updateBinding, busy)}
+                    {supportsClaudeCacheTtl(binding.id, binding.apiStyle ?? apiStyle, info?.family) ? (
+                      <div className="provider-chosen-thinking-default">
+                        <span className="provider-chosen-field-label">
+                          {t("settings.claudeCacheTtl")}
+                          <HelpIcon label={t("settings.claudeCacheTtlHint")} />
+                        </span>
+                        <SettingsMenuSelect
+                          label={t("settings.claudeCacheTtl")}
+                          value={binding.claudeCacheTtl ?? "5m"}
+                          disabled={busy}
+                          options={[
+                            { id: "5m", label: t("settings.claudeCache5m") },
+                            { id: "1h", label: t("settings.claudeCache1h") },
+                          ]}
+                          onChange={(id) => {
+                            if (id === "5m" || id === "1h") updateBinding(binding.id, { claudeCacheTtl: id });
+                          }}
+                        />
+                      </div>
+                    ) : null}
+                    {(!apiStyle || apiStyle === "chat_completions" || apiStyle === "opencode_go") ? (
+                      <ReasoningEffortSelect
+                        value={binding.supportsReasoningEffort}
+                        onChange={(supportsReasoningEffort) => updateBinding(binding.id, { supportsReasoningEffort })}
+                      />
+                    ) : null}
                     <div className="provider-chosen-capabilities">
                       <span className="provider-chosen-thinking-label">
                         {t("settings.modelCapabilities")}

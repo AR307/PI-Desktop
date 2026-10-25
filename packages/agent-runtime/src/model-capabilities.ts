@@ -98,9 +98,11 @@ export function modelConfigWithBinding(
         | "maxTokens"
         | "thinkingLevels"
         | "thinkingProtocol"
+        | "supportsReasoningEffort"
         | "supportsImages"
         | "supportsDocuments"
         | "nativeWebSearch"
+        | "claudeCacheTtl"
       >
     | null,
 ): ModelConfig {
@@ -178,6 +180,7 @@ export function modelConfigWithBinding(
       ? model.reasoning || enabledThinkingLevels.some((level) => level !== "off")
       : enabledThinkingLevels.some((level) => level !== "off"),
     supportedThinkingLevels: enabledThinkingLevels,
+    supportsReasoningEffort: binding.supportsReasoningEffort,
     ...(binding.thinkingProtocol
       ? { thinkingProtocol: binding.thinkingProtocol }
       : {}),
@@ -185,6 +188,7 @@ export function modelConfigWithBinding(
     ...(Object.keys(thinkingLevelMap).length > 0 ? { thinkingLevelMap } : {}),
     ...modalityOverride(model, binding),
     ...(binding.nativeWebSearch === true ? { webSearch: true } : {}),
+    claudeCacheTtl: binding.claudeCacheTtl,
   };
 }
 

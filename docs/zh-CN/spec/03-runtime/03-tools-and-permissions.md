@@ -219,6 +219,37 @@ Electron 主要低于 `<data_dir>/scratch/<sessionId>/pasted/` 之前的
 - 会话 lookup/storage 错误使工具请求失败；它绝不能是
   被视为丢失的旧会话或重定向到选定的工作区。
 
+## 4b.1 会话可视化目录（D671）
+
+内联可视化（ADR `gen-ui-inline-visualization`）是模型写出、由转录区渲染的 HTML 片段。
+它们放在第三个由宿主拥有的根目录中，与 scratch 分开，这样 scratch 保留 7 天清理，
+而可视化与会话同生命周期：
+
+```text
+<data_dir>/visualizations/<sessionId>/
+```
+
+- **可用范围。** 仅本地会话，且默认关闭：需要用户开启设置项
+  `AppSettings.inlineVisualizations`（缺省与 `false` 都表示关闭）。关闭时没有该目录、
+  没有提示行，技能目录、`/` 菜单和 `Skill` 工具都不提供 `pi-desktop/visualize`，
+  渲染层只隐藏引用行、不加载卡片。远程工作区会话同样没有这些内容。
+- **寻址。** 只接受绝对路径；路径在系统提示中与 scratch 目录一起给出。相对路径
+  永远不会解析到这里。
+- **包含校验。** `resolve_tool_path` 依次检查工作区、scratch、可视化三个根目录，
+  使用相同的词法 + 符号链接防护。
+- **内容。** `Write`/`Edit` 只接受以 `.html` 结尾的单层文件名；该根目录下的其他目标
+  返回工具错误。允许 `Read`。
+- **权限。** 在该根目录内的 `Write`/`Edit` 与 scratch 条件相同，免确认自动允许。
+  Plan 和 Goal 不提供 Write/Edit，因此合约模式无法写入这里。结果带
+  `root: "visualization"`，不记为工件，也不做审核快照。
+- **生命周期。** 首次写入时延迟创建。随 `session.delete` 删除。启动清理只删除会话已
+  不存在的目录，从不按时间删除。
+- **渲染。** 代码块之外单独一行 `::visualize{"path":"<绝对路径>","title":"…"}` 会在
+  回合完成后渲染为内联卡片。渲染层由路径后缀推导出
+  `pi-genui://session/<sessionId>/<file>`，从不把绝对路径发给 Main。Main 只提供当前
+  数据目录下不超过 2 MB 的普通非符号链接片段，拒绝完整文档，并把片段包进带严格 CSP
+  （无网络、子框架、表单）的宿主外壳；框架为 `sandbox="allow-scripts"`。
+
 ## 4c。消息拥有的审核快照和回滚
 
 `Write` 和 `Edit` 是结构化审核边界。对于一个成功的
@@ -365,7 +396,7 @@ tool/protocol 名称，请求中单独携带固定的 shell ID。
 2. Unix：众所周知的位置（`/bin/bash`、`/usr/bin/bash`、`/usr/local/bin/bash`、Homebrew），然后是 PATH
 3. Windows：来自 Git 的 Windows 的 `bash.exe` — 派生自 PATH 上的 `git`，然后是标准安装目录，然后是排除 `System32` 中的 WSL 启动器的 PATH
 
-- Unix 调用 `bash -lc`（登录 shell 为 Finder/Dock 启动保留配置文件路径）； Windows 使用 `CREATE_NO_WINDOW` 调用 `bash -c`
+- Unix 调用 `bash -lc`（登录 shell 为 Finder/Dock 启动保留配置文件路径）；Windows 使用 `CREATE_NO_WINDOW` 调用 `bash -c`。负责拥有命令树的隐藏 host-core runner 会使用 `CREATE_NO_WINDOW` 创建，并且仅当宿主所在的 job 授予 `JOB_OBJECT_LIMIT_BREAKAWAY_OK` 时才加上 `CREATE_BREAKAWAY_FROM_JOB`，然后被分配到自己的 kill-on-close Job Object 中。按宿主自身 job 的能力请求 breakaway，使启动器或策略 Job 不会成为 Desktop 进程的终止范围。当该 job 未授予 `JOB_OBJECT_LIMIT_BREAKAWAY_OK` 时，`CreateProcess` 会以 `ERROR_ACCESS_DENIED` 拒绝该 breakaway，因此不再带上该标志，runner 改以嵌套 job 的形式加入 host 拥有的 job；无论哪种情况，shell 本身都留在这个 host 拥有的 job 中，所以超时和中止仍会终止完整的命令树。
 - 在 Unix 上，Bash 工具另外探测用户的登录 shell 以获取其信息
   路径 — `$SHELL`（回退 `/bin/zsh` → `/bin/bash` → `/bin/sh`）
   `-lic 'printf %s "$PATH"'`，5 秒范围内，每个进程缓存 — 并注入它
@@ -377,6 +408,10 @@ tool/protocol 名称，请求中单独携带固定的 shell ID。
 - 安装程序中没有捆绑 bash：Windows 的 Git 是 Windows 的先决条件（无论如何，该应用程序都需要 git）
 - 解决失败返回稳定的 `SHELL_NOT_FOUND` 并提供安装指导
 - Windows PowerShell 和 cmd 使用其本机非交互式调用。
+- PowerShell 输出经过 PowerShell 自身的格式化器，因此对象（表格、列表、哈希表、
+  `Measure-Object` 结果）以控制台显示的形式交给 Agent，而不是类型名。原生命令
+  写入 stderr 的行会转发到 stderr，但本身不会使调用失败：调用报告原生命令的退出码。
+  其他 PowerShell 错误会使调用以退出码 1 失败。
 - PowerShell 7 先解析 `%ProgramFiles%\PowerShell\7`（宿主进程为 32 位时为
   `ProgramW6432`）下的 `pwsh.exe`，再回退到 PATH，覆盖机器级安装、Store、
   用户级与便携安装。它与 Windows PowerShell 5.1 共用同一调用契约，且从不被
@@ -385,6 +420,42 @@ tool/protocol 名称，请求中单独携带固定的 shell ID。
 - Git Bash 使用发现的 Git 来执行 Windows 可执行文件。
 - Unix Bash 使用经过批准的系统 Bash 条目。
 - 用户中止和超时在返回之前终止整个进程树。
+- `runInBackground: true` 让命令脱离本轮：shell 一启动就返回 `backgroundTaskId`，
+  不再套用超时，进程也不会被 `tools.abort` / `agent.abort` 终止。进程树归宿主
+  所有，通过输入框上方的共用容器展示，可由用户停止或随应用退出而结束。
+  每个输出流保留最后 256KB。
+- **后台任务归属启动它的会话。** 会话 ID 在启动时固定，之后不随切换、重命名、
+  归档或恢复而改变。单个会话最多同时运行 **10** 个后台任务，拒绝时会指明这是
+  每会话上限。另有一个进程级总量上限，仅用于防止多个会话叠加压垮宿主，并以
+  独立原因上报，使两种拒绝可区分。会话已不存在时启动会被拒绝，任务不会落在一个
+  无法展示它的会话里。
+- 后台任务先排空输出，再发布最终状态，保留跨管道读取边界的 UTF-8 字符；
+  退出和停止时已排队的输出不会丢失。关闭宿主时发送停止信号不依赖输出锁。
+- **Todo 与后台任务共用输入框上方的一个容器**，位于 Plan/Ask 决策面与输入框之上。
+  容器只有一个头部，承载待办进度摘要、运行中任务数、tab 列表与展开控件；折叠
+  只隐藏面板，因此折叠时 tab 仍可点击。仅当两侧都有内容时才出现 tabs：只有一侧
+  有内容时直接渲染该面板、不渲染 tab 列表；两侧都为空时容器不渲染。面板在
+  `min(200px, 24vh)` 内滚动，不随行数无限增高；审批和 Ask 对输入的既有约束不变。
+- **当前显示的 tab 是按会话记的视图状态。** 它记住用户自己的选择，容器自动选出的
+  tab 不会覆盖该选择；记忆的 tab 对应侧变空时回落到另一侧。容器沿用待办坞原有的
+  门控：需要存在 active 会话且允许本地工具。
+- **新启动的任务不抢焦点。** 当后台任务面板不是当前可见面板时，新任务只在其 tab 上
+  累加徽标；进入该 tab 即清零。折叠状态下点击 tab 会同时展开容器，否则点击看起来
+  没有效果。
+- 终止的后台任务不长期驻留：渲染层观察到任务结束后保留 10 秒宽限窗以便读取退出码，
+  随后离开容器。渲染层首次加载时已经结束的任务属于注册表历史，不再出现。正在查看的
+  输出预览会钉住其行，避免日志在阅读时消失。
+- **移除是视图动作，但对运行中任务有准入限制。** 只有终止态（`exited`、`failed`、
+  `stopped`）可移除；运行中任务——包括已发出停止信号、但在 supervisor 落定前仍是
+  `running` 的任务——在状态层就被拒绝，而不只是隐藏按钮。宿主侧任务、输出与 id
+  均不受影响，因此按 id 仍可读取，直到宿主自身的保留策略淘汰。移除记录按会话记忆，
+  不持久化。
+- **删除会话会停止它的运行中后台任务。** 归档不会：归档是可恢复的标记，杀掉进程属于
+  破坏性副作用。删除只发停止信号即返回——不等待任务落定，也不因任务杀不掉而失败。
+  已删除会话中被停止的任务不出现在任何容器里，因为原本展示它的会话已不存在。
+- 同时只展开一个输出预览；任务运行时，上次读取完成后每秒刷新一次，折叠的日志
+  不读取。预览最多展示 stdout 的 8,000 字符和 stderr 的 4,000 字符，忽略切换前
+  的过期响应。读取、停止或移除失败会显示错误，停止操作可以重试。
 
 初始拒绝名单（可扩展）：
 

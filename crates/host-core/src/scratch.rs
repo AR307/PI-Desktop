@@ -61,6 +61,9 @@ pub fn sweep(data_dir: &Path, live_session_ids: &HashSet<String>) {
             continue;
         }
         let name = entry.file_name().to_string_lossy().to_string();
+        if name.starts_with("side-") {
+            continue;
+        }
         let stale = entry
             .metadata()
             .and_then(|m| m.modified())

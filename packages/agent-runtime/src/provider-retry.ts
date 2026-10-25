@@ -455,7 +455,16 @@ export function createProviderRetryStream(
         | undefined;
       let opaqueLimitRejection: ClassifiedAgentError | undefined;
 
-      for await (const event of inner) {
+      for await (let event of inner) {
+        // A provider/SDK may label a disconnected or timed-out stream aborted.
+        // Only a caller cancellation (or an explicit local cancel marker) is
+        // Stop. Otherwise route it through the ordinary transient recovery.
+        if (event.type === "error" && event.reason === "aborted" &&
+            !options.signal?.aborted && !readLocalRequestErrorDetails(event.error)) {
+          event.error.stopReason = "error";
+          event.error.errorMessage = `Provider stream interrupted: ${event.error.errorMessage || "connection aborted"}`;
+          event = { ...event, reason: "error" };
+        }
         if (event.type === "start") sawStart = true;
         const partial = event.type === "error" ? event.error : event.type === "done" ? event.message : event.partial;
         // Some adapters emit a fresh empty error envelope after streaming.
@@ -544,10 +553,10 @@ export function createProviderRetryStream(
       await sleep(delayMs, options.signal);
     }
   })().catch((error) => {
-    const aborted =
-      options.signal?.aborted ||
-      (error instanceof Error && error.name === "AbortError");
-    const message = setupErrorMessage(model, error, Boolean(aborted));
+    const aborted = options.signal?.aborted;
+    const failure = !aborted && !readLocalRequestErrorDetails(error) && error instanceof Error && error.name === "AbortError"
+      ? new Error(`Provider stream interrupted: ${error.message}`) : error;
+    const message = setupErrorMessage(model, failure, Boolean(aborted));
     if (lastPartial) { message.content = lastPartial.content; message.usage = lastPartial.usage; message.providerThinkingLevel = lastPartial.providerThinkingLevel; }
     outer.push({
       type: "error",

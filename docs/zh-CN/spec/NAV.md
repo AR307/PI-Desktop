@@ -66,6 +66,7 @@
 - [10-workbuddy-benchmark-ux.md](/zh-CN/spec/04-ux/10-workbuddy-benchmark-ux)
 - [11-asktool-question-card.md](/zh-CN/spec/04-ux/11-asktool-question-card)
 - [12-prompt-enhancement.md](/zh-CN/spec/04-ux/12-prompt-enhancement)
+- [24-selected-references-and-temporary-side-chat.md](/zh-CN/spec/04-ux/24-selected-references-and-temporary-side-chat)
 
 ## 5. 安全性
 - [README.md](/zh-CN/spec/05-security/README)
@@ -80,6 +81,7 @@
 - [04-e2e-test-plan.md](/zh-CN/spec/06-delivery/04-e2e-test-plan)
 - [05-change-checklist.md](/zh-CN/spec/06-delivery/05-change-checklist)
 - [06-release-runbook.md](/zh-CN/spec/06-delivery/06-release-runbook)
+- [plugin-reviews-test-plan.md](/zh-CN/spec/06-delivery/plugin-reviews-test-plan)
 - [07-remote-control-rollout.md](/zh-CN/spec/06-delivery/07-remote-control-rollout)
 
 ## 7. 插件
@@ -116,3 +118,5 @@
 - [安卓伴侣与限定范围的桌面同步](/zh-CN/spec/03-runtime/23-mobile-companion)
 
 - [Ultra 协作](/zh-CN/spec/03-runtime/ultra-collaboration)
+
+- [显式导入 Codex 历史](03-runtime/codex-native-import.md)

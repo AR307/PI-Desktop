@@ -45,6 +45,7 @@ export function userMessageMenuItems({
   text,
   selectTarget,
   editable,
+  deletable = true,
   running,
   revision,
   actions,
@@ -57,6 +58,7 @@ export function userMessageMenuItems({
   selectTarget: HTMLElement | null;
   /** Session-relayed turns are not human input, so they cannot be edited. */
   editable: boolean;
+  deletable?: boolean;
   running: boolean;
   /** Present only while a regenerate left more than one version behind. */
   revision: { count: number; active: number } | null;
@@ -108,7 +110,7 @@ export function userMessageMenuItems({
         onActivateRevision(Math.min(revision.count, revision.active + 1)),
     });
   }
-  if (editable) {
+  if (editable && deletable) {
     items.push({
       id: "delete",
       label: t("chat.deleteMessage"),
@@ -134,6 +136,7 @@ export function assistantTurnMenuItems({
   answer,
   selectTarget,
   complete,
+  branchable = true,
   actions,
   onRegenerate,
   onBranch,
@@ -143,6 +146,7 @@ export function assistantTurnMenuItems({
   selectTarget: HTMLElement | null;
   /** Idle, error-free, and backed by an answer message. */
   complete: boolean;
+  branchable?: boolean;
   actions: MenuItemActions;
   onRegenerate: () => void;
   onBranch: () => void;
@@ -170,6 +174,8 @@ export function assistantTurnMenuItems({
       separatorBefore: items.length > 0,
       onSelect: onRegenerate,
     });
+  }
+  if (complete && branchable) {
     items.push({
       id: "branch",
       label: t("chat.forkResponse"),

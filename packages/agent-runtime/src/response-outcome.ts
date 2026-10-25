@@ -1,3 +1,4 @@
+import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import type { AssistantMessage } from "@earendil-works/pi-ai";
 import type { AssistantReplay, ResponseDiagnostics, UiMessage } from "@pi-desktop/shared";
 import type { ClassifiedAgentError } from "./agent-errors.js";
@@ -29,6 +30,44 @@ export function responseContentFacts(message: Pick<AssistantMessage, "content">)
     }
   }
   return { textLength, thinkingLength, toolCallCount, meaningful };
+}
+
+/** Keep only provider-native replayable output, never unfinished tool calls. */
+export function retainedAssistantForRetry(message: AssistantMessage): AssistantMessage | undefined {
+  const content = restoredAssistantBlocks(assistantReplay(message));
+  return content.length
+    ? { ...message, content, stopReason: "stop", errorMessage: undefined }
+    : undefined;
+}
+
+/** Continue the failed response, not the turn or its already completed tools. */
+export function prepareProviderRetryMessages(
+  messages: readonly AgentMessage[],
+): AgentMessage[] {
+  const result = [...messages];
+  for (let index = result.length - 1; index >= 0; index--) {
+    const message = result[index];
+    if (message.role === "system") continue;
+    if (message.role !== "assistant") break;
+    if (["error", "aborted", "pending"].includes(message.stopReason)) {
+      const retained = retainedAssistantForRetry(message);
+      if (retained) result[index] = retained;
+      else result.splice(index, 1);
+      continue;
+    }
+    if (responseContentFacts(message).meaningful) break;
+    result.splice(index, 1);
+  }
+  // Pi requires a user/tool tail. This runtime-owned continuation is model
+  // context only: it is not echoed as a user submission or persisted as one.
+  if (result.filter(message => message.role !== "system").at(-1)?.role === "assistant") {
+    result.push({
+      role: "user",
+      content: "The response stream was interrupted. Continue the current task from the retained output and completed tool results. Do not repeat completed actions or repeat the text already provided.",
+      timestamp: Date.now(),
+    });
+  }
+  return result;
 }
 
 /** Provider termination takes precedence over content; never infer token limits. */

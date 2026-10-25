@@ -8,14 +8,16 @@ import { trustedExtensionCommandName, type Mode } from "@pi-desktop/shared";
  * composer "/" dispatch (D123). Builtin ids run app actions locally; other
  * ids round-trip to the plugin runtime via commandPalette/execute.
  */
-export async function runPaletteCommand(commandId: string): Promise<void> {
+export async function runPaletteCommand(commandId: string, targetSessionId?: string): Promise<void> {
   const store = useAppStore.getState();
+  const sessionId = targetSessionId ?? store.activeSessionId;
   switch (commandId) {
     case "builtin.session.new":
+      if (sessionId?.startsWith("side-")) throw new Error(i18n.t("chat.sideChat.mainCommand"));
       await store.newSession();
       break;
     case "builtin.agent.compact":
-      await store.compactContext();
+      await store.compactContext(sessionId);
       break;
     case "builtin.mode.agent":
     case "builtin.mode.plan":
@@ -25,8 +27,8 @@ export async function runPaletteCommand(commandId: string): Promise<void> {
         : commandId.endsWith("goal")
           ? "goal"
           : "agent";
-      const activeSession = store.activeSessionId
-        ? store.sessions.find((session) => session.id === store.activeSessionId)
+      const activeSession = sessionId
+        ? store.sessions.find((session) => session.id === sessionId)
         : undefined;
       if (activeSession) {
         await store.configureActiveSession({
@@ -34,7 +36,7 @@ export async function runPaletteCommand(commandId: string): Promise<void> {
           providerId: activeSession.providerId,
           modelId: activeSession.modelId,
           thinkingLevel: activeSession.thinkingLevel,
-        });
+        }, sessionId);
       } else if (store.settings) {
         // Keep the command useful from the empty home, where no session has
         // been created yet. The next session will inherit this default.
@@ -49,18 +51,20 @@ export async function runPaletteCommand(commandId: string): Promise<void> {
       // (spec 16 §8); without a session there is nothing to run them in.
       const extensionCommand = trustedExtensionCommandName(commandId);
       if (extensionCommand !== undefined) {
-        await runExtensionCommand(extensionCommand, "");
+        await runExtensionCommand(extensionCommand, "", sessionId);
         return;
       }
+      if (sessionId?.startsWith("side-")) throw new Error(i18n.t("chat.sideChat.mainCommand"));
       await api.executeCommand(commandId);
     }
   }
 }
 
-export async function runExtensionCommand(name: string, args: string): Promise<void> {
+export async function runExtensionCommand(name: string, args: string, targetSessionId?: string): Promise<void> {
   const store = useAppStore.getState();
-  if (!store.activeSessionId) {
+  const sessionId = targetSessionId ?? store.activeSessionId;
+  if (!sessionId) {
     throw new Error(i18n.t("plugins.agentExtension.commandNeedsSession"));
   }
-  await api.runExtensionCommand({ sessionId: store.activeSessionId, name, args });
+  await api.runExtensionCommand({ sessionId, name, args });
 }

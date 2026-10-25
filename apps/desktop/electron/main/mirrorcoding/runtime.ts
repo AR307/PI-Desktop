@@ -12,6 +12,7 @@ import type { HostProcess } from "../host-process";
 import type { ModelsDevCatalog } from "../models-dev-catalog";
 import { ImageService, type ImageServiceDependencies } from "../images/service";
 import { MirrorCodingAccount } from "./account";
+import { MirrorCodingBenefitsService } from "./benefits";
 import { modelMetadata } from "./catalog";
 import { MirrorCodingCredentials } from "./credentials";
 import { MirrorCodingRelay } from "./relay";
@@ -50,6 +51,7 @@ export function createMirrorCodingRuntime(deps: Dependencies) {
     changed: (state) => deps.send(IPC.event.mirrorCodingChanged, state),
   });
   const relay = new MirrorCodingRelay(account);
+  const benefits = new MirrorCodingBenefitsService(account);
   const images = new ImageService(deps, account, relay);
 
   const bindingFor = async (providerId: string, modelId: string, sessionId?: string): Promise<RuntimeProviderConfig> => {
@@ -121,9 +123,9 @@ export function createMirrorCodingRuntime(deps: Dependencies) {
     return Boolean(metadata && state.status === "connected" && state.account?.id === metadata.accountId);
   };
   return {
-    account, relay, bindingFor, bindingForImage, isReady, completeWelcome, images,
+    account, benefits, relay, bindingFor, bindingForImage, isReady, completeWelcome, images,
     async start() { await account.initialize(); void account.refreshCatalog(); void account.retryRevocation(); },
-    dispose() { images.dispose(); account.dispose(); relay.dispose(); },
+    dispose() { benefits.dispose(); images.dispose(); account.dispose(); relay.dispose(); },
   };
 }
 export type MirrorCodingRuntime = ReturnType<typeof createMirrorCodingRuntime>;

@@ -459,6 +459,7 @@ async function dispatchApprovedPlan(rawExecution: unknown): Promise<void> {
       mode: launch.sidecarParams.mode, providerId: launch.providerId, modelId: launch.modelId,
       thinkingLevel: launch.sidecarParams.thinkingLevel, ultra: launch.sidecarParams.ultra, fast: launch.sidecarParams.provider.fast === true,
     });
+    coordination.recordTurnStart(execution.sessionId, turnId);
     activeTurnUsages.delete(execution.sessionId);
     approvedExecutionIdsBySession.set(execution.sessionId, execution.id);
     approvedExecutionTurns.set(execution.id, {

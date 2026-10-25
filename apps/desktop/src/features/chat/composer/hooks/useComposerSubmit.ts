@@ -14,6 +14,7 @@ import {
 import { readEditorValue, type ComposerFileReference } from "../editor";
 import type { ComposerDraftSnapshot } from "../../../../lib/composer-smart-stop";
 import type { ComposerDraftController } from "./useComposerDraft";
+import { submitWithLatestDraftRestore } from "./submit-with-latest-draft-restore.mjs";
 
 type UseComposerSubmitOptions = {
   value: string;
@@ -49,6 +50,7 @@ export type ComposerSubmitController = { submit: (steering?: boolean) => Promise
  * dependency so command dispatch and optimistic draft clearing remain
  * independent from editor rendering.
  */
+
 export function useComposerSubmit({
   value,
   draftKey,
@@ -74,7 +76,7 @@ export function useComposerSubmit({
     // arrives where the user put it instead of trailing the text.
     const inlineContent = serializeInlineComposerFileReferences(rawText, activeFileReferences);
     const serializedContent = serializeComposerFileReferences(rawText, activeFileReferences);
-    if (!serializedContent) return;
+    if (!serializedContent && !draft.draftSnapshot(rawText).quotes?.length) return;
     if (sendBlocked || (steering && !steeringAllowed)) {
       if (pasting) showToast(t("chat.pasteInProgress"), { variant: "info" });
       return;
@@ -121,7 +123,7 @@ export function useComposerSubmit({
           command.id === "builtin.mode.goal";
         if (isModeCommand && commandBody) {
           try {
-            await runPaletteCommand(command.id);
+            await runPaletteCommand(command.id, activeSessionId ?? undefined);
             const visibleDraft = rawText.trim();
             const visibleCommandEnd = visibleDraft.search(/\s/);
             const visibleCommandBody =
@@ -148,7 +150,7 @@ export function useComposerSubmit({
         }
         if (command.kind === "extension") {
           try {
-            await runExtensionCommand(command.name, commandBody);
+            await runExtensionCommand(command.name, commandBody, activeSessionId ?? undefined);
             draft.clearDraftForKey(submittedDraftKey, submittedDraftRevision, submittedDraft);
             remember();
           } catch (error) {
@@ -160,7 +162,8 @@ export function useComposerSubmit({
         }
         if (!commandBody) {
           try {
-            if (command.kind === "builtin") await runPaletteCommand(command.id);
+            if (command.kind === "builtin") await runPaletteCommand(command.id, activeSessionId ?? undefined);
+            else if (activeSessionId?.startsWith("side-")) throw new Error(t("chat.sideChat.mainCommand"));
             else await api.executeCommand(command.id);
             draft.clearDraftForKey(submittedDraftKey, submittedDraftRevision, submittedDraft);
             remember();
@@ -178,16 +181,19 @@ export function useComposerSubmit({
       return;
     }
     draft.clearDraftForKey(submittedDraftKey, submittedDraftRevision, submittedDraft);
-    const accepted = steering
-      ? await steerPrompt(inlineContent, submittedDraft)
-      : await sendPrompt(
-          inlineContent,
-          submittedDraft,
-          activeSessionId ?? undefined,
-          captureAcceptedSession,
-        );
-    if (!accepted) draft.restoreDraftForKey(submittedDraftKey, submittedDraft);
-    else remember();
+    const accepted = await submitWithLatestDraftRestore(
+      submittedDraftKey,
+      () => steering
+        ? steerPrompt(inlineContent, submittedDraft, activeSessionId ?? undefined)
+        : sendPrompt(
+            inlineContent,
+            submittedDraft,
+            activeSessionId ?? undefined,
+            captureAcceptedSession,
+          ),
+      () => draft.restoreDraftForKey(submittedDraftKey, submittedDraft),
+    );
+    if (accepted) remember();
   };
 
   return { submit };

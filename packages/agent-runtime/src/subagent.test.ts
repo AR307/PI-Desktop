@@ -147,10 +147,10 @@ describe("SubagentRun event forwarding", () => {
 
     expect(run.agent.state.thinkingLevel).toBe("off");
     expect(run.agent.streamFunction.toString()).toContain(
-      "models.stream(omitThinkingModel, context, retryOptions)",
+      "models.stream(omitThinkingModel, requestContext, retryOptions)",
     );
   });
-  it("deduplicates repeated tool calls before a subagent request", () => {
+  it("retains completed same-id rounds in a resumed subagent request", () => {
     const stderr = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
     try {
       const { run } = createRun({
@@ -190,15 +190,15 @@ describe("SubagentRun event forwarding", () => {
           : [],
       );
 
-      expect(toolCalls.map((call) => call.id)).toEqual(["child-read"]);
-      expect(outgoing.filter((message) => message.role === "toolResult")).toHaveLength(1);
+      expect(toolCalls.map((call) => call.id)).toEqual(["child-read", "call_pi_repeat_1"]);
+      expect(outgoing.filter((message) => message.role === "toolResult")).toHaveLength(2);
       expect(
         outgoing.filter(
           (message) => message.role === "assistant" && message.content.length === 0,
         ),
       ).toHaveLength(0);
       expect(stderr.mock.calls.map(([chunk]) => String(chunk)).join(""))
-        .toContain("session=session-1");
+        .toBe("");
     } finally {
       stderr.mockRestore();
     }
@@ -1167,6 +1167,40 @@ describe("SubagentRun retries before fallback", () => {
     }
 
     expect(run.agent.state.messages).toEqual([user, toolUse, toolResult]);
+    expect(continued).toHaveBeenCalledOnce();
+  });
+
+  it("retries from a compacted transcript when the failed assistant is gone (issue #1768)", async () => {
+    const { run } = createRun();
+    const user = { role: "user", content: "task", timestamp: 1 };
+    const compactedTail = {
+      role: "compactionSummary",
+      content: "Earlier work was summarized.",
+      timestamp: 2,
+    };
+    const continued = vi.fn(async () => undefined);
+    run.agent = {
+      state: { ...run.agent.state, messages: [user, compactedTail] as any },
+      continue: continued,
+      waitForIdle: async () => {},
+    };
+    run.pendingProviderRetry = {
+      code: "STREAM_FAILED",
+      message: "stream terminated",
+      retriable: true,
+    };
+    run.providerTransientRetryAttempt = 1;
+
+    vi.useFakeTimers();
+    try {
+      const retry = run.retryPendingProviderFailure();
+      await vi.runAllTimersAsync();
+      await retry;
+    } finally {
+      vi.useRealTimers();
+    }
+
+    expect(run.agent.state.messages).toEqual([user, compactedTail]);
     expect(continued).toHaveBeenCalledOnce();
   });
 

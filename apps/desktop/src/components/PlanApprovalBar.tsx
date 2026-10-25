@@ -20,6 +20,7 @@ import {
 } from "./icons";
 import { TooltipButton } from "./ui";
 import { AnchoredMenu } from "./settings/AnchoredMenu";
+import { focusSessionComposer } from "../lib/composer-quotes";
 
 const APPROVAL_MODES: readonly GlobalPermissionMode[] = [
   "ask",
@@ -81,9 +82,8 @@ export function PlanApprovalBar({ proposal }: { proposal: PlanProposal }) {
   }, [proposal.id]);
 
   const focusComposer = () => {
-    if (useAppStore.getState().activeSessionId !== proposal.sessionId) return;
     requestAnimationFrame(() => {
-      document.querySelector<HTMLTextAreaElement>(".composer-input")?.focus();
+      focusSessionComposer(proposal.sessionId);
     });
   };
 
@@ -128,9 +128,13 @@ export function PlanApprovalBar({ proposal }: { proposal: PlanProposal }) {
 
   const openArtifact = () => {
     if (!artifactPath) return;
+    const session = useAppStore.getState().sessions.find((item) => item.id === proposal.sessionId);
+    const path = session?.sideChatWorkspacePath
+      ? `${session.sideChatWorkspacePath}/${artifactPath}`
+      : artifactPath;
     openWorkPanelTabForSession(
-      proposal.sessionId,
-      preferredFileWorkPanelTab(artifactPath, pluginViews),
+      session?.sideChatParentId ?? proposal.sessionId,
+      preferredFileWorkPanelTab(path, pluginViews),
     );
   };
 

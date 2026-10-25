@@ -20,6 +20,9 @@ register(pathToFileURL(join(here, "helpers/ts-import-hooks.mjs")));
 const { isWindowFullScreen, setWindowFullScreen } = await import(
   "../electron/main/window-fullscreen.ts"
 );
+const { maximizedBoundsExceedWorkArea, maximizedBoundsForWorkArea } = await import(
+  "../electron/main/work-panel-window.ts"
+);
 const { readMainSource } = await import("./helpers/source-contracts.mjs");
 
 const lifecycleSource = await readMainSource();
@@ -193,4 +196,58 @@ test("the display-topology reconcile uses the tracked fullscreen flag", () => {
     lifecycleSource,
     /if \(isLiveWindow\(\) && !isWindowFullScreen\(window\)\) \{/,
   );
+});
+
+test("a maximized rect that only overshoots the work area is left alone", () => {
+  const workArea = { x: 0, y: 0, width: 1920, height: 1032 };
+  const maximized = { x: -8, y: -8, width: 1936, height: 1048 };
+  assert.equal(maximizedBoundsExceedWorkArea(maximized, workArea), false);
+  assert.deepEqual(maximizedBoundsForWorkArea(maximized, workArea), maximized);
+});
+
+test("the frameless restore that hides the taskbar is detected and corrected", () => {
+  // Windows restores a frameless maximized window to the full monitor rect:
+  // height 1120 instead of the work-area-based 1048, so the taskbar is hidden.
+  const workArea = { x: 0, y: 0, width: 1920, height: 1032 };
+  const restored = { x: -8, y: -8, width: 1936, height: 1120 };
+  assert.equal(maximizedBoundsExceedWorkArea(restored, workArea), true);
+  assert.deepEqual(maximizedBoundsForWorkArea(restored, workArea), {
+    x: -8,
+    y: -8,
+    width: 1936,
+    height: 1048,
+  });
+});
+
+test("a monitor without a taskbar never reports a false positive", () => {
+  // Secondary display: the work area equals the monitor, so a healthy
+  // maximized window already overshoots the bottom by the same inset as the
+  // top and must not be treated as a broken restore.
+  const workArea = { x: 1920, y: 0, width: 1920, height: 1080 };
+  const maximized = { x: 1912, y: -8, width: 1936, height: 1096 };
+  assert.equal(maximizedBoundsExceedWorkArea(maximized, workArea), false);
+  const restored = { x: 1912, y: -8, width: 1936, height: 1120 };
+  assert.equal(maximizedBoundsExceedWorkArea(restored, workArea), true);
+});
+
+test("a windowed rect is never treated as a broken maximize", () => {
+  const workArea = { x: 0, y: 0, width: 1920, height: 1032 };
+  const windowed = { x: 360, y: 116, width: 1200, height: 800 };
+  assert.equal(maximizedBoundsExceedWorkArea(windowed, workArea), false);
+});
+
+test("the restore handler re-applies the work-area-based maximized rect", () => {
+  const block = lifecycleSource.slice(
+    lifecycleSource.indexOf("const reconcileRestoredMaximize"),
+    lifecycleSource.indexOf('window.on("resize", observeNativeWorkPanelResize)'),
+  );
+  assert.match(block, /maximizedBoundsExceedWorkArea\(bounds, workArea\)/);
+  assert.match(
+    block,
+    /window\.setBounds\(maximizedBoundsForWorkArea\(bounds, workArea\)\)/,
+  );
+  assert.match(block, /window\.on\("restore"/);
+  // The OS finishes the restore after the event dispatch, so the correction
+  // has to be repeated once the transition settles.
+  assert.match(block, /windowBoundsSettleMs/);
 });

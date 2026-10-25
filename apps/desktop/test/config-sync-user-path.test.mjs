@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { createRequire } from "node:module";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -320,6 +320,7 @@ app.whenReady().then(async () => {
     webPreferences: { sandbox: true, contextIsolation: true, nodeIntegration: false, backgroundThrottling: false } });
   try {
     await win.loadFile(path.join(__dirname, "index.html"));
+    win.showInactive();
     console.log("S3_SETTINGS_PROBE " + JSON.stringify(await win.webContents.executeJavaScript("window.configSyncProbe()")));
     await win.webContents.executeJavaScript("window.checkboxProbe()");
     win.webContents.sendInputEvent({ type: "keyDown", keyCode: "Space" });
@@ -342,5 +343,5 @@ app.whenReady().then(async () => {
     assert.equal(code, 0, output.slice(-6000));
     assert.match(output, /S3_SETTINGS_PROBE \{"passed":true\}/);
     assert.match(output, /CHECKBOX_PROBE \{"passed":true\}/);
-  } finally { await rm(temp, { recursive: true, force: true }); }
+  } finally { console.log("Retained isolated settings evidence: " + temp); }
 });

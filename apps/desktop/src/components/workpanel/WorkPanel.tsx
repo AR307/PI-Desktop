@@ -1,3 +1,4 @@
+import { SideChatPane } from "../../features/chat/SideChatPane";
 import { isRemoteSession } from "../../lib/remote-session-safety";
 import { RemoteWorkspace } from "../remote/RemoteWorkspace";
 import {
@@ -48,9 +49,11 @@ import { SubagentTranscriptTab } from "./SubagentTranscriptTab";
 import {
   MAIN_PANE_MIN_WIDTH,
   WORK_PANEL_COMPACT_MIN_WIDTH,
-  WORK_PANEL_MIN_WIDTH,
+  WORK_PANEL_DEFAULT_WIDTH,
   clampWorkPanelWidth,
+  workPanelGestureMinimum,
   workPanelLayout,
+  workPanelRequestedWidth,
   workPanelResetWidth,
   workPanelWidthBounds,
 } from "../../lib/work-panel-resize";
@@ -61,6 +64,7 @@ const TAB_ICONS = {
   file: IconFileText,
   plugin: IconPlug,
   subagent: IconBot,
+  "side-chat": IconBot,
 } as const;
 
 type WorkPanelResizeState = {
@@ -114,6 +118,7 @@ function tabLabel(
     return view?.title ?? tab.resource ?? t("panel.tabs.plugin");
   }
   if (tab.kind === "new") return t("panel.new.title");
+  if (tab.kind === "side-chat") return t("chat.sideChat.title");
   if (tab.kind === "subagent") return tab.label ?? t("panel.tabs.subagent");
   if (tab.kind !== "file") return t(`panel.tabs.${tab.kind}`);
   const path = tab.resource ?? "";
@@ -211,6 +216,7 @@ function LocalWorkPanel({
   const activeSessionId = useAppStore((s) => s.activeSessionId);
   const pluginViews = useAppStore((s) => s.pluginViews);
   const width = useAppStore((s) => s.workPanelWidth);
+  const yieldedWidth = useAppStore((s) => s.workPanelYieldedWidth);
   const activateTab = useAppStore((s) => s.activateWorkPanelTab);
   const reorderTabs = useAppStore((s) => s.reorderWorkPanelTabs);
   const closeTab = useAppStore((s) => s.closeWorkPanelTab);
@@ -241,7 +247,9 @@ function LocalWorkPanel({
   const tabReorderState = useRef<WorkPanelTabReorderState | null>(null);
   const tabStripRef = useRef<HTMLDivElement | null>(null);
   const suppressedTabClickPointerIdsRef = useRef<Set<number>>(new Set());
+  const tabWrapperRefs = useRef<Record<string, HTMLDivElement | null>>({});
   const tabButtonRefs = useRef<Record<string, HTMLButtonElement | null>>({});
+  const tabCloseButtonRefs = useRef<Record<string, HTMLButtonElement | null>>({});
   const newTabButtonRef = useRef<HTMLButtonElement | null>(null);
   const [draggingTabId, setDraggingTabId] = useState<string | null>(null);
   const [dropIndicator, setDropIndicator] = useState<{
@@ -251,11 +259,7 @@ function LocalWorkPanel({
   const [nativeSurfaceReadyForExit, setNativeSurfaceReadyForExit] =
     useState(false);
 
-  const requestedPanelWidth = panelDragWidth ?? width;
-  const panelMinimum =
-    requestedPanelWidth < WORK_PANEL_MIN_WIDTH
-      ? WORK_PANEL_COMPACT_MIN_WIDTH
-      : WORK_PANEL_MIN_WIDTH;
+  const isSideChat = activeTab?.kind === "side-chat";
   // The first render can precede ResizeObserver's first notification. Use a
   // conservative shell estimate for that frame; the measured width takes over
   // before a user can interact with the divider.
@@ -263,9 +267,20 @@ function LocalWorkPanel({
   const budgetWidth =
     containerWidth > 0
       ? containerWidth
-      : requestedPanelWidth +
+      : (panelDragWidth ?? width) +
         (sidebarOccupiesBudget ? sidebarWidth : 0) +
         MAIN_PANE_MIN_WIDTH;
+  // A drag preview is an explicit width; otherwise the panel asks for its
+  // preferred width, or the width it lent to a manually reopened sidebar.
+  const requestedPanelWidth =
+    panelDragWidth ??
+    (isSideChat ? Math.max(width, WORK_PANEL_DEFAULT_WIDTH) : workPanelRequestedWidth({
+      containerWidth: budgetWidth,
+      sidebarWidth,
+      sidebarCollapsed: !sidebarOccupiesBudget,
+      preferredWidth: width,
+      yieldedWidth,
+    }));
   const layout = workPanelLayout({
     containerWidth: budgetWidth,
     sidebarWidth,
@@ -273,12 +288,14 @@ function LocalWorkPanel({
     requestedPanelWidth,
     maximized,
   });
-  const renderPanelWidth = layout.panelWidth;
+  const sideDrawer = isSideChat && budgetWidth - (sidebarOccupiesBudget ? sidebarWidth : 0) < MAIN_PANE_MIN_WIDTH + WORK_PANEL_DEFAULT_WIDTH;
+  const renderPanelWidth = sideDrawer ? Math.min(Math.max(width, WORK_PANEL_DEFAULT_WIDTH), budgetWidth - 16) : layout.panelWidth;
+  const panelMinimum = isSideChat ? Math.min(WORK_PANEL_DEFAULT_WIDTH, renderPanelWidth) : workPanelGestureMinimum(renderPanelWidth);
   const isResizing = panelDragWidth !== null;
 
   useLayoutEffect(() => {
-    if (!exiting && layout.shouldCollapseSidebar) onAutoCollapseSidebar?.();
-  }, [exiting, layout.shouldCollapseSidebar, onAutoCollapseSidebar]);
+    if (!sideDrawer && !exiting && layout.shouldCollapseSidebar) onAutoCollapseSidebar?.();
+  }, [sideDrawer, exiting, layout.shouldCollapseSidebar, onAutoCollapseSidebar]);
 
   useEffect(() => {
     if (isResizing) {
@@ -301,13 +318,56 @@ function LocalWorkPanel({
     setNativeSurfaceReadyForExit(true);
   }, [exiting]);
 
+  /**
+   * Reveal one tab's full box — the wrapper, not the button alone. The close
+   * control is a 24px sibling inside that wrapper, so scrolling only the button
+   * leaves the close control clipped by the strip's overflow edge (issue
+   * #1762). The button is the fallback for a tab rendered without a wrapper.
+   */
+  const revealTab = useCallback((tabId: string) => {
+    tabWrapperRefs.current[tabId]?.scrollIntoView({
+      block: "nearest",
+      inline: "nearest",
+    });
+    tabButtonRefs.current[tabId]?.scrollIntoView({
+      block: "nearest",
+      inline: "nearest",
+    });
+    tabCloseButtonRefs.current[tabId]?.scrollIntoView({
+      block: "nearest",
+      inline: "nearest",
+    });
+  }, []);
+
   useLayoutEffect(() => {
     if (!activeTabId) return;
+    // Inline rather than a helper call: `work-panel.test.mjs` pins this effect
+    // body as the contract for "wrapper, then button, then close control".
+    tabWrapperRefs.current[activeTabId]?.scrollIntoView({
+      block: "nearest",
+      inline: "nearest",
+    });
     tabButtonRefs.current[activeTabId]?.scrollIntoView({
       block: "nearest",
       inline: "nearest",
     });
+    tabCloseButtonRefs.current[activeTabId]?.scrollIntoView({
+      block: "nearest",
+      inline: "nearest",
+    });
   }, [activeTabId, tabs.length]);
+
+  // A narrowed panel clips a tab that was fully visible a moment ago, and
+  // neither `activeTabId` nor `tabs.length` changes when only the width does —
+  // so the reveal above would not re-run and the close control would stay
+  // clipped after a resize (issue #1762). Observe the strip itself.
+  useLayoutEffect(() => {
+    const strip = tabStripRef.current;
+    if (!strip || !activeTabId || typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver(() => revealTab(activeTabId));
+    observer.observe(strip);
+    return () => observer.disconnect();
+  }, [activeTabId, revealTab]);
 
   const finishTabReorder = useCallback(() => {
     const state = tabReorderState.current;
@@ -579,10 +639,11 @@ function LocalWorkPanel({
   );
 
   const closeTabAndFocus = useCallback(
-    (tabId: string) => {
+    async (tabId: string) => {
       const index = tabs.findIndex((tab) => tab.id === tabId);
       const nextTab = index >= 0 ? tabs[index + 1] ?? tabs[index - 1] : undefined;
-      closeTab(tabId);
+      await closeTab(tabId);
+      if (useAppStore.getState().workPanelTabs.some((tab) => tab.id === tabId)) return;
       requestAnimationFrame(() => {
         if (nextTab) tabButtonRefs.current[nextTab.id]?.focus();
         else newTabButtonRef.current?.focus();
@@ -731,7 +792,11 @@ function LocalWorkPanel({
       else if (event.key === "End") nextWidth = maximum;
       if (nextWidth === null) return;
       event.preventDefault();
-      setWidth(clampWorkPanelWidth(nextWidth, minimum));
+      const committedWidth = clampWorkPanelWidth(nextWidth, minimum);
+      // A key that cannot move the separator commits nothing, so it neither
+      // rewrites the preferred width nor ends a width lent to the sidebar.
+      if (committedWidth === renderPanelWidth) return;
+      setWidth(committedWidth);
     },
     [finishPanelResize, layout.maxPanelWidth, maximized, panelMinimum, renderPanelWidth, setWidth],
   );
@@ -765,7 +830,7 @@ function LocalWorkPanel({
   const exitAnimationReady = exiting && nativeSurfaceReadyForExit;
   const panelStyle = {
     width: renderPanelWidth,
-    maxWidth: layout.maxPanelWidth,
+    maxWidth: sideDrawer ? budgetWidth - 16 : layout.maxPanelWidth,
     "--work-panel-width": `${renderPanelWidth}px`,
   } as CSSProperties;
 
@@ -773,6 +838,7 @@ function LocalWorkPanel({
     <aside
       className={cx(
         "work-panel",
+        sideDrawer && "is-side-chat-drawer",
         maximized && "is-maximized",
         exiting && !exitAnimationReady && "is-exit-pending",
         exitAnimationReady && "is-exiting",
@@ -837,6 +903,9 @@ function LocalWorkPanel({
                       : TAB_ICONS[tab.kind];
                   return (
                     <div
+                      ref={(node) => {
+                        tabWrapperRefs.current[tab.id] = node;
+                      }}
                       className={cx(
                         "work-panel-tab",
                         selected && "active",
@@ -845,6 +914,12 @@ function LocalWorkPanel({
                           (dropIndicator.insertAfter ? "is-drop-after" : "is-drop-before"),
                       )}
                       data-work-panel-tab-id={tab.id}
+                      // A partly visible inactive tab reveals its close
+                      // control on hover (`.work-panel-tab:hover
+                      // .work-panel-tab-close`, styles/work-panel.css:314) —
+                      // revealing opacity is not enough when the control sits
+                      // outside the strip, so bring the whole box in first.
+                      onPointerEnter={() => revealTab(tab.id)}
                       key={tab.id}
                     >
                       <button
@@ -876,6 +951,9 @@ function LocalWorkPanel({
                       </button>
                       <button
                         type="button"
+                        ref={(node) => {
+                          tabCloseButtonRefs.current[tab.id] = node;
+                        }}
                         className="work-panel-tab-close"
                         aria-label={t("panel.closeTab", { name: label })}
                         title={t("panel.closeTab", { name: label })}
@@ -917,6 +995,7 @@ function LocalWorkPanel({
           </div>
         </header>
         <div className="work-panel-body">
+          {activeTab?.kind === "side-chat" && activeTab.resource ? <SideChatPane key={activeTab.resource} sessionId={activeTab.resource} /> : null}
           {activeTab?.kind === "subagent" && (
             <div
               key={activeTab.id}

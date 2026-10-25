@@ -3,7 +3,8 @@ export type WorkPanelTabKind =
   | "review"
   | "file"
   | "plugin"
-  | "subagent";
+  | "subagent"
+  | "side-chat";
 
 export type WorkPanelTab = {
   id: string;
@@ -88,7 +89,7 @@ export function switchWorkPanelContextState(
 }
 
 export function toolWorkPanelTab(
-  kind: Exclude<WorkPanelTabKind, "new" | "file" | "plugin" | "subagent">,
+  kind: Exclude<WorkPanelTabKind, "new" | "file" | "plugin" | "subagent" | "side-chat">,
 ): WorkPanelTab {
   return { id: kind, kind };
 }
@@ -248,7 +249,7 @@ export function isKnownWorkPanelTab(tab: WorkPanelTab): boolean {
     Boolean(tab) &&
     (tab.kind === "new" || tab.kind === "review" ||
       tab.kind === "file" || tab.kind === "plugin" ||
-      tab.kind === "subagent")
+      tab.kind === "subagent" || tab.kind === "side-chat")
   );
 }
 

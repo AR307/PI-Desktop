@@ -1759,10 +1759,12 @@ type McpOAuthLoginEvent = {
   | { kind: "authUrl"; url: string; instructions?: string; opened: boolean }
   | { kind: "progress"; message: string }
   | { kind: "done"; status: McpServerStatus }
-  | { kind: "error"; message: string }
+  | { kind: "error"; message: string; errorCode?: "MCP_OAUTH_DCR_UNAVAILABLE" }
   | { kind: "cancelled" }
 );
 ```
+
+When authorization-server metadata has no `registration_endpoint` and no reusable client is available, login fails before opening the external browser. The error event carries `MCP_OAUTH_DCR_UNAVAILABLE`; the renderer shows localized recovery guidance. The main-process message remains diagnostic and must not include discovered authorization endpoint URLs.
 
 #### Status and Token Storage
 - `McpServerStatus` includes:
@@ -1856,8 +1858,8 @@ through `session.get`, allowing its project-group folders (or its isolated
 worktree) and its own `<data_dir>/scratch/<sessionId>` directory. A temporary
 conversation needs no workspace to preview its generated HTML. A missing
 session fails explicitly; a background preview never inherits the visible
-session's roots. BrowserPreview validates realpath containment before emitting
-the absolute path to the existing resource-tab owner. Chat links to other
+session's roots. BrowserPreview validates realpath containment before creating
+its host-owned page and emitting the corresponding resource-tab identity.
 sessions' scratch files and attachments retain the read-only file surface.
 This does not restrict the Browser's explicit absolute-path / `file:` address
 entry or local-page navigation, which follow its existing local-file policy.
@@ -1887,12 +1889,20 @@ Renderer IPC kept for the Plan-safe preview facade and URL fallback:
   tab id is supplied). The shared plugin chrome is not closed with a sibling page.
 - event: `browser/event/state {url, title, isLoading, canGoBack, canGoForward, loadError?, sessionId?, tabId?}`
   (also pushed to plugin views as `browser:state`)
-- agent preview event: `browser/event/preview {sessionId, path?, url?}`.
-  Electron Main validates a workspace `path` inside that session's project,
-  asks the renderer to create a Browser resource tab before navigation, with
-  `location` in the matching
-  runtime panel context. Navigation of a background session does not steal the
-  visible guest.
+- `browser/getPages({sessionId})` → `BrowserState[]`. Returns only that session's
+  retained page metadata for shell-reload recovery, including blank/loading tabs.
+  It never returns DOM, credentials, another session's pages or shared plugin state.
+- agent preview event: `browser/event/preview {sessionId, tabId?, path?, url?, revealOnly?}`.
+  Electron Main validates a workspace `path`, starts its own resource page and
+  requests the corresponding renderer tab. Page execution does not wait for UI
+  mounting. Continuing operations use a trusted session connection rather than
+  visible selection. Explicit reveal remains presentation-only; background work
+  never steals focus. Shell reload hides presentation without destroying pages.
+- plugin file action: `browser/event/openFile {path}`. Electron Main emits this
+  only after the plugin's `fs.openInBrowser` request passes its declared
+  `fs.read` scope and HTML-file checks. The renderer opens the absolute path in a
+  new Browser resource tab for the active local session; the Browser plugin
+  must be enabled. This route grants no `browser.cdp` access.
 
 ### fs (read-only)
 
@@ -1921,7 +1931,10 @@ Renderer IPC kept for the Plan-safe preview facade and URL fallback:
   so the extensionless blob has a media association without copying its bytes.
 - `fs/resolveRef({ref, sessionId?})` → `FsChatRefResolveResult`
   (for isolated sessions, lookup and file reads use `worktree.location` rather
-  than the parent project checkout)
+  than the parent project checkout; an absolute reference under the parent
+  checkout is rebased onto the same relative path in the worktree when that
+  file exists, so the branch copy opens instead of reporting
+  `outside-allowed-roots`)
   (`{ match: FsChatRefMatch | null, reason?: "outside-allowed-roots" }`, the match naming the answering `root`
   (`workspace` / `scratch` / `attachments`), the `relativePath` relative to that
   root, optional `sessionScratch: true` for the current session's own scratch
@@ -1942,9 +1955,10 @@ Renderer IPC kept for the Plan-safe preview facade and URL fallback:
   other folders, which are then searched in the group's own order (ADR 0263),
   so a shorthand resolves in a sibling folder as readily as in the primary one,
   and the match names the folder that answered. Inside one root an exact path
-  beats a shorthand; among shorthands the longest matching tail wins, then the
-  shallowest path. Relative and indexed candidates must resolve to regular files
-  whose real paths remain inside their answering root; an exact path through an
+  beats a shorthand; a shorthand matches only when its complete supplied suffix
+  identifies one safe file. It never degrades to a shorter suffix, and an
+  ambiguous match returns `match: null`. Relative and indexed candidates must
+  resolve to regular files whose real paths remain inside their answering root; an exact path through an
   escaping or dangling link cannot fall back to a same-name indexed file. The
   files-panel ignore set applies. An absolute reference may also name a store
   the app reads without searching it: the whole scratch store
@@ -2050,6 +2064,16 @@ macOS, where there is no close behavior to configure. Setting a behavior does
 not touch the tray icon: D216 (ADR 0078) creates one at startup on every
 platform, and minimize-to-tray needs it whichever close behavior is stored.
 
+Lifecycle close/quit prompts use additive main-window-only Electron IPC. Main sends
+`pi-desktop/window/event/lifecycleDialogRequest` with `{ requestId, kind }` after the
+renderer acknowledges `pi-desktop/window/lifecycleDialog/ready`; the renderer returns
+`{ requestId, choice }` through `pi-desktop/window/lifecycleDialog/respond`. If Main
+falls back, it sends `pi-desktop/window/event/lifecycleDialogDismiss` with the
+request ID so the renderer removes any stale overlay. Main validates the sender and
+pending request ID. A missing/unresponsive renderer falls back to the native dialog
+after a bounded timeout; if that fallback also fails, shutdown proceeds rather than
+remaining blocked. Tray Quit restores a hidden main
+window before showing its in-app confirmation. This does not change host RPC or storage.
 Maximize/unmaximize changes also emit
 `window/event/maximized`. Unknown actions fail. These window-control channels
 remain Electron-only and do not change the host RPC protocol version.
@@ -2138,7 +2162,7 @@ reservation, and background artifacts cannot change visible window geometry.
 ## 13c. Composer input APIs (D123/D124/D197, ADR 0024/0059)
 
 Electron-only channels backing composer autocomplete and file references.
-`composer/commands` and `fs/index` are read-only and fail soft;
+`composer/commands`, `fs/index`, and `fs/search` are read-only and fail soft;
 `composer/pickFiles` opens the unified native picker used by the Composer and
 returns a one-shot token; the legacy `composer/pickPhotos` channel remains
 available for compatibility but is not exposed by the Composer UI.
@@ -2192,7 +2216,28 @@ Workspace-rooted relative paths for the `@` menu: `git ls-files -co
 --exclude-standard` fast path, ignore-set recursive walk fallback,
 directories derived from file paths, 8000-entry cap with `truncated: true`,
 short TTL cache per root. Fails closed to an empty list without a
-workspace. Fuzzy filtering happens renderer-side.
+workspace. Fuzzy filtering happens renderer-side; a truncated index keeps
+only the shallowest entries, so a query against it is also sent to
+`fs/search`.
+
+### fs/search
+
+```ts
+fs/search({ sessionId?, query }) -> { entries: FsIndexEntry[]; truncated: boolean }
+```
+
+The `@` menu calls this only while its `fs/index` snapshot is truncated and
+the query is non-empty, after a short typing pause, then merges the answer
+with its own matches (D669). Main ranks the query with the renderer's fuzzy
+scorer over the root's full listing and returns the best 50 entries. The
+listing is the `git ls-files` list behind the index, or — when the index came
+from the walk — a deeper ignore-set walk of at most 200,000 entries or two
+seconds. It shares the index's TTL cache and is released when that expires.
+`truncated: true` means the search itself was capped. The query is trimmed and
+bounded to 256 characters; an empty query returns no entries. A remote session
+returns `{ entries: [], truncated: true }` without contacting its host — the
+remote file protocol has no search operation — so the menu keeps filtering
+the remote snapshot alone.
 
 ### composer/pickFiles and composer/pickPhotos
 

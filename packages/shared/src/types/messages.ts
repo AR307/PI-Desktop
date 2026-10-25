@@ -1,5 +1,6 @@
 /** Shared public types grouped by the owning application domain. */
 import type { SessionMessageOrigin } from "../session-collaboration.js";
+import type { MessageQuote } from "../message-quotes.js";
 import type { AppError } from "../errors.js";
 import type { ImageGenerationResult } from "./images.js";
 import type { PlanHistoryEntry } from "./plans.js";
@@ -126,6 +127,7 @@ export type UiMessage = {
   id: string;
   role: UiMessageRole;
   content: string;
+  quotes?: MessageQuote[];
   /** Internal model instructions/tool declarations; never a visible chat row. */
   modelSystem?: {
     version: 1;

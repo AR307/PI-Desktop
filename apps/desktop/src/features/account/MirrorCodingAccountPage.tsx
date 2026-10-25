@@ -5,6 +5,7 @@ import { api } from "../../lib/api";
 import { AccountDialog } from "./AccountDialog";
 import { observeMirrorCoding, useMirrorCoding } from "./state";
 import { MobileSyncSettings } from "../mobile-sync/MobileSyncSettings";
+import { AccountBenefitsSettings } from "./AccountBenefits";
 import "./account.css";
 
 export function MirrorCodingAccountPage() {
@@ -117,6 +118,7 @@ export function MirrorCodingAccountPage() {
         </section>
       ) : null}
 
+      <AccountBenefitsSettings />
       {connected ? <MobileSyncSettings /> : null}
 
       {confirmation ? (

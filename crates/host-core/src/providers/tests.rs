@@ -63,12 +63,14 @@ fn mirrorcoding_sync_persists_group_and_model_bindings() {
                     max_tokens: 8_192,
                     max_tokens_source: Some("catalog".into()),
                     thinking_protocol: None,
+                    supports_reasoning_effort: None,
                     thinking_levels: vec!["off".into(), "medium".into()],
                     default_thinking_level: Some("medium".into()),
                     supports_images: None,
                     supports_documents: None,
                     available_for_subagents: None,
                     native_web_search: None,
+                    claude_cache_ttl: None,
                     mirror_coding_group_id: Some("group-1".into()),
                     temperature: None,
                     api_style: None,
@@ -166,6 +168,7 @@ fn mirrorcoding_account_model_settings_project_to_groups_and_survive_refresh() {
     edited[0].context_window = 200_000;
     edited[0].max_tokens = 12_000;
     edited[0].temperature = Some(0.7);
+    edited[0].claude_cache_ttl = Some(super::model::ClaudeCacheTtl::OneHour);
     edited[0].mirror_coding_group_id = Some("premium".into());
     let input: ProviderUpdateInput = serde_json::from_value(json!({
         "id": account.id,
@@ -180,6 +183,10 @@ fn mirrorcoding_account_model_settings_project_to_groups_and_survive_refresh() {
         assert_eq!(group.models[0].context_window, 200_000);
         assert_eq!(group.models[0].max_tokens, 12_000);
         assert_eq!(group.models[0].temperature, Some(0.7));
+        assert_eq!(
+            group.models[0].claude_cache_ttl,
+            Some(super::model::ClaudeCacheTtl::OneHour)
+        );
         assert_eq!(
             group.models[0].mirror_coding_group_id.as_deref(),
             Some(group.mirror_coding.as_ref().unwrap().group_id.as_str())
@@ -198,6 +205,10 @@ fn mirrorcoding_account_model_settings_project_to_groups_and_survive_refresh() {
         Some("premium")
     );
     assert_eq!(account.models[0].temperature, Some(0.7));
+    assert_eq!(
+        account.models[0].claude_cache_ttl,
+        Some(super::model::ClaudeCacheTtl::OneHour)
+    );
     assert_eq!(account.models[0].context_window, 200_000);
 }
 
@@ -441,10 +452,12 @@ fn model_bindings_roundtrip_and_legacy_model_migrates_on_read() {
                     thinking_levels: vec!["high".into(), "medium".into()],
                     default_thinking_level: Some("medium".into()),
                     thinking_protocol: Some("adaptive".into()),
+                    supports_reasoning_effort: None,
                     supports_images: Some(true),
                     supports_documents: None,
                     available_for_subagents: Some(true),
                     native_web_search: None,
+                    claude_cache_ttl: None,
                     mirror_coding_group_id: None,
                     temperature: None,
                     api_style: None,
@@ -459,10 +472,12 @@ fn model_bindings_roundtrip_and_legacy_model_migrates_on_read() {
                     thinking_levels: vec![],
                     default_thinking_level: None,
                     thinking_protocol: None,
+                    supports_reasoning_effort: None,
                     supports_images: None,
                     supports_documents: Some(false),
                     available_for_subagents: None,
                     native_web_search: None,
+                    claude_cache_ttl: None,
                     mirror_coding_group_id: None,
                     temperature: None,
                     api_style: None,
@@ -571,10 +586,12 @@ fn binding_with_alias(id: &str, alias: Option<&str>) -> ModelBinding {
         thinking_levels: Vec::new(),
         default_thinking_level: None,
         thinking_protocol: None,
+        supports_reasoning_effort: None,
         supports_images: None,
         supports_documents: None,
         available_for_subagents: None,
         native_web_search: None,
+        claude_cache_ttl: None,
         mirror_coding_group_id: None,
         temperature: None,
         api_style: None,
@@ -593,6 +610,24 @@ fn normalize_model_bindings_trims_aliases_and_drops_blank_ones() {
     assert_eq!(normalized[1].alias, None);
     assert_eq!(normalized[2].alias, None);
     assert_eq!(normalized[3].alias, None);
+}
+
+#[test]
+fn claude_cache_duration_survives_normalization_and_json_round_trip() {
+    for ttl in ["5m", "1h"] {
+        let mut value =
+            serde_json::to_value(binding_with_alias("claude-sonnet-4-6", None)).unwrap();
+        value["claudeCacheTtl"] = json!(ttl);
+        let binding: ModelBinding = serde_json::from_value(value).unwrap();
+        let normalized = normalize_model_bindings(&[binding]);
+        assert_eq!(
+            serde_json::to_value(&normalized[0]).unwrap()["claudeCacheTtl"],
+            ttl
+        );
+    }
+    let mut invalid = serde_json::to_value(binding_with_alias("claude-sonnet-4-6", None)).unwrap();
+    invalid["claudeCacheTtl"] = json!("24h");
+    assert!(serde_json::from_value::<ModelBinding>(invalid).is_err());
 }
 
 #[test]
@@ -1757,10 +1792,12 @@ fn binding_with_limits(id: &str, context_window: u32, max_tokens: u32) -> ModelB
         thinking_levels: Vec::new(),
         default_thinking_level: None,
         thinking_protocol: None,
+        supports_reasoning_effort: None,
         supports_images: None,
         supports_documents: None,
         available_for_subagents: None,
         native_web_search: None,
+        claude_cache_ttl: None,
         mirror_coding_group_id: None,
         temperature: None,
         api_style: None,
@@ -2181,4 +2218,41 @@ fn sync_payloads_keep_only_storable_headers() {
     // holding it behaves the same before and after this runs.
     let raw = BTreeMap::from([("x-cjk".to_string(), "星".to_string())]);
     assert!(storable_headers(&raw).is_empty());
+}
+
+#[test]
+fn reasoning_effort_override_survives_provider_create_update_and_read() {
+    let (_dir, db, secrets) = test_context();
+    let binding = serde_json::json!({
+        "id": "deepseek-v4.1-flash", "thinkingLevels": ["off", "high"],
+        "supportsReasoningEffort": true
+    });
+    let input: ProviderCreateInput = serde_json::from_value(serde_json::json!({
+        "name": "Reasoning gateway", "baseUrl": "https://gateway.example/v1",
+        "authKind": "none", "apiStyle": "chat_completions", "models": [binding]
+    }))
+    .unwrap();
+    let provider = create_provider(&db, &secrets, input).unwrap();
+    assert_eq!(
+        serde_json::to_value(&provider).unwrap()["models"][0]["supportsReasoningEffort"],
+        true
+    );
+    for value in [
+        serde_json::json!(false),
+        serde_json::Value::Null,
+        serde_json::json!(true),
+    ] {
+        let mut model = binding.clone();
+        model["supportsReasoningEffort"] = value.clone();
+        let input: ProviderUpdateInput = serde_json::from_value(serde_json::json!({
+            "id": provider.id, "models": [model]
+        }))
+        .unwrap();
+        update_provider(&db, &secrets, input).unwrap();
+        let loaded = get_provider(&db, &secrets, &provider.id).unwrap().unwrap();
+        assert_eq!(
+            serde_json::to_value(loaded).unwrap()["models"][0]["supportsReasoningEffort"],
+            value
+        );
+    }
 }

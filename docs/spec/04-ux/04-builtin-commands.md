@@ -98,6 +98,11 @@ the composer draft. Former builtin aliases are no longer resolved and are
 handled as ordinary unknown slash text unless supplied by another command
 source.
 
+Prompt-template arguments preserve explicitly quoted empty strings (`""` or
+`''`) as positional arguments. An empty first argument can activate a template
+default without shifting later `$2` / slice substitutions. Ordinary quoting,
+literal argument content, and the stored original slash command are unchanged.
+
 When a command completes, it clears only the submitted draft if that draft has
 not been edited since submission. Any newer edit remains—even if the user
 changes the text or attachments back to exactly the submitted values—including

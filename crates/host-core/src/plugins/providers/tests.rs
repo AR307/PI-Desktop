@@ -100,9 +100,10 @@ fn a_new_database_carries_the_owner_column_at_the_current_schema_version() {
     // v17 added the owner column, v18 the turn-queue priority column,
     // v19 session omit, v21 the session Todo checklist, and v22 the
     // session-list index, v23 the session title source, and v24 the worktree
-    // registry. Fork v25 adds the mobile delta tables. A fresh database is stamped with the newest version, so the
+    // registry. Fork v25 adds mobile delta tables and v26 temporary side chats.
+    // A fresh database is stamped with the newest version, so the
     // column set is the current one.
-    assert_eq!(SCHEMA_VERSION, 25);
+    assert_eq!(SCHEMA_VERSION, 26);
     let version: i64 = db
         .conn()
         .query_row("PRAGMA user_version", [], |row| row.get(0))

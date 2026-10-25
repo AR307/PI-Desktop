@@ -91,7 +91,35 @@ describe("DeepSeek reasoning replay", () => {
     );
     expect(
       deepseekRequestCompat({ baseUrl: "https://api.deepseek.com" }),
-    ).toEqual({ requiresReasoningContentOnAssistantMessages: true });
+    ).toEqual({
+      requiresReasoningContentOnAssistantMessages: true,
+    });
+  });
+
+  it("keeps reasoning_effort on official endpoints and suppresses it on relays (#1821)", () => {
+    // Official DeepSeek Completions documents `reasoning_effort` (low/high/max)
+    // next to `thinking`; only relays were reported to reject it (#1664).
+    expect(
+      deepseekRequestCompat({ baseUrl: "https://api.deepseek.com/v1", modelId: "deepseek-flash" })
+        ?.supportsReasoningEffort,
+    ).toBeUndefined();
+    expect(
+      deepseekRequestCompat({ baseUrl: "https://gw.example.test/v1", modelId: "deepseek-v4.1-flash" })
+        ?.supportsReasoningEffort,
+    ).toBe(false);
+  });
+
+  it("does not treat a relay URL containing deepseek.com as an official host", () => {
+    for (const baseUrl of [
+      "https://api.deepseek.com.evil.test/v1",
+      "https://relay.example.test/v1/deepseek.com",
+    ]) {
+      expect(isOfficialDeepSeekEndpoint({ baseUrl })).toBe(false);
+      expect(deepseekRequestCompat({ baseUrl, modelId: "deepseek-v4.1-flash" })).toMatchObject({
+        supportsReasoningEffort: false,
+        requiresNonEmptyReasoningReplay: true,
+      });
+    }
   });
 
   it("matches aggregator and custom DeepSeek-family models without a deepseek.com URL", () => {
@@ -103,6 +131,7 @@ describe("DeepSeek reasoning replay", () => {
       }),
     ).toEqual({
       requiresReasoningContentOnAssistantMessages: true,
+      supportsReasoningEffort: false,
       requiresNonEmptyReasoningReplay: true,
     });
     expect(DEEPSEEK_REASONING_REPLAY_PLACEHOLDER.length).toBeGreaterThan(0);
@@ -182,12 +211,15 @@ describe("named endpoint presets", () => {
     });
   });
 
-  it("keeps StepFun Plan on its subscription endpoint and catalog vendor", () => {
+  it("keeps StepFun Plan on its subscription endpoint, catalog vendor and model-list auth", () => {
     const expected = {
       id: "stepfun-plan",
       vendorKey: "stepfun-step-plan",
       baseUrl: "https://api.stepfun.com/step_plan/v1",
       apiStyle: "anthropic_messages",
+      /* Chat is Anthropic Messages; this deployment publishes its models the
+         OpenAI way, so the endpoint states that instead of it being derived. */
+      discoveryStyle: "openai_models",
     };
     expect(NAMED_ENDPOINT_PRESETS.find((preset) => preset.id === expected.id)).toMatchObject(expected);
     expect(matchNamedPreset({ vendorKey: expected.vendorKey })).toMatchObject(expected);

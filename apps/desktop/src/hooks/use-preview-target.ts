@@ -88,6 +88,17 @@ export type ResolvedChatFileRef = {
   scratch: boolean;
 };
 
+export type ChatFileOpenDestination =
+  | "file-manager"
+  | "built-in-browser"
+  | "default-browser";
+
+export type ChatFileOpenOptions = {
+  line?: number;
+  column?: number;
+  destination?: ChatFileOpenDestination;
+};
+
 /**
  * Load the bundled file view on demand when a user explicitly opens a project
  * file. Its enabled state can be off or its runtime can have failed even though
@@ -170,7 +181,7 @@ function useResolveChatFileRef() {
       // main process can: the base is the markdown file on screen, which only
       // the caller knows. Everything else is completed against the roots.
       const anchored = isDotRelative(raw)
-        ? toWorkspaceRel(raw, workspacePath, baseDir)
+        ? toWorkspaceRel(raw, session?.sideChatWorkspacePath ?? workspacePath, baseDir)
         : null;
       let result;
       try {
@@ -179,6 +190,10 @@ function useResolveChatFileRef() {
         showToast(t("chat.fileRefLookupFailed"), { variant: "error" });
         return null;
       }
+      // An isolated session's files live in its worktree, which is outside the
+      // plugin's project roots. A relative path would be resolved by the file
+      // view against the parent checkout, so the branch copy stays absolute.
+      const isolated = Boolean(session?.worktree);
       const match = result.match;
       if (!match) {
         const key = result.reason === "outside-allowed-roots"
@@ -200,9 +215,9 @@ function useResolveChatFileRef() {
       // A project group can hold several folders, and a relative path always
       // means the primary one, so a file from a sibling folder travels by its
       // absolute path and the file view switches to that folder (ADR 0263).
-      const primary = match.projectRoot ? match.projectRoot.primary : true;
+      const primary = !session?.sideChatParentId && (match.projectRoot ? match.projectRoot.primary : true);
       return {
-        path: primary ? match.relativePath : match.absolutePath,
+        path: primary && !isolated ? match.relativePath : match.absolutePath,
         absolutePath: match.absolutePath,
         relativePath: match.relativePath,
         inProject: true,
@@ -231,7 +246,10 @@ export function useOpenChatFileRef() {
   const paneSessionId = useSlotSessionId();
   const resolveRef = useResolveChatFileRef();
   const workspacePath = useAppStore((s) => s.workspace?.path ?? null);
-  const sessionId = useAppStore((s) => paneSessionId || s.activeSessionId);
+  const sessionId = useAppStore((s) => {
+    const owner = s.sessions.find((item) => item.id === paneSessionId);
+    return owner?.sideChatParentId ?? (paneSessionId || s.activeSessionId);
+  });
   const openFile = useAppStore((s) => s.openFileInWorkPanel);
   const openUrl = useAppStore((s) => s.openUrlInWorkPanel);
   const openTab = useAppStore((s) => s.openWorkPanelTab);
@@ -242,10 +260,11 @@ export function useOpenChatFileRef() {
       path: string,
       baseDir?: string,
       mimeType?: string,
-      position?: { line?: number; column?: number },
+      options?: ChatFileOpenOptions,
     ) => {
-      const line = position?.line;
-      const column = position?.column;
+      const line = options?.line;
+      const column = options?.column;
+      const destination = options?.destination;
       void (async () => {
         const resolved = await resolveRef(path, baseDir);
         if (!resolved) return;
@@ -254,6 +273,59 @@ export function useOpenChatFileRef() {
           (current.workspace?.path ?? null) !== workspacePath ||
           current.activeSessionId !== sessionId
         ) {
+          return;
+        }
+        if (destination === "file-manager") {
+          if (current.workspace?.remote) {
+            showToast(t("chat.fileManagerOpenFailed"), { variant: "error" });
+            return;
+          }
+          const ready = await ensureFileManagerView(workspacePath);
+          const latest = useAppStore.getState();
+          if (
+            (latest.workspace?.path ?? null) !== workspacePath ||
+            latest.activeSessionId !== sessionId
+          ) {
+            return;
+          }
+          if (!ready) {
+            showToast(t("chat.fileManagerOpenFailed"), { variant: "error" });
+            return;
+          }
+          openTab(
+            fileManagerPluginTab(
+              resolved.inProject ? resolved.path : resolved.absolutePath,
+            ),
+          );
+          return;
+        }
+        if (destination === "built-in-browser") {
+          if (
+            current.workspace?.remote ||
+            !hasPluginView(current.pluginViews, BROWSER_PLUGIN_TAB)
+          ) {
+            showToast(t("chat.builtInBrowserUnavailable"), {
+              variant: "error",
+            });
+            return;
+          }
+          openUrl(resolved.absolutePath);
+          return;
+        }
+        if (destination === "default-browser") {
+          if (current.workspace?.remote) {
+            showToast(t("chat.defaultBrowserOpenFailed"), {
+              variant: "error",
+            });
+            return;
+          }
+          try {
+            await api.fsOpen(resolved.absolutePath, mimeType, sessionId);
+          } catch {
+            showToast(t("chat.defaultBrowserOpenFailed"), {
+              variant: "error",
+            });
+          }
           return;
         }
         const hasPosition = line !== undefined || column !== undefined;
@@ -304,37 +376,6 @@ export function useOpenChatFileRef() {
       t,
       workspacePath,
     ],
-  );
-}
-
-/**
- * Show a file reference in the system file manager.
- *
- * It travels through the same completion and the same address rule a click
- * uses (`useOpenChatFileRef`), so a right-click never reveals a differently
- * named file that happens to sit in the same folder: a reference that matched
- * nothing says so instead.
- */
-export function useRevealChatFileRef() {
-  const { t } = useTranslation();
-  const resolveRef = useResolveChatFileRef();
-  const paneSessionId = useSlotSessionId();
-  const sessionId = useAppStore((s) => paneSessionId || s.activeSessionId);
-  const showToast = useAppStore((s) => s.showToast);
-
-  return useCallback(
-    (path: string, baseDir?: string) => {
-      void (async () => {
-        const resolved = await resolveRef(path, baseDir);
-        if (!resolved) return;
-        try {
-          await api.fsReveal(resolved.path, sessionId);
-        } catch {
-          showToast(t("chat.fileRevealFailed"), { variant: "error" });
-        }
-      })();
-    },
-    [resolveRef, sessionId, showToast, t],
   );
 }
 

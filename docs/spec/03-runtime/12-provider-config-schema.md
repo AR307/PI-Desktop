@@ -1,5 +1,38 @@
 # 12. Provider Config Schema
 
+## Claude prompt-cache duration
+
+The optional **models[].claudeCacheTtl** selects the Claude prompt-cache
+lifetime for Anthropic Messages. Advanced model settings exposes **5 minutes**
+(default) and **1 hour**, including MirrorCoding model settings. The provider
+must support the selected duration. This is not a local disk-cache preference
+or an OpenAI prompt-cache-retention setting.
+
+The main-page model/reasoning menu also exposes the same two choices below
+the reasoning slider whenever the selected binding supports Claude caching.
+The control remains available when reasoning is off. Changes save immediately
+to the provider/model binding, apply on the next turn and stay synchronized
+with advanced settings; they are not per-session reasoning settings. For
+MirrorCoding group selections, the account binding owns the preference and
+Host projects it to group rows. Non-Claude, non-Anthropic, image-mode and
+plugin-owned models do not expose this editable control. Saving does not
+change the selected model, reasoning level, provider default, draft or session.
+
+- **5m** or an absent preference uses Pi's cacheRetention: "short", producing
+  cache_control: { "type": "ephemeral" } (the five-minute default).
+- **1h** uses cacheRetention: "long", producing
+  cache_control: { "type": "ephemeral", "ttl": "1h" }. An explicit user choice
+  enables the adapter's long-cache capability even on a proxy.
+- The adapter owns cache-marker placement on system, tool and message blocks;
+  Desktop does not rewrite transcripts or add another cache-marker pass.
+- Main sessions, temporary side chats and subagents use their own effective
+  model binding. Explicit no-cache requests, including compaction summaries,
+  remain uncached. Non-Claude and non-Anthropic wires are not changed.
+- The field is optional JSON in the existing provider configuration. No SQL
+  schema change, data rewrite or migration is needed. Host deserialization and
+  provider-sync import reject unknown durations. Copying providers, saving,
+  restarting and refreshing MirrorCoding catalogs preserve the selection.
+
 ## 1. Storage location
 
 Owned by Rust host DB/settings store.
@@ -108,7 +141,8 @@ Tables (canonical DDL in [04-data-storage](04-data-storage.md) §4.3–4.4, §4.
           },
           "supportsImages": { "type": ["boolean", "null"] },
           "supportsDocuments": { "type": ["boolean", "null"] },
-          "availableForSubagents": { "type": "boolean", "default": false }
+          "availableForSubagents": { "type": "boolean", "default": false },
+          "claudeCacheTtl": { "enum": ["5m", "1h"] }
         }
       }
     },
@@ -393,11 +427,14 @@ Presets only prefill form defaults; they are not a closed world.
 | bedrock | bedrock | aws_sdk_default | no |
 | ollama | openai_compatible | none | yes |
 | lmstudio | openai_compatible | none | yes |
-| custom | openai_compatible | api_key_and_base_url by default; `none` when the endpoint needs no authentication | yes |
+| custom | openai_compatible | `api_key_and_base_url` with a supplied/saved key; `none` without a key | yes |
 
-The custom endpoint form keeps API-key authentication as its default and lets
-the user explicitly select `authKind: "none"` for endpoints that accept
-unauthenticated requests. Named cloud presets retain their declared auth kind.
+The custom endpoint form derives authentication from the effective API key,
+without a mode switch. An empty or whitespace-only input on a row without a
+saved key uses `authKind: "none"`; a supplied key uses API-key authentication.
+Editing with a blank input keeps the stored key. **Clear saved API key** stages
+its removal until Save; typing a replacement key instead keeps API-key auth.
+Named cloud presets retain their declared auth kind.
 
 ### Fixed API-style presets
 
@@ -452,6 +489,17 @@ Step 5 Preview capabilities come from the bundled first-party models.dev
 record; no supplemental catalog or hard-coded limits are needed. The ordinary
 StepFun API and existing custom-provider rows retain their configuration.
 
+Its model list is asked differently from its chat route: this deployment
+publishes `GET /step_plan/v1/models` to `Authorization: Bearer`, so the preset
+declares `discoveryStyle: "openai_models"` — a declared model-list style, not
+one derived from `anthropic_messages`. Chat stays on Anthropic Messages while
+the model-list probe and the connection test both send a Bearer token.
+
+A declared style is a statement about the endpoint, not about one spelling of
+it: it holds for the base URL and for a URL pasted with an operation suffix
+(`/models`, `/messages`), which is stripped before resolution. Pasting back the
+address the settings dialog itself offered therefore keeps the same model-list
+authentication.
 
 Zhipu / Z.AI Completions requests still receive `thinkingFormat: "zai"` and
 `zaiToolStream: true`. pi-ai `zai-coding-cn` remains an alias of
@@ -770,11 +818,13 @@ registry's `/api/paas/v4` sibling. The only generic extra path is `/v1` for an
 unknown OpenAI-compatible endpoint. Every published model-list shape is read —
 `data[].id`, Google's `models[].name`, and the `models[].slug` rows Zhipu's
 OpenAI Responses endpoint returns — so an endpoint that answers is never treated
-as empty. Connection testing reuses
-the same request builder, so "the model list loaded" and "the connection test
-passed" always describe the same URL, auth header and format. Anthropic-style
-endpoints that return 404 because they intentionally publish no model list may
-instead pass connection testing through a same-origin `OPTIONS /v1/messages`
+as empty. Connection testing reuses the same request builder, so "the model list
+loaded" and "the connection test passed" always describe the same URL, auth
+header and format — including a deployment whose model list authenticates
+differently from its chat route, where the endpoint's declared model-list style
+is what both surfaces use. Anthropic-style endpoints that return 404 because
+they intentionally publish no model list may instead pass connection testing
+through a same-origin `OPTIONS /v1/messages`
 route probe; this proves reachability without sending credentials or a billable
 model request, while model IDs remain manual.
 

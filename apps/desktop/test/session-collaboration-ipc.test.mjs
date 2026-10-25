@@ -35,6 +35,7 @@ const { registerSessionIpc } = load("../electron/main/ipc/session-ipc.ts", {
   "@pi-desktop/shared": shared,
   "../importers": {},
   "../services/session-collaboration": collaboration,
+  "../services/side-chats": { clearStaleSideChats() { assert.fail("summary reads must not clean up side chats"); } },
   "../services/session-configuration": { configureSession() { assert.fail("read/fork must not configure a session"); } },
   "../bootstrap/remote-hosts.js": { getActiveRemoteHostsBoot: () => null },
   "../services/session-search": { searchSessionsAcrossSources: async () => ({ hits: [], nextOffset: null }) },

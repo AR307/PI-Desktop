@@ -1,3 +1,5 @@
+import { assertSideChatOpen, createSideChatService } from "../services/side-chats";
+import { parseMessageQuotes, promptWithQuotes } from "@pi-desktop/shared";
 import { delegationNotification, type InternalAgentPrompt } from "../runtime/delegation-notification";
 import type { ImageService } from "../images/service";
 import { expandMcpInvocation } from "../composer-mcp";
@@ -29,6 +31,8 @@ export type AgentIpcDependencies = {
   persistenceOutbox: PersistenceOutbox;
   dataDir: string;
   activeTurns: Map<string, string>;
+  completionNoticeTurns: Set<string>;
+  recordTurnStart: (sessionId: string, turnId: string) => void;
   /** Whether the named turn can still start or steer host work. */
   isTurnDispatchable: (sessionId: string, turnId: string | null | undefined) => boolean;
   activeTurnUsages: Map<string, MessageUsage>;
@@ -91,6 +95,8 @@ export function registerAgentIpc({
   persistenceOutbox,
   dataDir,
   activeTurns,
+  completionNoticeTurns,
+  recordTurnStart,
   isTurnDispatchable,
   activeTurnUsages,
   approvedExecutionIdsBySession,
@@ -119,17 +125,24 @@ export function registerAgentIpc({
       return fn(...args);
     });
   };
+  const sideChats = createSideChatService({ getHost, getSidecar, getAgentHostBridge,
+    acquireSessionOperation, resolveAgentRuntimeLaunch, cancelSessionTools, agentExtensions,
+    activeTurns, finishTurn, lockAbortReason, persistenceOutbox });
+  handle(IPC.invoke.sideChatOpen, (req: { parentSessionId: string }) => sideChats.open(req.parentSessionId));
+  handle(IPC.invoke.sideChatClose, (req: { sessionId: string }) => sideChats.close(req.sessionId));
   handle(IPC.invoke.agentSteer, async (req: AgentSteerRequest) => {
+    assertSideChatOpen(req.sessionId);
     if (!host || !sidecar) throw new Error("backend unavailable");
     if (
       !req?.sessionId || typeof req.content !== "string" || !req.expectedTurnId ||
-      (!req.content.trim() && !req.attachments?.length)
+      (!req.content.trim() && !req.attachments?.length && !req.quotes?.length)
     ) {
       throw Object.assign(new Error("Steering input and expectedTurnId required"), {
         errorCode: ErrorCodes.INVALID_ARGUMENT,
       });
     }
     const voiceOrigin = parseVoiceOrigin(req.voiceOrigin);
+    const quotes = parseMessageQuotes(req.quotes);
     // A steering input belongs to the turn it names: it is refused once that
     // turn was cancelled, has started finalizing, or no longer owns the session.
     if (!isTurnDispatchable(req.sessionId, req.expectedTurnId)) {
@@ -144,7 +157,9 @@ export function registerAgentIpc({
     const mcpExpansion = /^\/mcp:\S/.test(req.content)
       ? expandMcpInvocation(
           req.content,
-          await composerCommandService.buildComposerCommands(localProjectPath ?? null),
+          await composerCommandService.buildComposerCommands(localProjectPath ?? null, {
+            remote: Boolean(context.remoteWorkspace),
+          }),
           Boolean(req.attachments?.length),
         )
       : null;
@@ -162,6 +177,7 @@ export function registerAgentIpc({
       id: durableUserMessageId(req.messageId, session.session?.messages ?? []),
       role: "user",
       content: steerContent,
+      quotes,
       ...(mcpExpansion ? { command: mcpExpansion.command } : {}),
       status: "complete",
       createdAt: new Date().toISOString(),
@@ -173,7 +189,7 @@ export function registerAgentIpc({
     // never turn into a normal prompt or alter the next turn's configuration.
     return sidecar.call<{ accepted: boolean; turnId: string }>("agent.steer", {
       sessionId: req.sessionId, expectedTurnId: req.expectedTurnId, message,
-      content: appendPromptFallbackPaths(steerContent, prepared),
+      content: promptWithQuotes(appendPromptFallbackPaths(steerContent, prepared), quotes),
       ...(mcpExpansion ? { mcpServerIds: mcpExpansion.mcpServerIds, mcpToolNames: mcpExpansion.mcpToolNames } : {}),
       attachments: prepared.filter((attachment) => attachment.inlineData).map((attachment) => ({
         path: attachment.message.ref, name: attachment.message.name, kind: attachment.message.kind,
@@ -184,8 +200,10 @@ export function registerAgentIpc({
   });
 
   handle(IPC.invoke.agentPrompt, async (req: InternalAgentPrompt) => {
+    assertSideChatOpen(req.sessionId);
     if (!sidecar) throw new Error("sidecar unavailable");
     const voiceOrigin = parseVoiceOrigin(req.voiceOrigin);
+    const quotes = parseMessageQuotes(req.quotes);
     if (req.sessionId.startsWith("native-pi:")) {
       // Desktop-managed MCP servers are not installed in native Pi sessions.
       if (/^\/mcp:\S/.test(req.content)) expandMcpInvocation(req.content, []);
@@ -194,7 +212,7 @@ export function registerAgentIpc({
           errorCode: "NATIVE_PI_UNSUPPORTED",
         });
       }
-      if (req.sessionMessageId || req.truncateFromMessageId || req.truncateBefore !== undefined || req.attachments?.length) {
+      if (req.sessionMessageId || req.truncateFromMessageId || req.truncateBefore !== undefined || req.attachments?.length || req.quotes?.length) {
         throw Object.assign(new Error("Native Pi continuation currently supports text prompts only"), {
           errorCode: ErrorCodes.INVALID_ARGUMENT,
         });
@@ -209,6 +227,7 @@ export function registerAgentIpc({
     if (!host) throw new Error("host unavailable");
     const releaseSessionOperation = await acquireSessionOperation(req.sessionId);
     try {
+    assertSideChatOpen(req.sessionId);
     const sessionMessage = await resolveSessionMessageInput(host, req);
     // Install the renderer's prompt-time snapshot before any asynchronous
     // setup. This closes the gap where a fast completion could beat the
@@ -239,6 +258,7 @@ export function registerAgentIpc({
           req.content,
           await composerCommandService.buildComposerCommands(
             !session.remoteWorkspace && typeof session.projectPath === "string" ? session.projectPath.trim() || null : null,
+            { remote: Boolean(session.remoteWorkspace) },
           ),
           Boolean(req.attachments?.length),
         )
@@ -255,6 +275,11 @@ export function registerAgentIpc({
         ? Math.floor(req.truncateBefore)
         : undefined;
     if (truncateFromMessageId || truncateBefore !== undefined) {
+      if (req.sessionId.startsWith("side-")) {
+        throw Object.assign(new Error("Use the temporary side-chat rewind before resending"), {
+          errorCode: ErrorCodes.INVALID_ARGUMENT,
+        });
+      }
       cancelSessionTools(req.sessionId, "Session turn was replaced");
       // Host-owned cut: the kept prefix never crosses the JSON-RPC pipe
       // (issue #211). Abort any leftover running turn first so beginTurn
@@ -346,6 +371,7 @@ export function registerAgentIpc({
       mode: launch.sidecarParams.mode, providerId: launch.providerId, modelId: launch.modelId,
       thinkingLevel: launch.sidecarParams.thinkingLevel, ultra: launch.sidecarParams.ultra, fast: launch.sidecarParams.provider.fast === true,
     });
+    recordTurnStart(req.sessionId, durableTurnId);
     activeTurnUsages.delete(req.sessionId);
 
     // Slash expansion (D123, ADR 0024): templates expand before persistence
@@ -367,6 +393,7 @@ export function registerAgentIpc({
           : "";
         const commands = await composerCommandService.buildComposerCommands(
           session.remoteWorkspace ? null : launch.projectPath ?? root,
+          { remote: Boolean(session.remoteWorkspace) },
         );
         const command = commands.find((item) => item.name === commandName);
         const activeSkills = new Map(
@@ -469,6 +496,7 @@ export function registerAgentIpc({
 
       role: "user" as const,
       content: promptContent,
+      quotes,
       ...(sessionMessage ? { sessionMessage: sessionMessage.origin } : {}),
       createdAt: new Date().toISOString(),
       status: "complete" as const,
@@ -523,6 +551,16 @@ export function registerAgentIpc({
       } satisfies AgentEventEnvelope);
     }
     let result: { accepted: boolean; turnId: string };
+    const isTrustedCompletionNotice =
+      sessionMessage?.origin.kind === "completion" &&
+      sessionMessage.origin.targetSessionId === req.sessionId &&
+      Boolean(
+        sessionMessage.origin.messageId.trim() &&
+        sessionMessage.origin.replyToMessageId?.trim(),
+      );
+    // sessionMessage was resolved from the Host ledger above; keep this
+    // provenance Main-owned and tied to the durable turn, never the prompt text.
+    if (isTrustedCompletionNotice) completionNoticeTurns.add(durableTurnId);
     try {
       result = await sidecar.call<{ accepted: boolean; turnId: string }>(
         "agent.prompt",
@@ -531,7 +569,7 @@ export function registerAgentIpc({
           // The host-created durable turn is the approval identity used by
           // Rust. The runtime must not replace it with a provider-local UUID.
           turnId: durableTurnId,
-          content: modelContent,
+          content: promptWithQuotes(modelContent, quotes),
           ...(mcpExpansion ? { mcpServerIds: mcpExpansion.mcpServerIds, mcpToolNames: mcpExpansion.mcpToolNames } : {}),
           ...(sessionMessage ? { sessionMessage: sessionMessage.origin } : {}),
           attachments: [
@@ -567,6 +605,7 @@ export function registerAgentIpc({
         },
       );
     } catch (e) {
+      completionNoticeTurns.delete(durableTurnId);
       await finishTurn(req.sessionId, "error", (e as any)?.errorCode, {
         turnId: durableTurnId,
       });
@@ -724,9 +763,11 @@ export function registerAgentIpc({
   // The Host-owned turn queue (D375 / D386). The renderer mirrors it; the
   // headless module admits, orders, and drains it.
   handle(IPC.invoke.agentQueuePush, async (req: AgentQueuePushRequest) => {
-    rejectNativeAgentOperation(req.sessionId);
-    if (!agentHostBridge) throw new Error("agent host unavailable");
-    return agentHostBridge.queue.push(req);
+      assertSideChatOpen(req.sessionId);
+      parseMessageQuotes(req.quotes);
+      rejectNativeAgentOperation(req.sessionId);
+      if (!agentHostBridge) throw new Error("agent host unavailable");
+      return await agentHostBridge.queue.push(req);
   });
   handle(IPC.invoke.agentQueueList, async (req: { sessionId: string }) => {
     rejectNativeAgentOperation(req.sessionId);

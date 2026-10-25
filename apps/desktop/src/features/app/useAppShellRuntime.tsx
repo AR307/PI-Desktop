@@ -16,6 +16,7 @@ import { useTranslation } from "react-i18next";
 import { installRendererApi } from "../../capture/renderer-api";
 import { StartupSplash } from "../../components/StartupSplash";
 import { api } from "../../lib/api";
+import { composerSuggestion } from "../chat/composer/plugins/suggestion-bridge";
 import { subscribeRemoteInteractions } from "../../lib/remote-interactions";
 import { playNotificationChime } from "../../lib/notification-sound";
 import {
@@ -27,9 +28,14 @@ import { sidebarWidthBudget } from "../../lib/sidebar-resize";
 import { commitWorkPanelPresentation } from "../../lib/work-panel-presentation";
 import {
   MAIN_PANE_MIN_WIDTH,
+  workPanelRequestedWidth,
   workPanelWidthForSidebarReopen,
 } from "../../lib/work-panel-resize";
-import { browserPluginTab, browserPluginTabForReveal } from "../../lib/work-panel-tabs";
+import {
+  browserPluginTab,
+  browserPluginTabForReveal,
+  pluginWorkPanelTab,
+} from "../../lib/work-panel-tabs";
 import { useAppStore } from "../../stores/app-store";
 import { useSidebarTransition } from "./useSidebarTransition";
 import { useStartupWatchdog } from "./useStartupWatchdog";
@@ -64,11 +70,38 @@ export function useAppShellRuntime() {
   const settings = useAppStore((s) => s.settings);
   const workPanelOpen = useAppStore((s) => s.workPanelOpen);
   const workPanelWidth = useAppStore((s) => s.workPanelWidth);
+  const workPanelYieldedWidth = useAppStore((s) => s.workPanelYieldedWidth);
   const pluginThemes = useAppStore((s) => s.pluginThemes);
   const refreshPluginThemes = useAppStore((s) => s.refreshPluginThemes);
   const plugins = useAppStore((s) => s.plugins);
   const projectPath = useAppStore((s) => s.workspace?.path ?? null);
+  /** Monotonic counter for the plugin active-session push. */
+  const activeSessionSeq = useRef(0);
+  /** Identifies this renderer load: a reload restarts the counter, and the
+   * main-side high-water mark must restart with it (#1753). */
+  const sessionPushBootId = useRef(crypto.randomUUID());
+  /** The project of the session on screen, for the plugin session snapshot. */
+  const activeSessionProjectPath = useAppStore((s) =>
+    s.activeSessionId
+      ? (s.sessions.find((session) => session.id === s.activeSessionId)?.projectPath ?? null)
+      : null,
+  );
   const workPanelVisible = workPanelOpen;
+
+  useEffect(() => {
+    if (!ready || !activeSessionId || activeSessionId.startsWith("remote:")) return;
+    const state = useAppStore.getState();
+    const tabs = state.workPanelContexts[activeSessionId]?.tabs ?? state.workPanelTabs;
+    let current = true;
+    void api.browserGetPages(activeSessionId).then((pages) => {
+      if (!current) return;
+      const live = useAppStore.getState();
+      const liveTabs = live.workPanelContexts[activeSessionId]?.tabs ?? live.workPanelTabs;
+      if (live.activeSessionId !== activeSessionId || liveTabs !== tabs) return;
+      live.restoreBrowserWorkPanelTabs(activeSessionId, pages);
+    }).catch((error) => console.warn("Browser tab restore failed", error));
+    return () => { current = false; };
+  }, [ready, activeSessionId, workPanelOpen]);
 
   const [searchOpen, setSearchOpen] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
@@ -89,6 +122,7 @@ export function useAppShellRuntime() {
   const sidebarPreferredWidthRef = useRef(sidebarWidth);
   const shellWidthRef = useRef(shellWidth);
   const workPanelWidthRef = useRef(workPanelWidth);
+  const workPanelYieldedWidthRef = useRef(workPanelYieldedWidth);
   const workPanelOpenRef = useRef(workPanelVisible);
   const workPanelMaximizedRef = useRef(false);
   const autoCollapsedSidebarRef = useRef(false);
@@ -96,6 +130,7 @@ export function useAppShellRuntime() {
   sidebarWidthRef.current = sidebarWidth;
   shellWidthRef.current = shellWidth;
   workPanelWidthRef.current = workPanelWidth;
+  workPanelYieldedWidthRef.current = workPanelYieldedWidth;
   workPanelOpenRef.current = workPanelVisible;
 
   // The shell is a fixed client area: the three-column budget needs its real
@@ -114,13 +149,22 @@ export function useAppShellRuntime() {
     observer.observe(shell);
     return () => observer.disconnect();
   }, []);
-  const resolveSidebarMax = () =>
-    sidebarWidthBudget({
-      containerWidth: appShellRef.current?.clientWidth || shellWidthRef.current,
+  const resolveSidebarMax = () => {
+    const containerWidth =
+      appShellRef.current?.clientWidth || shellWidthRef.current;
+    return sidebarWidthBudget({
+      containerWidth,
       workPanelOpen: workPanelOpenRef.current,
-      workPanelWidth: workPanelWidthRef.current,
+      workPanelWidth: workPanelRequestedWidth({
+        containerWidth,
+        sidebarWidth: sidebarWidthRef.current,
+        sidebarCollapsed: sidebarCollapsedRef.current,
+        preferredWidth: workPanelWidthRef.current,
+        yieldedWidth: workPanelYieldedWidthRef.current,
+      }),
       workPanelMaximized: workPanelMaximizedRef.current,
     });
+  };
   const handleSidebarWidthChange = useCallback((width: number) => {
     setSidebarWidth(clampSidebarWidth(width, resolveSidebarMax()));
   }, []);
@@ -137,7 +181,8 @@ export function useAppShellRuntime() {
   // Reopening prefers the right column: the work panel gives up width first so
   // MainChat keeps the width it already had, and only a would-be breach of the
   // 450px floor falls back to the 460px reopen target. The column comes back at
-  // the user's preferred width, which a collapsing drag never overwrites.
+  // the user's preferred width, which a collapsing drag never overwrites. The
+  // panel only lends that width: its own preferred width stays stored.
   const reopenSidebar = useCallback(() => {
     if (!sidebarCollapsedRef.current) return;
     const preferredWidth = clampSidebarWidth(sidebarPreferredWidthRef.current);
@@ -152,7 +197,11 @@ export function useAppShellRuntime() {
         sidebarWidth: preferredWidth,
         currentPanelWidth,
       });
-      useAppStore.getState().setWorkPanelWidth(nextPanelWidth);
+      useAppStore
+        .getState()
+        .setWorkPanelYieldedWidth(
+          nextPanelWidth < currentPanelWidth ? nextPanelWidth : null,
+        );
     }
     autoCollapsedSidebarRef.current = false;
     setSidebarWidth(preferredWidth);
@@ -177,6 +226,13 @@ export function useAppShellRuntime() {
     autoCollapsedSidebarRef.current = true;
     setSidebarCollapsed(true);
   }, []);
+  // Width the panel lent to a reopened sidebar returns once the sidebar has
+  // finished collapsing, whichever path collapsed it.
+  useEffect(() => {
+    if (sidebarCollapsed && !sidebarExiting) {
+      useAppStore.getState().setWorkPanelYieldedWidth(null);
+    }
+  }, [sidebarCollapsed, sidebarExiting]);
   const [presentedWorkPanelOpen, setPresentedWorkPanelOpen] = useState(false);
   const [workPanelMaximized, setWorkPanelMaximized] = useState(false);
   const [workPanelExiting, setWorkPanelExiting] = useState(false);
@@ -425,6 +481,27 @@ export function useAppShellRuntime() {
       .catch(() => undefined);
   }, [activeSessionId, page]);
 
+  /**
+   * The selected session is shell state, so the shell publishes it. Plugin
+   * `pi.session.getActive()` and `session:activated` read this instead of any
+   * plugin guessing from the transcript.
+   *
+   * Each push carries a counter because two switches can be in flight at once:
+   * a slower invoke must never land after a newer one and restore a session the
+   * user already left.
+   */
+  useEffect(() => {
+    activeSessionSeq.current += 1;
+    void api
+      .setPluginActiveSession({
+        sessionId: activeSessionId ?? null,
+        projectPath: activeSessionProjectPath,
+        seq: activeSessionSeq.current,
+        bootId: sessionPushBootId.current,
+      })
+      .catch(() => undefined);
+  }, [activeSessionId, activeSessionProjectPath]);
+
   useEffect(() => {
     const acknowledgeFocusedSession = () => {
       if (!ready || page !== "chat" || !activeSessionId) return;
@@ -624,6 +701,46 @@ export function useAppShellRuntime() {
       }
       state.openWorkPanelTabForSession(event.sessionId, {
         ...browserPluginTab(event.path ?? event.url),
+        ...(event.tabId ? { id: event.tabId } : {}),
+      });
+    });
+    const offBrowserOpenFile = api.onBrowserOpenFile(({ path }) => {
+      const state = useAppStore.getState();
+      if (state.activeSessionId) {
+        state.openWorkPanelTabForSession(state.activeSessionId, browserPluginTab(path));
+      }
+    });
+    // A plugin asked to show one of its own views in the work panel
+    // (`pi.ui.revealView`). The main process already refused a stale session,
+    // so this only has to open — and focus — the tab that session owns.
+    const offPluginViewReveal = api.onPluginViewReveal((event) => {
+      useAppStore.getState().openWorkPanelTabForSession(event.sessionId, {
+        ...pluginWorkPanelTab(event.pluginId, event.viewId),
+        ...(event.location ? { location: event.location } : {}),
+      });
+    });
+    // A plugin offered one line for the composer (`pi.composer.suggest`). The
+    // shell owns the composer, so it decides here and answers the main process,
+    // which is waiting on the plugin's call with that answer.
+    const offComposerSuggestion = api.onPluginComposerSuggestion((event) => {
+      if (event.kind === "clear") {
+        composerSuggestion.clear({
+          ...(event.pluginId ? { pluginId: event.pluginId } : {}),
+          ...(event.sessionId ? { sessionId: event.sessionId } : {}),
+        });
+        return;
+      }
+      const outcome = composerSuggestion.offer({
+        pluginId: event.pluginId,
+        sessionId: event.sessionId,
+        ...(event.turnId ? { turnId: event.turnId } : {}),
+        text: event.text,
+        expiresAt: event.expiresAt,
+      });
+      void api.pluginComposerSuggestionResult({
+        requestId: event.requestId,
+        shown: outcome.shown === true,
+        ...(outcome.shown ? {} : { reason: outcome.reason }),
       });
     });
     const offHostStatus = api.onHostStatus((status) => {
@@ -831,9 +948,12 @@ export function useAppShellRuntime() {
       offNotificationSound();
       offInsecureEndpoint();
       offBrowserPreview();
+      offBrowserOpenFile();
       offBrowserState();
+      offPluginViewReveal();
       offHostStatus();
       offNotificationChanged();
+      offComposerSuggestion();
       offSessionsChanged();
       offRemoteInteractions();
       offNotificationActivated();
@@ -938,10 +1058,19 @@ export function useAppShellRuntime() {
     : workPanelToggleLabel;
 
 
+  // What the panel asks of the shared budget, including a width it lent to a
+  // reopened sidebar; the stored preference may be wider.
+  const requestedWorkPanelWidth = workPanelRequestedWidth({
+    containerWidth: shellWidth,
+    sidebarWidth,
+    sidebarCollapsed: sidebarCollapsed && !sidebarExiting,
+    preferredWidth: workPanelWidth,
+    yieldedWidth: workPanelYieldedWidth,
+  });
   const sidebarWidthMax = sidebarWidthBudget({
     containerWidth: shellWidth,
     workPanelOpen: workPanelVisible || presentedWorkPanelOpen,
-    workPanelWidth,
+    workPanelWidth: requestedWorkPanelWidth,
     workPanelMaximized,
   });
 
@@ -967,7 +1096,7 @@ export function useAppShellRuntime() {
     autoCollapseSidebar,
     appShellRef,
     shellWidth,
-    workPanelWidth,
+    requestedWorkPanelWidth,
     runMenuCommand,
     handleSidebarAnimationEnd,
     presentedWorkPanelOpen,

@@ -118,7 +118,11 @@ OpenAI 风格的 Copilot 线路 API 仍将令牌作为请求密钥签名；所�
 `reasoning_content`。非官方 DeepSeek 端点还会设置 `requiresNonEmptyReasoningReplay`，
 用文档化的非空占位符而不是 `""` 填补缺失推理（OpenCode / 第三方中转在压缩后拒绝空回传；
 见 ADR 0256 / #296）。官方 `deepseek.com` 行仍使用空串回填（#223）。该覆盖不改
-`thinkingFormat`。
+`thinkingFormat`。中转行设置 `supportsReasoningEffort: false`，因为有 DeepSeek 系中转
+被报告拒绝通用 OpenAI 的 `reasoning_effort` 字段（#1664）。官方 `deepseek.com` 行把该标志
+交给 pi-ai，按 DeepSeek 文档在 `thinking: {type: "enabled"}` 旁发送 `reasoning_effort`
+（low / high / max），使所选思考等级真正下发（#1821，D672）。模型绑定上显式选择的
+`supportsReasoningEffort`（`send` 或 `omit`）在两类行上都仍优先于该自动规则。
 
 当 Pi catalog 记录发布了推理 `effort` 选项且没有 `budget_tokens` 选项时
 （例如 Opus 4.7+、Opus 5.x、Fable），Anthropic Messages 请求会设置
@@ -591,6 +595,8 @@ UI 可能会显示层级提示，但默认情况下不得硬阻止未知模型�
 这是**通用逃生舱**，保证超出原生集成之外的市场覆盖范围。
 
 目录条目还可以额外固定模型级 wire API（例如 `api: "openai-responses"`）。当该 API 与 provider 的协议族兼容时，它优先于 provider 级 `apiStyle`（因此 `opencode_go` 下的 responses-only 模型会走 Responses adapter 而非 Chat Completions）。外部 catalog 的异构 wire API（例如 relay 端点上匹配到的 `google-generative-ai` 或 `anthropic-messages`）不会覆盖 OpenAI-compatible provider 配置的 wire style（issue #1310）；没有模型级固定时保持 provider 级风格不变。
+
+对于内置 OpenCode Go 行，目录条目若明确发布独立的 Anthropic Messages 路由，则有一个文档化例外：models.dev 的 Claude 条目同时声明 `api: "anthropic_messages"` 和 OpenCode Anthropic 根 `baseUrl` 时，agent-runtime 使用这组目录 API 与地址，最终访问 `/v1/messages`。该例外只适用于命名的 OpenCode Go 预设；自定义端点和外部 relay 匹配到的目录记录仍使用保存的 provider API 与 Base URL。
 
 ### 16.1 Responses 流终止（pi-ai 补丁）
 

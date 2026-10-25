@@ -1,0 +1,139 @@
+# Codex import candidate validation
+
+## Continuation-only wizard correction (2026-10-25)
+
+- Removed individual and bulk history-only choices from the wizard and the
+  corresponding renderer request path. Confirmation always retains available
+  continuation context. Sources with no usable context explain how to rescan
+  a complete source and are not silently imported as empty-context sessions.
+- The Electron single-action regression failed against the previous UI, then
+  passed with the correction. The real Renderer/Main/Host journey covers single
+  and bulk partial-context imports, cleared selections and missing-context
+  non-import. A dedicated review stage captures the remaining action in both
+  themes and at narrow width. Existing history-only Host data/contracts are
+  unchanged; the historical results below describe the earlier UI.
+- i18n build, Desktop typecheck, style-token check and whitespace validation
+  are the scoped static checks. The Host conversion logic is unchanged; this
+  correction does not claim new real-image or paid-provider acceptance.
+
+## Real-source recovery and usability correction (2026-10-25)
+
+- User-authorized read-only scans of local Codex source found 1,893 candidates.
+  The current conversation and five conversations from the reported project
+  were actually imported into fresh isolated PI storage, not merely scanned.
+- Five preserved available native checkpoint context with explicit partial
+  consent; one had no source rollout and imported 1,419 visible messages only.
+  The current conversation retained 5,171 visible rows and 116 context messages
+  at the test cutoff; the reported failing conversation retained 4,755 and 82.
+  Counts include native import receipts and may change as source conversations
+  continue. No missing content is represented as complete recovery.
+- All six survived Host restart and duplicate import skipped them. Actual tests
+  exposed and then regressed physical/logical segment aliasing and global native
+  message-ID collisions between forks. Both synthetic regressions failed before
+  their fixes. Compressed history and dynamic-tool records now import directly.
+- Two real imported conversations continued through the production sidecar and
+  a controlled loopback Responses endpoint. Four requests contained sampled
+  recovered context; two new Read/Write calls operated only inside a dedicated
+  fixture directory. No historical tools replayed, no paid provider was used.
+- Full AppShell acceptance clicked the sidebar entry, selected the real project
+  with five conversations, imported the reported conversation with partial
+  consent, then opened its transcript. Normal/narrow screenshots show readable
+  rows and visible confirmation buttons, with technical warnings collapsed.
+- Host import suite: 18/18. Shared contract: 2/2. Shared/i18n builds, Desktop
+  typecheck, Host debug build and all-target clippy passed. Electron acceptance
+  additionally covers partial consent and batch/history-only interactions.
+- Real histories, requests, screenshots and reports stay in untracked artifacts;
+  they are not repository fixtures. Codex source is read-only and account files
+  are not imported. The previous user testing profile is preserved.
+
+These results supersede the earlier synthetic-only boundary below for this
+specific Windows source snapshot, not for every possible Codex format. Native
+OS picker behavior and macOS/Linux builds remain outside this correction.
+
+## Migrated-project search regression
+
+- A real-source, read-only metadata check found both a current SQLite project
+  and its legacy UI project, while conversations still referenced the legacy
+  identity. The previous catalog offered two entries and the current entry
+  filtered to zero conversations. No private source data is in test fixtures.
+- The new synthetic Host user-path test failed before the fix (three project
+  entries instead of two), then passed scan, current-project selection, current
+  thread-name search, native import and duplicate-import skipping. It also keeps
+  an unrelated same-name project separate and ignores a remote mapping.
+- Host import suite: 14/14 passed. Six-stage Electron acceptance passed, including
+  actual project-menu selection, display-name search and selected import.
+- A fresh read-only scan of the affected source returned one canonical project
+  and the requested conversation. No real conversation was imported by the
+  verification and no paid provider was invoked.
+- Interactive preview refresh reuses its isolated data and browser directories;
+  it does not copy account state from the production installation.
+
+## Candidate environment
+
+- Branch: codex/codex-history-import-20261025.
+- Base main: 5f272b38bf540251263623f8b94818545d94f78b.
+- Windows, Node 22.12, Rust 1.90; reused existing dependencies, Electron and
+  Cargo target. The host default Rust 1.86 is below dependency requirements.
+- Synthetic source, workspace and application profiles only. No paid API, real
+  Codex conversation import, user application instance or source data mutation.
+
+## Executable acceptance
+
+1. `cargo test -p host-core codex_import --locked`: actual source files, SQLite
+   projections, native Host session/checkpoint import, duplicate preservation,
+   cancellation/retry, root mapping and directory admission. Fixtures cover 301
+   candidates, chained history_base, rollback, retained-only context, images,
+   missing attachments, malformed and unknown content, mixed projection ordering.
+2. Shared `codex-import.test.ts`: IPC request shapes for the user import journey.
+3. Runtime `session-context.test.ts`: retained context with no summary and normal
+   checkpoint filtering.
+4. `node scripts/e2e-codex-import.mjs`: actual Sidebar, import components, real
+   Main IPC and Rust Host in a separate Electron profile. Covers both entrypoints,
+   cancel/Escape/focus, navigation/reload, process restart, permanent dismissal,
+   Settings restoration, selected import and dark/light/narrow screenshots.
+5. `node scripts/e2e/codex-import-continuation.mjs`: builds the real sidecar from
+   task source, imports native history and captures four controlled Responses
+   requests. Verifies effective summary, latest answer and historical tool output;
+   excludes replaced history and duplicate summary. Executes two real Host
+   read/write tools, restarts Host and sidecar, then continues without replay.
+
+Set PI_DESKTOP_HOST_BIN and PI_DESKTOP_ELECTRON_BIN to existing build binaries
+when reusing a shared development environment. Build shared/i18n/runtime packages
+first. Test artifacts are retained under artifacts/ and must not be committed.
+
+## Source format reference
+
+Codex source was inspected at 970111f6cb62cc02fe36a82ea7d71b37a2889c97:
+codex-rs/history/src/lib.rs, rollout_payload.rs, retained_context.rs, and
+codex-rs/core/src/session/rollout_reconstruction.rs. Persisted ordinals,
+replacement-history metadata and rollback boundaries are source-format inputs,
+not claims of exact runtime equivalence. NekoCodeDesktop's ACP approach was
+reference research only; no code was copied.
+
+## Boundaries
+
+The UI suite mounts production Sidebar/import components, not the whole AppShell.
+The continuation suite uses production Host/runtime but mirrors Main's completed
+message persistence at the Host API boundary. Their combination proves actual
+cross-process import/recovery and visible interactions, not a packaged installer
+or a full click-to-model-to-transcript journey through every AppShell service.
+Native OS directory-picker interaction, macOS/Linux visuals, multi-gigabyte
+single-session memory behavior, all evolving Codex event variants and real user
+profiles are not claimed as tested. EN/zh-CN are authored; other locales use the
+feature's English catalog. Full repository test/build coverage is not claimed.
+
+Earlier UI fixtures omitted Tailwind compilation; those screenshots are not
+visual acceptance evidence. The final fixture compiles the actual global styles
+and uses production Sidebar. Final candidate commit and artifacts are reported
+in the delivery message without staging generated data.
+
+## Checks completed before candidate commit
+
+- Host import integration: 13/13 passed. Native compaction regressions: 6/6;
+  existing session import idempotency: 1/1 (one compaction test overlaps).
+- Shared import protocol tests: 2/2. Runtime context tests: 6/6.
+- Shared, i18n and runtime TypeScript builds; Desktop typecheck: passed.
+- Host debug build, clippy all-targets, scoped rustfmt, style-token checks,
+  agent-policy sync, diff whitespace check and current-main ancestry: passed.
+- Earlier Electron and controlled continuation journeys passed; final exact
+  commit journeys run after committing and their paths are in delivery.

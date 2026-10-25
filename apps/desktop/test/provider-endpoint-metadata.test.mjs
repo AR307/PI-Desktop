@@ -206,7 +206,7 @@ test("a relay enriches official IDs, strips safe deployment labels, and preserve
   // the owner's record instead of dropping to the generic seed.
   const deepseek = byId.get("deepseek-v4-flash");
   assert.equal(deepseek.catalogSource, "models.dev");
-  assert.equal(deepseek.contextWindow, 1_000_000);
+  assert.equal(deepseek.contextWindow, 1_048_576);
   assert.equal(deepseek.maxTokens, 393_216);
   // Xiaomi publishes the base id, so both the plain and the `-1m` alias read
   // the owner's record without rewriting the served wire ID.

@@ -198,10 +198,12 @@ session and builtin subagents use the same controller and policy.
 error, lifecycle `error`, `turn_end`, `agent_end`, or duplicate assistant
 bubble reaches the UI. A normalized `status` event identifies the retry
 backoff so the user can tell that the turn is still active. The visible
-assistant message id is reused when an output-free retry starts, retaining no substantive
-content in one bubble. End events are emitted once by the final successful or
-exhausted attempt. An abort during the wait cancels the timer and prevents the
-next provider request.
+assistant message id is reused when an output-free retry starts. A delivered
+fragment is retained in its completed row, and the resumed response gets a new
+row under the same turn. Terminal turn/agent events are emitted once by the final
+successful or exhausted attempt. An abort during the wait cancels the timer,
+prevents the next provider request, and releases the suppressed terminal
+lifecycle even when the retained fragment no longer has an open assistant row.
 
 The delay follows the OpenCode-style order `retry-after-ms`, `retry-after`
 seconds, `retry-after` HTTP-date, then exponential backoff. The fallback starts
@@ -230,6 +232,13 @@ independent recovered outages must not eventually stop because earlier tool
 rounds consumed the budget. One-shot completions still use one bounded budget
 for their single response. Persistent failures remain bounded and abortable.
 
+When compaction has already replaced a failed assistant with a summary or
+retained user message, a retry uses that current compacted transcript. It
+removes empty failed assistant rows, retains replayable partial output, and
+does not require an assistant message at the transcript tail (issue #1768).
+Section 5e defines the model-only continuation used when retained assistant
+output would otherwise prevent Pi from calling `continue()`.
+
 Before surfacing a pre-stream `PROVIDER_ERROR` for HTTP 400/422 whose message
 ends in `(no body)`, the runtime makes at most one silent repair attempt with
 the generated output-limit fields removed: `max_tokens`,
@@ -249,10 +258,10 @@ because it paces one failed request rather than a synchronized rate-limit burst.
 A server-stated delay wins outright, including one shorter than the scheduled
 wait.
 
-Only the failed request is replayed. The session, its transcript, and its tool
-state are untouched: the failed assistant is removed from the next model context
-and the same visible message id is reused, so a retry never restarts the turn or
-re-runs a completed tool call.
+Only the interrupted response is resumed. The session and completed tool state
+are retained: an output-free failure is removed from model context and reuses
+its visible message id; substantive output is retained as described in section
+5e. Recovery never restarts the turn or re-runs an already completed tool call.
 
 The application setting `infiniteProviderRetry` is off by default. When enabled,
 the main session and its builtin subagents skip only the ten-retry ceiling for
@@ -310,9 +319,14 @@ required protocol terminator or broken stream keeps its underlying failure code.
 Unknown stop reasons and unavailable usage fields are not invented or inferred
 from elapsed time or character count.
 
-Once a request produces text, thinking or tool content, no automatic replay is
-allowed, including under infinite retry. Output-free temporary failures still
-use section 5d budgets and Retry-After. Neither a lower reasoning level nor an
+Temporary failures retry automatically even after text, thinking or tool-call
+fragments arrive. Section 5d budgets and Retry-After apply across setup and stream
+failures; partial content never replenishes a budget. Infinite retry continues
+until recovery or user Stop. Retain delivered fragments as ordinary transcript
+rows, retain valid native text/thinking and completed tools in model context,
+and discard unfinished calls. Add a runtime-only continuation to model context
+when its retained tail is an assistant; do not fabricate a user submission in
+the visible or persisted transcript. Neither a lower reasoning level nor an
 alternative model, group or protocol is selected to conceal an interrupted turn.
 Legal tool-result continuations and approved Plan/Goal progress steps are not
 failed-request replays and keep their existing behavior.
@@ -326,7 +340,14 @@ system instruction and no incomplete tool execution. Completed tool results are
 preserved. Unsigned partial thinking is display-only. Mobile Continue preserves
 an unsent draft even when delivery confirmation is delayed by reconnection.
 
-One-shot completions and delegates use the same outcome classification. The
+One-shot completions and delegates use the same outcome classification and
+transient stream recovery, including the zero-event stream watchdog. A one-shot
+call has no published partial output or tools and retries its original context.
+Provider/SDK aborts without caller cancellation are interruptions, not user Stop;
+explicit local cancellation markers and caller signals remain authoritative.
+Unauthorized, invalid-request, local preparation and certificate failures stay
+terminal. Normally completed thinking-only and explicit output-limit responses
+retain their existing explicit Continue behavior. The
 runtime's existing lifecycle drain runs pending empty retries after idle, at
 most once, without leaving suppression flags active. Diagnostics record the
 actual wire path, protocol, model, group, reasoning/output parameters, reported
@@ -567,7 +588,13 @@ the pi-ai chars/4 baseline plus a CJK correction, then reserves the larger of
 4,096 tokens or 1% of the effective window. The effective window is the smaller
 of the configured value and the published catalog window when both are known;
 this prevents an oversized user override from bypassing compaction and output
-protection. Unknown windows preserve the configured output budget.
+protection. Unknown windows preserve the configured output budget. The estimate
+measures the transcript the adapter sends: unless the bound model declares
+mid-conversation system support, later system-transcript updates are folded
+into one leading message carrying the current instructions and tools, and the
+parent and subagent paths hand that folded transcript to pi-ai as well, so its
+own `streamSimple` clamp agrees. Superseded instruction snapshots are never
+charged against the output budget.
 
 The incoming user prompt participates in budgeting before the first provider
 request. The automatic summary request retries transient provider failures
@@ -766,6 +793,12 @@ criterion-by-criterion report of what was met and the evidence observed.
   enables or disables image transport for the configured binding. Unknown or
   custom ids remain conservative text/path models unless their binding
   explicitly enables image input.
+- A model binding's optional `supportsReasoningEffort` controls the Chat
+  Completions `reasoning_effort` parameter only. An absent or `null` value keeps
+  existing catalog/provider compatibility; an explicit boolean takes precedence
+  over automatic compatibility detection, including DeepSeek-family defaults.
+  This does not enable reasoning, select a level, or change Responses/Anthropic
+  request serialization. Published compatibility alone is not an explicit opt-in.
 - The effective level is passed to the pi `Agent`; provider-specific request
   serialization remains pi-ai's responsibility.
 - Pi `thinking` blocks become `UiMessage.thinking` and
@@ -801,24 +834,24 @@ order the user wrote. Reads are bounded by the admitted file size. Base64 is
 transient and never restored into durable UI messages or transcript records.
 - Failed assistant messages remain durable diagnostic transcript entries but
   are never restored into pi model context on a later turn.
-- A tool-call id is unique in every request. The transcript is an append-only
-  snapshot stream that tolerates a retried append, so the same call can reach
-  the assembled context twice — under one row id, which the host's keep-last
-  read already collapses, or under two, which it cannot. The last view before
-  the wire therefore keeps the first occurrence of each `toolCall` id and drops
-  a later call or a later result for it, so the pair the provider validates
-  stays well-formed; a request with no duplicates is returned unchanged. A drop
-  is reported once on the `agent` log channel with the session and the ids
-  (D608). Anthropic-family endpoints, including DeepSeek's, reject the whole
-  turn with `tool_use ids must be unique` (issue #718), which leaves the session
-  unable to continue.
-- The guard compares the wire-visible call id — the part before the `|` that
-  separates the Responses item id — and drops an assistant message whole once
-  every tool call in it was already claimed, because keeping its residual text
-  would leave a message sitting between a call and the result answering it. A
-  message that replays a claimed call while carrying a new one keeps its new
-  call in place; no writer produces that partial replay, and the guard does not
-  reorder messages to close the gap it leaves (D620).
+- Tool-call ids remain unique in each provider request. Before Pi executes a
+  streamed response, the parent runtime and each delegate assign fresh local
+  ids to calls that reuse an earlier wire-visible id (the part before `|`).
+  Each runtime retains its identity set across context compaction; the parent
+  seeds it from the full restored transcript, and delegates keep it across
+  model fallback. This prevents reused provider ids from losing real results
+  when the runtime journals entries by id (issue #1815).
+- The final request guard drops a repeated call only while the earlier call is
+  still waiting for its result, and drops a repeated result only without a
+  pending call. An independently completed same-id pair is retained under a
+  fresh request-local id with its result remapped to match. A renamed Responses
+  call does not reuse its old item id. No source messages are mutated; unchanged
+  requests retain their identity. Drops are logged with the session and ids
+  (D608). Composite result ids are aligned even without a duplicate drop.
+- A replayed assistant snapshot whose calls are all pending elsewhere is
+  removed whole: retaining its text would separate the call from its result
+  and make pi-ai synthesize a second output (D620). A partial snapshot retains
+  its new calls in place; the guard does not reorder messages.
 - The agent loop owns its context array. `prepareNextTurn` hands pi a copy of
   the live state — for a delegate turn boundary too — exactly as pi's own
   `createContextSnapshot()` does for `prompt()` and `continue()`: pi's loop
@@ -1871,9 +1904,11 @@ browseable.
 ### Provider certificate trust (issue #714)
 
 The desktop sidecar's effective trust set is the union of Node's bundled
-roots, the inherited `NODE_EXTRA_CA_CERTS` set, and the OS trust store, with
-chain and hostname validation on. On Windows and Linux the launcher passes
-Node's `--use-system-ca` to obtain the system roots. On macOS the Electron
+roots, the inherited `NODE_EXTRA_CA_CERTS` set, and non-expired entries from
+the OS trust store, with chain and hostname validation on. Expired entries in
+the OS store are omitted because platform stores may retain stale certificates;
+bundled and `NODE_EXTRA_CA_CERTS` entries are unchanged. On Windows and Linux
+the launcher passes Node's `--use-system-ca` to obtain the system roots. On macOS the Electron
 build applies that flag by replacing the bundled roots instead of adding them
 and its system enumeration misses public anchors (issue #1187), so the
 launcher omits the flag and the sidecar merges the three sets into the default

@@ -40,7 +40,7 @@ import type {
   SessionSort,
 } from "../lib/sidebar-preferences";
 import type { PermissionQueues } from "../lib/pending-permissions";
-import type { AskQueues } from "../lib/pending-asks";
+import type { AskDraft, AskDrafts, AskQueues } from "../lib/pending-asks";
 import type {
   QueuedPromptDirection,
   QueuedPrompts,
@@ -64,6 +64,8 @@ export type ToastItem = {
   duration: number;
   /** Notification chime is enabled by default. */
   sound: boolean;
+  /** Optional conversation opened when the user activates the toast. */
+  sessionId?: string;
 };
 
 export type ToastOptions = {
@@ -72,6 +74,8 @@ export type ToastOptions = {
   duration?: number;
   /** Suppress the default soft chime when another notification surface already played it. */
   sound?: boolean;
+  /** Make the toast message an explicit conversation-navigation action. */
+  sessionId?: string;
 };
 
 export type AgentTurnResult = {
@@ -176,6 +180,8 @@ export type AppState = {
   pendingPermissions: PermissionQueues;
   /** Inline asktool requests, queued per session without an expiry. */
   pendingAsks: AskQueues;
+  /** In-progress AskTool answers keyed by requestId, so a remount keeps them. */
+  askDrafts: AskDrafts;
   /** Renderer-owned, in-memory prompt queue, isolated by session. */
   queuedPrompts: QueuedPrompts;
   /** Planning state is durable per session, including sessions outside view. */
@@ -230,7 +236,7 @@ export type AppState = {
     modelId?: string;
     thinkingLevel: SessionThinkingLevel;
     permissionMode?: PermissionMode;
-  }) => Promise<void>;
+  }, targetSessionId?: string) => Promise<void>;
   /** Returns true once accepted unless concurrent smart Stop restores it. */
   sendPrompt: (
     content: string,
@@ -238,32 +244,34 @@ export type AppState = {
     targetSessionId?: string,
     onAccepted?: (sessionId: string) => void,
   ) => Promise<boolean>;
-  steerPrompt: (content: string, draft?: ComposerDraftSnapshot) => Promise<boolean>;
+  steerPrompt: (content: string, draft?: ComposerDraftSnapshot, targetSessionId?: string) => Promise<boolean>;
   enqueuePrompt: (
     content: string,
     draft?: ComposerDraftSnapshot,
     sessionId?: string,
   ) => Promise<boolean>;
-  removeQueuedPrompt: (promptId: string) => void;
+  removeQueuedPrompt: (promptId: string, targetSessionId?: string) => void;
   /** Move one waiting row past its neighbour; promoted rows stay locked. */
   moveQueuedPrompt: (
     promptId: string,
     direction: QueuedPromptDirection,
+    targetSessionId?: string,
   ) => Promise<void>;
   /** Return one waiting row to the composer as an editable draft. */
-  editQueuedPrompt: (promptId: string) => void;
-  sendQueuedNow: (promptId: string) => Promise<void>;
+  editQueuedPrompt: (promptId: string, targetSessionId?: string) => void;
+  sendQueuedNow: (promptId: string, targetSessionId?: string) => Promise<void>;
   refreshQueuedPrompts: (sessionId: string) => Promise<void>;
   applyQueueChanged: (event: AgentQueueChangedEvent) => void;
-  compactContext: () => Promise<void>;
-  retryAssistantMessage: (messageId: string) => Promise<void>;
+  compactContext: (sessionId?: string) => Promise<void>;
+  retryAssistantMessage: (messageId: string, sessionId?: string) => Promise<void>;
   /** Read canonical text before opening a user-message editor. */
-  prepareUserMessageEdit: (messageId: string, signal?: AbortSignal) => Promise<UiMessage | null>;
+  prepareUserMessageEdit: (messageId: string, signal?: AbortSignal, sessionId?: string) => Promise<UiMessage | null>;
   /** Replace a user prompt and regenerate from it. */
   editUserMessage: (
     messageId: string,
     content: string,
     attachments?: UiMessage["attachments"],
+    sessionId?: string,
   ) => Promise<boolean>;
   retryLastPrompt: () => Promise<void>;
   clearError: () => void;
@@ -274,7 +282,7 @@ export type AppState = {
     messageId: string,
     snapshotId: string,
   ) => Promise<ReviewRollbackResult | null>;
-  abort: () => Promise<void>;
+  abort: (targetSessionId?: string) => Promise<void>;
   openProject: (options?: { remoteHostKey?: string }) => Promise<void>;
   closeProjectDialog: () => void;
   createProjectFromRemote: (input: {
@@ -379,6 +387,10 @@ export type AppState = {
     sessionId: string,
     resolution: AskToolResolution,
   ) => Promise<void>;
+  /** Persist one question card's in-progress answers by requestId. */
+  setAskDraft: (requestId: string, draft: AskDraft) => void;
+  /** Forget a request's draft once it is resolved or dismissed. */
+  dropAskDraft: (requestId: string) => void;
   resolvePlan: (resolution: PlanResolveRequest) => Promise<PlanResolutionResult>;
   showToast: (message: string, options?: ToastOptions) => void;
   dismissToast: (id: number) => void;
@@ -389,7 +401,13 @@ export type AppState = {
   activeWorkPanelTabId: string | null;
   /** Runtime-only work panel state owned by each conversation. */
   workPanelContexts: Record<string, WorkPanelContext>;
+  /** The user's preferred panel width; persisted, never below the regular minimum. */
   workPanelWidth: number;
+  /**
+   * Runtime-only width a manual sidebar reopen lends to the sidebar. It ends
+   * when the sidebar collapses or the user resizes the panel.
+   */
+  workPanelYieldedWidth: number | null;
   /** Chat-initiated "preview this file" request consumed by the files viewer. */
   workPanelFileRequest: {
     path: string;
@@ -416,11 +434,13 @@ export type AppState = {
     targetTabId: string,
     insertAfter: boolean,
   ) => void;
-  closeWorkPanelTab: (tabId: string) => void;
+  closeWorkPanelTab: (tabId: string) => Promise<void>;
+  releaseClosedSession: (sessionId: string) => void;
   collapseWorkPanel: () => void;
   /** Hide the visible panel while retaining its session-owned context. */
   resetWorkPanelContext: () => void;
   setWorkPanelWidth: (width: number) => void;
+  setWorkPanelYieldedWidth: (width: number | null) => void;
   openFileInWorkPanel: (
     path: string,
     mimeType?: string,
@@ -428,6 +448,7 @@ export type AppState = {
   ) => void;
   openUrlInWorkPanel: (url: string) => void;
   updateBrowserWorkPanelTab: (state: BrowserState) => void;
+  restoreBrowserWorkPanelTabs: (sessionId: string, pages: BrowserState[]) => void;
 };
 
 export type AppStateData = {

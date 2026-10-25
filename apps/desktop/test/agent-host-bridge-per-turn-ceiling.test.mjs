@@ -6,6 +6,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 
 const here = dirname(fileURLToPath(import.meta.url));
 register(pathToFileURL(join(here, "helpers/ts-import-hooks.mjs")));
+register(new URL("./helpers/native-session-electron-hook.mjs", import.meta.url));
 
 const { createAgentHostBridge, DESKTOP_PRINCIPAL } = await import(
   "../electron/main/agent-host-bridge.ts"

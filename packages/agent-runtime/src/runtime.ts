@@ -1,8 +1,11 @@
+import { sideChatContext, type SideChatRuntimeState } from "./side-chat-context.js";
+import { promptWithQuotes } from "@pi-desktop/shared";
 import { returnToParent } from "./return-to-parent.js";
 import { highestThinkingLevel, isReturnToParent } from "@pi-desktop/shared";
 import { delegationGuidance, delegationHandoffGuidance, delegationSystemPrompt, resolveDelegationThinking, shouldHandOffDelegations } from "./ultra-policy.js";
+import { claudeCacheOptions } from "./claude-cache.js";
 import { assertMirrorCodingFast, withMirrorCodingFast } from "./mirrorcoding-fast.js";
-import { assistantReplay, canRestorePartialResponse, responseContentFacts, responseDiagnostics, responseOutcome, responseOutcomeError, restoredAssistantBlocks } from "./response-outcome.js";
+import { assistantReplay, prepareProviderRetryMessages, retainedAssistantForRetry, canRestorePartialResponse, responseContentFacts, responseDiagnostics, responseOutcome, responseOutcomeError, restoredAssistantBlocks } from "./response-outcome.js";
 import { upstreamRequestDiagnostics, type RequestDiagnostics } from "./request-diagnostics.js";
 import {
   MAX_MUTATION_RECOVERY_FAILURES, BASH_PATCH_FAILURE_KEY,
@@ -130,6 +133,7 @@ import {
   subagentToolsLabel,
   type ProposalKind,
   type SubagentPermission,
+  GEN_UI_SKILL_ID,
 } from "@pi-desktop/shared";
 import { createStreamCoalescer, type StreamCoalescer } from "./stream-coalescer.js";
 import type { RuntimeHost } from "./host-client.js";
@@ -174,6 +178,7 @@ import {
 } from "./system-transcript.js";
 import {
   dedupeToolCallMessages,
+  createToolCallIdentity,
   reportDuplicateToolCallDrop,
 } from "./tool-call-dedupe.js";
 import {
@@ -209,6 +214,7 @@ import {
   clampOutputToContext,
   effectiveModelContextWindow,
   estimateOutputCapInputTokens,
+  requestTranscript,
 } from "./output-cap.js";
 import {
   composeSubagentSystemPrompt,
@@ -1022,6 +1028,8 @@ export type AgentRuntimeOptions = {
   /** Persisted transcript to seed the agent with (session isolation: each
    * session's agent carries only its own history). */
   history?: UiMessage[];
+  initialContext?: AgentMessage[];
+  sideChatState?: SideChatRuntimeState;
   /** Latest host-owned checkpoint used only to rebuild model context. */
   compaction?: ContextCompactionRecord;
   compactionSettings?: ContextCompactionSettings;
@@ -1043,6 +1051,10 @@ export type AgentRuntimeOptions = {
    * Advertised to the model in the system prompt; host-core enforces it as
    * a second containment root. */
   scratchDir?: string;
+  /** Absolute per-session directory for inline visualization fragments
+   * (ADR gen-ui-inline-visualization). Advertised in the system prompt;
+   * host-core enforces it as a containment root. Ignored for remote sessions. */
+  visualizationsDir?: string;
   onEvent: (envelope: AgentEventEnvelope) => void;
   /** Bounded diagnostics routed to the Electron logger, never the transcript. */
   onDiagnostic?: (diagnostic: AgentRuntimeDiagnostic) => void;
@@ -1286,6 +1298,14 @@ const TOOL_PARAM_ALIASES: Record<string, Record<string, string>> = {
   Grep: { query: "pattern" },
 };
 const TOOL_OUTPUT_UPDATE_THROTTLE_MS = 100;
+const READ_ONLY_CORE_TOOLS = new Set(["Read", "Glob", "Grep"]);
+/**
+ * How long a stop request waits for a tool that host-core can actually
+ * interrupt (`Bash`, `GenerateImages`) to hand back the output it collected
+ * before the kill (#1767). Tools without host-side cancellation do not wait at
+ * all: the runtime stops waiting the moment the signal fires.
+ */
+const TOOL_ABORT_GRACE_MS = 10_000;
 const MAX_TOOL_PROGRESS_CHARS = 64 * 1024;
 const TOOL_PROGRESS_TRUNCATION_MARKER =
   "\n\n[tool output progress truncated]\n\n";
@@ -1351,6 +1371,7 @@ function commandShellToolDescription(
     shellSyntaxGuidance(shell),
     `The session scratch directory variable is ${shellScratchVariable(shell)}.`,
     `An optional timeout from 1 to ${MAX_COMMAND_TIMEOUT_SECONDS} seconds may be supplied; without it, the command defaults to a 60-second timeout.`,
+    `Set runInBackground: true for long-lived processes the user needs after the turn ends (dev servers, watchers, builds). A background call returns a backgroundTaskId immediately, survives turn aborts and timeouts, and its output is visible in the composer's running-tasks bar; do not set it for commands whose output the current turn depends on.`,
     ...(formattedScratch ? [`The session scratch directory is ${formattedScratch}.`] : []),
   ].join(" ");
 }
@@ -1894,6 +1915,7 @@ export class DesktopAgentRuntime {
   private trackToolActivation = false;
   private activationHydrated = false;
   private scratchDir?: string;
+  private visualizationsDir?: string;
   private projectPath?: string;
   private remoteWorkspace?: { hostKey: string; path: string };
   /** Set only for an isolated session; see `RuntimeConfig.workspaceRoot`. */
@@ -2011,6 +2033,7 @@ export class DesktopAgentRuntime {
   private terminatingToolCalls = new Set<string>();
   private delegateMutationTerminations = new Map<string, { code: string; message: string }>();
   private fullEntries: MessageEntry[];
+  private readonly uniqueToolCalls: ReturnType<typeof createToolCallIdentity>;
   private readonly systemJournal = new SystemTranscriptJournal();
   private composedSections: Record<string, string> = {};
   private activeCompaction?: ContextCompactionRecord;
@@ -2042,6 +2065,12 @@ export class DesktopAgentRuntime {
   private contextReminderClaimed = false;
   private contextFallbackReminderClaimed = false;
   private activeToolProgressCleanups = new Set<(flush: boolean) => void>();
+  /**
+   * Abort handlers for the tool calls currently awaiting `tools.execute`.
+   * `abort()` drives these directly: a tool must be released even when the
+   * signal it was handed never fires, or the stop RPC stays pending forever.
+   */
+  private activeToolAborts = new Set<() => void>();
   private hostCloseUnsubscribe?: () => void;
   private turnSubagentUsage?: MessageUsage;
   private compactionRequestShape?: CompactionRequestShape;
@@ -2084,6 +2113,7 @@ export class DesktopAgentRuntime {
     this.commandShell = opts.commandShell;
     this.remoteWorkspace = opts.remoteWorkspace;
     this.scratchDir = opts.remoteWorkspace ? undefined : opts.scratchDir;
+    this.visualizationsDir = opts.remoteWorkspace ? undefined : opts.visualizationsDir;
     this.projectPath = opts.remoteWorkspace?.path ?? (opts.projectPath?.trim() || undefined);
     // Remote workspaces are never isolated (ADR 0329).
     this.workspaceRoot = opts.remoteWorkspace ? undefined : opts.workspaceRoot?.trim() || undefined;
@@ -2101,8 +2131,15 @@ export class DesktopAgentRuntime {
     this.models = models;
 
     this.transcriptHistory = [...(opts.history ?? [])];
-    this.fullEntries = this.historyToEntries(this.transcriptHistory);
-    this.activeCompaction = opts.compaction;
+    this.fullEntries = opts.sideChatState?.entries ?? (opts.initialContext ? opts.initialContext.map((message, index) => ({
+      type: "message" as const, id: "inherited-" + index, seq: index, parentId: index ? "inherited-" + (index - 1) : null, timestamp: timestampMs(message.timestamp), message,
+    })) : this.historyToEntries(this.transcriptHistory));
+    // Inherited system declarations are context only, not new child records.
+    if (opts.initialContext || opts.sideChatState) {
+      for (const entry of this.fullEntries) this.systemJournal.remember(entry.message, entry.id);
+    }
+    this.activeCompaction = opts.sideChatState?.compaction ?? opts.compaction;
+    this.uniqueToolCalls = createToolCallIdentity(this.fullEntries.map((entry) => entry.message));
     this.delegationChains.hydrate(
       rebuildChainsFromTranscript(this.transcriptHistory),
     );
@@ -2114,6 +2151,8 @@ export class DesktopAgentRuntime {
       "Complete the requested work and relevant checks without expanding scope. Preserve unrelated user changes. Resolve recoverable blockers yourself.",
       // Visibility rules.
       "Before each tool batch, briefly state its purpose. Keep the user informed during long work. The final response must state the outcome, verification, and remaining blockers. Never claim actions or checks you did not perform.",
+      // File-reference formatting.
+      "File references: when citing a real local file, use a Markdown link with a short label and the exact absolute path as its target, e.g. [file.ts](/workspace/src/file.ts:42). Add only a starting line (:line or :line:column) when useful; do not use ranges or GitHub #L anchors. Wrap destinations containing spaces in angle brackets. Do not wrap links in backticks or use file://, vscode://, or https:// for local files. Link only to existing files in the accessible workspace; mention unavailable or other-repository files as code text.",
       // Delegation guidance is composed per turn so Ultra changes stay coherent.
       // Editing workflow.
       `Editing workflow: inside the advertised workspace, use Edit for small, uniquely anchored changes and Write for new files or intentional whole-file rewrites. Never modify the same path concurrently. Do not use shell apply_patch, git apply, patch, or hand-edited unified-diff files. On failure, diagnose the cause, refresh content or anchors with Read or a complete tool-provided reveal when needed, and correct the payload before retrying. After three failed edit attempts on the same path in one user turn, stop editing that path, report the exact error, and continue unblocked work. For an authorized worktree outside the advertised workspace, use a guarded, deterministic Bash edit that aborts on unexpected content, then verify the diff.`,
@@ -2123,6 +2162,12 @@ export class DesktopAgentRuntime {
       ...(this.scratchDir
         ? [
             `Your scratch directory for this session is \`${formatScratchDirForShell(this.commandShell, this.scratchDir)}\` (in Bash: ${shellScratchVariable(this.commandShell)}). Store ad-hoc temporary and intermediate files there using absolute paths. Workspace writes must be task-related project files or required toolchain outputs. Scratch persists across turns and is deleted with the session.`,
+          ]
+        : []),
+      // Inline visualizations (ADR gen-ui-inline-visualization).
+      ...(this.visualizationsDir
+        ? [
+            `Visualization directory (absolute paths only, .html fragments only; see the ${GEN_UI_SKILL_ID} skill): \`${this.visualizationsDir}\``,
           ]
         : []),
       // Isolated session (ADR 0329).
@@ -2148,7 +2193,7 @@ export class DesktopAgentRuntime {
         this.providerHasContent = false;
         this.providerRequestDiagnostics = undefined;
         this.providerRequestId = undefined;
-        if (!this.currentAssistant) this.providerRequestAttempts = 0;
+        if (!this.currentAssistant && !this.providerRetryInProgress) this.providerRequestAttempts = 0;
         this.providerResponseStatus = undefined;
         this.providerRetryHeaders = undefined;
         this.providerRequestBytes = undefined;
@@ -2170,6 +2215,7 @@ export class DesktopAgentRuntime {
           withOpenCodeSessionHeaders(
             {
               ...options,
+              ...claudeCacheOptions(m, this.provider.modelConfig, options),
               ...(this.provider.temperature !== undefined && options?.temperature === undefined
                 ? { temperature: this.provider.temperature }
                 : {}),
@@ -2234,6 +2280,9 @@ export class DesktopAgentRuntime {
         // with pi's own run signal (Stop must keep working): the adapter refuses
         // to start an attempt on an aborted signal, and its backoff sleep rejects.
         const stallAbort = new AbortController();
+        // Both output clamps, ours and pi-ai's inside `streamSimple`, must see
+        // the instructions the adapter sends, not every superseded snapshot.
+        const requestContext = requestTranscript(m, context);
         const attemptOptions: SimpleStreamOptions = {
           ...hookedOptions,
           // Cap the output budget at the pi-desktop layer so the estimate
@@ -2241,7 +2290,7 @@ export class DesktopAgentRuntime {
           // max_tokens, but the low-level `stream` path used by
           // `thinkingLevel: "omit"` would otherwise send it untouched, and
           // both consume an estimate that under-counts CJK text (issue B).
-          maxTokens: clampOutputToContext(m, context, hookedOptions.maxTokens),
+          maxTokens: clampOutputToContext(m, requestContext, hookedOptions.maxTokens),
           signal: AbortSignal.any([
             ...(hookedOptions.signal ? [hookedOptions.signal] : []),
             stallAbort.signal,
@@ -2250,12 +2299,12 @@ export class DesktopAgentRuntime {
         const usageTurnId = this.turnId;
         const retryStream = createProviderRetryStream(
           m,
-          context,
+          requestContext,
           attemptOptions,
           (retryOptions) => accountModelStream(m, () =>
             this.thinkingLevel === "omit"
-              ? this.models.stream(omitThinkingModel(m), context, retryOptions)
-              : this.models.streamSimple(m, context, retryOptions), {
+              ? this.models.stream(omitThinkingModel(m), requestContext, retryOptions)
+              : this.models.streamSimple(m, requestContext, retryOptions), {
                 providerId: this.provider.id,
                 nativeCost: this.provider.modelConfig?.nativeCost,
                 onUsage: (usage) => this.emit({ type: "usage", usage }, usageTurnId),
@@ -2281,8 +2330,9 @@ export class DesktopAgentRuntime {
         // configured budget ends as a STREAM_FAILED error and re-enters the
         // shared transient retry path instead of hanging the turn on a
         // connection the provider never closes.
-        return withStreamIdleTimeout(retryStream, m, streamIdleTimeoutMs(), () =>
-          stallAbort.abort(),
+        return this.uniqueToolCalls(
+          withStreamIdleTimeout(retryStream, m, streamIdleTimeoutMs(), () => stallAbort.abort()),
+          context.messages,
         );
       },
       // A vendor account has no long-lived key. Leaving it unset keeps pi-ai
@@ -2302,6 +2352,9 @@ export class DesktopAgentRuntime {
         );
       },
       prepareRequest: ({ context }) => this.prepareToolDeclarations(context),
+      // Extensions see every provider request, including the first one of a
+      // run, which `prepareNextTurn` never reaches (spec 16 §6, issue #1838).
+      transformContext: (messages) => this.extensionContext(messages),
       prepareNextTurnWithContext: (context, signal) =>
         this.prepareNextTurn(context, signal),
       afterToolCall: async (context) => this.afterToolCall(context),
@@ -2640,17 +2693,20 @@ export class DesktopAgentRuntime {
     return Object.keys(out).length ? out : undefined;
   }
 
-  /** `context` hook: extensions may rewrite the message list before a provider request. */
-  private async extensionContext(update: AgentLoopTurnUpdate): Promise<AgentLoopTurnUpdate> {
+  /**
+   * `context` hook: extensions may rewrite the message list of one provider
+   * request. The replacement only shapes that request; the run's working
+   * context and the transcript keep the original messages.
+   */
+  private async extensionContext(messages: AgentMessage[]): Promise<AgentMessage[]> {
     const runner = this.extensionRunner;
-    if (!runner?.hasHandlers("context") || !update.context) return update;
+    if (!runner?.hasHandlers("context")) return messages;
     const result = await runner.emit<{ messages?: AgentMessage[] }>(
       "context",
-      { type: "context", messages: update.context.messages },
+      { type: "context", messages },
       (_acc, next) => next,
     );
-    if (!Array.isArray(result?.messages)) return update;
-    return { ...update, context: { ...update.context, messages: result.messages } };
+    return Array.isArray(result?.messages) ? result.messages : messages;
   }
 
   /** Mirror pi-agent-core events to extension handlers (spec 16 §6). */
@@ -3151,11 +3207,11 @@ export class DesktopAgentRuntime {
           ),
         );
         const content = promptContent({
-          text: m.sessionMessage ? formatSessionMessage(m.content, m.sessionMessage) : m.content,
+          text: promptWithQuotes(m.sessionMessage ? formatSessionMessage(m.content, m.sessionMessage) : m.content, m.quotes),
           attachments,
         });
         if (
-          !(m.content || "").trim() &&
+          !(m.content || "").trim() && !m.quotes?.length &&
           !attachments.some((attachment) => attachment.data)
         ) {
           continue;
@@ -3244,11 +3300,11 @@ export class DesktopAgentRuntime {
    * The transcript is append-only and tolerates a retried append, so the same
    * call can reach the request twice: under the same row id (which the host's
    * keep-last dedupe already collapses) or a new one (which it cannot). The
-   * first occurrence wins, and a later call *or* a later result for that id is
-   * dropped, so the pair the provider validates stays well-formed — one call,
-   * one result. What was dropped is logged with its ids, because the next
-   * report of this should name the writer instead of only the provider's
-   * sentence.
+   * first pending occurrence wins; a later completed pair is retained under
+   * a fresh request id. New streamed executions are normalized before they
+   * reach this guard or the journal. What was dropped is logged with its ids,
+   * because the next report should name the writer instead of only the
+   * provider's sentence.
    */
   private dropDuplicateToolCalls(messages: AgentMessage[]): AgentMessage[] {
     const drop = dedupeToolCallMessages(messages);
@@ -3474,6 +3530,12 @@ export class DesktopAgentRuntime {
               `Optional command timeout in seconds from 1 to ${MAX_COMMAND_TIMEOUT_SECONDS}; defaults to 60 seconds.`,
           }),
         ),
+        runInBackground: Type.Optional(
+          Type.Boolean({
+            description:
+              "Start the command as a background task that outlives the turn (dev servers, watchers, builds). Returns backgroundTaskId immediately; ignored with timeout.",
+          }),
+        ),
       },
       PluginScaffold: {
         template: Type.String(),
@@ -3545,13 +3607,29 @@ export class DesktopAgentRuntime {
               scheduleProgress();
             })
           : undefined;
+        // Read-only core tools may be abandoned locally if host-core is still
+        // waiting on a blocking read/search. Mutating, MCP, and plugin calls
+        // must settle before the turn is reported stopped. Bash and image
+        // generation retain their host process-abort path and grace window.
+        const hostAbortsProcess = isBash || toolName === "GenerateImages";
+        const canAbandonWait = READ_ONLY_CORE_TOOLS.has(toolName);
+        const abortedMarker = Symbol("tool-aborted");
+        let resolveAborted: (marker: typeof abortedMarker) => void = () => undefined;
+        const aborted = new Promise<typeof abortedMarker>((resolve) => {
+          resolveAborted = resolve;
+        });
+        let abortGraceTimer: ReturnType<typeof setTimeout> | undefined;
+        let stopped = false;
         const abort = () => {
-          if ((!isBash && toolName !== "GenerateImages" && toolName !== "GenerateImage") || abortRequested || settled) return;
+          // Every host tool may be waiting for approval, including Write/Edit.
+          // Cancel that waiter before disposal waits for the turn to settle.
+          if (abortRequested || settled) return;
           abortRequested = true;
           abortPromise = this.host
             .call("tools.abort", {
               sessionId: this.sessionId,
               toolCallId,
+              toolName,
             })
             .then(
               () => undefined,
@@ -3559,7 +3637,21 @@ export class DesktopAgentRuntime {
                 abortError = error;
               },
             );
+          // Release progress/output resources before arming the grace window:
+          // cleanup is idempotent and must not race the timer it would clear.
           cleanup(true);
+          if (hostAbortsProcess) {
+            // Bounded window for the partial output the host collected before
+            // the kill; past it the turn ends regardless.
+            abortGraceTimer = setTimeout(
+              () => resolveAborted(abortedMarker),
+              TOOL_ABORT_GRACE_MS,
+            );
+          } else if (canAbandonWait) {
+            // These tools are read-only, so returning before their host-side
+            // work drains cannot leave a write or external action behind.
+            resolveAborted(abortedMarker);
+          }
         };
 
         cleanup = (flush: boolean) => {
@@ -3571,6 +3663,7 @@ export class DesktopAgentRuntime {
           unsubscribeOutput?.();
           signal?.removeEventListener("abort", abort);
           this.activeToolProgressCleanups.delete(cleanup);
+          this.activeToolAborts.delete(abort);
         };
         this.activeToolProgressCleanups.add(cleanup);
         if (signal?.aborted) {
@@ -3582,6 +3675,7 @@ export class DesktopAgentRuntime {
         if (signal) {
           signal.addEventListener("abort", abort, { once: true });
         }
+        this.activeToolAborts.add(abort);
 
         let result: {
           ok: boolean;
@@ -3593,7 +3687,7 @@ export class DesktopAgentRuntime {
         let executionError: unknown;
         let executionFailed = false;
         try {
-          result = await this.host.call<{
+          const execution = this.host.call<{
               ok: boolean;
               content: unknown;
               isError?: boolean;
@@ -3611,6 +3705,9 @@ export class DesktopAgentRuntime {
                     expectedCommandShellId: this.commandShell.id,
                     expectedCommandShellDialect: this.commandShell.dialect,
                     timeoutMs,
+                    ...(isRecord(params) && params.runInBackground === true
+                      ? { runInBackground: true }
+                      : {}),
                   }
                 : {}),
               ...(toolName.startsWith("plugin_")
@@ -3641,15 +3738,34 @@ export class DesktopAgentRuntime {
                 ? { delegationId: this.delegateWorktrees.get(toolCallId) }
                 : {}),
             });
+          // #1767: read-only host work must not keep the user-facing turn open
+          // indefinitely. Other tool classes deliberately wait for the Host
+          // result so a write or extension action cannot outlive a reported
+          // stop.
+          const raced = await Promise.race([execution, aborted]);
+          if (raced === abortedMarker) {
+            stopped = true;
+          } else {
+            result = raced;
+          }
         } catch (error) {
           executionFailed = true;
           executionError = error;
         } finally {
           this.delegatePermissionScopes.delete(toolCallId);
           cleanup(true);
+          // cleanup is a no-op once the abort path has run, so the grace timer
+          // it armed is released here instead.
+          if (abortGraceTimer) clearTimeout(abortGraceTimer);
         }
         if (abortPromise) await abortPromise;
         if (abortError) throw abortError;
+        if (stopped) {
+          throw Object.assign(
+            new Error(`tool execution aborted while ${toolName} was running`),
+            { errorCode: "TOOL_ABORTED" },
+          );
+        }
         if (executionFailed) throw executionError;
         if (!result) throw new Error("tool execution returned no result");
         const recordParams = isRecord(params) ? params : undefined;
@@ -6441,7 +6557,7 @@ export class DesktopAgentRuntime {
     error: ReturnType<typeof classifyAgentError>,
     phase: "request" | "stream",
   ): number | undefined {
-    if (this.providerHasContent || !error.retriable || error.details?.origin === "local") return undefined;
+    if (this.runCancelled || !error.retriable || error.details?.origin === "local") return undefined;
     const infinite = this.infiniteProviderRetry;
     if (error.code === "PROVIDER_RATE_LIMITED") {
       if (
@@ -6615,18 +6731,10 @@ export class DesktopAgentRuntime {
     this.activeProviderRetryAttempt = retryAttempt;
     this.pendingProviderRetry = undefined;
 
-    const messages = [...this.agent.state.messages];
-    if (messages.at(-1)?.role !== "assistant") {
-      throw new Error("Cannot retry a provider stream without its failed assistant message");
-    }
     // A failed stream can be represented by more than one trailing assistant
-    // message after a tool round. Remove the whole failed suffix before
-    // continuing; pi-agent-core rejects any assistant-terminated transcript.
-    while (messages.at(-1)?.role === "assistant") {
-      const last = messages.at(-1);
-      if (last?.role !== "assistant" || responseContentFacts(last).meaningful) break;
-      messages.pop();
-    }
+    // tool round. Keep meaningful partial output and system deltas while
+    // removing empty failed responses; compaction may leave no assistant tail.
+    const messages = prepareProviderRetryMessages(this.agent.state.messages);
     this.setAgentMessages(messages);
 
     this.providerRetryInProgress = true;
@@ -6657,16 +6765,28 @@ export class DesktopAgentRuntime {
       });
       await delayWithAbort(delayMs, this.providerRetryAbort.signal);
       if (this.disposed) throw new Error("runtime disposed");
+      if (this.runCancelled) return;
       // The failed attempt has already finished. Only its lifecycle events
       // are suppressed; the retry must close the visible run normally.
       this.suppressProviderRetryRunEnd = false;
       await this.agent.continue();
       await this.waitForIdleAndSteering();
     } finally {
+      const cancelledWhileWaiting = this.runCancelled && this.suppressProviderRetryRunEnd && !this.turnEndEmitted;
       this.providerRetryAbort = undefined;
       this.activeProviderRetryAttempt = 0;
       this.providerRetryInProgress = false;
       this.suppressProviderRetryRunEnd = false;
+      if (cancelledWhileWaiting) {
+        // The failed run's lifecycle was suppressed and no replacement run
+        // started. Stop must release that held lifecycle even when its partial
+        // assistant was already retained and there is no open message to end.
+        this.finalizeCurrentAssistant("aborted");
+        const subagentUsage = this.turnSubagentUsage;
+        this.turnSubagentUsage = undefined;
+        this.emit({ type: "turn_end", ...(subagentUsage ? { subagentUsage } : {}) });
+        await this.handleAgentEvent({ type: "agent_end", messages: [] });
+      }
     }
   }
 
@@ -7059,13 +7179,6 @@ export class DesktopAgentRuntime {
    */
   private async prepareNextTurn(
     turn: PrepareNextTurnContext,
-    signal?: AbortSignal,
-  ): Promise<AgentLoopTurnUpdate> {
-    return this.extensionContext(await this.prepareNextTurnWithoutExtensions(turn, signal));
-  }
-
-  private async prepareNextTurnWithoutExtensions(
-    turn: PrepareNextTurnContext,
     _signal?: AbortSignal,
   ): Promise<AgentLoopTurnUpdate> {
     let context = this.rebuiltAgentContext();
@@ -7303,6 +7416,38 @@ export class DesktopAgentRuntime {
       model: this.model.id,
       requiresCompletionsReasoningReplay,
     };
+  }
+
+  sideChatContext(): AgentMessage[] {
+    return sideChatContext(this.liveSessionContext().messages);
+  }
+
+  /** Move the existing buffers after disposal; preserve child IDs and compaction. */
+  takeSideChatState(): SideChatRuntimeState {
+    if (!this.disposed || !this.sessionId.startsWith("side-")) {
+      throw new Error("Only a disposed side chat can transfer its context");
+    }
+    const state = { entries: this.fullEntries, compaction: this.activeCompaction };
+    this.fullEntries = [];
+    this.activeCompaction = undefined;
+    return state;
+  }
+
+  /** Rewind a child edit, retry or unanswered stop without dropping inherited context. */
+  rewindSideChat(userMessageId: string): void {
+    this.assertNotRunning();
+    if (!this.sessionId.startsWith("side-")) throw new Error("Not a temporary side chat");
+    const index = this.fullEntries.findIndex((entry) => entry.id === userMessageId && entry.message.role === "user");
+    if (index < 0) throw new Error("Side chat turn is no longer available to restore");
+    this.fullEntries = this.fullEntries.slice(0, index);
+    if (this.activeCompaction && !this.fullEntries.some((entry) => entry.id === this.activeCompaction?.throughMessageId)) {
+      this.activeCompaction = undefined;
+    }
+    const keptHistory = this.transcriptHistory.filter((message) => this.fullEntries.some((entry) => entry.id === message.id));
+    this.transcriptHistory.splice(0, this.transcriptHistory.length, ...keptHistory);
+    this.currentAssistant = undefined;
+    this.pendingUserMessageId = undefined;
+    this.setAgentMessages(this.liveSessionContext().messages);
   }
 
   private liveSessionContext(
@@ -7605,7 +7750,8 @@ export class DesktopAgentRuntime {
       return "oversized";
     }
     try {
-      await this.host.call("session.appendCompaction", {
+      // Side context may summarize inherited parent material; keep it in memory.
+      if (!this.sessionId.startsWith("side-")) await this.host.call("session.appendCompaction", {
         sessionId: this.sessionId,
         compaction: checkpoint,
       });
@@ -8244,6 +8390,7 @@ export class DesktopAgentRuntime {
             this.progressTurnRerunInProgress = false;
             this.emit({ type: "message_update", message: this.currentAssistant });
           } else {
+            this.providerRetryInProgress = false;
             this.emit({ type: "message_start", message: this.currentAssistant });
           }
           this.applyHostedSearch(event.message);
@@ -8337,7 +8484,7 @@ export class DesktopAgentRuntime {
             effectiveModelContextWindow(this.model) || DEFAULT_CONTEXT_WINDOW,
           );
           const aborted = stopReason === "aborted" || localError?.causeName === "AbortError";
-          const failed = !aborted && (stopReason === "error" || overflow);
+          const failed = !aborted && (outcome === "interrupted" || overflow);
           const errorMessage =
             failed &&
             typeof (event.message as any).errorMessage === "string" &&
@@ -8564,6 +8711,23 @@ export class DesktopAgentRuntime {
           ) {
             this.pendingProviderRetry = diagnosticError;
             this.suppressProviderRetryRunEnd = true;
+            if (this.providerHasContent) {
+              // Close the retained fragment without ending the turn. The next
+              // attempt gets its own row so streaming cannot erase prior work.
+              const retained = retainedAssistantForRetry(event.message);
+              if (retained) this.appendLiveEntry(assistantId, retained);
+              this.emit({ type: "message_end", message: {
+                ...this.currentAssistant,
+                content: nextText,
+                ...(nextThinking ? { thinking: nextThinking } : {}),
+                status: "complete",
+                assistantReplay: assistantReplay(event.message),
+                ...(usage ? { usage } : {}),
+              } });
+              this.currentAssistant = undefined;
+              this.streamStartedAt = undefined;
+              break;
+            }
             this.currentAssistant = {
               ...this.currentAssistant,
               content: nextText,
@@ -9383,6 +9547,14 @@ export class DesktopAgentRuntime {
     this.providerRetryAbort?.abort();
     if (this.compactionInProgress) this.compactionAborted = true;
     this.compactionAbort?.abort();
+    // `agent.abort()` normally fires the signal each in-flight tool was handed,
+    // and the tool executor reacts to that. When the signal does not reach a
+    // tool, the executor keeps awaiting `tools.execute`, the turn never
+    // settles, and this method never returns. The renderer awaits this RPC
+    // before it clears the "processing" state, so one unyielding tool pinned
+    // the whole session until it finished on its own (#1767). Drive the tools
+    // from here as well, so a stop always releases them.
+    for (const abortTool of [...this.activeToolAborts]) abortTool();
     await settlement;
   }
 
@@ -9446,6 +9618,9 @@ export class DesktopAgentRuntime {
 
   async dispose(): Promise<void> {
     if (this.disposed) return;
+    const settlements = this.sessionId.startsWith("side-")
+      ? [...this.activeTurnSettlements.values(), ...this.runningDelegations().map((record) => record.completion)]
+      : [];
     const runner = this.extensionRunner;
     this.extensionRunner = undefined;
     const closingExtensions = runner?.dispose();
@@ -9476,5 +9651,6 @@ export class DesktopAgentRuntime {
     if (this.compactionInProgress) this.compactionAborted = true;
     this.compactionAbort?.abort();
     await closingExtensions;
+    await Promise.all(settlements);
   }
 }

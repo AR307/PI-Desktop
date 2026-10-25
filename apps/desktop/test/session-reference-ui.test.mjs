@@ -73,6 +73,12 @@ const shared = load(new URL("../src/features/chat/transcript/shared.tsx", import
   "react-i18next": { useTranslation: () => ({ t, i18n: { language: locale } }) },
   "@pi-desktop/shared": await import("@pi-desktop/shared"),
   "./disclosure": {},
+  "./TextShimmer": {
+    TextShimmer: ({ text }) => React.createElement("span", null, text),
+  },
+  // The usage capsule has its own render contract; this fixture only proves
+  // the session-chip graph still loads and renders.
+  "./TurnUsageCapsule": { TurnUsageCapsule: () => null },
   "../../../hooks/use-preview-target": {
     useOpenChatFileRef: () => () => {},
     useOpenPreviewTarget: () => undefined,
@@ -94,13 +100,31 @@ const shared = load(new URL("../src/features/chat/transcript/shared.tsx", import
       React.createElement("button", { ...props, "aria-label": ariaLabel ?? tooltip }),
   },
   "../../../lib/disclosure-anchor-context": { useDisclosureAnchorNotifier: () => {} },
-  "../../../lib/turn-process": { isThinkingActive: () => false, resolveThinkingDisplayMode: () => "none" },
+  "../../../lib/turn-process": { isThinkingActive: () => false },
+  "../../../lib/thinking-visibility": { resolveShowThinking: () => true },
   "../../../lib/transcript-search-context": { TranscriptSearchContext: React.createContext(null) },
   "../../../lib/assistant-turns": { messageThinking: () => "" },
   "../../../lib/use-referenced-image-data-url": { useReferencedImageDataUrl: () => undefined },
   "../../../lib/chat-links": { isHtmlFilePath: () => false },
-  "../../../lib/context-usage": { calculateTokenRate: () => 0 },
+  "../../../lib/context-usage": {
+    calculateTokenRate: () => 0,
+    turnUsageBreakdown: () => ({
+      inputTokens: 0,
+      outputTokens: 0,
+      cacheReadTokens: 0,
+      cacheWriteTokens: 0,
+      totalTokens: 0,
+    }),
+  },
   "../../../stores/app-store": { useAppStore },
+});
+
+const { MessageQuotes } = load(new URL("../src/features/chat/MessageQuotes.tsx", import.meta.url), {
+  "react/jsx-runtime": jsxRuntime,
+  "react-i18next": { useTranslation: () => ({ t }) },
+  "../../components/icons": new Proxy({}, { get: () => Icon }),
+  "../../components/ui": { Tooltip: ({ children }) => children, TooltipButton: ({ children }) => children },
+  "./message-quotes.css": {},
 });
 
 const { MessageRow } = load(new URL("../src/features/chat/transcript/MessageRow.tsx", import.meta.url), {
@@ -124,6 +148,7 @@ const { MessageRow } = load(new URL("../src/features/chat/transcript/MessageRow.
   },
   "../../../plugins/renderer-slots/use-slots": { useSlotSessionId: () => "local-session" },
   "../../../plugins/renderer-slots/slot-message": { slotMessage: () => undefined },
+  "../MessageQuotes": { MessageQuotes },
   "./menu-items": { userMessageMenuItems: () => [] },
   "./ActionBarSlots": { ActionSlotSide: () => null },
   "./SessionMessageOrigin": { SessionMessageOrigin: () => null },
@@ -302,22 +327,22 @@ test("a referenced conversation never reaches the file-attachment resolver", asy
   );
 });
 
-test("the conversation overflow menu copies the link for every reader", () => {
+test("the session Copy submenu exposes the link to every reader", () => {
   const sidebar = read("../src/components/Sidebar.tsx");
-  assert.match(sidebar, /data-action="copy-session-link"/);
-  assert.match(sidebar, /t\("nav\.copySessionLink"\)/);
+  assert.match(
+    sidebar,
+    /id: "session-copy"[\s\S]*?id: "copy-conversation-id"[\s\S]*?id: "copy-session-link"/,
+  );
   assert.match(sidebar, /api\.writeClipboardText\(formatSessionLink\(session\.id\)\)/);
   assert.doesNotMatch(sidebar, /pi-desktop:\/\/session\//, "the scheme stays in shared");
 
-  const link = sidebar.indexOf('data-action="copy-session-link"');
-  const fork = sidebar.indexOf('data-action="fork-session"');
-  const id = sidebar.indexOf('data-action="copy-conversation-id"');
-  assert.ok(
-    link > fork && id > fork,
-    "both copy actions remain available to ordinary readers",
+  const developerBlock = sidebar.slice(
+    sidebar.indexOf("settings?.developerMode === true"),
+    sidebar.indexOf('id: "session-danger"'),
   );
+  assert.match(developerBlock, /id: "open-session-path"/);
+  assert.doesNotMatch(developerBlock, /copy-conversation-id|copy-session-path/);
 });
-
 test("the reference keys exist in every shipped locale", () => {
   const locales = Object.keys(catalogs);
   assert.equal(locales.length, 9, "nine locales ship");

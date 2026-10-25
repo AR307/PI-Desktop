@@ -63,6 +63,7 @@
 - [10-workbuddy-benchmark-ux.md](04-ux/10-workbuddy-benchmark-ux.md)
 - [11-asktool-question-card.md](04-ux/11-asktool-question-card.md)
 - [12-prompt-enhancement.md](04-ux/12-prompt-enhancement.md)
+- [24-selected-references-and-temporary-side-chat.md](04-ux/24-selected-references-and-temporary-side-chat.md)
 
 ## 5. Security
 - [README.md](05-security/README.md)
@@ -77,6 +78,7 @@
 - [04-e2e-test-plan.md](06-delivery/04-e2e-test-plan.md)
 - [05-change-checklist.md](06-delivery/05-change-checklist.md)
 - [06-release-runbook.md](06-delivery/06-release-runbook.md)
+- [plugin-reviews-test-plan.md](06-delivery/plugin-reviews-test-plan.md)
 - [07-remote-control-rollout.md](06-delivery/07-remote-control-rollout.md)
 
 ## 7. Plugins
@@ -113,3 +115,5 @@
 - [Android companion and scoped desktop sync](/spec/03-runtime/23-mobile-companion)
 
 - [Ultra collaboration](/spec/03-runtime/ultra-collaboration)
+
+- [Explicit Codex history import](03-runtime/codex-native-import.md)

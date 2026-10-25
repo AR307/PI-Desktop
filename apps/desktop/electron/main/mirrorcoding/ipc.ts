@@ -24,6 +24,8 @@ export function registerMirrorCodingIpc({ registrar, runtime, activeTurns, abort
     return true;
   };
   handle(IPC.invoke.mirrorCodingGetState, async () => { await runtime.account.initialize(); return runtime.account.snapshot(); });
+  handle(IPC.invoke.mirrorCodingBenefits, async () => { await runtime.account.initialize(); return runtime.benefits.load(); });
+  handle(IPC.invoke.mirrorCodingCheckIn, async () => { await runtime.account.initialize(); return runtime.benefits.load(true); });
   handle(IPC.invoke.mirrorCodingLogin, async (confirmed) => {
     if (!await prepare(confirmed)) return { confirmationRequired: true };
     return { state: await runtime.account.startLogin() };

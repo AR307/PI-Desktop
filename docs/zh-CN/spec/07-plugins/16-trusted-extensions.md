@@ -189,7 +189,7 @@ main、渲染层或插件宿主进程中。
 | `project_trust` | v1 说明：不触发；按项目启用即信任决定 | 否 |
 | `resources_discover` | v1 说明：不触发；skills 与提示发现留在 Electron main | 不适用 |
 | `before_agent_start` | 回合内首个 provider 请求之前 | 是，仅替换系统提示词 |
-| `context` | `prepareNextTurn` | 是，替换消息列表 |
+| `context` | `transformContext`，在一次运行的每个 provider 请求之前触发（包括第一个） | 是，替换消息列表，只作用于该次请求；运行上下文和 transcript 保留原消息 |
 | `before_provider_request`、`before_provider_headers`、`after_provider_response` | provider 调用包装 | 请求采纳返回值；头部原地修改 payload |
 | `agent_start`、`agent_end`、`agent_settled` | Agent 循环边界 | 否 |
 | `turn_start`、`turn_end` | 回合边界 | 否 |

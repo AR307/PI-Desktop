@@ -1,5 +1,46 @@
 # MirrorCoding Account And Model Routing
 
+## Account benefits (client implementation, server support required)
+
+Signed-in accounts expose wallet balance to the left of the subscription bar
+before the composer model picker and a shared details/check-in panel in Account
+settings. Balance uses server-provided raw wallet quota and CNY conversion,
+formatted to two decimals. Unknown balance/conversion shows an em dash, never
+a fabricated zero. Clicking balance opens a confirmation dialog; only Confirm
+opens `https://console.mirrorcoding.xyz/wallet` in the external browser. Cancel
+or Escape does not navigate. Browser-open failure is visible and retryable.
+
+Show the bar only when an active, unexpired subscription individually has more
+than CNY 0.50 remaining, or is unlimited. Exact CNY 0.50 is excluded and several
+smaller balances cannot be summed to qualify. Missing CNY conversion hides
+finite bars. No active/usable plan or a read error hides the bar, not a gray
+placeholder. An open quota popup closes when its bar disappears so it cannot
+float without an anchor. Account settings still provide details/check-in.
+The closed bar has no
+percentage text; hover and the accessible label provide it. Details list all
+active subscriptions, expiry, remaining/total, consumed quota, reset and groups.
+Finite remaining quota is weighted by total allocation: over 50% green,
+over 20% through 50% yellow, 20% or less red. An active unlimited plan is green
+and labeled Unlimited, not a percentage.
+This is account-wide subscription allowance, not wallet balance or permission
+to use a particular model/group.
+
+Check-in requires an explicit button action and effective server permission.
+Daily boundaries and one reward across website/Pi belong to the server. Wallet
+rewards do not increase the subscription bar. No automatic check-in is run.
+Reads happen on account change, panel open, visible focus, a visible 60-second
+interval and manual refresh. Logout/account switches hide previous data; stale
+responses cannot republish it. Account changes close the wallet confirmation.
+Errors clear stale balances and hide the bar; settings explain the failure.
+
+Main owns both authenticated requests and exposes sanitized data through
+`mirrorCodingBenefits` and `mirrorCodingCheckIn` IPC. No token reaches renderer,
+no benefits are persisted, and failures do not mutate catalog/provider rows.
+The endpoints, wallet fields and additional read-only consent are defined in the
+standalone [server requirements](../../mirrorcoding-account-benefits-server-requirements.md).
+Production support is not implied by this client change.
+See [account benefits ADR](../../adr/mirrorcoding-account-benefits.md).
+
 MirrorCoding authorization is owned by Electron main and stored through
 `safeStorage`. Renderer and Node sidecar processes receive account metadata,
 model catalog data, and a short-lived loopback relay key; they never receive

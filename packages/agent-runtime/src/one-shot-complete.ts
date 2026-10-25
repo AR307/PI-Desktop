@@ -16,7 +16,7 @@ import type {
 import { addUsage, type MessageUsage, type ThinkingLevel } from "@pi-desktop/shared";
 import { accountModelStream } from "./request-usage.js";
 import { requestThinkingLevel } from "./thinking-level.js";
-import { classifyAgentError } from "./agent-errors.js";
+import type { ClassifiedAgentError } from "./agent-errors.js";
 import { clampOutputToContext } from "./output-cap.js";
 import { assistantContent, usageFromPi } from "./agent-messages.js";
 import {
@@ -42,6 +42,12 @@ import {
   PROVIDER_RATE_LIMIT_MAX_RETRIES,
   PROVIDER_TRANSIENT_MAX_RETRIES,
   isTransientProviderRetryCode,
+  classifyProviderError,
+  delayWithAbort,
+  providerRateLimitDelayMs,
+  providerSetupRetryDelayMs,
+  streamIdleTimeoutMs,
+  withStreamIdleTimeout,
 } from "./provider-retry.js";
 
 export type OneShotCompleteStream = (
@@ -154,40 +160,42 @@ export async function completeOneShot(
     baseUrl: model.baseUrl,
     sessionId: options.sessionId,
   });
-  for (let emptyAttempt = 0; ; emptyAttempt++) {
-    const stream = createProviderRetryStream(
+  const claimRetry = (error: ClassifiedAgentError): number | undefined => {
+    if (options.signal?.aborted || !error.retriable || error.details?.origin === "local") return undefined;
+    if (error.code === "PROVIDER_RATE_LIMITED") {
+      if (rateLimitRetryAttempt >= PROVIDER_RATE_LIMIT_MAX_RETRIES) return undefined;
+      return ++rateLimitRetryAttempt;
+    }
+    if (!isTransientProviderRetryCode(error.code) || transientRetryAttempt >= PROVIDER_TRANSIENT_MAX_RETRIES) return undefined;
+    return ++transientRetryAttempt;
+  };
+  let emptyRetried = false;
+  for (let attempt = 0; ; attempt++) {
+    const stallAbort = new AbortController();
+    let setupExhausted = false;
+    const retryStream = createProviderRetryStream(
       model,
       context,
-      sessionOptions,
+      { ...sessionOptions, signal: AbortSignal.any([...(options.signal ? [options.signal] : []), stallAbort.signal]) },
       (retryOptions) => accountModelStream(model, () => streamSimple(model, context, retryOptions), {
         providerId: provider.id, nativeCost: provider.modelConfig?.nativeCost,
         onUsage: attemptUsage => { usage = addUsage(usage, attemptUsage); },
       }),
       {
-        claim: (error, phase) => {
-          if (phase !== "request" || !error.retriable) return undefined;
-          if (error.code === "PROVIDER_RATE_LIMITED") {
-            if (rateLimitRetryAttempt >= PROVIDER_RATE_LIMIT_MAX_RETRIES) {
-              return undefined;
-            }
-            rateLimitRetryAttempt += 1;
-            return rateLimitRetryAttempt;
-          }
-          if (!isTransientProviderRetryCode(error.code)) return undefined;
-          if (transientRetryAttempt >= PROVIDER_TRANSIENT_MAX_RETRIES) {
-            return undefined;
-          }
-          transientRetryAttempt += 1;
-          return transientRetryAttempt;
+        claim: (error) => {
+          const retry = claimRetry(error);
+          setupExhausted = retry === undefined;
+          return retry;
         },
         headers: () => providerHeaders,
         status: () => providerStatus,
         failure: () => providerFailure,
       },
     );
+    const stream = withStreamIdleTimeout(retryStream, model, streamIdleTimeoutMs(), () => stallAbort.abort());
     const result = await stream.result();
     const diagnostic = {
-      ...responseDiagnostics(result, Math.max(emptyAttempt + 1, requestAttempts)),
+      ...responseDiagnostics(result, Math.max(attempt + 1, requestAttempts)),
       ...request,
       ...(providerStatus !== undefined ? { httpStatus: providerStatus } : {}),
       ...(providerRequestId ? { requestId: providerRequestId } : {}),
@@ -198,11 +206,19 @@ export async function completeOneShot(
     if (result.stopReason === "aborted") {
       throw completeError("TURN_ABORTED", "The completion was aborted.");
     }
-    if (result.stopReason === "error") {
+    if (responseOutcome(result) === "interrupted") {
       const classified = withProviderFetchFailure(
-        classifyAgentError(result.errorMessage || "Completion failed."),
+        classifyProviderError(result, providerStatus),
         providerFailure,
       );
+      const retry = setupExhausted ? undefined : claimRetry(classified);
+      if (retry !== undefined) {
+        const delay = classified.code === "PROVIDER_RATE_LIMITED"
+          ? providerRateLimitDelayMs(retry, providerHeaders)
+          : providerSetupRetryDelayMs(retry, undefined, providerHeaders);
+        await delayWithAbort(delay, options.signal);
+        continue;
+      }
       throw completeError(
         classified.code,
         classified.message,
@@ -212,7 +228,10 @@ export async function completeOneShot(
     }
 
     const outcome = responseOutcome(result);
-    if (outcome === "empty" && emptyAttempt === 0 && !options.signal?.aborted) continue;
+    if (outcome === "empty" && !emptyRetried && !options.signal?.aborted) {
+      emptyRetried = true;
+      continue;
+    }
     const outcomeError = responseOutcomeError(outcome);
     if (outcomeError)
       throw completeError(outcomeError.code, outcomeError.message, { response: diagnostic }, false);

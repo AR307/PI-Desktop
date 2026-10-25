@@ -60,8 +60,7 @@ async function inventory(from: string, to: string, entries: Entry[], browser = f
     entries.push({ from, to, kind: "directory", bytes: 0, mode: info.mode });
     for (const name of await readdir(from)) {
       if (browser && excluded(name)) continue;
-      // Only the browser root contains installation metadata; nested user files
-      // with the same names still belong to the copied profile.
+      // Installation metadata is excluded only at the browser root.
       await inventory(join(from, name), join(to, name), entries);
     }
   } else if (info.isFile()) {

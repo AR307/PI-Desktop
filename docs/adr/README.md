@@ -26,6 +26,10 @@ Each ADR includes:
 
 | ID | Title | Status |
 |---|---|---|
+| browser-background-lifecycle | [Browser page execution outlives side-panel presentation](browser-background-lifecycle.md) | Accepted |
+| asktool-draft-survives-session-switch | [AskTool drafts survive a card remount](asktool-draft-survives-session-switch.md) | Accepted |
+| tool-abort-abandons-host-call | [A user stop ends the turn even when the running tool cannot be cancelled](tool-abort-abandons-host-call.md) | Accepted for implementation |
+| provider-metadata-client-certificate-retry | [Provider metadata recovery from optional client certificates](provider-metadata-client-certificate-retry.md) | Implemented candidate |
 | device-local-project-lists-in-config-sync | [Device-local project lists in configuration sync](device-local-project-lists-in-config-sync.md) | Accepted |
 | s3-only-configuration-backup-sync | [S3-only encrypted configuration backup and synchronization](s3-only-configuration-backup-sync.md) | Accepted; supersedes WebDAV decisions in 0300 / 0301 |
 | remote-provider-import | [Explicit provider import into a running remote Host](remote-provider-import.md) | Accepted for the experimental SSH MVP |
@@ -373,8 +377,10 @@ Each ADR includes:
 | image-generation-pipeline | [Image generation outside the conversational agent loop](image-generation-pipeline.md) | Accepted |
 | mobile-companion-relay | [Scoped MC relay for the Android companion](mobile-companion-relay.md) | Accepted |
 | mobile-transcript-cache-and-delta-sync | [Mobile transcript cache and delta sync](mobile-transcript-cache-and-delta-sync.md) | Accepted |
+| mobile-account-sync-offline-history | [Account discovery and persistent mobile history](mobile-account-sync-offline-history.md) | Accepted |
 | mobile-attention-push | [Session attention notifications for the Android companion](mobile-attention-push.md) | Accepted |
 | response-completion-recovery | [Native MC Claude routing and non-destructive response recovery](response-completion-recovery.md) | Accepted |
+| temporary-side-chat-runtime | [Host-owned temporary side chats with in-memory inherited context](temporary-side-chat-runtime.md) | Accepted for the requested fork feature |
 | ultra-session-orchestration | [Ultra session orchestration](ultra-session-orchestration.md) | Accepted |
 | mirrorcoding-account-provider-model-routing | [MirrorCoding Account Provider With Model-Level Group Routing](mirrorcoding-account-provider-model-routing.md) | Accepted |
 | 0318 | [Publish native Linux arm64 artifacts](0318-linux-arm64-release-lane.md) | Accepted (D638) |
@@ -389,6 +395,16 @@ Each ADR includes:
 | 0327 | [Automatic remote Host version realignment](0327-remote-host-version-realignment.md) | Accepted for experimental implementation (amends ADR 0326 item 6; Linux SSH qualification pending) |
 | 0328 | [Open arbitrary local files in the embedded Browser](0328-browser-arbitrary-local-files.md) | Accepted (D657; amends ADR 0170; issue #1627) |
 | 0329 | [Isolate parallel sessions of one project in git worktrees](0329-session-worktree-isolation.md) | Accepted (Windows E2E pending) |
+| 0330 | [Open scoped HTML files in the work-panel Browser from plugins](0330-open-html-files-in-work-panel-browser-from-plugins.md) | Accepted |
+| 0331 | [Plugin session follow and host-owned work-panel reveal](0331-plugin-session-follow-and-work-panel-reveal.md) | Accepted |
+| 0333 | [A plugin-owned suggestion in the Composer placeholder](0333-plugin-composer-suggestion.md) | Accepted |
 | plugin-fetch-redirect-policy | [Host-enforced plugin fetch redirect policy](plugin-fetch-redirect-policy.md) | Accepted (implementation candidate for #1475) |
 
 | local-agent-remote-workspace-tools | [Local Agent and model requests for remote workspaces](local-agent-remote-workspace-tools.md) | Accepted for implementation |
+| mirrorcoding-account-benefits | [Main-owned account benefits and manual check-in](mirrorcoding-account-benefits.md) | Client implemented; server contract pending |
+| 0332 | [macOS keeps its translucent window surface with an opaque opt-out](0332-macos-opaque-window-surface.md) | Accepted (D665, amended by D666 and D667; supersedes the macOS vibrancy window backing from D348; issue #1064) |
+| gen-ui-inline-visualization | [Inline generative UI visualizations](gen-ui-inline-visualization.md) | Accepted (D671) |
+
+| model-reasoning-effort-override | [Model reasoning effort override](model-reasoning-effort-override.md) | Proposed |
+
+| codex-native-history-import | [Explicit native Codex history import](codex-native-history-import.md) | Implemented candidate |

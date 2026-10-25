@@ -1,3 +1,5 @@
+import { useTranscriptView } from "../hooks/use-transcript-view";
+import { MessageQuotes } from "../features/chat/MessageQuotes";
 import { useImageComposer } from "../features/images/useImageComposer";
 import { ImageOptions } from "../features/images/ImageOptions";
 import { useImageReference } from "../features/images/useImageReference";
@@ -36,7 +38,7 @@ import {
 import { ComposerAutocomplete } from "./ComposerAutocomplete";
 import { AskToolCard } from "./AskToolCard";
 import { PlanApprovalBar } from "./PlanApprovalBar";
-import { TodoDock } from "./TodoDock";
+import { TaskDock } from "./TaskDock";
 import {
   COMPOSER_MAX_VISIBLE_ROWS,
   COMPOSER_MIN_HEIGHT_PX,
@@ -54,6 +56,7 @@ import { useComposerCompletions } from "../features/chat/composer/hooks/useCompo
 import { useComposerDraft } from "../features/chat/composer/hooks/useComposerDraft";
 import { useComposerInputHistory } from "../features/chat/composer/hooks/useComposerInputHistory";
 import { usePluginComposerBridge } from "../features/chat/composer/hooks/usePluginComposerBridge";
+import { useComposerSuggestion } from "../features/chat/composer/hooks/useComposerSuggestion";
 import { useComposerSubmit } from "../features/chat/composer/hooks/useComposerSubmit";
 import { useComposerTransforms } from "../features/chat/composer/hooks/useComposerTransforms";
 import { ComposerInput } from "../features/chat/composer/ComposerInput";
@@ -74,21 +77,30 @@ export {
 export function Composer({
   variant = "docked",
   prefill,
+  sessionId: targetSessionId,
 }: {
   variant?: "home" | "docked";
   prefill?: ComposerPrefill | null;
+  sessionId?: string;
 }) {
   const { t } = useTranslation();
+  const globalSessionId = useAppStore((s) => s.activeSessionId);
+  const activeSessionId = targetSessionId ?? globalSessionId;
   const sendPrompt = useAppStore((s) => s.sendPrompt);
   const steerPrompt = useAppStore((s) => s.steerPrompt);
-  const removeQueuedPrompt = useAppStore((s) => s.removeQueuedPrompt);
-  const moveQueuedPrompt = useAppStore((s) => s.moveQueuedPrompt);
-  const editQueuedPrompt = useAppStore((s) => s.editQueuedPrompt);
-  const sendQueuedNow = useAppStore((s) => s.sendQueuedNow);
-  const abort = useAppStore((s) => s.abort);
-  const isRunning = useAppStore((s) => s.isRunning);
+  const removeQueue = useAppStore((s) => s.removeQueuedPrompt);
+  const removeQueuedPrompt = (id: string) => removeQueue(id, activeSessionId);
+  const moveQueue = useAppStore((s) => s.moveQueuedPrompt);
+  const moveQueuedPrompt = (id: string, direction: "up" | "down") => moveQueue(id, direction, activeSessionId);
+  const editQueue = useAppStore((s) => s.editQueuedPrompt);
+  const editQueuedPrompt = (id: string) => editQueue(id, activeSessionId);
+  const sendNow = useAppStore((s) => s.sendQueuedNow);
+  const sendQueuedNow = (id: string) => sendNow(id, activeSessionId);
+  const abortSession = useAppStore((s) => s.abort);
+  const abort = () => abortSession(activeSessionId);
+  const isRunning = useAppStore((s) => activeSessionId ? !!s.runningSessions[activeSessionId] : false);
   const planningState = useAppStore((s) =>
-    s.activeSessionId ? s.planningStates[s.activeSessionId] : undefined,
+    activeSessionId ? s.planningStates[activeSessionId] : undefined,
   );
   const settings = useAppStore((s) => s.settings);
   const plugins = useAppStore((s) => s.plugins);
@@ -97,7 +109,7 @@ export function Composer({
     [settings?.imageGenerationModels, settings?.imageGeneration],
   );
   const sessions = useAppStore((s) => s.sessions);
-  const activeSessionId = useAppStore((s) => s.activeSessionId);
+
   const activeSessionSummary = sessions.find(
     (session) => session.id === activeSessionId,
   );
@@ -118,13 +130,13 @@ export function Composer({
     nativeSession && activeSessionSummary.capabilities?.canPrompt !== true;
   const nativeInputBlocked = nativeReadOnly || !promptAllowed || ((nativeSession || remoteSession) && isRunning);
   const localWorkspacePath = useAppStore((s) => s.workspace?.path ?? "");
-  const workspacePath = remoteSession ? "" : localWorkspacePath;
+  const workspacePath = remoteSession ? "" : activeSessionSummary?.sideChatWorkspacePath ?? activeSessionSummary?.projectPath ?? localWorkspacePath;
   const sessionMeta = useAppStore((s) => s.sessionMeta);
   const providers = useAppStore((s) => s.providers);
   const providerModels = useAppStore((s) => s.providerModels);
-  const liveMessages = useAppStore((s) => s.messages);
+  const { messages: liveMessages } = useTranscriptView(activeSessionId ?? "");
   const sessionCompactions = useAppStore((s) =>
-    s.activeSessionId ? s.sessionCompactions[s.activeSessionId] : undefined,
+    activeSessionId ? s.sessionCompactions[activeSessionId] : undefined,
   );
   // One inspector in the composer toolbar, always the newest turn with usage.
   const composerContextUsage = useMemo(
@@ -137,25 +149,27 @@ export function Composer({
       ),
     [liveMessages, providerModels, providers, sessionCompactions],
   );
-  const configureActiveSession = useAppStore((s) => s.configureActiveSession);
+  const configureSession = useAppStore((s) => s.configureActiveSession);
+  const configureActiveSession = (config: Parameters<typeof configureSession>[0]) => configureSession(config, activeSessionId);
   const showToast = useAppStore((s) => s.showToast);
   const composerPrefill = useAppStore((s) => s.composerPrefill);
   const clearComposerPrefill = useAppStore((s) => s.clearComposerPrefill);
   const planCheckpoint = useAppStore((s) =>
-    s.activeSessionId ? s.planCheckpoints[s.activeSessionId] : undefined,
+    activeSessionId ? s.planCheckpoints[activeSessionId] : undefined,
   );
   const pendingAsk = useAppStore((s) =>
-    headAsk(s.pendingAsks, s.activeSessionId),
+    headAsk(s.pendingAsks, activeSessionId),
   );
   const queuedAsks = useAppStore((s) =>
-    queuedAskCount(s.pendingAsks, s.activeSessionId),
+    queuedAskCount(s.pendingAsks, activeSessionId),
   );
   const queuedPrompts = useAppStore((s) =>
-    s.activeSessionId
-      ? s.queuedPrompts[s.activeSessionId] ?? EMPTY_QUEUED_PROMPTS
+    activeSessionId
+      ? s.queuedPrompts[activeSessionId] ?? EMPTY_QUEUED_PROMPTS
       : EMPTY_QUEUED_PROMPTS,
   );
 
+  const [modeOpen, setModeOpen] = useState(false);
   const [permissionOpen, setPermissionOpen] = useState(false);
   const composerTransformInvalidateRef = useRef<() => void>(() => {});
   const composerShellRef = useRef<HTMLDivElement>(null);
@@ -255,7 +269,7 @@ export function Composer({
   // captured draft becomes the input, so the input must be empty first: the
   // live read is the only current source (the draft cache is not per keystroke).
   const handleEditQueuedPrompt = (id: string) => {
-    if (readLiveDraft().trim() || activeFileReferences.length) {
+    if (readLiveDraft().trim() || activeFileReferences.length || draft.quotes.length) {
       showToast(t("chat.editQueuedPromptBusy"), { variant: "info" });
       return;
     }
@@ -421,10 +435,11 @@ export function Composer({
       !isImageGenerationModel(imageGenerationCandidates, provider.id, modelId) &&
       (provider.hasSecret || provider.authKind === "none" || provider.authKind === "mirrorcoding");
   const enterToSend = settings?.enterToSend ?? true;
-  const hasDraftContent = Boolean(value.trim() || activeFileReferences.length);
+  const hasDraftContent = Boolean(value.trim() || activeFileReferences.length || draft.quotes.length);
 
   useEffect(() => {
     if (!controlsBlocked) return;
+    setModeOpen(false);
     setPermissionOpen(false);
   }, [controlsBlocked]);
 
@@ -479,7 +494,7 @@ export function Composer({
   // Keep the legacy listener for already-started or IPC-owned Dictation, but
   // the Composer no longer exposes a Dictation control or overlay.
   useVoiceInput({
-    enabled: localToolsAllowed && import.meta.env.DEV && !!settings?.voice?.enabled,
+    enabled: !targetSessionId && localToolsAllowed && import.meta.env.DEV && !!settings?.voice?.enabled,
     onTranscriptionComplete: (text) => {
       const current = readLiveDraft();
       if (!current.trim()) {
@@ -503,7 +518,10 @@ export function Composer({
   });
 
   // Plugin draft and attachment actions reach this composer while it takes input.
-  usePluginComposerBridge({ ...draft, inputBlocked, enabled: localToolsAllowed });
+  usePluginComposerBridge({ ...draft, inputBlocked, enabled: localToolsAllowed && !targetSessionId });
+  // A plugin may have offered one line for this empty draft; it shows in the
+  // placeholder layer and `Tab` takes it (ADR 0333).
+  const suggestion = useComposerSuggestion();
 
   // Keep the transcript's bottom reserve in sync with the composer's real
   // height (it grows with multi-line input) so the last message sits just
@@ -517,7 +535,7 @@ export function Composer({
       const h = Math.round(el.getBoundingClientRect().height);
       if (h === publishedDockHeightRef.current) return;
       publishedDockHeightRef.current = h;
-      document.documentElement.style.setProperty(
+      (targetSessionId ? dockRef.current?.closest<HTMLElement>(".side-chat-pane") : document.documentElement)?.style.setProperty(
         "--composer-dock-height",
         `${h}px`,
       );
@@ -527,16 +545,20 @@ export function Composer({
     const ro = new ResizeObserver(publish);
     ro.observe(el);
     return () => ro.disconnect();
-  }, [variant]);
+  }, [variant, targetSessionId]);
 
   return (
     <div
       ref={dockRef}
       className={`composer-dock composer-dock-${variant}`}
       data-composer-dock={variant}
+      data-composer-session={activeSessionId ?? ""}
     >
       <div className="composer-stack">
-        {activeSessionId && localToolsAllowed ? <TodoDock sessionId={activeSessionId} /> : null}
+        {/* One container for todo and background tasks: the tabs live in the
+            header, so the gate now covers both the way it already covered the
+            todo dock. */}
+        {activeSessionId && localToolsAllowed ? <TaskDock sessionId={activeSessionId} /> : null}
         {planCheckpoint?.status === "pending" ? (
           <PlanApprovalBar proposal={planCheckpoint} />
         ) : null}
@@ -580,6 +602,7 @@ export function Composer({
           ) : null}
           {image.active ? <ImageOptions capability={image.capability} options={image.config.options} references={activeFileReferences.length} disabled={image.busy || image.running} onChange={image.setOptions} /> : null}
           {image.running ? <div className="image-options-notice" role="status">{t("images.generating")} · {image.label}</div> : null}
+          <MessageQuotes quotes={draft.quotes} onRemove={draft.removeQuote} />
           <ComposerInput
             imagePreview={draft.imagePreview}
             inputRef={ref}
@@ -591,6 +614,7 @@ export function Composer({
             enterToSend={enterToSend}
             runActive={runActive}
             composerAc={completions.ac}
+            suggestion={targetSessionId ? null : suggestion}
             onPaste={pasteClipboardFiles}
             onAcceptCompletion={completions.acceptCompletion}
             onSubmit={(steering) => void submitFromComposer(steering)}
@@ -624,10 +648,13 @@ export function Composer({
             modelId={modelId}
             thinkingLevel={thinkingLevel}
             composerPermissionMode={composerPermissionMode}
+            modeOpen={modeOpen}
+            setModeOpen={setModeOpen}
             permissionOpen={permissionOpen}
             setPermissionOpen={setPermissionOpen}
             controlsBlocked={controlsBlocked}
             localToolsAllowed={localToolsAllowed}
+            globalComposerControlsAllowed={!targetSessionId}
             attachmentsAllowed={attachmentsAllowed}
             stopAllowed={sessionAllows(capabilitySession, "canStop")}
             pasting={pasting}

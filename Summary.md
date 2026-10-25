@@ -1,5 +1,259 @@
 # PI-Desktop MirrorCoding Edition
 
+## 2026-10-25 - Upstream integration acceptance corrections
+
+- Register the Codex import ADR and spec in the documentation catalogs and add
+  the matching Chinese spec/E2E table. Locale checks cover 92 pairs and the
+  whole-tree check covers 646 pages without relaxing either documentation gate.
+
+- Complete the real side-chat lifecycle journey using Playwright actionability
+  rather than stale screen coordinates after viewport changes. Background-only
+  close confirmation, cancellation, queued-work cleanup and restart all pass.
+- Keep browser recovery, structured-error and image normalization regressions
+  aligned with current imports and behavior; make GenUI fixture paths portable.
+- Windows 0.21.0 packaged startup passes with bundled Host protocol 11 and 800
+  session records. macOS packaging and final release publication remain pending.
+- Show isolated Electron fixture windows without taking focus so animation-frame
+  user journeys run on Windows. Deep file search and S3 settings now pass;
+  preserve their temporary evidence instead of deleting it. The bounded native
+  Host suite passes 1062 tests with one ignored.
+
+- Align terminal live-message projection with upstream empty-assistant
+  persistence so Smart Stop restores an unanswered side-chat draft after a
+  completed tool turn. Preserve tool results, errors, reasoning and image cards.
+- Keep wallet controls within narrow main and side composers; collapse the mode
+  label and bound wallet text instead of overlapping adjacent controls.
+- Use explicit Codex context-status translation keys and update native browser
+  bounds and provider/RPC test fixtures for the upstream contracts.
+- Update recovery acceptance to expect no empty tool-only assistant bubbles;
+  all eleven completed tool results and no-replay assertions remain required.
+- Prevent focus-before-click from auto-opening a closed process disclosure and
+  immediately toggling it closed. Keep reading holds for already open content,
+  and validate first-click expansion in the real generated-image user path.
+
+## 2026-10-25 - Wallet balance and useful subscription indicator
+
+- Extend the existing main-owned benefits projection with wallet read consent,
+  separate raw wallet balance and server-authoritative CNY conversion. No new
+  persistence, account credentials, backend code or deployment is introduced.
+- Add a compact wallet control before the composer subscription bar, using the
+  existing account dialog and external-browser API. Navigation requires explicit
+  confirmation; Cancel/Escape do not navigate and failures remain retryable.
+- Hide the bar unless an active plan independently has more than CNY 0.50 left
+  or is unlimited. Small plans cannot be added together to pass. Missing server
+  monetary fields stay unknown; Account settings still expose plans/check-in.
+- Update the standalone server handoff with exact field units, consent, null
+  handling and check-in refresh semantics. Subscription allowance is never used
+  as a substitute for wallet balance, and no exchange rate is guessed.
+- Extend service regressions and the real composer/settings browser acceptance
+  with monetary thresholds, wallet confirmation, failed-open retry, missing
+  fields, check-in balance refresh, themes, keyboard use and logout cleanup.
+  Tests use only local fixtures, not real accounts or paid models.
+- Validation passed: 15 benefits service tests, 39 i18n tests, shared/i18n builds,
+  Desktop typecheck, style-token check, scoped shared-type lint, and Electron
+  main/preload/renderer production build. Browser acceptance covers the real
+  composer with local HTTP/IPC handlers; dark/light screenshots were reviewed.
+  An orphaned popup regression was reproduced and fixed before final acceptance.
+  Native Electron transport, packaged installation and live wallet API acceptance
+  are not claimed; the existing user preview is not replaced by this task.
+## 2026-10-23 - Resume interrupted provider responses automatically
+
+- Refresh the models.dev snapshot and localized 0.21.0 in-app notes before the
+  beta.6 cut so the prerelease documents the recovery behavior.
+- Remove the post-content retry veto in main/side-chat and delegate runtimes.
+  Preserve partial text/thinking rows and completed tool results; resume through
+  the existing Agent loop with native replayable context and no unfinished calls.
+- Cover request/stream timeouts, disconnects and provider-aborted streams without
+  confusing them with user Stop. Extend stream-stall recovery to delegates and
+  one-shot completions while preserving existing budgets and permanent errors.
+- Validate real adapter/Agent user paths and isolated Electron Responses and
+  Completions recovery. The regression baseline failed six partial-response
+  scenarios before the fix. Server, active profiles and release publication
+  remain outside this change; detailed results belong in the validation record.
+- Extend acceptance to automatic-recovery restart/native metadata retention and
+  clicking Stop during the real Electron retry wait, with onboarding dismissed
+  through its normal control before visual verification.
+- Release the suppressed turn lifecycle when Stop cancels a retry wait after
+  a partial row has already been retained. Verify caller cancellation behavior
+  rather than AbortSignal identity now that the watchdog composes signals.
+- Assert the existing `TURN_ABORTED` cancellation contract and an idle composer
+  after clicking Stop; cancellation remains distinct from provider error cards.
+- Validation passed: 601 tests in 13 runtime suites, runtime TypeScript build,
+  configured lint, PR-base check, and all eight isolated Electron journeys.
+  See `docs/interrupted-stream-recovery-validation.md` for the tested candidate,
+  screenshots, regression evidence, unchanged retry limits, and release scope.
+- Repair beta.6 release preflight documentation failures without changing
+  runtime behavior: add the missing decision-log rationales, restore ADR/spec
+  indexes, and add the Chinese selected-reference spec and updated E2E mirrors.
+  The documentation and locale tests pass locally. The beta.7 VitePress build
+  exposed two broken relative links in the new Chinese mirror; both are fixed
+  and the full docs build now passes. Beta.8 passed build/typecheck/lint and
+  docs checks but exposed stale source-contract assertions in the pre-existing
+  WorkPanel and subagent tests; update those assertions to cover the current
+  side-drawer and side-chat tab expressions. Beta.6 through beta.9 tags remain
+  unchanged.
+- Repair release-preflight tests against the current product contracts rather
+  than changing working application behavior: session-addressed composers,
+  retained side-chat/subagent tabs, quoted queue drafts, Host/shared schema
+  agreement and the bundled DeepSeek model metadata.
+- Reuse the existing fail-on-recycle Electron fixture for Node and Vite Main
+  imports, teach the TypeScript test hook to load JSX, and disable unused Vite
+  development watchers. Exercise real bridge, approval, queue, session and Live
+  Work paths; the combined targeted run passes 205 tests in 28 files.
+- The Windows full-suite baseline also exposed POSIX-only shell/SSH/signing
+  fixtures and two isolated Electron user-path timeouts. These are not recorded
+  as passes. Validate the complete Linux CI candidate on the request branch
+  before creating another release tag; no release gate is skipped or weakened.
+- Repair the trusted-extensions Electron fixture after CI showed its first-run
+  welcome dialog covering Settings navigation. Mark onboarding complete in the
+  isolated seed and assert the dialog is closed before opening Settings; the
+  real plugin OAuth journey remains covered. The Electron run passes 57/57.
+
+## 2026-10-21 - Keep Agent-generated images visible in replies
+
+- Fix the authorized-account `GenerateImage` result being hidden when a
+  completed turn automatically collapses its process. Promote its existing
+  image card alongside configured `GenerateImages` galleries in AssistantTurn;
+  ToolRow suppresses the duplicate only when its containing turn owns it.
+- Reuse the existing image parser, card and actions. No provider, runtime,
+  permissions, stored-message format or generation/retry behavior changes.
+  Historical results render from the saved tool payload without regeneration.
+- Add `test:e2e:agent-image-result`: real isolated Electron, Host and Agent
+  execution against local account/model fixtures. The old renderer fails with
+  a successfully saved but hidden image; the fixed renderer passes 18 checks
+  covering collapse/expand, preview, save, draft-preserving references,
+  reload/restart, both image-tool contracts, and light/dark narrow/wide views.
+- Validation: 26 targeted transcript tests, desktop typecheck, renderer
+  production build, configured Biome lint, style tokens, policy sync and
+  PR-base checks passed. Reuse the existing Node/Electron dependencies and
+  unchanged Host/runtime builds; no install, paid service or user profile used.
+- The older all-in-one `scripts/e2e-image-chat.mjs` driver stopped before image
+  generation at its AI-settings hit-target assertion; it is not counted as a
+  pass. The new focused native journey separately verifies that driver's
+  configured-provider image contract without unrelated settings navigation.
+  Full repository suites, packaging and live-provider generation were not run.
+- No server changes, push, merge or release. Test profiles and screenshots
+  remain in the task worktree's ignored artifact directory for review.
+
+## 2026-10-21 - Main-page Claude cache selector
+
+- Add the shared segmented control beneath the model menu's reasoning slider.
+  Five-minute and one-hour choices save immediately to the existing model
+  binding; reasoning-off models remain eligible. Drafts and reasoning are
+  independent of the cache preference. No new session field or protocol.
+- Resolve MirrorCoding selections to their account-owned configuration and
+  let Host project settings to group providers. Exclude non-Claude wires,
+  image mode and plugin-owned immutable provider rows.
+- Keep persistence in a focused component and selection in a pure helper;
+  do not enlarge the Composer store or duplicate runtime cache policy.
+- Extend isolated Electron coverage to main-page model/cache selection,
+  outgoing HTTP markers, settings synchronization, restart, keyboard input,
+  MirrorCoding projection and dark/wide plus light/narrow rendering.
+- Validation: 25 targeted selection/menu/provider-copy tests, desktop
+  typecheck, Electron production build, Biome lint, style-token check and
+  agent-policy/PR-base checks passed. The real Electron journey passed using
+  a local HTTP endpoint, with unchanged Host/runtime builds reused from the
+  cache-duration candidate. Full repository suites and production cache
+  hits/billing were not exercised; no paid account or running user app used.
+- No server changes, push, merge, release or installer packaging.
+
+## 2026-10-21 - Per-model Claude prompt-cache duration
+
+- Add a native advanced-model dropdown for five-minute and one-hour Claude
+  caching on Anthropic Messages, shared by API services and MirrorCoding.
+- Store the optional model preference in Host-owned provider JSON and carry
+  it through provider copy/import, account refresh and runtime model binding.
+- Use the existing Pi adapter for cache markers. Main sessions and delegates
+  receive short/long retention; explicit no-cache summarization is unchanged.
+- Cover native settings selection, saving, restart and actual request bodies
+  with an isolated Electron journey and local HTTP model. No paid API is used.
+- No server changes, push, merge, release or installer packaging are included.
+- Validation: 122 targeted runtime/shared tests, 37 desktop configuration
+  tests and 66 Host provider tests passed. Workspace TypeScript builds,
+  desktop typecheck, native Host/Electron builds, Biome lint, Rust format and
+  clippy checks passed. Real Electron covered API-provider and MirrorCoding
+  settings, keyboard selection, persistence/restart, actual 1h/5m HTTP bodies
+  and dark/wide plus light/narrow screenshots. Full repository suites and
+  production cache billing/hit behavior were not exercised.
+
+## 2026-10-19 - Desktop package candidates on Windows and macOS
+
+- Package the synchronized 0.21.0-beta.4 desktop without changing Android 0.20.4.
+  Use a dedicated package branch; do not update main, tag or publish a release.
+- Add an artifact-only GitHub Actions lane for native macOS arm64 and x64.
+  Build locked dependencies and the native Host, typecheck, package DMG/ZIP,
+  smoke-test the packaged application, and retain artifacts for 14 days.
+- The fork has no configured Apple signing/notarization secrets. This explicit
+  lane creates unsigned test builds and does not change the signed release lane.
+- Build Windows installers locally with reused dependencies and isolated output;
+  validate the packaged application without touching the user's running profile.
+- Keep package-probe data directly in its dedicated temporary boot directory,
+  as required by the existing Host session-list fixture safety boundary.
+- Windows NSIS, ZIP and portable outputs passed packaged boot probes; the
+  packaged side-chat user journey passed all five scenario groups.
+- Both native macOS Actions jobs passed build, package and Host boot checks.
+  DMG/ZIP artifacts and local delivery copies are available; signing and
+  interactive installation remain explicitly outside this test-build scope.
+  See docs/releases/desktop-0.21.0-beta.4-package.md for exact evidence.
+
+## 2026-10-19 - Synchronize upstream v0.21.0-beta.4
+
+- Integrate upstream main at 589e5803a7a9f4ebf7ec1e8849c43e44b4a198f7
+  (99 commits not in origin/main) on codex/sync-upstream-20261019, based on
+  fork main 5f272b38bf540251263623f8b94818545d94f78b. Keep both source
+  checkouts and their uncommitted work unchanged.
+- Carry the existing selected-reference/temporary-side-chat and account
+  benefits changes into this isolated candidate, including compact controls.
+  Preserve mobile synchronization, branding, storage maintenance and account
+  image generation while adopting upstream menus and work-panel width loans.
+- Integrate detached Bash with temporary sessions: filter background-task
+  bars by session, confirm close when a detached command remains, and stop
+  that session's processes before recycling its temporary records. Ordinary
+  turn abort still leaves detached commands alive; foreground tool approvals
+  remain cancellable. Parent commands are unaffected by child closure.
+- Retain the fourth Image mode in the new single-chip mode menu and restore
+  arrow/Home/End keyboard navigation. Update affected contracts, fixtures and
+  behavior specifications rather than retaining obsolete chip CSS.
+- Windows candidate builds and targeted Desktop/shared/runtime/Host checks
+  passed. Isolated Electron acceptance covers selected references, concurrent
+  side chats, cancellation, restart, menus and account image generation;
+  controlled browser acceptance covers subscription quota and manual check-in.
+- This is a local synchronization, not a remote-main update or a release.
+  See docs/upstream-sync-20261019.md for exact evidence and untested platforms.
+
+## 2026-10-18 - Account subscription quota and manual daily check-in
+
+- Add a main-owned benefits service using the existing Pi OAuth request path;
+  parsed subscription/check-in projections cross main-window IPC, never tokens.
+  No changes to Rust persistence, catalog routing, agent execution or mobile.
+- The account feature owns quota aggregation, lifecycle and a shared panel
+  used by the composer and Account settings. The compact bar is green/yellow/red,
+  shows percentage on hover only, and opens every active plan's quota/expiry.
+  Manual check-in refreshes wallet reward without changing subscription quota.
+- Preserve the shared AnchoredMenu's fixed-layer/visibility contract. A
+  real-browser geometry regression failed before the popup placement fix.
+- Add controlled browser-to-IPC-to-local-HTTP acceptance plus service tests
+  for permissions, error states, duplicates, cancellation and account changes.
+  No personal profile, production login, paid model or server mutation is used.
+- Server consent and endpoint implementation are still required. The separate
+  handoff is docs/mirrorcoding-account-benefits-server-requirements.md.
+- Validation: 37 related Desktop tests and 39 i18n tests passed; workspace
+  dependency builds, Desktop typecheck, targeted lint/style checks and the
+  Electron main/preload/renderer production build passed. Browser acceptance
+  covers actual Composer and Account settings interactions with controlled
+  HTTP/IPC handlers. Native Electron transport, production server parity and
+  packaged-install acceptance are not claimed.
+## 2026-10-25 - Simplify Codex import to continuation only
+
+- Removed individual and bulk history-only actions from the import wizard.
+  Confirmation keeps available continuation context instead of offering a
+  competing archive-only choice. The renderer no longer submits historyOnly.
+- Updated English and Chinese guidance. A source with no recoverable context
+  explains how to choose a complete source and rescan, without creating an
+  empty-context conversation. Existing imported records remain unchanged.
+- Added Electron user-path regressions for single/bulk confirmation and missing
+  context; the single-action assertion fails against the previous UI.
+
 ## 2026-10-15 - Upstream integration, shared branding and account image tools
 
 - Integrated upstream 0.20.1 at 2eb333723 with the committed mobile redesign
@@ -1472,6 +1726,32 @@ Captured native windows and the Android login screen were visually checked.
   9, and the signing identity is unchanged. The desktop stays at published
   0.20.2. See docs/releases/0.20.3.md for validation and publication.
 
+## 2026-10-19 - Selected references and temporary side chats
+
+- Add modular selection, reference-draft, and WorkPanel side-chat UI; keep
+  Composer operations bound to the target session instead of global focus.
+- Carry shared MessageQuote metadata through ordinary, queued, steered and
+  edited prompts, transcript storage and unanswered-stop draft restoration.
+- Host schema 26 owns unique temporary parent/child identities and excludes
+  them from history/search/mobile. Runtime inherits effective context only in
+  memory and persists only new child records; Electron recycles child files.
+- Test real local-provider Electron paths, shared-directory writes/approval,
+  concurrent main/side execution, stop/resend and lifecycle cleanup.
+- Preserve child entry IDs and memory-only compaction when configuration
+  recreates a runtime, so earlier referenced messages remain editable.
+- Cancel all Host-tool permission waits on close, including Write/Edit;
+  real Electron coverage verifies no pending write runs and delegates settle.
+- Validate immediate steering, queued reference delivery, independent model
+  and reasoning selection, and edit/regenerate after a completed Plan turn.
+- Keep side tab/close controls reachable with a side-specific 360px minimum
+  and narrow overlay; never persist temporary compression as the preferred width.
+- Local acceptance passed with 1466 runtime tests, 71 AgentHost tests, 66
+  Desktop tests, 941 Host tests and the real isolated Electron journey. See
+  docs/selection-side-chat-validation.md for skipped coverage and baseline fmt drift.
+- See docs/spec/04-ux/24-selected-references-and-temporary-side-chat.md for the
+  feature contract and docs/adr/temporary-side-chat-runtime.md for ownership.
+- Local implementation only: no push, merge, installer or server modification.
+
 ## 2026-10-15 - Android 0.20.4: in-app update fixes
 
 - A phone that had downloaded and installed 0.20.2 was offered "Install update"
@@ -1484,3 +1764,101 @@ Captured native windows and the Android login screen were visually checked.
   release cases. It failed on the pre-fix code and passes on the fix.
 - Android-only release; the desktop stays at published 0.20.2. Phones holding a
   stale record need one manual install of 0.20.4. See docs/releases/0.20.4.md.
+
+
+## 2026-10-19 - Combined selection and account preview
+
+The selected-reference/side-chat preview now includes the committed account-benefits feature from f08901a5d. The preview had been built from origin/main without that separate feature branch, so authorization worked but the check-in/subscription controls were absent. Integration preserves both locale namespaces, session-scoped composer behavior and the existing independent test profile. No server implementation or grant changes are included; unavailable endpoints and missing permissions remain explicit.
+
+## 2026-10-19 - Side-chat layout correction
+
+Removed the side-only in-flow composer, forced two-row toolbar and model-label
+overrides. The transcript mask had reserved the composer a second time, hiding
+an extra composer-height strip above the input. Side chats now use the same
+overlay dock, spacing and surface as main chat, with their own measured height.
+Shared container rules keep signed-in quota/context/model/send controls separate
+at narrow widths. Real Electron regressions cover expanded/narrow layouts and
+multiline drafts; browser acceptance compares main/side controls at seven widths
+in both themes. No session lifecycle, storage, permission or server changes.
+
+## 2026-10-19 - Compact selected-text actions and annotations
+
+SelectionActions now uses compact shared ghost buttons without an outer card.
+MessageQuotes shares a borderless disclosure, numbered source tooltip, quote
+rail and accessible close-icon action across main chat, side chat and sent
+messages. Full source identities remain in structured references and tooltips.
+The renderer-only update preserves drafts, sending and temporary-chat lifetime.
+Real Electron coverage checks the appearance, keyboard/source/removal paths,
+narrow panes and both themes; see docs/selection-side-chat-validation.md.
+
+## 2026-10-21 - Desktop beta.5 upstream integration
+
+Integrated upstream b73b6dfae97ec4daacb4cea000b0a7bbba7ea27d and Pi 1.3.0.
+Preserved selected references, temporary side chat, account benefits, Claude
+cache duration controls, and generated images outside collapsed process rows.
+Retry cleanup now skips system deltas and removes only empty assistant tails,
+preserving meaningful output and completed tools after compaction.
+Windows packages are built locally; macOS arm64/x64 use the artifact-only
+Actions lane. Android remains on its existing release. Validation and artifact
+results are recorded in docs/releases/0.21.0-beta.5-validation.md.
+## 2026-10-25 - Explicit Codex native history import
+
+### Real-source recovery and import usability
+
+- Stream compressed rollout segments, resolve physical base segments separately
+  from logical threads, and scope imported message IDs per destination. These
+  fix false missing-base/cycle reports and batch-import collisions between forks.
+- Preserve dynamic tool results and activity as historical records. Explicit
+  partial-context consent keeps usable native checkpoint messages; history-only
+  remains available when source context is genuinely missing.
+- Keep list rows readable, collapse optional directory controls and raw warnings,
+  expose localized recovery actions, batch confirmation and current-item progress,
+  and clear completed selections without losing pending choices.
+- Authorized real-source acceptance imported six conversations into isolated
+  storage, verified restart/duplicates, and exercised the full Electron wizard.
+  Two real imports also continued through a controlled loopback provider with
+  two new sandbox-directory tool actions and no historical replay or paid calls.
+  Private records and screenshots remain untracked; see validation documentation.
+
+### Project-search correction
+
+- Resolve Codex's saved local-host legacy project IDs to current SQLite project
+  IDs before listing and filtering; do not merge projects by display name.
+- Prefer current nonempty conversation names so searches match the Codex sidebar.
+- Add a failing-then-passing Host scan/filter/import regression and an Electron
+  project-menu/search journey with migrated source metadata. Source files and
+  credentials are not modified or copied.
+
+- Add a modular Rust source catalog, paginated/segmented history reader, visible
+  transcript projection, effective-context recovery, attachment import and
+  project-root binding. Native checkpoints allow PI continuation without old
+  tool execution, source credentials or copied project code.
+- Add a typed thin Main bridge and one shared Renderer wizard, with the pinned
+  Sidebar card, three-way dismissal and persistent Project archive entry.
+- Preserve source identity and working directories, skip duplicate imports,
+  require confirmation for history-only recovery, and isolate cancellation
+  by batch identity. Missing directories block continuation until rebound.
+- Acceptance uses synthetic Host SQLite/JSONL fixtures, production Sidebar in
+  isolated Electron, and a real sidecar plus controlled endpoint with actual
+  tools and restart. See docs/testing/codex-import-validation.md for boundaries.
+- No push, merge, release, server change or real user-profile modification.
+
+## 2026-10-25 - Integrated desktop 0.21.0 release candidate
+
+- Integrate the completed Codex import and wallet changes with the maintained
+  selection/side-chat, account, cache, image and interrupted-stream recovery line.
+- Merge upstream main at 7a95fd08a, preserving tool identity normalization,
+  request output caps, safe provider abort classification and session task docks.
+- Preserve per-session steering, quoted text around inline visualizations, Claude
+  cache controls and independent temporary-session tool cancellation.
+- Recycle the superseded BackgroundTasksBar only in this release worktree after
+  explicit user approval. Source worktrees and the existing upstream PR remain intact.
+- Align workspace package metadata with 0.21.0; no Android APK is built or published.
+  MirrorCoding server code and production profiles are unchanged.
+- Record exact candidate validation and publication results in the release report;
+  earlier feature-test results are not presented as current integration evidence.
+- Resolve the File Manager theme fixture's Electron binary only after its
+  display precondition. Run the real light/dark user path in the existing
+  virtual-display CI lane and retain isolated fixture evidence for diagnosis.
+- Exclude the independent October 11 outbox and October 13-14 RPC recovery
+  branches from this release, as confirmed by the user on October 25.

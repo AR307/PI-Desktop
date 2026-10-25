@@ -12,10 +12,6 @@
   .plugins-search-wrap {
     flex: 1 1 auto;
   }
-
-  .plugins-row-controls {
-    align-self: flex-start;
-  }
 }
 
 /*
@@ -39,12 +35,30 @@
   justify-content: flex-end;
 }
 
+/* Mode and permission children cannot shrink with their flex group. Reserve
+ * their actual width; the model label on the right owns text compression. */
+.composer-left {
+  flex-shrink: 0;
+}
+
 .composer-model-thinking {
   min-width: 0;
 }
 
 @container composer-stack (max-width: 560px) {
-  .composer-model-thinking-dot,
+  .composer-toolbar .mc-quota-trigger {
+    width: 44px;
+  }
+
+  .composer-toolbar:has(.mc-benefits-control) .context-inspector-trigger {
+    gap: 0;
+    padding-inline: 3px;
+  }
+
+  .composer-toolbar:has(.mc-benefits-control) .context-inspector-ring-value {
+    display: none;
+  }
+
   .composer-model-thinking-level {
     display: none;
   }
@@ -70,6 +84,11 @@
     padding: 0 !important;
   }
 
+  /* Collapsed to a glyph: the labels are gone, so the icon carries the trigger. */
+  .composer-model-thinking-icon {
+    display: inline-flex;
+  }
+
   .composer-model-thinking-model,
   .composer-model-thinking-chevron {
     display: none;
@@ -86,10 +105,51 @@
 
 }
 
+/* The signed-in quota bar also shares the narrow composer row. Keep every
+ * action reachable instead of shrinking flex groups over one another. */
+@container composer-stack (max-width: 400px) {
+  .composer-mode-chip {
+    width: 28px;
+    min-width: 28px;
+    max-width: 28px;
+    flex-basis: 28px;
+    justify-content: center;
+    padding: 0 !important;
+  }
+
+  .composer-mode-chip-label {
+    display: none;
+  }
+
+  .composer-permission .mode-chip {
+    padding-inline: 4px !important;
+  }
+
+  .composer-permission .mode-chip > span {
+    max-width: 44px;
+  }
+
+  .composer-toolbar {
+    gap: 4px;
+  }
+
+  .composer-left,
+  .composer-right {
+    gap: 2px;
+    flex-shrink: 0;
+  }
+
+  .composer-model-thinking {
+    flex-shrink: 0;
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .plugins-menu,
   .plugins-sheet,
   .plugins-sheet-scrim,
+  .plugins-reviews,
+  .plugins-reviews-scrim,
   .plugins-modal,
   .plugins-modal-backdrop,
   .plugins-skeleton-line {

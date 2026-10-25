@@ -228,6 +228,8 @@ export type ModelBinding = {
   defaultThinkingLevel: SessionThinkingLevel | null;
   /** Provider request protocol used when thinking is enabled. */
   thinkingProtocol?: ThinkingProtocol;
+  /** Chat Completions reasoning_effort override; absent/null keeps compatibility defaults. */
+  supportsReasoningEffort?: boolean | null;
   /**
    * User override for image input. `null` or absent follows the published
    * models.dev capability. Once explicitly selected, either boolean is pinned
@@ -254,6 +256,8 @@ export type ModelBinding = {
    * knowledge of the endpoint is the only source.
    */
   nativeWebSearch?: boolean;
+  /** Claude Messages prompt-cache lifetime; absent uses the five-minute default. */
+  claudeCacheTtl?: "5m" | "1h";
   /** Selected MirrorCoding group for this model on an account-level provider. */
   mirrorCodingGroupId?: string;
   /** Model-level sampling override; absent leaves the adapter default. */

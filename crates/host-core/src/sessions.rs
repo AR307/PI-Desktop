@@ -193,6 +193,15 @@ pub struct MessageAttachment {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+#[derive(PartialEq, Eq)]
+pub struct MessageQuote {
+    pub session_id: String,
+    pub message_id: String,
+    pub text: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct UiMessage {
     pub id: String,
     pub role: String,
@@ -209,6 +218,8 @@ pub struct UiMessage {
     /// Minimal provenance for an accepted Live Voice work input.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub voice_origin: Option<Value>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub quotes: Option<Vec<MessageQuote>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub attachments: Option<Vec<MessageAttachment>>,
     /// Accepted input to an existing turn, preserved by Stop after renderer reload.
@@ -359,28 +370,39 @@ pub struct SearchHit {
 /// The renderer creates a session with its localized `chat.untitledTask` label
 /// and also recognizes `nav.newChat`, so host-core has to recognize the same
 /// values: it owns title eligibility and cannot read the renderer catalog when
-/// it decides whether a title may still be replaced. German, Spanish, and
-/// French fall back to the English label. Keep this in sync with the migration
-/// list in `db/session_title_source_migration.rs` and `LEGACY_DEFAULT_TITLES`
-/// in the renderer.
-const PLACEHOLDER_TITLES: [&str; 13] = [
+/// it decides whether a title may still be replaced. Every entry is stored
+/// lowercased and compared through `to_lowercase`, because both localized
+/// keys the renderer writes — `chat.untitledTask` and `nav.newChat` — have
+/// their own label per locale, and a non-ASCII uppercase letter (a future
+/// "Ñö..." entry) would slip past ASCII-case-insensitive matching (#1755).
+/// Keep this in sync with the migration list in
+/// `db/session_title_source_migration.rs` and `LEGACY_DEFAULT_TITLES` in the
+/// renderer.
+const PLACEHOLDER_TITLES: [&str; 19] = [
     "",
-    "New task",
-    "New chat",
+    "new task",
+    "new chat",
     "新建任务",
     "新对话",
     "新建任務",
     "新對話",
     "새 작업",
     "새 채팅",
-    "Tarefa sem título",
-    "Nova conversa",
-    "Yeni görev",
-    "Yeni sohbet",
+    "tarefa sem título",
+    "nova conversa",
+    "yeni görev",
+    "yeni sohbet",
+    "neue aufgabe",
+    "nouvelle tâche",
+    "nueva tarea",
+    "neuer chat",
+    "nuevo chat",
+    "nouvelle discussion",
 ];
 
 fn is_default_title(title: &str) -> bool {
-    PLACEHOLDER_TITLES.contains(&title.trim())
+    let t = title.trim().to_lowercase();
+    PLACEHOLDER_TITLES.iter().any(|p| *p == t)
 }
 
 // ---- UiMessage ⇄ transcript record mapping -----------------------------------
@@ -400,6 +422,9 @@ pub(crate) fn ui_to_record(message: &UiMessage) -> (MessageRecord, Option<String
     }
     if let Some(origin) = &message.session_message {
         meta_obj.insert("sessionMessage".into(), origin.clone());
+    }
+    if let Some(quotes) = &message.quotes {
+        meta_obj.insert("quotes".into(), json!(quotes));
     }
     if let Some(origin) = &message.voice_origin {
         meta_obj.insert("voiceOrigin".into(), origin.clone());
@@ -566,6 +591,9 @@ pub(crate) fn record_to_ui(record: MessageRecord) -> UiMessage {
         .and_then(|value| serde_json::from_value(value.clone()).ok());
     let session_message = meta.get("sessionMessage").cloned();
     let voice_origin = meta.get("voiceOrigin").cloned();
+    let quotes: Option<Vec<MessageQuote>> = meta
+        .get("quotes")
+        .and_then(|value| serde_json::from_value(value.clone()).ok());
     let steering = meta.get("steering").and_then(Value::as_bool);
     let status = meta
         .get("status")
@@ -706,6 +734,7 @@ pub(crate) fn record_to_ui(record: MessageRecord) -> UiMessage {
             skill_mentions: skill_mentions.clone(),
             session_message,
             voice_origin: voice_origin.clone(),
+            quotes: quotes.clone(),
             attachments: None,
             steering,
             created_at: record.created_at,
@@ -763,6 +792,7 @@ pub(crate) fn record_to_ui(record: MessageRecord) -> UiMessage {
             skill_mentions,
             session_message,
             voice_origin,
+            quotes,
             attachments,
             steering,
             created_at: record.created_at,
@@ -1206,6 +1236,9 @@ fn insert_recovered_session_row(
 /// Restore a missing sessions row (and its search index) from an orphaned
 /// JSONL transcript. Returns true when a row was inserted (D318).
 pub fn restore_orphaned_session(db: &Database, session_id: &str) -> Result<bool> {
+    if session_id.starts_with("side-") {
+        return Ok(false);
+    }
     if session_created_at(db, session_id).is_ok() {
         return Ok(false);
     }
@@ -1296,6 +1329,9 @@ fn ensure_session_for_append(db: &Database, session_id: &str) -> Result<String> 
     match session_created_at(db, session_id) {
         Ok(created) => Ok(created),
         Err(error) if error.to_string().starts_with("session not found") => {
+            if session_id.starts_with("side-") {
+                return Err(error);
+            }
             if restore_orphaned_session(db, session_id)? {
                 return session_created_at(db, session_id);
             }
@@ -1376,7 +1412,7 @@ fn attach_worktrees(db: &Database, summaries: &mut [SessionSummary]) -> Result<(
 // ---- sessions ---------------------------------------------------------------
 
 pub fn list_sessions(db: &Database) -> Result<Vec<SessionSummary>> {
-    let sql = format!("{SUMMARY_SELECT} ORDER BY s.updated_at DESC");
+    let sql = format!("{SUMMARY_SELECT} AND s.id NOT LIKE 'side-%' ORDER BY s.updated_at DESC");
     let mut stmt = db.conn().prepare_cached(&sql)?;
     let rows = stmt.query_map([], summary_from_row)?;
     let mut out = Vec::new();
@@ -1571,6 +1607,17 @@ pub fn session_summary(db: &Database, id: &str) -> Result<Option<SessionSummary>
         attach_worktrees(db, std::slice::from_mut(summary))?;
     }
     Ok(summary)
+}
+
+/// Whether a session row still exists. Used to refuse work that would otherwise
+/// outlive its owning session and become unreachable — a background task
+/// started after its session was deleted belongs to nobody.
+pub fn session_exists(db: &Database, id: &str) -> Result<bool> {
+    Ok(db.conn().query_row(
+        "SELECT EXISTS(SELECT 1 FROM sessions WHERE id = ?1)",
+        params![id],
+        |row| row.get(0),
+    )?)
 }
 
 /// Load a session detail with an optional renderer-facing message window.
@@ -1820,6 +1867,13 @@ pub fn fork_session_through(
         &mut records,
         &mut compactions,
     )?;
+    let visualization_files = fork_files::preserve_visualizations(
+        db.data_dir(),
+        source_id,
+        &id,
+        &mut records,
+        &mut compactions,
+    )?;
     let texts = records.iter().map(record_index_text).collect::<Vec<_>>();
     let now = now_ms();
     let created_at = ms_to_ts(now);
@@ -1865,6 +1919,7 @@ pub fn fork_session_through(
         return Err(error);
     }
     files.commit();
+    visualization_files.commit();
 
     let summary = SessionSummary {
         fast: false,
@@ -1995,6 +2050,9 @@ pub fn configure_session_with_thinking(
 }
 
 pub fn delete_session(db: &Database, id: &str) -> Result<bool> {
+    if id.starts_with("side-") {
+        return Err(anyhow!("Close temporary side chats through sideChat.close"));
+    }
     let tx = db.conn().unchecked_transaction()?;
     tx.execute(
         "DELETE FROM kv WHERE ns = 'app' AND key IN (?1, ?2)",
@@ -3702,6 +3760,15 @@ pub fn import_session(
     summary: &SessionSummary,
     messages: &[UiMessage],
 ) -> Result<bool> {
+    import_session_with_compactions(db, summary, messages, &[])
+}
+
+pub fn import_session_with_compactions(
+    db: &Database,
+    summary: &SessionSummary,
+    messages: &[UiMessage],
+    compactions: &[CompactionRecord],
+) -> Result<bool> {
     validate_thinking_level(&summary.thinking_level)?;
     let mode = normalize_mode(Some(&summary.mode));
     let conn = db.conn();
@@ -3714,7 +3781,18 @@ pub fn import_session(
         return Ok(false);
     }
     let (records, texts) = records_and_texts(messages);
-    transcripts::write_transcript(db.data_dir(), &summary.id, &summary.created_at, &records)?;
+    for checkpoint in compactions {
+        if !compaction_valid_for_records(checkpoint, &records) {
+            return Err(anyhow!("Invalid imported checkpoint anchor"));
+        }
+    }
+    transcripts::write_transcript_with_compactions(
+        db.data_dir(),
+        &summary.id,
+        &summary.created_at,
+        &records,
+        compactions,
+    )?;
     let indexed = (|| -> Result<()> {
         let tx = conn.unchecked_transaction()?;
         let project_id = match summary
@@ -3789,6 +3867,7 @@ pub fn begin_turn(
     provider_id: Option<&str>,
     model_id: Option<&str>,
 ) -> Result<String> {
+    crate::codex_import::require_bound_directory(db, session_id)?;
     let id = Uuid::new_v4().to_string();
     let inserted = db
         .conn()
@@ -4310,6 +4389,19 @@ pub fn get_token_usage_history(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn default_title_matches_the_german_french_and_spanish_placeholders() {
+        // The renderer lowercases `chat.untitledTask` before persisting (#1755);
+        // the nav.newChat labels resolve through the same to_lowercase path.
+        assert!(is_default_title("neue aufgabe"));
+        assert!(is_default_title("Nouvelle tâche"));
+        assert!(is_default_title("nueva tarea"));
+        assert!(is_default_title("Neuer Chat"));
+        assert!(is_default_title("nuevo chat"));
+        assert!(is_default_title("Nouvelle discussion"));
+        assert!(!is_default_title("real session name"));
+    }
     use crate::workspace::simple_canonicalize;
 
     fn test_db() -> Database {
@@ -4327,6 +4419,7 @@ mod tests {
             skill_mentions: None,
             attachments: None,
             voice_origin: None,
+            quotes: None,
             steering: None,
             created_at: ts.into(),
             thinking: None,
@@ -4956,6 +5049,12 @@ mod tests {
             "Tarefa sem título",
             "Yeni görev",
             "New chat",
+            "new task",
+            "new chat",
+            "tarefa sem título",
+            "nova conversa",
+            "yeni görev",
+            "yeni sohbet",
         ] {
             let session =
                 create_session(&db, Some(placeholder.into()), None, None, None, None).unwrap();
@@ -5225,6 +5324,7 @@ mod tests {
             skill_mentions: None,
             attachments: None,
             voice_origin: None,
+            quotes: None,
             steering: None,
             created_at: "2025-05-01T00:00:02Z".into(),
             thinking: None,
@@ -5846,6 +5946,7 @@ mod tests {
             skill_mentions: None,
             attachments: None,
             voice_origin: None,
+            quotes: None,
             steering: None,
             created_at: "2025-05-01T00:00:01Z".into(),
             thinking: Some("first plan\nsecond plan".into()),
@@ -5957,6 +6058,7 @@ mod tests {
             skill_mentions: None,
             attachments: None,
             voice_origin: None,
+            quotes: None,
             steering: None,
             created_at: "2025-05-01T00:00:01Z".into(),
             thinking: None,
@@ -6365,6 +6467,47 @@ mod tests {
             1
         );
         assert_eq!(std::fs::read_to_string(file).unwrap(), "keep source");
+    }
+
+    #[test]
+    fn fork_copies_referenced_visualizations_so_cards_survive_source_deletion() {
+        let db = test_db();
+        let source = create_session(&db, Some("Charts".into()), None, None, None, None).unwrap();
+        let dir = crate::visualizations::session_dir(db.data_dir(), &source.id).unwrap();
+        std::fs::create_dir_all(&dir).unwrap();
+        let chart = dir.join("chart.html");
+        std::fs::write(&chart, "<p>chart</p>").unwrap();
+        std::fs::write(dir.join("unused.html"), "<p>unused</p>").unwrap();
+        let text = format!("::visualize{}", json!({"path": chart}));
+        append_message(
+            &db,
+            &source.id,
+            &UiMessage {
+                role: "assistant".into(),
+                ..user_msg("viz-1", &text, "2025-05-01T00:00:00Z")
+            },
+            None,
+        )
+        .unwrap();
+        let ForkSessionResult::Created(child) =
+            fork_session_through(&db, &source.id, None, None).unwrap()
+        else {
+            panic!("expected child")
+        };
+        let child_dir =
+            crate::visualizations::session_dir(db.data_dir(), &child.summary.id).unwrap();
+        let child_chart = child_dir.join("chart.html");
+        assert_eq!(
+            child.messages[0].content,
+            format!("::visualize{}", json!({"path": child_chart}))
+        );
+        assert!(!child_dir.join("unused.html").exists());
+        delete_session(&db, &source.id).unwrap();
+        crate::visualizations::remove_session_dir(db.data_dir(), &source.id);
+        assert_eq!(
+            std::fs::read_to_string(&child_chart).unwrap(),
+            "<p>chart</p>"
+        );
     }
 
     #[test]

@@ -101,6 +101,12 @@ export function createHostRuntime({
       sendToRenderer(IPC.event.pluginInstallProgress, params);
       return;
     }
+    if (method === "backgroundTasks.changed") {
+      // Fan-out only: the renderer re-lists on the event and renders the
+      // running-tasks bar above the composer. No main-process decisions.
+      sendToRenderer(IPC.event.backgroundTasksChanged, params);
+      return;
+    }
     if (method === "permissions.request") {
       const permission = params as {
         requestId: string;

@@ -178,25 +178,36 @@ mod tests {
             let dir = tempfile::tempdir().unwrap();
             let path = dir.path().join("v24.sqlite");
             let db = Database::open(&path).unwrap();
-            let session = crate::sessions::create_session(&db, None, None, None, None, None).unwrap();
+            let session =
+                crate::sessions::create_session(&db, None, None, None, None, None).unwrap();
             let message: crate::sessions::UiMessage = serde_json::from_value(serde_json::json!({
                 "id": "retained-v24", "role": "user", "content": "Existing conversation",
                 "createdAt": "2026-10-15T00:00:00Z"
-            })).unwrap();
+            }))
+            .unwrap();
             crate::sessions::append_message(&db, &session.id, &message, None).unwrap();
             let revision = crate::sessions::session_sync_revision(&db, &session.id).unwrap();
             if fork {
                 db.conn().execute_batch("DROP TABLE worktrees; ALTER TABLE projects DROP COLUMN worktree_setup_command;").unwrap();
             } else {
-                db.conn().execute_batch("DROP TABLE session_sync_changes; DROP TABLE session_sync_state;").unwrap();
+                db.conn()
+                    .execute_batch(
+                        "DROP TABLE session_sync_changes; DROP TABLE session_sync_state;",
+                    )
+                    .unwrap();
             }
             db.conn().pragma_update(None, "user_version", 24).unwrap();
             drop(db);
             let db = Database::open(&path).unwrap();
-            let detail = crate::sessions::get_session(&db, &session.id).unwrap().unwrap();
+            let detail = crate::sessions::get_session(&db, &session.id)
+                .unwrap()
+                .unwrap();
             assert_eq!(detail.messages[0].content, "Existing conversation");
             assert_eq!(detail.sync_revision, if fork { revision } else { 0 });
-            let count: i64 = db.conn().query_row("SELECT COUNT(*) FROM worktrees", [], |row| row.get(0)).unwrap();
+            let count: i64 = db
+                .conn()
+                .query_row("SELECT COUNT(*) FROM worktrees", [], |row| row.get(0))
+                .unwrap();
             assert_eq!(count, 0);
             assert!(migration_backup_path(&path, 24).exists());
         }

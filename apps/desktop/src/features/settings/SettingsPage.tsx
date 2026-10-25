@@ -37,11 +37,13 @@ import { Badge, Button, cx, SegmentedControl, SettingsToggle } from "../../compo
 import { ModelConfigPage } from "../../components/settings/ModelConfigPage";
 import { KeyboardShortcutsSection } from "../../components/settings/KeyboardShortcutsSection";
 import { FontFamilyRow } from "../../components/settings/FontFamilyRow";
-import { ThinkingDisplayModeRow } from "../../components/settings/ThinkingDisplayModeRow";
+import { ShowThinkingRow } from "../../components/settings/ShowThinkingRow";
+import { TranscriptDisplayModeRow } from "../../components/settings/TranscriptDisplayModeRow";
 import { FontSizeRow } from "../../components/settings/FontSizeRow";
 import { LanguageRow } from "../../components/settings/LanguageRow";
 import { SettingsMenuSelect } from "../../components/settings/SettingsMenuSelect";
 import { ThemeRow } from "../../components/settings/ThemeRow";
+import { MacosWindowTranslucencyRow } from "../../components/settings/MacosWindowTranslucencyRow";
 import { NetworkProxySection } from "../../components/settings/NetworkProxySection";
 import { ProjectsPage } from "../../pages/ProjectsPage";
 import { AgentSkillsPage } from "../../components/settings/AgentSkillsPage";
@@ -418,6 +420,58 @@ export function SettingsPage() {
                 <LanguageRow settings={settings} saveSettings={saveSettings} />
                 <FontFamilyRow settings={settings} saveSettings={saveSettings} />
                 <FontSizeRow settings={settings} saveSettings={saveSettings} />
+                {platform === "darwin" && (
+                  <MacosWindowTranslucencyRow settings={settings} saveSettings={saveSettings} />
+                )}
+              </SettingsCard>
+
+              <SettingsCard title={t("settings.sidebar")}>
+                <SettingsRow
+                  title={t("settings.sidebarRunningIndicators")}
+                  description={t("settings.sidebarRunningIndicatorsDesc")}
+                >
+                  <SettingsToggle
+                    checked={settings.sidebarRunningIndicators === true}
+                    label={t("settings.sidebarRunningIndicators")}
+                    onChange={() => void saveSettings({
+                      sidebarRunningIndicators: settings.sidebarRunningIndicators !== true,
+                    })}
+                  />
+                </SettingsRow>
+                {/*
+                  The two sub-switches are gated by the master switch. They keep
+                  their stored value while disabled, so turning the master back
+                  on restores the previous choice instead of resetting it.
+                */}
+                <SettingsRow title={t("settings.sidebarRunningBadge")}>
+                  <SettingsToggle
+                    checked={settings.sidebarRunningBadge === true}
+                    label={t("settings.sidebarRunningBadge")}
+                    disabled={settings.sidebarRunningIndicators !== true}
+                    onChange={() => void saveSettings({
+                      sidebarRunningBadge: settings.sidebarRunningBadge !== true,
+                    })}
+                  />
+                </SettingsRow>
+                <SettingsRow title={t("settings.sidebarRunningRail")}>
+                  <SettingsToggle
+                    checked={settings.sidebarRunningRail === true}
+                    label={t("settings.sidebarRunningRail")}
+                    disabled={settings.sidebarRunningIndicators !== true}
+                    onChange={() => void saveSettings({
+                      sidebarRunningRail: settings.sidebarRunningRail !== true,
+                    })}
+                  />
+                </SettingsRow>
+                <SettingsRow title={t("settings.sidebarSessionTime")}>
+                  <SettingsToggle
+                    checked={settings.sidebarSessionTime === true}
+                    label={t("settings.sidebarSessionTime")}
+                    onChange={() => void saveSettings({
+                      sidebarSessionTime: settings.sidebarSessionTime !== true,
+                    })}
+                  />
+                </SettingsRow>
               </SettingsCard>
 
               <NetworkProxySection settings={settings} saveSettings={saveSettings} />
@@ -497,7 +551,8 @@ export function SettingsPage() {
                 </SettingsRow>
                 <CommandShellRow settings={settings} saveSettings={saveSettings} />
                 <LinkOpenTargetRow settings={settings} saveSettings={saveSettings} />
-                <ThinkingDisplayModeRow settings={settings} saveSettings={saveSettings} />
+                <ShowThinkingRow settings={settings} saveSettings={saveSettings} />
+                <TranscriptDisplayModeRow settings={settings} saveSettings={saveSettings} />
                 <ContextUsageDisplayRow
                   settings={settings}
                   saveSettings={saveSettings}
@@ -530,6 +585,20 @@ export function SettingsPage() {
                     checked={settings.smoothStreaming !== false}
                     label={t("settings.smoothStreaming")}
                     onChange={() => void saveSettings({ smoothStreaming: !(settings.smoothStreaming !== false) })}
+                  />
+                </SettingsRow>
+                <SettingsRow
+                  title={t("settings.inlineVisualizations")}
+                  description={t("settings.inlineVisualizationsDesc")}
+                >
+                  <SettingsToggle
+                    checked={settings.inlineVisualizations === true}
+                    label={t("settings.inlineVisualizations")}
+                    onChange={() =>
+                      void saveSettings({
+                        inlineVisualizations: settings.inlineVisualizations !== true,
+                      })
+                    }
                   />
                 </SettingsRow>
                 <LargePasteThresholdRow

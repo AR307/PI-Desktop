@@ -30,10 +30,19 @@ import {
   type ToolsOutputParams,
 } from "./index.js";
 
+describe("Browser recovery IPC", () => {
+  it("admits the additive session-owned page metadata channel", () => {
+    expect(IPC.invoke.browserGetPages).toBe("pi-desktop/browser/getPages");
+    expect(IPC_WHITELIST.has(IPC.invoke.browserGetPages)).toBe(true);
+  });
+});
+
 describe("Plan protocol contracts", () => {
-  it("uses protocol v11/schema v16 and exposes the plan, schedule, and shell channels", () => {
+  it("uses protocol v11/schema v26 and exposes the plan, schedule, and shell channels", () => {
     expect(PROTOCOL_VERSION).toBe(11);
-    expect(SCHEMA_VERSION).toBe(16);
+    expect(SCHEMA_VERSION).toBe(26);
+    expect(IPC_WHITELIST.has(IPC.invoke.sideChatOpen)).toBe(true);
+    expect(IPC_WHITELIST.has(IPC.invoke.sideChatClose)).toBe(true);
     expect(IPC_WHITELIST.has(IPC.invoke.plansPending)).toBe(true);
     expect(IPC_WHITELIST.has(IPC.invoke.plansResolve)).toBe(true);
     expect(IPC_WHITELIST.has(IPC.event.plansChanged)).toBe(true);
@@ -52,6 +61,18 @@ describe("Plan protocol contracts", () => {
     expect(IPC_WHITELIST.has(IPC.invoke.providersRefreshModelCatalog)).toBe(true);
     expect(IPC_WHITELIST.has(IPC.invoke.windowSetWorkPanelChatWidth)).toBe(true);
     expect(IPC_WHITELIST.has(IPC.event.windowWorkPanelResize)).toBe(true);
+    expect(IPC.invoke.lifecycleDialogReady).toBe("pi-desktop/window/lifecycleDialog/ready");
+    expect(IPC.invoke.lifecycleDialogRespond).toBe("pi-desktop/window/lifecycleDialog/respond");
+    expect(IPC.event.lifecycleDialogRequest).toBe("pi-desktop/window/event/lifecycleDialogRequest");
+    expect(IPC.event.lifecycleDialogDismiss).toBe("pi-desktop/window/event/lifecycleDialogDismiss");
+    for (const channel of [
+      IPC.invoke.lifecycleDialogReady,
+      IPC.invoke.lifecycleDialogRespond,
+      IPC.event.lifecycleDialogRequest,
+      IPC.event.lifecycleDialogDismiss,
+    ]) {
+      expect(IPC_WHITELIST.has(channel)).toBe(true);
+    }
     expect(IPC.invoke.appOpenFeedback).toBe("pi-desktop/app/openFeedback");
     expect(IPC_WHITELIST.has(IPC.invoke.appOpenFeedback)).toBe(true);
     expect(IPC.invoke.fsOpen).toBe("pi-desktop/fs/open");

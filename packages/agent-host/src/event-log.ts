@@ -172,6 +172,16 @@ export class EventHub {
     return this.host;
   }
 
+  /** A temporary session has ended; do not retain its transcript event log. */
+  releaseSession(sessionId: string): void {
+    this.streams.delete(sessionId);
+    for (const [id, subscription] of this.subscriptions) {
+      if (subscription.sessionId !== sessionId) continue;
+      this.subscriptions.delete(id);
+      subscription.sink.close(racpError("NOT_FOUND", "Session was closed"), subscription.lastDelivered);
+    }
+  }
+
   /** Append to the right stream and fan out. Returns the allocated envelope. */
   publish(draft: EventDraft): RacpEventEnvelope {
     const stream = draft.scope === "host" ? this.host : this.stream(requireSession(draft));

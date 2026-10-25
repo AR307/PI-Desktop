@@ -136,7 +136,7 @@ test("the component spec assigns mode ownership to Composer", () => {
     componentSpec.indexOf("## 11. Composer"),
     componentSpec.indexOf("## 12.", componentSpec.indexOf("## 11. Composer")),
   );
-  assert.match(topbarSpec, /Project\s+scope/);
+  assert.match(topbarSpec, /project breadcrumb/i);
   assert.doesNotMatch(topbarSpec, /model picker/);
   assert.doesNotMatch(topbarSpec, /Agent \| Plan|mode toggle|mode indicator/);
   assert.match(composerSpec, /combined model ×\s+reasoning-level control/);
@@ -255,7 +255,7 @@ test("pending approval keeps the draft while gating every composer control", () 
 test("composer configuration is retained on the draft when no session is active", () => {
   assert.match(
     storeSource,
-    /const sessionId = get\(\)\.activeSessionId;[\s\S]*?if \(!sessionId\) \{[\s\S]*?draftConfiguration: \{[\s\S]*?mode: config\.mode,[\s\S]*?thinkingLevel: config\.thinkingLevel,/,
+    /const sessionId = targetSessionId \?\? get\(\)\.activeSessionId;[\s\S]*?if \(!sessionId\) \{[\s\S]*?draftConfiguration: \{[\s\S]*?mode: config\.mode,[\s\S]*?thinkingLevel: config\.thinkingLevel,/,
   );
   assert.match(composerSource, /disabled=\{controlsBlocked\}/);
 });

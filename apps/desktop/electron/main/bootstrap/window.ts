@@ -22,6 +22,8 @@ import {
   displayWorkAreaKey,
   emptyWorkPanelReservationState,
   isWorkPanelOuterResizeEdge,
+  maximizedBoundsExceedWorkArea,
+  maximizedBoundsForWorkArea,
   planWorkPanelChatResize,
   planWorkPanelReservation,
   WORK_PANEL_MAX_WIDTH,
@@ -39,7 +41,11 @@ import {
   installWindows11CornerController,
   usesWindows11NativeCorners,
 } from "../window-native-corners";
-import { applyMainWindowBackground, mainWindowBackgroundOptions } from "../window-background";
+import {
+  applyMainWindowBackground,
+  macosWindowSurfaceOptions,
+  mainWindowBackgroundOptions,
+} from "../window-background";
 import { recoverRendererAfterGone } from "../renderer-recovery";
 
 function windowsIconPath(): string | undefined {
@@ -81,6 +87,13 @@ export type WindowLifecycleState = {
   tray: Tray | null;
   closeBehavior: CloseBehavior;
   developerMode: boolean;
+  /**
+   * macOS surface this process launched with: `true` keeps the vibrancy
+   * material behind a transparent window, `false` paints an opaque one. It is
+   * read once before the window is created and is not the live preference —
+   * `settings.macosWindowTranslucency` is.
+   */
+  macosWindowTranslucency: boolean;
   pluginLauncherWindow: BrowserWindow | null;
   host: HostProcess | null;
 };
@@ -201,10 +214,15 @@ export async function createWindow({
       ? {
           titleBarStyle: "hiddenInset" as const,
           trafficLightPosition: MAC_TRAFFIC_LIGHT_POSITION,
-          vibrancy: "sidebar" as const,
-          visualEffectState: "followWindow" as const,
-          transparent: true,
-          backgroundColor: "#00000000",
+          // The default opaque surface avoids continuous WindowServer
+          // recomposition while the Electron window is visible (issue #1064).
+          // `settings.macosWindowTranslucency` opts back into the vibrancy
+          // material, and it is only readable here: Electron fixes
+          // `transparent` when the window is created.
+          ...macosWindowSurfaceOptions(
+            windowState.macosWindowTranslucency,
+            initialWindowBackground,
+          ),
         }
       : {
           frame: false,
@@ -246,13 +264,19 @@ export async function createWindow({
       installWindowShape(window, DEFAULT_WINDOW_CORNER_RADIUS, screen);
     }
   }
-  applyMainWindowBackground(
-    window,
-    process.platform,
-    initialWindowBackground,
-    windows11NativeCorners,
-    initialWindowBackground,
-  );
+  // A translucent macOS window owns its transparent backing and the native
+  // vibrancy material; painting the host palette here would flatten the glass
+  // and quietly make the setting look broken. The opaque surface still takes
+  // the colour on every platform.
+  if (!(process.platform === "darwin" && windowState.macosWindowTranslucency)) {
+    applyMainWindowBackground(
+      window,
+      process.platform,
+      initialWindowBackground,
+      windows11NativeCorners,
+      initialWindowBackground,
+    );
+  }
   suppressLinuxFramelessSystemMenu(window);
   const initialBounds = window.getBounds();
   windowState.workPanelBaseBounds = restoredBounds
@@ -515,7 +539,7 @@ export async function createWindow({
   });
   let windowCloseAccepted = false;
   window.webContents.on("did-start-loading", () => {
-    browserHost.disposeGuest();
+    browserHost.detachPresentation();
     windowState.notificationViewingSessionId = null;
     if (windowState.mainWindow === window) resetMenuRendererReady(window);
   });
@@ -883,8 +907,8 @@ export async function createWindow({
       // so the reservation replan below is treated as an OS-owned adjustment.
       windowState.workPanelUserMovePending = false;
       applyWorkPanelReservation();
-      // Brief pin only when actively recovering from a shelf.
-      if (shelved || electronTiny) {
+      // Only macOS runs the watchdog that releases this temporary recovery pin.
+      if (process.platform === "darwin" && (shelved || electronTiny)) {
         window.setAlwaysOnTop(true, "floating");
         pinUntil = Date.now() + 4000;
       } else {
@@ -927,6 +951,35 @@ export async function createWindow({
   window.on("show", () => ensureStableBounds(false));
   window.on("focus", () => ensureStableBounds(false));
   window.on("restore", () => ensureStableBounds(false));
+
+  // Windows restores a frameless maximized window to the full monitor rect
+  // instead of the work area, so the window covers the taskbar and reads as
+  // fullscreen (issue #1655). Re-apply the work-area-based maximized rect.
+  const reconcileRestoredMaximize = () => {
+    if (!isLiveWindow() || process.platform !== "win32") return;
+    if (
+      !window.isMaximized() ||
+      isWindowFullScreen(window) ||
+      window.isMinimized()
+    ) {
+      return;
+    }
+    const bounds = window.getBounds();
+    const workArea = screen.getDisplayMatching(bounds).workArea;
+    if (!maximizedBoundsExceedWorkArea(bounds, workArea)) return;
+    window.setBounds(maximizedBoundsForWorkArea(bounds, workArea));
+  };
+  // The OS finishes the restore after the event dispatch, overwriting a
+  // synchronous correction, so try now and again once the transition settles.
+  let restoredMaximizeTimer: NodeJS.Timeout | null = null;
+  window.on("restore", () => {
+    reconcileRestoredMaximize();
+    if (restoredMaximizeTimer) clearTimeout(restoredMaximizeTimer);
+    restoredMaximizeTimer = setTimeout(() => {
+      restoredMaximizeTimer = null;
+      reconcileRestoredMaximize();
+    }, windowBoundsSettleMs);
+  });
   window.on("resize", observeNativeWorkPanelResize);
   window.on("move", scheduleBoundsCheck);
   window.on("move", noteUserWindowMove);
@@ -1096,6 +1149,10 @@ export async function createWindow({
     if (workPanelSettleExpiryTimer) {
       clearTimeout(workPanelSettleExpiryTimer);
       workPanelSettleExpiryTimer = null;
+    }
+    if (restoredMaximizeTimer) {
+      clearTimeout(restoredMaximizeTimer);
+      restoredMaximizeTimer = null;
     }
     if (boundsWatchdog) clearInterval(boundsWatchdog);
   });

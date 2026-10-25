@@ -1,0 +1,272 @@
+import assert from "node:assert/strict";
+import { createServer } from "node:http";
+import { execFileSync } from "node:child_process";
+import { mkdtempSync, mkdirSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { pathToFileURL } from "node:url";
+import { Host, resolveHostBinary } from "./e2e/host.mjs";
+import { desktopPaths, resolveElectronBinary } from "./e2e/boot.mjs";
+
+// Real settings -> IPC -> Rust storage -> runtime -> Anthropic HTTP adapter.
+// Only the provider endpoint is simulated; retain profiles and screenshots.
+const { _electron } = process.env.PI_E2E_PLAYWRIGHT
+  ? await import(pathToFileURL(process.env.PI_E2E_PLAYWRIGHT).href)
+  : await import("playwright");
+const scratch = mkdtempSync(join(tmpdir(), "pi-claude-cache-"));
+console.log("EVIDENCE " + scratch);
+writeFileSync(join(scratch, "candidate.json"), JSON.stringify({
+  head: execFileSync("git", ["rev-parse", "HEAD"], { encoding: "utf8" }).trim(),
+  base: execFileSync("git", ["rev-parse", "origin/main"], { encoding: "utf8" }).trim(),
+  changes: execFileSync("git", ["status", "--porcelain"], { encoding: "utf8" }),
+}, null, 2));
+const dataDir = join(scratch, "data"), project = join(scratch, "project");
+mkdirSync(project);
+const requests = [];
+const modelId = "claude-sonnet-4-6";
+const server = createServer(async (req, res) => {
+  if (req.method === "GET") {
+    res.writeHead(200, { "content-type": "application/json" });
+    res.end(JSON.stringify({ data: [modelId, "gpt-5"].map(id => ({ id, object: "model" })) }));
+    return;
+  }
+  const chunks = [];
+  for await (const chunk of req) chunks.push(chunk);
+  const body = JSON.parse(Buffer.concat(chunks).toString());
+  requests.push(body);
+  res.writeHead(200, { "content-type": "text/event-stream" });
+  const event = (type, data) => res.write("event: " + type + "\ndata: " + JSON.stringify({ type, ...data }) + "\n\n");
+  event("message_start", { message: { id: "cache-" + requests.length, type: "message", role: "assistant", model: modelId, content: [], stop_reason: null, stop_sequence: null, usage: { input_tokens: 100, output_tokens: 0 } } });
+  event("content_block_start", { index: 0, content_block: { type: "text", text: "" } });
+  event("content_block_delta", { index: 0, delta: { type: "text_delta", text: "CACHE_ACCEPTED_" + requests.length } });
+  event("content_block_stop", { index: 0 });
+  event("message_delta", { delta: { stop_reason: "end_turn", stop_sequence: null }, usage: { output_tokens: 3 } });
+  event("message_stop", {});
+  res.end();
+});
+await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
+const host = new Host(resolveHostBinary(), dataDir, { quiet: true });
+await host.start();
+await host.call("workspace.set", { path: project });
+const { provider } = await host.call("providers.create", {
+  name: "Claude cache fixture", vendorKey: "custom", type: "openai_compatible", protocol: "anthropic",
+  baseUrl: "http://127.0.0.1:" + server.address().port, authKind: "none", apiStyle: "anthropic_messages", defaultModelId: modelId,
+  models: [modelId, "gpt-5"].map(id => ({ id, contextWindow: 200000, maxTokens: 8192, thinkingLevels: ["off"], defaultThinkingLevel: "off" })),
+});
+await host.call("settings.set", { language: "en", theme: "dark", mirrorCodingWelcomeCompleted: true, onboardingDismissed: true, autoGenerateTitle: false, defaultProviderId: provider.id, defaultModelId: modelId, defaultMode: "agent", defaultPermissionMode: "ask" });
+await host.stop();
+const { appDir, electronBinary } = process.env.PI_E2E_ELECTRON
+  ? { appDir: desktopPaths().appDir, electronBinary: process.env.PI_E2E_ELECTRON }
+  : resolveElectronBinary();
+const env = { ...process.env, PI_DESKTOP_DATA_DIR: dataDir, PI_DESKTOP_START_MAXIMIZED: "0", ELECTRON_RENDERER_URL: "" };
+delete env.ELECTRON_RUN_AS_NODE;
+let app, page;
+const close = async () => {
+  if (!app) return;
+  const current = app;
+  app = undefined;
+  await current.evaluate(({ app }) => app.exit(0)).catch(() => {});
+};
+const launch = async () => {
+  app = await _electron.launch({ executablePath: electronBinary, args: ["--user-data-dir=" + join(scratch, "profile"), "."], cwd: appDir, env, timeout: 60000 });
+  page = app.windows().find(window => window.url().includes("index.html") && !window.url().includes("plugin-launcher"))
+    ?? await app.waitForEvent("window", { predicate: window => window.url().includes("index.html") && !window.url().includes("plugin-launcher"), timeout: 45000 });
+  page.setDefaultTimeout(15000);
+  await page.locator('.composer-input[contenteditable="true"]').first().waitFor({ timeout: 45000 });
+  await page.locator(".startup-splash").waitFor({ state: "hidden", timeout: 45000 });
+};
+const invoke = (name, input) => page.evaluate(async ({ name, input }) => {
+  const result = await window.piDesktop.invoke(window.piDesktop.channels.invoke[name], input);
+  if (!result.ok) throw new Error(JSON.stringify(result.error));
+  return result.data;
+}, { name, input });
+const openModel = async () => {
+  await page.locator('[data-nav="settings"]').click();
+  await page.getByRole("button", { name: "Models", exact: true }).click();
+  await page.locator('[data-provider-id="' + provider.id + '"]').click();
+  const row = page.locator(".provider-chosen-row").filter({ has: page.locator(".provider-chosen-row-id", { hasText: modelId }) });
+  await row.locator(".provider-chosen-advanced-toggle").click();
+  return row;
+};
+const choose = async (label, keyboard = false) => {
+  const row = await openModel();
+  const select = row.getByRole("button", { name: "Claude cache duration", exact: true });
+  await select.click();
+  if (keyboard) {
+    await page.getByRole("option", { name: label, exact: true }).focus();
+    await page.keyboard.press("Enter");
+  } else await page.getByRole("option", { name: label, exact: true }).click();
+  assert.equal(await select.innerText(), label);
+  if (label === "5 minutes") {
+    await page.evaluate(() => { document.documentElement.dataset.theme = "light"; });
+    await app.evaluate(({ BrowserWindow }) => {
+      const main = BrowserWindow.getAllWindows().find(window => window.webContents.getURL().includes("index.html") && !window.webContents.getURL().includes("plugin-launcher"));
+      main.setContentSize(900, 760);
+    });
+    await select.scrollIntoViewIfNeeded();
+    const bounds = await select.boundingBox();
+    assert.ok(bounds && bounds.width > 40 && bounds.height > 20);
+  }
+  await page.screenshot({ path: join(scratch, label.replaceAll(" ", "-") + ".png") });
+  await page.getByRole("button", { name: "Save provider", exact: true }).click();
+  await page.locator(".provider-setup-head").waitFor({ state: "hidden" });
+  const saved = await invoke("providersList");
+  assert.equal(saved.providers.find(p => p.id === provider.id).models.find(m => m.id === modelId).claudeCacheTtl, label === "1 hour" ? "1h" : "5m");
+  await page.locator('[data-nav="back-to-app"]').click();
+};
+const openComposerMenu = async () => {
+  const trigger = page.locator(".composer-model-thinking-chip").first();
+  if (await trigger.getAttribute("aria-expanded") !== "true") await trigger.click();
+  return page.locator(".composer-model-thinking-menu");
+};
+const selectComposerModel = async (id, mirrorCoding = false) => {
+  const menu = await openComposerMenu();
+  await menu.locator(".composer-menu-entry").filter({ has: page.locator(".composer-menu-entry-label", { hasText: /^Model$/ }) }).click();
+  await menu.locator("input").fill(id);
+  const option = menu.locator(".composer-model-option").filter({ has: page.locator(".composer-model-label", { hasText: id }) });
+  await option.and(menu.getByRole(mirrorCoding ? "menuitem" : "menuitemradio")).first().click();
+  if (mirrorCoding) await menu.locator(".mirrorcoding-group-option").filter({ hasText: "Fixture" }).click();
+  await menu.locator(".composer-menu-root").waitFor();
+  return menu;
+};
+const chooseComposerCache = async (ttl, keyboard = false, selectedProviderId = provider.id) => {
+  const menu = await openComposerMenu();
+  const choice = menu.getByRole("radio", { name: ttl === "1h" ? "1 hour" : "5 minutes", exact: true });
+  if (keyboard) { await choice.focus(); await page.keyboard.press("Space"); }
+  else await choice.click();
+  await page.waitForFunction(({ ttl }) => {
+    const row = document.querySelector(".composer-claude-cache");
+    return row?.getAttribute("aria-busy") === "false" &&
+      row.querySelector('[aria-checked="true"]')?.textContent === (ttl === "1h" ? "1 hour" : "5 minutes");
+  }, { ttl });
+  const saved = await invoke("providersList");
+  assert.equal(saved.providers.find(p => p.id === selectedProviderId).models.find(m => m.id === modelId).claudeCacheTtl, ttl);
+  assert.equal(await page.locator(".composer-model-thinking-chip").first().getAttribute("aria-expanded"), "true");
+};
+const captureComposerMenu = async (name) => {
+  const menu = await openComposerMenu();
+  const menuBox = await menu.boundingBox();
+  const controls = await menu.getByRole("radiogroup", { name: "Claude cache duration" }).boundingBox();
+  const viewport = await page.evaluate(() => ({ width: innerWidth, height: innerHeight }));
+  assert.ok(menuBox.x >= 0 && menuBox.y >= 0 && menuBox.x + menuBox.width <= viewport.width + 1);
+  assert.ok(controls.x >= menuBox.x && controls.x + controls.width <= menuBox.x + menuBox.width + 1);
+  assert.ok(controls.y + controls.height <= viewport.height);
+  await page.screenshot({ path: join(scratch, name + ".png") });
+};
+function markers(value) {
+  return value && typeof value === "object" ? Object.entries(value).flatMap(([key, child]) => key === "cache_control" ? [child] : markers(child)) : [];
+}
+const send = async (ttl) => {
+  const count = requests.length;
+  const input = page.locator('.composer-input[contenteditable="true"]').first();
+  await input.fill("Check cache duration " + ttl);
+  await input.press("Enter");
+  await page.getByText("CACHE_ACCEPTED_" + (count + 1), { exact: true }).waitFor({ timeout: 30000 });
+  assert.equal(requests.length, count + 1);
+  const controls = markers(requests.at(-1));
+  assert.ok(controls.length > 0);
+  for (const control of controls) assert.deepEqual(control, ttl === "1h" ? { type: "ephemeral", ttl: "1h" } : { type: "ephemeral" });
+};
+try {
+  await launch();
+  let menu = await selectComposerModel("gpt-5");
+  assert.equal(await menu.locator(".composer-claude-cache").count(), 0);
+  menu = await selectComposerModel(modelId);
+  const input = page.locator('.composer-input[contenteditable="true"]').first();
+  await page.keyboard.press("Escape");
+  await input.fill("Keep my unsent draft");
+  await openComposerMenu();
+  const reasoning = await menu.getByRole("slider").inputValue();
+  await chooseComposerCache("1h", true);
+  assert.equal(await input.innerText(), "Keep my unsent draft");
+  assert.equal(await menu.getByRole("slider").inputValue(), reasoning);
+  await captureComposerMenu("composer-dark-1h");
+  await selectComposerModel("gpt-5");
+  assert.equal(await menu.locator(".composer-claude-cache").count(), 0);
+  await selectComposerModel(modelId);
+  assert.equal(await menu.getByRole("radio", { name: "1 hour", exact: true }).getAttribute("aria-checked"), "true");
+  await page.keyboard.press("Escape");
+  await send("1h");
+  await chooseComposerCache("5m");
+  await page.keyboard.press("Escape");
+  await send("5m");
+  await chooseComposerCache("1h");
+  await page.keyboard.press("Escape");
+  await close();
+  await launch();
+  const row = await openModel();
+  assert.equal(await row.getByRole("button", { name: "Claude cache duration", exact: true }).innerText(), "1 hour");
+  const other = page.locator(".provider-chosen-row").filter({ has: page.locator(".provider-chosen-row-id", { hasText: "gpt-5" }) });
+  await other.locator(".provider-chosen-advanced-toggle").click();
+  assert.equal(await other.getByRole("button", { name: "Claude cache duration", exact: true }).count(), 0);
+  await page.getByRole("button", { name: "Cancel", exact: true }).click();
+  await page.locator('[data-nav="back-to-app"]').click();
+  await choose("5 minutes");
+  menu = await openComposerMenu();
+  assert.equal(await menu.getByRole("radio", { name: "5 minutes", exact: true }).getAttribute("aria-checked"), "true");
+  await chooseComposerCache("1h");
+  await chooseComposerCache("5m", true);
+  await captureComposerMenu("composer-light-5m");
+  await page.keyboard.press("Escape");
+  await send("5m");
+  await page.screenshot({ path: join(scratch, "chat-requests.png") });
+  // Seed only local account metadata: no login, production token or MC request.
+  await close();
+  await host.start();
+  await host.call("providers.syncMirrorCoding", { accountId: 901, groups: [{
+    metadata: { scope: "group", accountId: 901, groupId: "fixture", groupName: "Fixture", description: "Local settings fixture", ratio: 1, dynamicBilling: false, routes: { [modelId]: "anthropic" } },
+    models: [{ id: modelId, contextWindow: 200000, maxTokens: 8192, thinkingLevels: ["off"], defaultThinkingLevel: "off", mirrorCodingGroupId: "fixture" }],
+  }] });
+  await host.stop();
+  await launch();
+  // Signed-out startup disables managed routes. Enable only these synthetic
+  // rows through real IPC, then reload the renderer to read the local catalog.
+  const localCatalog = await invoke("providersList");
+  for (const p of localCatalog.providers.filter(p => p.mirrorCoding?.accountId === 901)) {
+    await invoke("providersUpdate", { id: p.id, enabled: true });
+  }
+  await page.reload();
+  await page.locator('.composer-input[contenteditable="true"]').first().waitFor();
+  await page.locator(".startup-splash").waitFor({ state: "hidden" });
+  menu = await selectComposerModel(modelId, true);
+  const metadata = await invoke("providersList");
+  const accountId = metadata.providers.find(p => p.mirrorCoding?.scope === "account").id;
+  await chooseComposerCache("1h", false, accountId);
+  const projected = (await invoke("providersList")).providers.filter(p => p.mirrorCoding?.accountId === 901);
+  assert.ok(projected.length >= 2);
+  for (const p of projected) assert.equal(p.models.find(m => m.id === modelId).claudeCacheTtl, "1h");
+  await captureComposerMenu("composer-mirrorcoding");
+  await page.keyboard.press("Escape");
+  await page.locator('[data-nav="settings"]').click();
+  await page.getByRole("button", { name: "Models", exact: true }).click();
+  const account = page.locator(".mirrorcoding-model-configs");
+  await account.locator(".provider-chosen-advanced-toggle").click();
+  const accountSelect = account.getByRole("button", { name: "Claude cache duration", exact: true });
+  assert.equal(await accountSelect.innerText(), "1 hour");
+  await accountSelect.click();
+  await page.getByRole("option", { name: "5 minutes", exact: true }).click();
+  await account.getByRole("button", { name: "Save", exact: true }).click();
+  await page.getByText("AI provider saved", { exact: true }).waitFor();
+  const accountSaved = await invoke("providersList");
+  const accountProvider = accountSaved.providers.find(p => p.mirrorCoding?.scope === "account");
+  assert.equal(accountProvider.models.find(m => m.id === modelId).claudeCacheTtl, "5m");
+  await page.screenshot({ path: join(scratch, "mirrorcoding-cache.png") });
+  await page.locator('[data-nav="back-to-app"]').click();
+  menu = await openComposerMenu();
+  assert.equal(await menu.getByRole("radio", { name: "5 minutes", exact: true }).getAttribute("aria-checked"), "true");
+  console.log("PASS composer model selection, immediate cache save, keyboard, draft/reasoning preservation and two-way settings sync");
+  console.log("PASS settings selection, keyboard, persistence, restart, non-Claude exclusion, 1h and 5m real requests");
+  console.log("PASS MirrorCoding account model settings save without production authentication");
+} catch (error) {
+  if (page && !page.isClosed()) {
+    await page.screenshot({ path: join(scratch, "failure.png") });
+    writeFileSync(join(scratch, "failure-dom.txt"), await page.locator("body").innerText());
+  }
+  throw error;
+} finally {
+  writeFileSync(join(scratch, "requests.json"), JSON.stringify(requests, null, 2));
+  await close();
+  server.closeAllConnections();
+  await new Promise(resolve => server.close(resolve));
+  console.log("Retained isolated evidence: " + scratch);
+}

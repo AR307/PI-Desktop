@@ -124,6 +124,7 @@ does not turn temporary thread pressure into a host process exit.
 |---|---|---|
 | `WORKSPACE_REQUIRED` | no | no workspace bound |
 | `PATH_OUTSIDE_WORKSPACE` | no | path escapes sandbox before an explicit outside-path permission decision, or a prompt attachment is outside its session scratch/project/attachment roots |
+| `VISUALIZATION_HTML_ONLY` | no | a Write/Edit into the session visualization directory is not a direct-child `.html` fragment |
 | `WORKSPACE_PATH_DENIED` | no | an explicit `Read`/`Write`/`Edit` path hit the always-on security denylist (private keys, `.env` files, credential bundles, `.git/objects`); an outside-path grant does not lift it (spec 15 §3) |
 | `READ_PATH_IS_DIRECTORY` | no | `Read` was given a directory; the result carries a `Glob` suggestion |
 | `TOOL_BINARY_CONTENT` | no | `Read` refused to dump a binary file into the model context |
@@ -383,7 +384,11 @@ replayed by either retry budget, and a delegate reports it as
 classified first and stays `PROVIDER_RATE_LIMITED`.
 
 An exact `terminated` provider message and equivalent premature stream-close
-messages map to `STREAM_FAILED`. A request-setup or post-response
+messages map to `STREAM_FAILED`. A message is `TURN_ABORTED` only for a
+structured abort or the fixed phrases `Request aborted`, `The operation was
+aborted`, and `Turn aborted`; connection-abort wording such as `software
+caused connection abort` stays retriable `NETWORK_ERROR`, and `stream aborted`
+stays retriable `STREAM_FAILED`. A request-setup or post-response
 `PROVIDER_RATE_LIMITED` uses the shared runtime budget: ten retries after the
 initial attempt, with setup and stream failures counting together. Non-429
 transient failures — `STREAM_FAILED`, `NETWORK_ERROR`, `TIMEOUT`, and retryable

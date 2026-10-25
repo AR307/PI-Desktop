@@ -17,6 +17,7 @@ export class MobileScopeAccess {
   async resolve(input: MobileSyncScopeInput): Promise<MobileSyncScope> {
     if (input.kind === "account") throw new RacpError("INVALID_ARGUMENT", "account_scope_requires_service");
     if (input.kind === "session") {
+      if (input.sessionId.startsWith("side-")) throw new RacpError("FORBIDDEN", "temporary_session_not_shared");
       const { session } = await this.host().call<{ session?: SessionDetail }>("session.get", { id: input.sessionId, messageLimit: 1 });
       if (!session) throw new RacpError("NOT_FOUND", "session_not_found");
       return { kind: "session", id: session.id, label: session.title || "Untitled" };
@@ -31,13 +32,15 @@ export class MobileScopeAccess {
     const [result, groups] = await Promise.all([
       this.host().call<{ sessions: SessionSummary[] }>("session.list"), this.groups(),
     ]);
-    if (accountWide) return result.sessions;
+    const sessions = result.sessions.filter((session) => !session.id.startsWith("side-"));
+    if (accountWide) return sessions;
     const ids = new Set(grants.filter((grant) => grant.scope.kind === "session").map((grant) => grant.scope.id));
     const groupIds = new Set(grants.filter((grant) => grant.scope.kind === "project").map((grant) => grant.scope.id));
     const roots = new Set(groups.filter((group) => groupIds.has(group.id)).flatMap((group) => group.roots.map((root) => pathKey(root.path))));
-    return result.sessions.filter((session) => ids.has(session.id) || (session.projectPath && roots.has(pathKey(session.projectPath))));
+    return sessions.filter((session) => ids.has(session.id) || (session.projectPath && roots.has(pathKey(session.projectPath))));
   }
   async require(sessionId: string, grants: MobileGrant[]): Promise<SessionSummary> {
+    if (sessionId.startsWith("side-")) throw new RacpError("FORBIDDEN", "temporary_session_not_shared");
     const accountWide = grants.some((grant) => grant.scope.kind === "account");
     const explicit = grants.some((grant) => grant.scope.kind === "session" && grant.scope.id === sessionId);
     const projectIds = new Set(grants.filter((grant) => grant.scope.kind === "project").map((grant) => grant.scope.id));

@@ -337,6 +337,20 @@ to later refresh and inference; the vendor picker does not collect them.
   branch (discarding unmerged work)
 - `session.getScratchPath` — the session's scratch directory (D114), created
   on demand
+- `visualizations.readFragment({ sessionId, fileName })` — private Main-to-Host
+  reader for `pi-genui:` documents (D671). No renderer IPC or Plugin SDK method
+  is added. Parameters contain only a validated session ID and direct `.html`
+  basename; caller-supplied roots and extra fields are rejected. Host resolves
+  against its current data directory and pins native directory capabilities:
+  Unix uses relative `openat` with no-follow/nonblocking flags; Windows uses
+  `NtCreateFile` with a pinned `RootDirectory` for every ancestor/owned child
+  and refuses opened reparse entries. Share masks are an extra defense, not a
+  substitute for relative capabilities. Returns `{ ok: true, base64 }` for at
+  most 2 MiB of file bytes, or
+  `{ ok: false, code: "not-found" | "too-large" }`. Main validates this payload,
+  decodes bytes, rejects full HTML documents, and supplies the response sandbox.
+  Filesystem work does not hold the state/database lock. Additive to v11; no
+  storage schema change.
 - `session.rename({ id, title })` trims and validates the title at the host
   boundary. It accepts 1–80 Unicode code points and returns `{ ok: boolean }`;
   blank or overlong titles are `INVALID_PARAMS`. A successful rename changes
@@ -663,6 +677,41 @@ Additive `worktree.*` methods; no protocol version bump. Failures use code
 - `tools.execute`
 - `tools.abort`
 - `tools.output` notifications for ordered `stdout`/`stderr` chunks
+
+`tools.abort` accepts `sessionId`, `toolCallId`, and the optional `toolName`.
+Current runtimes include the name so Host cancellation is scoped to the exact
+tool while permission and admission are pending. Older callers may omit it;
+that form retains the legacy Bash cancellation behavior and can still stop an
+active typed cancellation by session and call id.
+
+### Background tasks
+- `backgroundTasks.list`
+- `backgroundTasks.output`
+- `backgroundTasks.stop`
+- `backgroundTasks.changed` notification carrying `{ version }`, emitted when a
+  task starts, exits, or is stopped
+
+A `tools.execute` call with `runInBackground: true` starts a `Bash` command the
+host owns instead of the turn: the call resolves immediately with a
+`backgroundTaskId`, the task never joins the per-tool-call cancellation registry
+so `tools.abort` / `agent.abort` cannot reach it, and its output is kept in
+bounded per-stream rings. The registry lives in the host process, so every task
+stops during host shutdown and an application exit never leaves an orphan
+process.
+
+Output chunks do not emit `backgroundTasks.changed`; the event remains a
+lifecycle invalidation, not a high-volume log transport. Clients fetch only the
+selected output preview. A terminal snapshot includes the final drained output,
+and shutdown signals every registered task even during a concurrent output read.
+
+`backgroundTasks.list` stays session-agnostic: it returns every task in the
+registry, each carrying its `sessionId`, and the renderer filters to the session
+on screen. Filtering is presentation, so the wire contract does not grow a
+session parameter and no consumer loses visibility of other sessions' work.
+Deleting a session signals its running tasks host-side; the deletion path does
+not wait for them to settle and does not fail when one cannot be killed.
+Removing a row in the UI is purely a view action and issues no RPC, so a removed
+task's output remains readable by id until the host's own retention drops it.
 
 ### Shells
 - `commandShells.list`
