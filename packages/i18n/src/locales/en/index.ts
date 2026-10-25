@@ -1,10 +1,12 @@
 import { accountBenefitsEn } from "../account-benefits.js";
 import { selectionEn } from "../selection.js";
+import { codexImportEn } from "../codex-import.js";
 import { mobileSyncEn } from "../mobile-sync.js";
 import { mobileEn } from "../mobile.js";
 import { imagesEn } from "../images.js";
 export const en = {
   accountBenefits: accountBenefitsEn,
+  codexImport: codexImportEn,
   ultra: {"label":"Ultra","hint":"{{reasoning}}Workflow + Subagent","unavailable":"Select a chat model and enable subagents to use Ultra."},
   mobileSync: mobileSyncEn,
   mobile: mobileEn,

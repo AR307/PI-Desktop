@@ -27,6 +27,7 @@ thiserror = "2"
 tokio = { version = "1", features = ["full"] }
 uuid = { version = "1", features = ["v4", "serde"] }
 walkdir = "2"
+zstd = { version = "0.13", default-features = false }
 mimalloc = { version = "0.1", default-features = false }
 aes-gcm = "0.11"
 argon2 = "0.5"

@@ -1,5 +1,6 @@
 import { accountBenefitsZhTW } from "../account-benefits.js";
 import { selectionEn } from "../selection.js";
+import { codexImportEn } from "../codex-import.js";
 import { mobileSyncZhCN } from "../mobile-sync.js";
 import { mobileZhCN } from "../mobile.js";
 import { imagesZhCN } from "../images.js";
@@ -7,6 +8,7 @@ import { en, type EnglishCatalog } from "../en/index.js";
 
 export const zhTW = {
   accountBenefits: accountBenefitsZhTW,
+  codexImport: codexImportEn,
   ultra: {"label":"Ultra","hint":"{{reasoning}}Workflow + Subagent","unavailable":"请选择聊天模型并启用子代理后使用 Ultra。"},
   mobileSync: mobileSyncZhCN,
   mobile: mobileZhCN,

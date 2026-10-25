@@ -187,6 +187,16 @@
   covers actual Composer and Account settings interactions with controlled
   HTTP/IPC handlers. Native Electron transport, production server parity and
   packaged-install acceptance are not claimed.
+## 2026-10-25 - Simplify Codex import to continuation only
+
+- Removed individual and bulk history-only actions from the import wizard.
+  Confirmation keeps available continuation context instead of offering a
+  competing archive-only choice. The renderer no longer submits historyOnly.
+- Updated English and Chinese guidance. A source with no recoverable context
+  explains how to choose a complete source and rescan, without creating an
+  empty-context conversation. Existing imported records remain unchanged.
+- Added Electron user-path regressions for single/bulk confirmation and missing
+  context; the single-action assertion fails against the previous UI.
 
 ## 2026-10-15 - Upstream integration, shared branding and account image tools
 
@@ -1735,3 +1745,44 @@ preserving meaningful output and completed tools after compaction.
 Windows packages are built locally; macOS arm64/x64 use the artifact-only
 Actions lane. Android remains on its existing release. Validation and artifact
 results are recorded in docs/releases/0.21.0-beta.5-validation.md.
+## 2026-10-25 - Explicit Codex native history import
+
+### Real-source recovery and import usability
+
+- Stream compressed rollout segments, resolve physical base segments separately
+  from logical threads, and scope imported message IDs per destination. These
+  fix false missing-base/cycle reports and batch-import collisions between forks.
+- Preserve dynamic tool results and activity as historical records. Explicit
+  partial-context consent keeps usable native checkpoint messages; history-only
+  remains available when source context is genuinely missing.
+- Keep list rows readable, collapse optional directory controls and raw warnings,
+  expose localized recovery actions, batch confirmation and current-item progress,
+  and clear completed selections without losing pending choices.
+- Authorized real-source acceptance imported six conversations into isolated
+  storage, verified restart/duplicates, and exercised the full Electron wizard.
+  Two real imports also continued through a controlled loopback provider with
+  two new sandbox-directory tool actions and no historical replay or paid calls.
+  Private records and screenshots remain untracked; see validation documentation.
+
+### Project-search correction
+
+- Resolve Codex's saved local-host legacy project IDs to current SQLite project
+  IDs before listing and filtering; do not merge projects by display name.
+- Prefer current nonempty conversation names so searches match the Codex sidebar.
+- Add a failing-then-passing Host scan/filter/import regression and an Electron
+  project-menu/search journey with migrated source metadata. Source files and
+  credentials are not modified or copied.
+
+- Add a modular Rust source catalog, paginated/segmented history reader, visible
+  transcript projection, effective-context recovery, attachment import and
+  project-root binding. Native checkpoints allow PI continuation without old
+  tool execution, source credentials or copied project code.
+- Add a typed thin Main bridge and one shared Renderer wizard, with the pinned
+  Sidebar card, three-way dismissal and persistent Project archive entry.
+- Preserve source identity and working directories, skip duplicate imports,
+  require confirmation for history-only recovery, and isolate cancellation
+  by batch identity. Missing directories block continuation until rebound.
+- Acceptance uses synthetic Host SQLite/JSONL fixtures, production Sidebar in
+  isolated Electron, and a real sidecar plus controlled endpoint with actual
+  tools and restart. See docs/testing/codex-import-validation.md for boundaries.
+- No push, merge, release, server change or real user-profile modification.

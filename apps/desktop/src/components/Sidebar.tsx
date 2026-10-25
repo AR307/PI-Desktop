@@ -1,3 +1,4 @@
+import { CodexImportCard } from "../features/codex-import/CodexImportCard";
 import { IconClock } from "./icons";
 import { RemoteProjectGroups } from "./remote/RemoteProjectGroups";
 import { groupRemoteProjectSessions } from "../lib/remote-project-catalog";
@@ -2619,6 +2620,7 @@ export function Sidebar({
         </div>
       </div>
 
+      <CodexImportCard />
       <div className="sidebar-body no-drag">
 
         {pinnedSessions.length > 0 ? (

@@ -24,6 +24,8 @@ import { LiveVoiceStatusHost } from "../voice/live/LiveVoiceStatusHost";
 import { CollapsedTitlebarActions, RoutePending } from "./chrome";
 import { useAppShellRuntime } from "./useAppShellRuntime";
 import { MirrorCodingWelcome } from "../account/MirrorCodingWelcome";
+import { CodexImportDismissDialog } from "../codex-import/CodexImportCard";
+import { CodexImportWizard } from "../codex-import/CodexImportWizard";
 
 const SettingsPage = lazy(() =>
   import("../../pages/SettingsPage").then((module) => ({
@@ -377,6 +379,8 @@ export function AppShell() {
       {(ready && !showSplash) || startupPhase !== "starting" ? (
         <WindowControls />
       ) : null}
+      <CodexImportDismissDialog />
+      <CodexImportWizard />
       <ProjectCreateDialog />
       {ready ? <MirrorCodingWelcome /> : null}
       <LifecycleConfirmationDialog />

@@ -74,6 +74,16 @@ completed tool evidence, incomplete-call filtering, and absence of parent
 records in child persistence. Host tests exercise uniqueness, inherited policy,
 parent-delete ordering and no resurrection. Main quoted edits/steering and
 child configuration changes run through the same Electron user-path suite.
+### E2E-CODEX-migrated-project-search
+
+- Scan a source containing SQLite projects and legacy UI project assignments
+  joined by Codex's saved mapping for the selected local host. Open the project
+  menu, select its single current entry, and search by the thread display name.
+  The matching conversation remains selectable and imports into that project.
+- Preserve unrelated same-name projects and ignore remote-host mappings. Repeated
+  import skips the existing native session. Source databases remain read-only.
+- Coverage: Host catalog user-path regression and the card-open stage of
+  `scripts/e2e-codex-import.mjs`, with real Electron IPC and synthetic SQLite.
 
 ## Storage junction normalization
 
@@ -19009,3 +19019,19 @@ increment and production update publication require later service validation.
   `composer-suggestion-state.test.mjs`, `composer-suggestion-relay.test.mjs`,
   and `plugin-composer-suggestion.test.mjs`; the rendered journey remains a
   manual/Electron check when this surface changes.
+## Codex native import (2026-10-25)
+
+| ID | User path and expected result |
+| --- | --- |
+| E2E-CODEX-ENTRY | First launch shows the pinned Sidebar card above chats without scanning; both Sidebar and Project archive open one wizard. |
+| E2E-CODEX-DISMISS | Cancel/Escape restore focus and visibility; current-run dismissal survives navigation/reload but not restart; permanent dismissal survives restart; Settings restores it. |
+| E2E-CODEX-SELECT | Scan a controlled directory, select one conversation, import, inspect its native history; no default select-all and no source modification. |
+| E2E-CODEX-CONTINUE | Native import, controlled-model follow-up, actual read/write, Host/runtime restart and another follow-up retain effective context; historical tools never execute. |
+| E2E-CODEX-COMPLEX | 301 candidates, paginated DB plus rollout, fork chains, rollback/compaction, Chinese, images, incomplete/unknown records and missing files with explicit partial-context confirmation. |
+| E2E-CODEX-LIFECYCLE | Cancel one batch and retry with a new identity; completed imports survive and duplicates never overwrite PI work; missing cwd blocks execution until bound. |
+| E2E-CODEX-VISUAL | Production Sidebar/import components in isolated Electron, compiled themes, narrow dialogs, independent list layout, keyboard focus and retained screenshots. |
+| E2E-CODEX-PARTIAL | Incomplete sources expose one continuation action above collapsed details; retain available context for one or several items. No individual or bulk history-only action exists. Missing context explains source repair without creating an empty-context conversation. Completed selections clear. |
+| E2E-CODEX-SEGMENTS | Stream Zstd segments, distinguish physical bases from logical threads including matching initial IDs, and import multiple forks without inherited-message collisions. |
+| E2E-CODEX-REAL | With explicit user authorization, read actual local source into isolated storage; import current and affected conversations, restart, skip duplicates, and inspect full AppShell list/review/open at normal and narrow widths. Capture continuation only at a controlled loopback endpoint with new tools confined to a fixture directory. Never commit private artifacts. |
+
+Commands and coverage boundaries: [Codex import validation](../../testing/codex-import-validation.md).

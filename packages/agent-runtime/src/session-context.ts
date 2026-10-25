@@ -61,11 +61,11 @@ export function sessionEntryToContextMessages(
       return [
         ...(entry.details && typeof entry.details === "object" && "systemMessageJson" in entry.details
           ? [readSystemMessage(entry.details.systemMessageJson)] : []),
-        createCompactionSummaryMessage(
+        ...(entry.summary ? [createCompactionSummaryMessage(
           entry.summary,
           entry.tokensBefore,
           entry.timestamp,
-        ),
+        )] : []),
         ...(identity?.requiresCompletionsReasoningReplay === false
           ? []
           : retainedReasoningToMessages(

@@ -1845,6 +1845,10 @@ async fn handle_request(
             .await
             .map_err(config_sync_rpc_err);
     }
+    if method.starts_with("codex.import.") {
+        return crate::codex_import::handle(state, method, params).await
+            .map_err(|error| rpc_err(1002, error.to_string(), "INVALID_PARAMS"));
+    }
 
     match method {
         "tools.remoteComplete" | "tools.workspaceExecute" | "tools.workspaceAbort" => {
