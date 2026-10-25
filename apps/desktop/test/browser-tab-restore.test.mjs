@@ -9,6 +9,10 @@ const { outputText } = ts.transpileModule(readFileSync(new URL("../src/stores/sl
   compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
 });
 const imports = {
+  "../../features/chat/side-chat-service": {
+    confirmSideChatDiscard: async () => { throw new Error("Browser recovery must not close a side chat"); },
+    closeSideChat: async () => { throw new Error("Browser recovery must not close a side chat"); },
+  },
   "../../lib/api": { api: { pluginViewClose: async () => {} } },
   "../../lib/remote-session-safety": { isRemoteSession: () => false },
   "../../lib/work-panel-tabs": workPanelTabs,

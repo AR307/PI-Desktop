@@ -3,8 +3,8 @@ import test from "node:test";
 
 const { normalizeToolResultImages } = await import(
   new URL(
-    "../../../packages/agent-runtime/node_modules/@earendil-works/pi-coding-agent/dist/utils/tool-result-images.js",
-    import.meta.url,
+    "./utils/tool-result-images.js",
+    import.meta.resolve("@earendil-works/pi-coding-agent"),
   ),
 );
 

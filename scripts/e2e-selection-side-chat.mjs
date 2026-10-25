@@ -1,4 +1,6 @@
 import assert from "node:assert/strict";
+import { createRequire } from "node:module";
+const { chromium } = createRequire(import.meta.url)(process.env.PI_TEST_PLAYWRIGHT || "playwright");
 import { spawn } from "node:child_process";
 import { createServer } from "node:http";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
@@ -208,6 +210,7 @@ const launch = () =>
 let child = launch();
 let log = "",
   ws,
+  browser,
   failureEvidence;
 for (const stream of [child.stdout, child.stderr])
   stream.on("data", (data) => {
@@ -284,31 +287,10 @@ try {
     });
   };
   const click = async (selector) => {
-    await evaluate(
-      "Promise.all(document.getAnimations().filter(a=>a.effect?.getTiming().iterations!==Infinity).map(a=>a.finished.catch(()=>{})))",
-    );
-    await evaluate(
-      "new Promise(resolve=>{let last='',stable=0;const sample=()=>{const e=document.querySelector(" +
-        JSON.stringify(selector) +
-        ");if(!e){resolve();return;}e.scrollIntoView({block:'nearest'});const r=e.getBoundingClientRect(),next=[r.x,r.y,r.width,r.height].join(',');stable=next===last?stable+1:0;last=next;if(stable>=2)resolve();else requestAnimationFrame(sample);};sample();})",
-    );
-    const point = await evaluate(
-      "(()=>{const e=document.querySelector(" +
-        JSON.stringify(selector) +
-        ");if(!e)throw new Error('Missing target');e.scrollIntoView({block:'nearest'});const r=e.getBoundingClientRect();return {x:r.x+r.width/2,y:r.y+r.height/2};})()",
-    );
-    await send("Input.dispatchMouseEvent", {
-      type: "mousePressed",
-      button: "left",
-      clickCount: 1,
-      ...point,
-    });
-    await send("Input.dispatchMouseEvent", {
-      type: "mouseReleased",
-      button: "left",
-      clickCount: 1,
-      ...point,
-    });
+    if (!browser?.isConnected()) browser = await chromium.connectOverCDP("http://127.0.0.1:" + port);
+    const page = browser.contexts()[0].pages().find((page) => page.url().includes("index.html") && !page.url().includes("plugin-launcher"));
+    assert.ok(page, "isolated Desktop page is available");
+    await page.locator(selector).first().click({ timeout: 10000 });
   };
   const screenshot = async (name) => {
     await evaluate(
@@ -1319,6 +1301,7 @@ try {
   throw error;
 } finally {
   writeFileSync(join(scratch, "requests.json"), JSON.stringify(requests, null, 2));
+  await browser?.close();
   ws?.close();
   for (const res of held) res.end();
   server.closeAllConnections();

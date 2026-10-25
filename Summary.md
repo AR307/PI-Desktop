@@ -2,6 +2,14 @@
 
 ## 2026-10-25 - Upstream integration acceptance corrections
 
+- Complete the real side-chat lifecycle journey using Playwright actionability
+  rather than stale screen coordinates after viewport changes. Background-only
+  close confirmation, cancellation, queued-work cleanup and restart all pass.
+- Keep browser recovery, structured-error and image normalization regressions
+  aligned with current imports and behavior; make GenUI fixture paths portable.
+- Windows 0.21.0 packaged startup passes with bundled Host protocol 11 and 800
+  session records. macOS packaging and final release publication remain pending.
+
 - Align terminal live-message projection with upstream empty-assistant
   persistence so Smart Stop restores an unanswered side-chat draft after a
   completed tool turn. Preserve tool results, errors, reasoning and image cards.
