@@ -42,7 +42,9 @@ export function verifyProviderRecovery(cases) {
       assert.equal(result.detail.session.messages.filter(message => message.role === "user").length, 1, "recovery does not invent a visible user submission");
     } else if (index !== 3) {
       assert.equal(errors.length, 0);
-      assert.equal(assistants.length, index === 4 ? 12 : 1);
+      // Tool-only assistant envelopes have no visible row after upstream's
+      // empty-assistant persistence fix; their results remain asserted below.
+      assert.equal(assistants.length, 1);
       assert(assistants.every((m) => m.status === "complete"));
       assert.equal(assistants.at(-1).content, "RECOVERED_699");
       assert(result.text.includes("RECOVERED_699"));

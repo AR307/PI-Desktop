@@ -63,6 +63,7 @@ fn mirrorcoding_sync_persists_group_and_model_bindings() {
                     max_tokens: 8_192,
                     max_tokens_source: Some("catalog".into()),
                     thinking_protocol: None,
+                    supports_reasoning_effort: None,
                     thinking_levels: vec!["off".into(), "medium".into()],
                     default_thinking_level: Some("medium".into()),
                     supports_images: None,

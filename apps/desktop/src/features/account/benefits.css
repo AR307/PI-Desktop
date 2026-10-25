@@ -131,4 +131,31 @@
   .mc-quota-trigger {
     width: 44px;
   }
+  .composer-toolbar:has(.mc-account-balances) .composer-mode-chip {
+    width: 28px;
+    min-width: 28px;
+    max-width: 28px;
+    flex-basis: 28px;
+    justify-content: center;
+    padding: 0 !important;
+  }
+  .composer-toolbar:has(.mc-account-balances) .composer-mode-chip-label {
+    display: none;
+  }
+}
+@container composer-stack (max-width: 400px) {
+  .composer-toolbar:has(.mc-account-balances) {
+    padding-inline: 4px;
+    gap: 2px;
+  }
+  .mc-wallet-trigger {
+    max-width: 72px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    padding-inline: 2px;
+  }
+  .composer-toolbar:has(.mc-account-balances) .composer-left,
+  .composer-toolbar:has(.mc-account-balances) .composer-right {
+    gap: 2px;
+  }
 }

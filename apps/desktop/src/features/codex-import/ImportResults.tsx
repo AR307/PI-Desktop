@@ -4,6 +4,11 @@ import { Button } from "../../components/ui";
 
 export type ImportResult = CodexImportResult | { externalId: string; status: "failed"; warnings: string[] };
 export type ImportChoice = "normal" | "partial";
+const contextLabels = {
+  restored: "codexImport.context_restored",
+  partial: "codexImport.context_partial",
+  historyOnly: "codexImport.context_historyOnly",
+} as const;
 
 function warningCategory(warning: string): string {
   if (/retained/i.test(warning)) return "retainedGap";
@@ -32,7 +37,7 @@ export function ImportResults({ results, title, busy, retry, open }: {
     </div>}
     {results.map((result) => <article key={result.externalId} className="codex-import-result" data-status={result.status}>
       <strong>{title(result.externalId)}</strong>
-      <span>{t("codexImport." + result.status)}{"context" in result && result.status === "imported" ? " · " + t("codexImport.context_" + result.context) : ""}</span>
+      <span>{t("codexImport." + result.status)}{"context" in result && result.status === "imported" ? " · " + t(contextLabels[result.context]) : ""}</span>
       {result.status === "needsConfirmation" && !result.availableContextMessages && <p>{t("codexImport.noContext")}</p>}
       {result.status === "needsConfirmation" && (result.availableContextMessages ?? 0) > 0 && <div className="codex-import-controls">
         <Button variant="primary" disabled={busy} onClick={() => retry([result.externalId], "partial")}>{t("codexImport.confirmPartial")}</Button>

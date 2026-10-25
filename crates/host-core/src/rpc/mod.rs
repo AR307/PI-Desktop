@@ -8840,6 +8840,8 @@ mod tests {
             None,
             None,
             Some("ask"),
+            None,
+            None,
         )
         .unwrap();
         let state = Arc::new(Mutex::new(app_state));

@@ -25,6 +25,26 @@ const message = (id, overrides = {}) => ({
 });
 const history = (length) => Array.from({ length }, (_, index) => message(`row-${index}`));
 
+test("tool-only completion does not leave a phantom row before smart Stop", () => {
+  const user = message("user", { role: "user", content: "write a file" });
+  const tool = message("tool", { role: "tool", toolCallId: "tool", toolStatus: "success" });
+  const empty = message("tool-envelope", { content: "", status: "complete" });
+  assert.deepEqual(
+    projectMessageEnd([user, { ...empty, status: "streaming" }, tool], { type: "message_end", message: empty }),
+    [user, tool],
+  );
+  for (const extra of [
+    { thinking: "reasoning" },
+    { error: { code: "TEST", message: "failed" } },
+    { imageGeneration: { status: "complete", images: [] } },
+    { toolCallId: "tool" },
+    { steering: true },
+  ]) {
+    const retained = { ...empty, ...extra };
+    assert.deepEqual(projectMessageEnd([user], { type: "message_end", message: retained }), [user, retained]);
+  }
+});
+
 test("warm replacements and dedupe do not read historical message ids", () => {
   let historicalIdReads = 0;
   const rows = Array.from({ length: 10_000 }, (_, index) => ({

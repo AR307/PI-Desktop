@@ -48,6 +48,8 @@ const electron = `data:text/javascript,${encodeURIComponent(`
         getURL() { return this.url; },
         getTitle: () => "fixture",
         isLoading: () => false,
+        getBackgroundThrottling: () => true,
+        setBackgroundThrottling() {},
         isDestroyed: () => false,
         close: () => {},
         navigationHistory: { canGoBack: () => false, canGoForward: () => false },

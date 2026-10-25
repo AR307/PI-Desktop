@@ -1,5 +1,17 @@
 # PI-Desktop MirrorCoding Edition
 
+## 2026-10-25 - Upstream integration acceptance corrections
+
+- Align terminal live-message projection with upstream empty-assistant
+  persistence so Smart Stop restores an unanswered side-chat draft after a
+  completed tool turn. Preserve tool results, errors, reasoning and image cards.
+- Keep wallet controls within narrow main and side composers; collapse the mode
+  label and bound wallet text instead of overlapping adjacent controls.
+- Use explicit Codex context-status translation keys and update native browser
+  bounds and provider/RPC test fixtures for the upstream contracts.
+- Update recovery acceptance to expect no empty tool-only assistant bubbles;
+  all eleven completed tool results and no-replay assertions remain required.
+
 ## 2026-10-25 - Wallet balance and useful subscription indicator
 
 - Extend the existing main-owned benefits projection with wallet read consent,
