@@ -1,5 +1,16 @@
 # 04. E2E Test Plan
 
+### E2E-CODEX-migrated-project-search
+
+- Scan a source containing SQLite projects and legacy UI project assignments
+  joined by Codex's saved mapping for the selected local host. Open the project
+  menu, select its single current entry, and search by the thread display name.
+  The matching conversation remains selectable and imports into that project.
+- Preserve unrelated same-name projects and ignore remote-host mappings. Repeated
+  import skips the existing native session. Source databases remain read-only.
+- Coverage: Host catalog user-path regression and the card-open stage of
+  `scripts/e2e-codex-import.mjs`, with real Electron IPC and synthetic SQLite.
+
 ## Storage junction normalization
 
 Create a dangling Windows junction with standalone Node, then migrate its

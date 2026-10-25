@@ -1,5 +1,23 @@
 # Codex import candidate validation
 
+## Migrated-project search regression
+
+- A real-source, read-only metadata check found both a current SQLite project
+  and its legacy UI project, while conversations still referenced the legacy
+  identity. The previous catalog offered two entries and the current entry
+  filtered to zero conversations. No private source data is in test fixtures.
+- The new synthetic Host user-path test failed before the fix (three project
+  entries instead of two), then passed scan, current-project selection, current
+  thread-name search, native import and duplicate-import skipping. It also keeps
+  an unrelated same-name project separate and ignores a remote mapping.
+- Host import suite: 14/14 passed. Six-stage Electron acceptance passed, including
+  actual project-menu selection, display-name search and selected import.
+- A fresh read-only scan of the affected source returned one canonical project
+  and the requested conversation. No real conversation was imported by the
+  verification and no paid provider was invoked.
+- Interactive preview refresh reuses its isolated data and browser directories;
+  it does not copy account state from the production installation.
+
 ## Candidate environment
 
 - Branch: codex/codex-history-import-20261025.

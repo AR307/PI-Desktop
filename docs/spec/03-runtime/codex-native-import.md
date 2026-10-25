@@ -27,6 +27,11 @@ archived conversations, and start unselected. Select a page, a project or
 individual conversations. No fixed total-session truncation is permitted.
 
 Source project identity owns the PI group mapping, never its display name.
+Codex's saved local-host legacy-to-app-server project mapping resolves old
+thread assignments to the current SQLite project before listing or filtering.
+Mapped aliases appear once; unrelated projects with the same name stay separate.
+Remote-host mappings do not apply to a local source. A nonempty current thread
+name is its searchable display title; the session index names unnamed records.
 Ordered roots, names and each conversation's actual working directory remain
 distinct. Exact-path PI groups can be reused; conflicting roots require explicit
 mapping. Root remapping preserves relative working-directory suffixes. Missing

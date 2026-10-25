@@ -38,6 +38,18 @@ const {app,BrowserWindow,ipcMain}=require("electron");const path=require("node:p
 const {registerCodexImportIpc}=require("./ipc.cjs");
 app.setPath("userData",path.join(__dirname,"profile"));
 app.whenReady().then(async()=>{
+ const {DatabaseSync}=require("node:sqlite");
+ const source=path.join(__dirname,"source"),workspace=path.join(__dirname,"workspace");
+ const database=new DatabaseSync(path.join(source,"state_5.sqlite"));
+ database.exec("CREATE TABLE IF NOT EXISTS threads(id TEXT PRIMARY KEY,rollout_path TEXT,cwd TEXT,title TEXT,name TEXT,project_id TEXT,archived INTEGER); CREATE TABLE IF NOT EXISTS projects(id TEXT PRIMARY KEY,name TEXT); CREATE TABLE IF NOT EXISTS project_roots(project_id TEXT PRIMARY KEY,path TEXT,position INTEGER); INSERT OR IGNORE INTO projects VALUES('current-project','Imported workspace');");
+ database.prepare("INSERT OR IGNORE INTO project_roots VALUES('current-project',?,0)").run(workspace);
+ for(const id of ["first","second"]) database.prepare("INSERT OR IGNORE INTO threads VALUES(?,?,?,?,?,NULL,?)").run(id,path.join(source,id==="first"?"archived_sessions":"sessions",id+".jsonl"),workspace,"Original request","Imported "+id,id==="first"?1:0);
+ database.close();
+ await fs.writeFile(path.join(source,".codex-global-state.json"),JSON.stringify({
+  "local-projects":{"legacy-project":{name:"Imported workspace",rootPaths:[workspace]}},
+  "thread-project-assignments":Object.fromEntries(["first","second"].map(id=>[id,{projectKind:"local",projectId:"legacy-project"}])),
+  "app-server-project-id-by-legacy-project-id-by-host":{["local:"+source]:{"legacy-project":"current-project"}}
+ }));
  const {Host}=await import(${JSON.stringify(new URL("./e2e/host.mjs", import.meta.url).href)});
  const host=new Host(${JSON.stringify(process.env.PI_DESKTOP_HOST_BIN || join(root, "target/debug", process.platform === "win32" ? "pi-desktop-host-core.exe" : "pi-desktop-host-core"))},path.join(__dirname,"data"),{env:{CODEX_HOME:path.join(__dirname,"source")},quiet:true});
  await host.start();let scans=0;const adapter={call:(method,params,timeout)=>{if(method==="codex.import.scan")scans++;return host.call(method,params,timeout)}};

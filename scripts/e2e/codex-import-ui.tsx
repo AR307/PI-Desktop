@@ -47,7 +47,18 @@ globalThis.codexImportProbe = async (stage) => {
   if (stage === "card-open") {
     click(button(i18n.t("codexImport.action")));
     await until(() => document.querySelectorAll(".codex-import-row").length === 2, "sidebar button did not open shared wizard");
-    return { ok: true, scenarios: ["sidebar-shared-wizard"] };
+    click(button(i18n.t("codexImport.project")));
+    const projects = [...document.querySelectorAll<HTMLButtonElement>('[role="option"]')].filter((b) => b.textContent?.trim() === "Imported workspace");
+    assert(projects.length === 1, "migrated source project appears twice");
+    click(projects[0]);
+    await until(() => document.querySelectorAll('.codex-import-list .codex-import-row').length === 2 && document.querySelector('.codex-import-list')?.getAttribute('aria-busy') === 'false', "project filter lost assigned conversations");
+    const input = document.querySelector<HTMLInputElement>(`input[aria-label="${i18n.t("codexImport.search")}"]`)!;
+    const setValue = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!;
+    input.focus();
+    flushSync(() => { setValue.call(input, "Imported first"); input.dispatchEvent(new Event("input", { bubbles: true })); });
+    await until(() => document.querySelectorAll('.codex-import-list .codex-import-row').length === 1 && document.querySelector('.codex-import-list')?.getAttribute('aria-busy') === 'false', "display-name search failed inside migrated project");
+    assert(document.querySelector('.codex-import-list')?.textContent?.includes("Imported first"), "search returned the wrong conversation");
+    return { ok: true, scenarios: ["sidebar-shared-wizard", "migrated-project-filter", "conversation-display-name-search"] };
   }
   if (stage === "dismiss") { click(button(i18n.t("codexImport.dismissTitle"))); return { ok: true }; }
   if (stage === "reload-hidden" || stage === "restart-hidden") {

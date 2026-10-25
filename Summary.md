@@ -1487,6 +1487,15 @@ Captured native windows and the Android login screen were visually checked.
 
 ## 2026-10-25 - Explicit Codex native history import
 
+### Project-search correction
+
+- Resolve Codex's saved local-host legacy project IDs to current SQLite project
+  IDs before listing and filtering; do not merge projects by display name.
+- Prefer current nonempty conversation names so searches match the Codex sidebar.
+- Add a failing-then-passing Host scan/filter/import regression and an Electron
+  project-menu/search journey with migrated source metadata. Source files and
+  credentials are not modified or copied.
+
 - Add a modular Rust source catalog, paginated/segmented history reader, visible
   transcript projection, effective-context recovery, attachment import and
   project-root binding. Native checkpoints allow PI continuation without old

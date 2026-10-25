@@ -1,5 +1,7 @@
 mod attachments;
 mod catalog;
+#[cfg(test)]
+mod catalog_tests;
 mod convert;
 mod history;
 mod projects;

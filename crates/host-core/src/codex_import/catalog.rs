@@ -3,7 +3,7 @@ use rusqlite::{Connection, OpenFlags};
 use serde::Serialize;
 use serde_json::Value;
 use std::{
-    collections::BTreeMap,
+    collections::{BTreeMap, BTreeSet},
     fs,
     io::{BufRead, BufReader},
     path::{Path, PathBuf},
@@ -170,6 +170,7 @@ pub fn scan(directory: Option<String>) -> Result<Catalog> {
         warnings: vec![],
         cancelled: Arc::new(AtomicBool::new(false)),
     };
+    let mut named_sessions = BTreeSet::new();
     if let Some(path) = if standalone.is_none() {
         db_file(&root, "state_")?
     } else {
@@ -183,6 +184,10 @@ pub fn scan(directory: Option<String>) -> Result<Catalog> {
         }
         for row in rows(&db, "threads")? {
             let Some(id) = text(&row, "id") else { continue };
+            let name = text(&row, "name").filter(|name| !name.trim().is_empty());
+            if name.is_some() {
+                named_sessions.insert(id.clone());
+            }
             let cwd = text(&row, "cwd");
             let files = text(&row, "rollout_path")
                 .map(|p| {
@@ -199,8 +204,8 @@ pub fn scan(directory: Option<String>) -> Result<Catalog> {
                 id.clone(),
                 Candidate {
                     id,
-                    title: text(&row, "title")
-                        .or_else(|| text(&row, "name"))
+                    title: name
+                        .or_else(|| text(&row, "title"))
                         .unwrap_or_else(|| "Codex conversation".into()),
                     directory_exists: cwd.as_ref().is_some_and(|p| Path::new(p).is_dir()),
                     cwd,
@@ -297,8 +302,10 @@ pub fn scan(directory: Option<String>) -> Result<Catalog> {
             if let Ok(row) = serde_json::from_str::<Value>(&line?) {
                 if let Some(session) = text(&row, "id").and_then(|id| catalog.sessions.get_mut(&id))
                 {
-                    if let Some(title) = text(&row, "thread_name") {
-                        session.title = title;
+                    if !named_sessions.contains(&session.id) {
+                        if let Some(title) = text(&row, "thread_name") {
+                            session.title = title;
+                        }
                     }
                 }
             }
@@ -307,8 +314,36 @@ pub fn scan(directory: Option<String>) -> Result<Catalog> {
     let global_path = root.join(".codex-global-state.json");
     if standalone.is_none() && global_path.is_file() {
         let global: Value = serde_json::from_reader(fs::File::open(global_path)?)?;
+        // Codex keeps legacy UI assignments after moving projects into SQLite.
+        // Only its explicit mapping for this local source identifies aliases;
+        // equal project names or a remote host's mapping do not.
+        let aliases: BTreeMap<String, String> = global
+            ["app-server-project-id-by-legacy-project-id-by-host"]
+            .as_object()
+            .and_then(|hosts| {
+                hosts.iter().find_map(|(host, mapping)| {
+                    host.strip_prefix("local:")
+                        .filter(|home| super::same_path(home, &root.to_string_lossy()))
+                        .and_then(|_| mapping.as_object())
+                })
+            })
+            .into_iter()
+            .flatten()
+            .filter_map(|(legacy, current)| {
+                current
+                    .as_str()
+                    .filter(|id| catalog.projects.iter().any(|p| p.id == *id))
+                    .map(|current| (legacy.clone(), current.to_owned()))
+            })
+            .collect();
+        for session in catalog.sessions.values_mut() {
+            if let Some(current) = session.project_id.as_ref().and_then(|id| aliases.get(id)) {
+                session.project_id = Some(current.clone());
+            }
+        }
         if let Some(projects) = global["local-projects"].as_object() {
             for (id, project) in projects {
+                let id = aliases.get(id).unwrap_or(id);
                 if !catalog.projects.iter().any(|p| &p.id == id) {
                     catalog.projects.push(Project {
                         id: id.clone(),
@@ -332,7 +367,8 @@ pub fn scan(directory: Option<String>) -> Result<Catalog> {
             for (id, assignment) in assignments {
                 if let Some(session) = catalog.sessions.get_mut(id) {
                     if session.project_id.is_none() {
-                        session.project_id = text(assignment, "projectId");
+                        session.project_id = text(assignment, "projectId")
+                            .map(|id| aliases.get(&id).cloned().unwrap_or(id));
                     }
                 }
             }
