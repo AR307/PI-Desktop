@@ -148,7 +148,9 @@ export function useAutomaticDisclosure(
     [],
   );
   const syncReading = useCallback(
-    () => setReading(ownsReadingPosition(titleRef.current, bodyRef.current)),
+    // Focus precedes click. Holding an already closed title would open it
+    // before its toggle runs, so the user's first click closes it again.
+    () => setReading(currentOpen.current && ownsReadingPosition(titleRef.current, bodyRef.current)),
     [],
   );
 

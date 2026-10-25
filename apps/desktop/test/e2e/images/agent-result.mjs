@@ -125,6 +125,8 @@ try {
   await screenshot("result-dark-wide", 1200, 900);
 
   await page.locator(".turn-process > .tool-activity-header").click();
+  await page.locator('.turn-process > [aria-expanded="true"]').waitFor();
+  check("first pointer click opens the automatically collapsed process");
   // Open nested activities too: an inline ToolRow must not add a second card.
   for (const button of await page.locator('.turn-process .process-activity-group > [aria-expanded="false"]').all()) await button.click();
   await imageVisible("expanding the process does not duplicate the image");

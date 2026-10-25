@@ -995,8 +995,8 @@ try {
   await key("Enter", 13);
   await waitFor(async () => (await invoke("backgroundTasksList")).tasks.some((task) => task.sessionId === sideId && task.state === "running"), 20000, "side background command started");
   await waitFor(async () => !(await invoke("agentGetStatus", sideId)).status.isRunning, 15000, "side background turn finished");
-  await waitFor(() => evaluate("!!document.querySelector('.side-chat-pane .background-tasks-bar')"), 10000, "side task bar visible");
-  assert.equal(await evaluate("document.querySelectorAll('.main-pane .background-tasks-bar').length"), 0, "side task does not appear in the parent composer");
+  await waitFor(() => evaluate("!!document.querySelector('.side-chat-pane .task-row[data-state=running]')"), 10000, "side task dock visible");
+  assert.equal(await evaluate("document.querySelectorAll('.main-pane .task-row[data-state=running]').length"), 0, "side task does not appear in the parent composer");
   await screenshot("side-background-task.png");
   await click('[data-work-panel-tab-id="side-chat:' + sideId + '"] .work-panel-tab-close');
   await waitFor(() => evaluate("!!document.querySelector('[role=alertdialog]')"), 5000, "background-only close confirmation");

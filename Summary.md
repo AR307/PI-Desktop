@@ -11,6 +11,9 @@
   bounds and provider/RPC test fixtures for the upstream contracts.
 - Update recovery acceptance to expect no empty tool-only assistant bubbles;
   all eleven completed tool results and no-replay assertions remain required.
+- Prevent focus-before-click from auto-opening a closed process disclosure and
+  immediately toggling it closed. Keep reading holds for already open content,
+  and validate first-click expansion in the real generated-image user path.
 
 ## 2026-10-25 - Wallet balance and useful subscription indicator
 
