@@ -1,5 +1,25 @@
 # PI-Desktop MirrorCoding Edition
 
+## 2026-10-25 - Repair Gemini loopback relay binding
+
+- Fix the session-launch provider projection: merge the temporary binding into
+  `provider.headers`, rather than spreading HTTP header names onto the provider
+  object. Reuse the existing case-insensitive merge and retain custom headers.
+- Recognize Google's `x-goog-api-key` as a local binding carrier. Unknown,
+  missing and invalidated credentials still fail; no account/group substitution,
+  authentication bypass, server change or blind authorization-error retry.
+- Reproduce `relay_binding_missing` on the unchanged candidate with the actual
+  Google SDK and session-launch resolver. All three regression cases failed
+  before the fix and pass afterward, including ordinary/stale-header launches
+  and the native Google credential carrier.
+- Add isolated native Host/Agent Sidecar acceptance for `gemini-3.8-flash`:
+  start an Agent turn, read a real fixture file, receive the tool continuation,
+  and follow up with retained context. Only a controlled local endpoint is used.
+- Validation: 4 Gemini user-path/process cases, 18 existing relay/catalog cases,
+  81 provider/header/Fast runtime tests, and Desktop typecheck pass. User data,
+  active Desktop instances and paid services are not test targets. No release
+  or production-backend change is included.
+
 ## 2026-10-25 - Upstream integration acceptance corrections
 
 - Register the Codex import ADR and spec in the documentation catalogs and add

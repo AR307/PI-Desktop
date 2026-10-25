@@ -162,6 +162,37 @@ reconnect while desktop remains running restores actionable pending plans.
 
 ## MirrorCoding local acceptance
 
+### Gemini relay binding regression
+
+Run `node --test apps/desktop/test/mirrorcoding-gemini-session.test.mjs`.
+Set `PI_DESKTOP_HOST_BIN` to a compatible existing Host executable to also run
+the native process scenario; without it that scenario is explicitly skipped.
+Reuse the installed Node/Electron dependencies instead of installing a second
+environment. Evidence and fixture state remain under ignored `.artifacts`
+directories in the request worktree.
+
+- Start at the real session-launch resolver, serialize its provider config,
+  and send using the actual pi-ai Google SDK through the loopback relay to a
+  controlled account endpoint. Complete a first reply and follow-up with
+  `gemini-3.8-flash`; preserve the preceding reply in the second request.
+- Preserve custom headers, replace a stale mixed-case local binding header,
+  and verify credentials remain nested in `provider.headers`.
+- Exercise Google's native API-key header without the explicit header. Reject
+  missing, unknown and invalidated keys, including an invalid explicit key
+  alongside a valid Google key. Relaunch after invalidation with a fresh key.
+- Verify only the intended encoded group and declared Gemini streaming route
+  reach the account boundary; local API keys and custom headers do not leak.
+- With an isolated real Rust Host and Node Agent Sidecar, create a session,
+  begin an Agent turn, read a fixture file through the real tool dispatcher,
+  receive a final reply, and submit a follow-up. Confirm the tool result and
+  previous reply enter the subsequent Google requests, with no error events.
+
+This scenario validates launch/serialization, SDK HTTP, Agent execution and
+native persistence. It does not claim live paid-provider, OAuth-consent UI,
+packaged-installation or released-build acceptance.
+
+### Broader account acceptance
+
 Run the MirrorCoding suites on the dedicated task candidate incorporating the
 latest `origin/main`; record candidate/base revisions and the artifact directory.
 Do not merge into local main for validation.

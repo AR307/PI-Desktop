@@ -8,7 +8,7 @@ import type { IncomingHttpHeaders } from "node:http";
 export function relayBindingKey(headers: IncomingHttpHeaders): string | undefined {
   const explicit = headers["x-pi-mirrorcoding-key"];
   if (typeof explicit === "string" && explicit.length > 0) return explicit;
-  for (const name of ["authorization", "x-api-key", "api-key"] as const) {
+  for (const name of ["authorization", "x-api-key", "api-key", "x-goog-api-key"] as const) {
     const value = headers[name];
     if (typeof value !== "string" || value.length === 0) continue;
     const match = name === "authorization" ? /^Bearer\s+(.+)$/i.exec(value) : /^(.+)$/.exec(value);
