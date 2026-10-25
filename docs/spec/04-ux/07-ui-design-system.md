@@ -1247,7 +1247,7 @@ Full component contract and usage rules: [08-component-spec.md §17](08-componen
 
 | Property | Value |
 |---|---|
-| Position | top-center viewport, 16px from the top edge, `width: min(360px, 100vw − 32px)` |
+| Position | 16px from the top edge; centered in the main-content safe area when the in-flow shell is visible, falling back to the viewport when no main-content anchor exists; `width: min(360px, safe area − 32px)` |
 | Surface | `bg-elevated-opaque` + 1px `border-subtle` + `shadow-dialog` (same family as floating menus) |
 | Radius | radius-md-plus |
 | Font | text-md, leading-compact-plus |
@@ -1459,7 +1459,7 @@ adjacent form inputs; dense surfaces may override that metric locally.
 - Floating composer plate: Codex elevated-primary (`#212121f5` / `color-mix(gray-800 96%, transparent)`) with standard elevation-prominent (`0 0 0 .5px` stroke + `0 3px 7.5px #0000000a` + `0 0 20px #0000000d`); no heavier night-only lift
 - Light workspace chips capsule: elevated gray `#f4f4f4` (not pure white-on-white)
 - Combined workspace chips: elevated translucent plate over main, not flat main gray
-- Stage Manager (macOS only): host re-asserts min bounds while collapsed (permanent watchdog). The watchdog does not run on Windows/Linux, so no platform re-layers its own window unprompted (D447)
+- Stage Manager (macOS only): host re-asserts min bounds while collapsed (permanent watchdog). The watchdog and temporary recovery pin are macOS-only; Windows/Linux bounds recovery stays at the normal window layer so switching to another app never leaves PI-Desktop above it (D447).
 
 ## Destination pages
 

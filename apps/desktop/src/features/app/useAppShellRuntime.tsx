@@ -88,6 +88,21 @@ export function useAppShellRuntime() {
   );
   const workPanelVisible = workPanelOpen;
 
+  useEffect(() => {
+    if (!ready || !activeSessionId || activeSessionId.startsWith("remote:")) return;
+    const state = useAppStore.getState();
+    const tabs = state.workPanelContexts[activeSessionId]?.tabs ?? state.workPanelTabs;
+    let current = true;
+    void api.browserGetPages(activeSessionId).then((pages) => {
+      if (!current) return;
+      const live = useAppStore.getState();
+      const liveTabs = live.workPanelContexts[activeSessionId]?.tabs ?? live.workPanelTabs;
+      if (live.activeSessionId !== activeSessionId || liveTabs !== tabs) return;
+      live.restoreBrowserWorkPanelTabs(activeSessionId, pages);
+    }).catch((error) => console.warn("Browser tab restore failed", error));
+    return () => { current = false; };
+  }, [ready, activeSessionId, workPanelOpen]);
+
   const [searchOpen, setSearchOpen] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [sidebarWidth, setSidebarWidth] = useState(() => loadSidebarWidth());
@@ -686,6 +701,7 @@ export function useAppShellRuntime() {
       }
       state.openWorkPanelTabForSession(event.sessionId, {
         ...browserPluginTab(event.path ?? event.url),
+        ...(event.tabId ? { id: event.tabId } : {}),
       });
     });
     const offBrowserOpenFile = api.onBrowserOpenFile(({ path }) => {

@@ -335,6 +335,10 @@ Settings is a **full-window page** that replaces the app sidebar + main chrome (
   only, and are read at render time, so switching repaints the transcript
   immediately. The deprecated `keepCommandsExpanded` boolean is no longer
   exposed and is not read for rendering. Settings search indexes the row.
+  Settings-row segmented controls use content-sized options rather than the
+  standard 240px field-column cap. Labels stay on one line; when space is
+  insufficient, the control moves below the title and whole options wrap
+  within the available pane width without horizontal overflow.
 - The **Command shell** row in Defaults uses the host-discovered catalog of native
   PowerShell 5.1, PowerShell 7, cmd, Git Bash, and Bash with IDs
   `windows-powershell`, `windows-pwsh`, `cmd`, `git-bash`, and
@@ -515,6 +519,11 @@ a usage tab.
     outside settings container dismisses it before the trigger can become
     detached. Search results keep a dedicated no-match state instead of
     reusing the search placeholder.
+  - Chat Completions model settings include a reasoning effort parameter menu:
+    **Auto**, **Send**, and **Do not send**. Auto restores compatibility defaults;
+    the other choices persist an explicit per-model `supportsReasoningEffort`
+    boolean. The selection survives save/reopen, copying, and configuration sync.
+    Other API formats hide this control without deleting the saved preference.
   - the context-window field states its provenance: while the number still
     follows the published models.dev limit, a faint hint under the input says so
     (`settings.contextWindowCatalogHint`), and the first edit — the preset
@@ -724,7 +733,10 @@ system while preserving their different data ownership:
   user sees that refusal while the same URL opens in their browser (ADR 0177).
   A failed catalog query offers Retry; the same action remains available when
   only some sources failed. It repeats the current search over the configured
-  sources and announces loading while the request runs.
+  sources and announces loading while the request runs. After a successful
+  load, a later failure keeps that list on screen with the time it was taken
+  and still offers Retry; the retained list never answers a different query,
+  and it disappears once a retry succeeds.
   Back reloads the skill list.
 - Skills also exposes **Scan other tools** in its toolbar. The explicit scan
   opens inline on the Skills page, and imported entries follow the current
@@ -736,7 +748,9 @@ system while preserving their different data ownership:
   shown in candidate rows.
 - MCP Market offers Retry after a failed query or partial source failure. It
   repeats the current search through the existing market request path and
-  announces loading while the request runs.
+  announces loading while the request runs. After a successful load, a later
+  failure keeps that list on screen with the time it was taken and still
+  offers Retry.
 - The Subagents create/edit sheet pins a model with a searchable, provider-
   grouped anchored menu — the same option-menu control the service picker uses
   — over the configured, runnable models the Composer offers, plus an

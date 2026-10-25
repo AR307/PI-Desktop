@@ -539,7 +539,7 @@ export async function createWindow({
   });
   let windowCloseAccepted = false;
   window.webContents.on("did-start-loading", () => {
-    browserHost.disposeGuest();
+    browserHost.detachPresentation();
     windowState.notificationViewingSessionId = null;
     if (windowState.mainWindow === window) resetMenuRendererReady(window);
   });
@@ -907,8 +907,8 @@ export async function createWindow({
       // so the reservation replan below is treated as an OS-owned adjustment.
       windowState.workPanelUserMovePending = false;
       applyWorkPanelReservation();
-      // Brief pin only when actively recovering from a shelf.
-      if (shelved || electronTiny) {
+      // Only macOS runs the watchdog that releases this temporary recovery pin.
+      if (process.platform === "darwin" && (shelved || electronTiny)) {
         window.setAlwaysOnTop(true, "floating");
         pinUntil = Date.now() + 4000;
       } else {

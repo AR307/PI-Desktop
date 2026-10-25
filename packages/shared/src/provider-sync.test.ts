@@ -23,6 +23,11 @@ describe("provider sync boundary", () => {
     Object.assign(input.providers[0]!.input.models[0]!, { claudeCacheTtl: "24h" });
     expect(() => parseProviderImportPayload(input)).toThrow("Invalid provider import payload");
   });
+  it.each([true, false, null])("preserves reasoning effort override %s", (supportsReasoningEffort) => {
+    const input = payload();
+    Object.assign(input.providers[0]!.input.models[0]!, { supportsReasoningEffort });
+    expect(parseProviderImportPayload(input)).toEqual(input);
+  });
   it("preserves current model settings and meaningful zero values", () => {
     const input = payload();
     expect(parseProviderImportPayload(input)).toEqual(input);
@@ -52,7 +57,8 @@ describe("provider sync boundary", () => {
     { supportedThinkingLevels: ["secret-level"] }, { temperature: Number.NaN },
     { models: [{ ...model, contextWindow: -1 }] }, { models: [{ ...model, extra: "fixture-key" }] },
     { models: [{ ...model, thinkingLevels: ["not-a-level"] }] }, { models: [{ ...model, defaultThinkingLevel: "low" }] },
-    { models: [{ ...model, supportsDocuments: "yes" }] }, { defaultModelId: "missing" },
+    { models: [{ ...model, supportsDocuments: "yes" }] },
+    { models: [{ ...model, supportsReasoningEffort: "true" }] }, { defaultModelId: "missing" },
   ])("rejects malformed inputs without echoing diagnostics: %j", (patch) => {
     const value = payload();
     Object.assign(value.providers[0]!.input, patch);

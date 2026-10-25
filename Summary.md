@@ -1811,3 +1811,18 @@ results are recorded in docs/releases/0.21.0-beta.5-validation.md.
   isolated Electron, and a real sidecar plus controlled endpoint with actual
   tools and restart. See docs/testing/codex-import-validation.md for boundaries.
 - No push, merge, release, server change or real user-profile modification.
+
+## 2026-10-25 - Integrated desktop 0.21.0 release candidate
+
+- Integrate the completed Codex import and wallet changes with the maintained
+  selection/side-chat, account, cache, image and interrupted-stream recovery line.
+- Merge upstream main at 7a95fd08a, preserving tool identity normalization,
+  request output caps, safe provider abort classification and session task docks.
+- Preserve per-session steering, quoted text around inline visualizations, Claude
+  cache controls and independent temporary-session tool cancellation.
+- Recycle the superseded BackgroundTasksBar only in this release worktree after
+  explicit user approval. Source worktrees and the existing upstream PR remain intact.
+- Align workspace package metadata with 0.21.0; no Android APK is built or published.
+  MirrorCoding server code and production profiles are unchanged.
+- Record exact candidate validation and publication results in the release report;
+  earlier feature-test results are not presented as current integration evidence.

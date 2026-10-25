@@ -588,7 +588,13 @@ the pi-ai chars/4 baseline plus a CJK correction, then reserves the larger of
 4,096 tokens or 1% of the effective window. The effective window is the smaller
 of the configured value and the published catalog window when both are known;
 this prevents an oversized user override from bypassing compaction and output
-protection. Unknown windows preserve the configured output budget.
+protection. Unknown windows preserve the configured output budget. The estimate
+measures the transcript the adapter sends: unless the bound model declares
+mid-conversation system support, later system-transcript updates are folded
+into one leading message carrying the current instructions and tools, and the
+parent and subagent paths hand that folded transcript to pi-ai as well, so its
+own `streamSimple` clamp agrees. Superseded instruction snapshots are never
+charged against the output budget.
 
 The incoming user prompt participates in budgeting before the first provider
 request. The automatic summary request retries transient provider failures
@@ -787,6 +793,12 @@ criterion-by-criterion report of what was met and the evidence observed.
   enables or disables image transport for the configured binding. Unknown or
   custom ids remain conservative text/path models unless their binding
   explicitly enables image input.
+- A model binding's optional `supportsReasoningEffort` controls the Chat
+  Completions `reasoning_effort` parameter only. An absent or `null` value keeps
+  existing catalog/provider compatibility; an explicit boolean takes precedence
+  over automatic compatibility detection, including DeepSeek-family defaults.
+  This does not enable reasoning, select a level, or change Responses/Anthropic
+  request serialization. Published compatibility alone is not an explicit opt-in.
 - The effective level is passed to the pi `Agent`; provider-specific request
   serialization remains pi-ai's responsibility.
 - Pi `thinking` blocks become `UiMessage.thinking` and
@@ -822,24 +834,24 @@ order the user wrote. Reads are bounded by the admitted file size. Base64 is
 transient and never restored into durable UI messages or transcript records.
 - Failed assistant messages remain durable diagnostic transcript entries but
   are never restored into pi model context on a later turn.
-- A tool-call id is unique in every request. The transcript is an append-only
-  snapshot stream that tolerates a retried append, so the same call can reach
-  the assembled context twice — under one row id, which the host's keep-last
-  read already collapses, or under two, which it cannot. The last view before
-  the wire therefore keeps the first occurrence of each `toolCall` id and drops
-  a later call or a later result for it, so the pair the provider validates
-  stays well-formed; a request with no duplicates is returned unchanged. A drop
-  is reported once on the `agent` log channel with the session and the ids
-  (D608). Anthropic-family endpoints, including DeepSeek's, reject the whole
-  turn with `tool_use ids must be unique` (issue #718), which leaves the session
-  unable to continue.
-- The guard compares the wire-visible call id — the part before the `|` that
-  separates the Responses item id — and drops an assistant message whole once
-  every tool call in it was already claimed, because keeping its residual text
-  would leave a message sitting between a call and the result answering it. A
-  message that replays a claimed call while carrying a new one keeps its new
-  call in place; no writer produces that partial replay, and the guard does not
-  reorder messages to close the gap it leaves (D620).
+- Tool-call ids remain unique in each provider request. Before Pi executes a
+  streamed response, the parent runtime and each delegate assign fresh local
+  ids to calls that reuse an earlier wire-visible id (the part before `|`).
+  Each runtime retains its identity set across context compaction; the parent
+  seeds it from the full restored transcript, and delegates keep it across
+  model fallback. This prevents reused provider ids from losing real results
+  when the runtime journals entries by id (issue #1815).
+- The final request guard drops a repeated call only while the earlier call is
+  still waiting for its result, and drops a repeated result only without a
+  pending call. An independently completed same-id pair is retained under a
+  fresh request-local id with its result remapped to match. A renamed Responses
+  call does not reuse its old item id. No source messages are mutated; unchanged
+  requests retain their identity. Drops are logged with the session and ids
+  (D608). Composite result ids are aligned even without a duplicate drop.
+- A replayed assistant snapshot whose calls are all pending elsewhere is
+  removed whole: retaining its text would separate the call from its result
+  and make pi-ai synthesize a second output (D620). A partial snapshot retains
+  its new calls in place; the guard does not reorder messages.
 - The agent loop owns its context array. `prepareNextTurn` hands pi a copy of
   the live state — for a delegate turn boundary too — exactly as pi's own
   `createContextSnapshot()` does for `prompt()` and `continue()`: pi's loop
@@ -1892,9 +1904,11 @@ browseable.
 ### Provider certificate trust (issue #714)
 
 The desktop sidecar's effective trust set is the union of Node's bundled
-roots, the inherited `NODE_EXTRA_CA_CERTS` set, and the OS trust store, with
-chain and hostname validation on. On Windows and Linux the launcher passes
-Node's `--use-system-ca` to obtain the system roots. On macOS the Electron
+roots, the inherited `NODE_EXTRA_CA_CERTS` set, and non-expired entries from
+the OS trust store, with chain and hostname validation on. Expired entries in
+the OS store are omitted because platform stores may retain stale certificates;
+bundled and `NODE_EXTRA_CA_CERTS` entries are unchanged. On Windows and Linux
+the launcher passes Node's `--use-system-ca` to obtain the system roots. On macOS the Electron
 build applies that flag by replacing the bundled roots instead of adding them
 and its system enumeration misses public anchors (issue #1187), so the
 launcher omits the flag and the sidecar merges the three sets into the default

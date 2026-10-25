@@ -20,6 +20,7 @@ import { TranscriptHistory, TranscriptTail } from "./AssistantTurn";
 import { collectLiveDelegationEntries } from "../../../lib/live-delegation-entries";
 import { reuseReadonlyMap } from "../../../lib/assistant-turns";
 import { useTranscriptScroll } from "./hooks/useTranscriptScroll";
+import { useTranscriptContinuation } from "../../../hooks/use-transcript-continuation";
 import type { TranscriptSearchTarget } from "../../../lib/transcript-reading";
 import type { RestoreTranscriptReading } from "../../../hooks/use-transcript-reading-position";
 import { TranscriptSearchContext } from "../../../lib/transcript-search-context";
@@ -159,6 +160,17 @@ function TranscriptBody({
     onRestoreReading,
   });
 
+  const continuationCursor = useAppStore((state) =>
+    sessionId ? state.transcriptViews[sessionId]?.messageEnd : undefined,
+  );
+  const automaticContinuation = readingWindow && !searchTarget;
+  useTranscriptContinuation({
+    scrollRef, contentRef, messages, onLoadNewer,
+    enabled: automaticContinuation && hasMoreAfter && paneVisible && !veilCovering,
+    cursor: continuationCursor,
+    loading: navigationLoading,
+  });
+
   const specializedActivity = agentActivity;
   const rawLiveDelegations = useMemo(
     () => collectLiveDelegationEntries(historyEntries, tailEntry, transcriptRunning),
@@ -295,7 +307,7 @@ function TranscriptBody({
               runtimeActivity={specializedActivity}
             />
           ) : null}
-          {hasMoreAfter ? (
+          {hasMoreAfter && !automaticContinuation ? (
             <button
               type="button"
               className="transcript-load-later"

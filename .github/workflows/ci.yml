@@ -109,11 +109,17 @@ jobs:
       - name: Test transcript module on Windows
         run: "cargo test -p host-core --locked transcripts::"
 
+      - name: Test visualization paths and lifecycle on Windows
+        run: cargo test -p host-core --locked visualization
+
       - name: Build host-core
         run: cargo build -p host-core --locked
 
       - name: Build Host RPC helper dependency
         run: pnpm --filter @pi-desktop/shared build
+
+      - name: Test GenUI document file boundaries on Windows
+        run: node --test apps/desktop/test/gen-ui-file-safety.test.mjs
 
       - name: Run transcript cache Host RPC E2E
         run: node scripts/e2e-transcript-cache.mjs
@@ -159,6 +165,12 @@ jobs:
       - name: Build Desktop bundle
         run: pnpm --filter @pi-desktop/desktop build
 
+      - name: Build host-core
+        run: cargo build -p host-core --locked
+
+      - name: Run inline GenUI interaction and isolation E2E
+        run: xvfb-run --auto-servernum pnpm test:e2e:gen-ui
+
       - name: Run provider optional client certificate E2E
         run: xvfb-run --auto-servernum pnpm test:e2e:provider-client-certificate
 
@@ -167,9 +179,6 @@ jobs:
 
       - name: Run transcript rendering and disclosure E2E
         run: xvfb-run --auto-servernum sh -c 'node scripts/e2e-transcript-render.mjs && node scripts/e2e-transcript-disclosure-anchor.mjs'
-
-      - name: Build host-core
-        run: cargo build -p host-core --locked
 
       - name: Run trusted extensions E2E
         env:

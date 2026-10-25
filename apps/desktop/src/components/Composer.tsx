@@ -38,8 +38,7 @@ import {
 import { ComposerAutocomplete } from "./ComposerAutocomplete";
 import { AskToolCard } from "./AskToolCard";
 import { PlanApprovalBar } from "./PlanApprovalBar";
-import { TodoDock } from "./TodoDock";
-import { BackgroundTasksBar } from "./BackgroundTasksBar";
+import { TaskDock } from "./TaskDock";
 import {
   COMPOSER_MAX_VISIBLE_ROWS,
   COMPOSER_MIN_HEIGHT_PX,
@@ -556,8 +555,10 @@ export function Composer({
       data-composer-session={activeSessionId ?? ""}
     >
       <div className="composer-stack">
-        {activeSessionId && localToolsAllowed ? <TodoDock sessionId={activeSessionId} /> : null}
-        <BackgroundTasksBar key={activeSessionId} sessionId={activeSessionId ?? undefined} />
+        {/* One container for todo and background tasks: the tabs live in the
+            header, so the gate now covers both the way it already covered the
+            todo dock. */}
+        {activeSessionId && localToolsAllowed ? <TaskDock sessionId={activeSessionId} /> : null}
         {planCheckpoint?.status === "pending" ? (
           <PlanApprovalBar proposal={planCheckpoint} />
         ) : null}

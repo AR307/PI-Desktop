@@ -1,6 +1,6 @@
 {
   "name": "@pi-desktop/desktop",
-  "version": "0.21.0-beta.9",
+  "version": "0.21.0",
   "desktopName": "pi-desktop.desktop",
   "private": true,
   "description": "PI-Desktop Electron application",
@@ -133,6 +133,10 @@
       {
         "from": "resources/skills",
         "to": "skills"
+      },
+      {
+        "from": "resources/gen-ui",
+        "to": "gen-ui"
       },
       {
         "from": "resources/plugins",

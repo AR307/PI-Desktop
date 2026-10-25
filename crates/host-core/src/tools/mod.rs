@@ -19,7 +19,9 @@ use tokio::io::{AsyncRead, AsyncReadExt};
 use tokio::process::{ChildStderr, ChildStdin, ChildStdout, Command};
 use tokio::sync::{mpsc, watch};
 
-use crate::workspace::{resolve_tool_path_with_external, simple_canonicalize, ToolRoot};
+use crate::workspace::{
+    resolve_tool_path_with_external, simple_canonicalize, ContainedRoots, ToolRoot,
+};
 
 mod grep_rg;
 pub mod hashline;
@@ -862,6 +864,9 @@ pub struct ToolExecutionOptions<'a> {
     pub bash_options: Option<BashExecutionOptions>,
     pub allow_external_paths: bool,
     pub hashline: Option<HashlineContext<'a>>,
+    /// Session visualization directory: a contained root for Read and for
+    /// `.html`-only Write/Edit (D671). `None` for remote sessions (contract modes still deny writes).
+    pub visualization_root: Option<&'a Path>,
 }
 
 pub fn validate_timeout_ms(timeout_ms: Option<u64>) -> Result<(), (String, String)> {
@@ -1110,6 +1115,7 @@ pub async fn execute_tool_with_options(
             bash_options,
             allow_external_paths: false,
             hashline: None,
+            visualization_root: None,
         },
     )
     .await
@@ -1119,14 +1125,13 @@ pub async fn execute_tool_with_options(
 /// traversal, read, or rg child wait cannot occupy an async worker (#1071).
 async fn run_file_tool(
     workspace: Option<&Path>,
-    scratch: Option<&Path>,
+    roots: ContainedRoots,
     tool_name: &str,
     args: &Value,
     allow_external_paths: bool,
     hashline: Option<&HashlineContext<'_>>,
 ) -> Result<Value, hashline::ToolError> {
     let workspace = workspace.map(Path::to_path_buf);
-    let scratch = scratch.map(Path::to_path_buf);
     let tool_name = tool_name.to_string();
     let args = args.clone();
     let hashline = hashline.map(|ctx| (ctx.session_id.to_string(), ctx.store.clone()));
@@ -1141,19 +1146,18 @@ async fn run_file_tool(
             session_id: id,
             store,
         });
-        let (workspace, scratch, hashline) =
-            (workspace.as_deref(), scratch.as_deref(), hashline.as_ref());
+        let (workspace, roots, hashline) = (workspace.as_deref(), &roots, hashline.as_ref());
         let args = &args;
         match tool_name.as_str() {
-            "Read" => tool_read(workspace, scratch, args, allow_external_paths, hashline)
+            "Read" => tool_read(workspace, roots, args, allow_external_paths, hashline)
                 .map_err(Into::into),
-            "Glob" => tool_glob(workspace, scratch, args, allow_external_paths).map_err(Into::into),
-            "Grep" => tool_grep(workspace, scratch, args, allow_external_paths, hashline)
+            "Glob" => tool_glob(workspace, roots, args, allow_external_paths).map_err(Into::into),
+            "Grep" => tool_grep(workspace, roots, args, allow_external_paths, hashline)
                 .map_err(Into::into),
-            "Write" => tool_write(workspace, scratch, args, allow_external_paths, hashline)
+            "Write" => tool_write(workspace, roots, args, allow_external_paths, hashline)
                 .map_err(Into::into),
             // "Edit": the caller routes only these five file tools here.
-            _ => tool_edit(workspace, scratch, args, allow_external_paths, hashline),
+            _ => tool_edit(workspace, roots, args, allow_external_paths, hashline),
         }
     })
     .await
@@ -1174,6 +1178,7 @@ pub async fn execute_tool_with_path_access(
         bash_options,
         allow_external_paths,
         hashline,
+        visualization_root,
     } = options;
     let started = Instant::now();
     let timeout_ms = effective_timeout_ms(tool_name, requested_timeout_ms);
@@ -1192,6 +1197,19 @@ pub async fn execute_tool_with_path_access(
             let _ = std::fs::create_dir_all(dir);
         }
     }
+    // The visualization dir is created only when a Write/Edit actually
+    // targets it, so ordinary sessions never get an empty directory (D671).
+    if matches!(tool_name, "Write" | "Edit") {
+        if let (Some(dir), Some(path)) =
+            (visualization_root, args.get("path").and_then(Value::as_str))
+        {
+            if crate::visualizations::contains_session_path(dir, path) {
+                if let Err(error) = crate::visualizations::ensure_session_root(dir) {
+                    tracing::warn!(%error, "failed to create visualization directory");
+                }
+            }
+        }
+    }
     let result: Result<Value, hashline::ToolError> = match tool_name {
         // Authorize the desktop-owned image request through the normal host gate.
         // Only the trusted desktop runner performs the external call.
@@ -1199,7 +1217,10 @@ pub async fn execute_tool_with_path_access(
         "Read" | "Glob" | "Grep" | "Write" | "Edit" => {
             run_file_tool(
                 workspace,
-                scratch,
+                ContainedRoots::scratch_only(scratch).with(
+                    ToolRoot::Visualization,
+                    visualization_root.map(Path::to_path_buf),
+                ),
                 tool_name,
                 args,
                 allow_external_paths,
@@ -1301,14 +1322,45 @@ fn require_workspace(workspace: Option<&Path>) -> Result<&Path, (String, String)
 fn display_tool_path(root_kind: ToolRoot, workspace_root: &Path, resolved: &Path) -> String {
     match root_kind {
         ToolRoot::Workspace => relative_display(workspace_root, resolved),
-        ToolRoot::Scratch | ToolRoot::External => resolved.to_string_lossy().to_string(),
+        ToolRoot::Scratch | ToolRoot::Visualization | ToolRoot::External => {
+            resolved.to_string_lossy().to_string()
+        }
     }
+}
+
+/// The visualization root holds only HTML fragments served to sandboxed
+/// cards (D671): Write/Edit there must target an `.html` file.
+fn ensure_visualization_fragment(
+    roots: &ContainedRoots,
+    root_kind: ToolRoot,
+    resolved: &Path,
+) -> Result<(), (String, String)> {
+    if root_kind != ToolRoot::Visualization {
+        return Ok(());
+    }
+    // The renderer can only address `<root>/<file>.html`, so nested paths and
+    // other extensions would produce files no card can ever show.
+    let direct_child = roots
+        .iter()
+        .find(|root| root.kind == ToolRoot::Visualization)
+        .filter(|root| root.allows_implicit_access())
+        .and_then(|root| crate::workspace::simple_canonicalize(&root.path).ok())
+        .is_some_and(|root| resolved.parent() == Some(root.as_path()));
+    if !direct_child || !crate::visualizations::is_fragment_path(resolved) {
+        return Err((
+            "VISUALIZATION_HTML_ONLY".into(),
+            "Only .html fragments directly inside the visualization directory can be written there"
+                .into(),
+        ));
+    }
+    Ok(())
 }
 
 fn root_label(root_kind: ToolRoot) -> &'static str {
     match root_kind {
         ToolRoot::Workspace => "workspace",
         ToolRoot::Scratch => "scratch",
+        ToolRoot::Visualization => "visualization",
         ToolRoot::External => "external",
     }
 }
@@ -1396,7 +1448,7 @@ fn read_image_block(
 
 fn tool_read(
     workspace: Option<&Path>,
-    scratch: Option<&Path>,
+    roots: &ContainedRoots,
     args: &Value,
     allow_external_paths: bool,
     hashline: Option<&HashlineContext<'_>>,
@@ -1407,7 +1459,7 @@ fn tool_read(
         .and_then(|v| v.as_str())
         .ok_or_else(|| ("INVALID_ARGUMENT".into(), "path required".into()))?;
     let (resolved, root_kind) =
-        resolve_tool_path_with_external(root, scratch, path, allow_external_paths)
+        resolve_tool_path_with_external(root, roots, path, allow_external_paths)
             .map_err(|e| (e.clone(), e))?;
     if ignore_rules::is_sensitive_path(&resolved) {
         return Err(ignore_rules::denied_error(path));
@@ -1542,7 +1594,7 @@ fn tool_read(
 
 fn tool_write(
     workspace: Option<&Path>,
-    scratch: Option<&Path>,
+    roots: &ContainedRoots,
     args: &Value,
     allow_external_paths: bool,
     hashline: Option<&HashlineContext<'_>>,
@@ -1558,14 +1610,17 @@ fn tool_write(
         .ok_or_else(|| ("INVALID_ARGUMENT".into(), "content required".into()))?;
     let content = hashline::strip_write_markup(content);
     let (resolved, root_kind) =
-        resolve_tool_path_with_external(root, scratch, path, allow_external_paths)
+        resolve_tool_path_with_external(root, roots, path, allow_external_paths)
             .map_err(|e| (e.clone(), e))?;
     if ignore_rules::is_sensitive_path(&resolved) {
         return Err(ignore_rules::denied_error(path));
     }
-    if let Some(parent) = resolved.parent() {
-        std::fs::create_dir_all(parent)
-            .map_err(|e| ("TOOL_FAILED".into(), format!("mkdir failed: {e}")))?;
+    ensure_visualization_fragment(roots, root_kind, &resolved)?;
+    if root_kind != ToolRoot::Visualization {
+        if let Some(parent) = resolved.parent() {
+            std::fs::create_dir_all(parent)
+                .map_err(|e| ("TOOL_FAILED".into(), format!("mkdir failed: {e}")))?;
+        }
     }
     std::fs::write(&resolved, &content).map_err(|e| {
         if e.kind() == std::io::ErrorKind::NotFound {
@@ -1636,7 +1691,7 @@ fn legacy_replace_ops(text: &str, start: usize, old: &str, new: &str) -> Option<
 
 fn tool_edit(
     workspace: Option<&Path>,
-    scratch: Option<&Path>,
+    roots: &ContainedRoots,
     args: &Value,
     allow_external_paths: bool,
     hashline: Option<&HashlineContext<'_>>,
@@ -1647,12 +1702,14 @@ fn tool_edit(
         .and_then(|v| v.as_str())
         .ok_or_else(|| hashline::ToolError::new("INVALID_ARGUMENT", "path required"))?;
     let (resolved, root_kind) =
-        resolve_tool_path_with_external(root, scratch, path, allow_external_paths)
+        resolve_tool_path_with_external(root, roots, path, allow_external_paths)
             .map_err(|e| hashline::ToolError::new(e.clone(), e))?;
     if ignore_rules::is_sensitive_path(&resolved) {
         let (code, message) = ignore_rules::denied_error(path);
         return Err(hashline::ToolError::new(code, message));
     }
+    ensure_visualization_fragment(roots, root_kind, &resolved)
+        .map_err(|(code, message)| hashline::ToolError::new(code, message))?;
     let live = std::fs::read(&resolved).map_err(|e| {
         if e.kind() == std::io::ErrorKind::NotFound {
             hashline::ToolError::new("FILE_NOT_FOUND", format!("File not found: {path}"))
@@ -1725,6 +1782,8 @@ fn tool_edit(
     )?;
 
     if success.delete_file {
+        ensure_visualization_fragment(roots, root_kind, &resolved)
+            .map_err(|(code, message)| hashline::ToolError::new(code, message))?;
         std::fs::remove_file(&resolved)
             .map_err(|e| hashline::ToolError::new("TOOL_FAILED", format!("delete failed: {e}")))?;
         hashline::invalidate_path(hashline, &canonical);
@@ -1740,12 +1799,14 @@ fn tool_edit(
     let bytes = hashline::encode_success(&file);
     if let Some(dest) = &success.moved_to {
         let (dest_resolved, dest_root) =
-            resolve_tool_path_with_external(root, scratch, dest, allow_external_paths)
+            resolve_tool_path_with_external(root, roots, dest, allow_external_paths)
                 .map_err(|e| hashline::ToolError::new(e.clone(), e))?;
         if ignore_rules::is_sensitive_path(&dest_resolved) {
             let (code, message) = ignore_rules::denied_error(dest);
             return Err(hashline::ToolError::new(code, message));
         }
+        ensure_visualization_fragment(roots, dest_root, &dest_resolved)
+            .map_err(|(code, message)| hashline::ToolError::new(code, message))?;
         // Both paths have passed the same canonical, permission-aware resolver.
         // Writing then unlinking an alias of the source would delete the file.
         if dest_resolved == resolved {
@@ -1754,11 +1815,15 @@ fn tool_edit(
                 "MV destination resolves to the source file; choose a different destination",
             ));
         }
-        if let Some(parent) = dest_resolved.parent() {
-            std::fs::create_dir_all(parent).map_err(|e| {
-                hashline::ToolError::new("TOOL_FAILED", format!("mkdir failed: {e}"))
-            })?;
+        if dest_root != ToolRoot::Visualization {
+            if let Some(parent) = dest_resolved.parent() {
+                std::fs::create_dir_all(parent).map_err(|e| {
+                    hashline::ToolError::new("TOOL_FAILED", format!("mkdir failed: {e}"))
+                })?;
+            }
         }
+        ensure_visualization_fragment(roots, root_kind, &resolved)
+            .map_err(|(code, message)| hashline::ToolError::new(code, message))?;
         std::fs::write(&dest_resolved, &bytes)
             .map_err(|e| hashline::ToolError::new("TOOL_FAILED", format!("write failed: {e}")))?;
         std::fs::remove_file(&resolved)
@@ -1783,6 +1848,8 @@ fn tool_edit(
         }));
     }
 
+    ensure_visualization_fragment(roots, root_kind, &resolved)
+        .map_err(|(code, message)| hashline::ToolError::new(code, message))?;
     std::fs::write(&resolved, &bytes)
         .map_err(|e| hashline::ToolError::new("TOOL_FAILED", format!("write failed: {e}")))?;
     hashline::record_write(hashline, &canonical, &file, &success.tag);
@@ -1835,7 +1902,7 @@ enum SearchPathKind {
 
 fn search_root(
     root: &Path,
-    scratch: Option<&Path>,
+    roots: &ContainedRoots,
     args: &Value,
     allow_external_paths: bool,
     expected: SearchPathKind,
@@ -1848,7 +1915,7 @@ fn search_root(
     {
         Some(path) => {
             let (resolved, kind) =
-                resolve_tool_path_with_external(root, scratch, path, allow_external_paths)
+                resolve_tool_path_with_external(root, roots, path, allow_external_paths)
                     .map_err(|e| (e.clone(), e))?;
             let accepted = resolved.is_dir()
                 || matches!(expected, SearchPathKind::FileOrDirectory) && resolved.is_file();
@@ -1931,7 +1998,7 @@ fn candidate_files(
 
 fn tool_glob(
     workspace: Option<&Path>,
-    scratch: Option<&Path>,
+    roots: &ContainedRoots,
     args: &Value,
     allow_external_paths: bool,
 ) -> Result<Value, (String, String)> {
@@ -1943,7 +2010,7 @@ fn tool_glob(
     let set = build_glob_set(pattern)?;
     let (search_dir, root_kind, scoped) = search_root(
         root,
-        scratch,
+        roots,
         args,
         allow_external_paths,
         SearchPathKind::DirectoryOnly,
@@ -1998,7 +2065,7 @@ fn tool_glob(
 
 fn tool_grep(
     workspace: Option<&Path>,
-    scratch: Option<&Path>,
+    roots: &ContainedRoots,
     args: &Value,
     allow_external_paths: bool,
     hashline: Option<&HashlineContext<'_>>,
@@ -2018,7 +2085,7 @@ fn tool_grep(
         .map_err(|e| ("INVALID_ARGUMENT".into(), e.to_string()))?;
     let (search_dir, root_kind, scoped) = search_root(
         root,
-        scratch,
+        roots,
         args,
         allow_external_paths,
         SearchPathKind::FileOrDirectory,
@@ -2080,7 +2147,7 @@ fn tool_grep(
     }) {
         return Ok(mint_grep_tags(
             root,
-            scratch,
+            roots,
             allow_external_paths,
             mode,
             value,
@@ -2160,7 +2227,7 @@ fn tool_grep(
 
     Ok(mint_grep_tags(
         root,
-        scratch,
+        roots,
         allow_external_paths,
         mode,
         grep_output(
@@ -2223,7 +2290,7 @@ pub(super) fn grep_output(
 
 fn mint_grep_tags(
     root: &Path,
-    scratch: Option<&Path>,
+    roots: &ContainedRoots,
     allow_external_paths: bool,
     mode: &str,
     out: Value,
@@ -2271,7 +2338,7 @@ fn mint_grep_tags(
     let mut tags = serde_json::Map::new();
     for (display, lines) in per_file {
         let Ok((resolved, _)) =
-            resolve_tool_path_with_external(root, scratch, &display, allow_external_paths)
+            resolve_tool_path_with_external(root, roots, &display, allow_external_paths)
         else {
             continue;
         };
@@ -3963,6 +4030,7 @@ mod tests {
                 bash_options: None,
                 allow_external_paths: true,
                 hashline: None,
+                visualization_root: None,
             },
         )
         .await;
@@ -4122,6 +4190,7 @@ mod tests {
                 bash_options: None,
                 allow_external_paths: true,
                 hashline: None,
+                visualization_root: None,
             },
         )
         .await;
@@ -4145,6 +4214,7 @@ mod tests {
                 bash_options: None,
                 allow_external_paths: true,
                 hashline: None,
+                visualization_root: None,
             },
         )
         .await;
@@ -4168,6 +4238,7 @@ mod tests {
                 bash_options: None,
                 allow_external_paths: true,
                 hashline: None,
+                visualization_root: None,
             },
         )
         .await;
@@ -4195,6 +4266,7 @@ mod tests {
                 bash_options: None,
                 allow_external_paths: true,
                 hashline: None,
+                visualization_root: None,
             },
         )
         .await;
@@ -4222,6 +4294,7 @@ mod tests {
                 bash_options: None,
                 allow_external_paths: true,
                 hashline: None,
+                visualization_root: None,
             },
         )
         .await;
@@ -4243,6 +4316,7 @@ mod tests {
                 bash_options: None,
                 allow_external_paths: true,
                 hashline: None,
+                visualization_root: None,
             },
         )
         .await;

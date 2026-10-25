@@ -565,6 +565,14 @@ export function validateSettingsWrite(settings: AppSettings): AppSettings {
       errorCode: "INVALID_PARAMS",
     });
   }
+  if (
+    Object.prototype.hasOwnProperty.call(value, "inlineVisualizations") &&
+    typeof value.inlineVisualizations !== "boolean"
+  ) {
+    throw Object.assign(new Error("inlineVisualizations is invalid"), {
+      errorCode: "INVALID_PARAMS",
+    });
+  }
   for (const key of [
     "sidebarRunningIndicators",
     "sidebarRunningBadge",
@@ -1656,6 +1664,8 @@ export const api = {
     invoke(IPC.invoke.browserOpenExternal, url ? { url } : {}),
   browserGetState: () =>
     invoke<BrowserState | null>(IPC.invoke.browserGetState),
+  browserGetPages: (sessionId: string) =>
+    invoke<BrowserState[]>(IPC.invoke.browserGetPages, { sessionId }),
   fsList: (path?: string, sessionId?: string) =>
     invoke<{ entries: FsEntry[] }>(IPC.invoke.fsList, { path: path ?? "", ...(sessionId ? { sessionId } : {}) }),
   fsRead: (path: string, mimeType?: string, sessionId?: string) =>

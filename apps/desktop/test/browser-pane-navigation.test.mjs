@@ -22,9 +22,19 @@ const electron = `data:text/javascript,${encodeURIComponent(`
     setVisible() {}
     setBounds() {}
   }
+  export class BrowserWindow {
+    contentView = new View();
+    destroyed = false;
+    constructor(options) { this.size = [options.width, options.height]; }
+    getContentSize() { return this.size; }
+    setContentSize(width, height) { this.size = [width, height]; }
+    isDestroyed() { return this.destroyed; }
+    destroy() { this.destroyed = true; }
+  }
   export class WebContentsView {
     static instances = [];
     constructor() {
+      this.bounds = { x: 0, y: 0, width: 0, height: 0 };
       this.webContents = Object.assign(new EventEmitter(), {
         url: "https://fixture.invalid/previous",
         bounds: null,
@@ -47,7 +57,9 @@ const electron = `data:text/javascript,${encodeURIComponent(`
       });
       WebContentsView.instances.push(this);
     }
-    setBounds(bounds) { this.webContents.setBounds(bounds); }
+    getBounds() { return this.bounds; }
+    setBounds(bounds) { this.bounds = bounds; }
+    setVisible() {}
   }
 `)}`;
 registerHooks({ resolve(specifier, context, next) {
@@ -328,6 +340,7 @@ test("in-page completion cannot republish an invalidated session", async () => {
 
 test("a panel resize during screenshot is applied after Chromium restores the viewport", async (t) => {
   const { pane, wc, request } = harness(t);
+  const view = WebContentsView.instances.at(-1);
   t.mock.timers.tick(100);
   await request;
 
@@ -348,13 +361,13 @@ test("a panel resize during screenshot is applied after Chromium restores the vi
   const initial = { x: 20, y: 30, width: 400, height: 300 };
   const resized = { x: 20, y: 30, width: 560, height: 420 };
   pane.setBounds(initial);
-  assert.deepEqual(wc.bounds, { ...initial, x: 0, y: 0 });
+  assert.deepEqual(view.getBounds(), { ...initial, x: 0, y: 0 });
 
   let release;
   const capture = pane.captureScreenshot(async () => {
     pane.setBounds(resized);
     assert.deepEqual(
-      wc.bounds,
+      view.getBounds(),
       { ...initial, x: 0, y: 0 },
       "native viewport size stays stable while capturing",
     );
@@ -365,12 +378,12 @@ test("a panel resize during screenshot is applied after Chromium restores the vi
   });
 
   await new Promise(setImmediate);
-  assert.deepEqual(wc.bounds, { ...initial, x: 0, y: 0 });
+  assert.deepEqual(view.getBounds(), { ...initial, x: 0, y: 0 });
   release();
 
   assert.equal(await capture, "captured");
   assert.deepEqual(
-    wc.bounds,
+    view.getBounds(),
     { ...resized, x: 0, y: 0 },
     "the latest panel size is restored after capture",
   );

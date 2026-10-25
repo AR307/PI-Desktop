@@ -26,6 +26,7 @@ import {
 import { sessionAllows } from "../../../lib/remote-session-safety";
 import { resolveShowThinking } from "../../../lib/thinking-visibility";
 import { resolveTranscriptDisplayMode } from "../../../lib/transcript-display-mode";
+import { reviewChangeFromMessage } from "../../../lib/workspace-review";
 import { cachedVisibleProcessSteps } from "../../../lib/transcript-activity-summary";
 import { useSlotSessionId } from "../../../plugins/renderer-slots/use-slots";
 import { useAppStore } from "../../../stores/app-store";
@@ -249,10 +250,17 @@ const StandaloneRunRow = memo(function StandaloneRunRow({
 }: {
   segment: TurnProcessRunSegment;
 }) {
+  // A review-backed edit is one tool-level row. It cannot become a run row
+  // today, but keeping the branch here prevents a future alias from rendering
+  // both the file header and the generic tool header.
+  const reviewed = reviewChangeFromMessage(segment.item.message) !== null;
   return (
     <div className="turn-run-row" data-run-row="true">
-      <ToolRow imagesInTurn message={segment.item.message} />
-      <ReviewChangeCard message={segment.item.message} />
+      {reviewed ? (
+        <ReviewChangeCard message={segment.item.message} asToolRow />
+      ) : (
+        <ToolRow imagesInTurn message={segment.item.message} />
+      )}
     </div>
   );
 });
@@ -425,6 +433,7 @@ export const AssistantTurn = memo(function AssistantTurn({
             usage={usage}
             responseDurationMs={responseDurationMs}
             responseOutputTokens={responseOutputTokens}
+            responseOutputEstimated={summary.responseOutputEstimated}
           />
         ) : null}
         {complete && actionMessage ? (

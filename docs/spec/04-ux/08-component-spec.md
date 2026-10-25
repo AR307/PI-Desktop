@@ -119,7 +119,16 @@ Outer frame that positions Topbar, Sidebar, MainChat, and WorkPanel. Owns resize
   layout box and its scroll offset — and are `aria-hidden` and non-interactive.
   Eviction releases the DOM, not the renderer-lifetime reading bookmark. On
   return, restore the bookmarked message and its viewport offset, loading a
-  bounded historical range when necessary without search focus/highlighting.
+  bounded historical range when necessary without search focus/highlighting. If
+  the message is already loaded but outside the mounted row window, first restore
+  the saved absolute scroll offset; the bounded window can then grow as the user
+  scrolls toward the anchor.
+  Restored ranges continue automatically near the visible lower boundary, in
+  bounded pages and without a Load later messages button. Appending a page must
+  preserve the viewport; hidden panes must not initiate continuation. Do not
+  merge a disjoint live tail across unread history. Once the range reaches the
+  tail, canonical updates and new live rows resume without prepending older
+  cached rows. Explicit search retains its separate manual paging behavior.
   Explicit disclosure choices and the mounted-window budget survive eviction;
   bookmarks do not persist across renderer/app restarts.
 - A pane renders the store's live `messages` while its session is the active one
@@ -243,15 +252,15 @@ See [ADR tray-session-shortcuts](/adr/tray-session-shortcuts).
 
 ### 2.1 Purpose
 
-Global controls bar: task title and window actions. Project scope remains
-available in the title tooltip. The active session's Agent/Plan/Goal control and
-model selection belong to the Composer. (Settings is reached from the command
-palette / application menu, not the top bar.)
+Global controls bar: the conversation's project breadcrumb, its task title, and
+window actions. A local task title is editable in place. The active session's
+Agent/Plan/Goal control and model selection belong to the Composer. (Settings is
+reached from the command palette / application menu, not the top bar.)
 
 ### 2.2 Anatomy
 
 ```text
-[☰ Sidebar] [Task title]                          [＋ New] [🔍 Search]
+[☰ Sidebar] [Folder · Project / Task title]       [＋ New] [🔍 Search]
 ```
 
 (Icons described functionally; actual render uses Lucide SVGs. The `[☰ Sidebar]`
@@ -267,10 +276,22 @@ explicitly unbound shortcut is omitted. The accessible name remains the
 localized action label.
 
 The conversation top bar renders for the chat route only; Scheduled, Plugins,
-and Settings keep the frameless drag band. It owns the task title and
-window actions only. Project scope remains in the title tooltip instead of adding
-another visible label. The Composer owns the Agent/Plan/Goal control and the
-combined model × reasoning selection (§11).
+and Settings keep the frameless drag band. It owns the project breadcrumb, the
+task title, and window actions only. The crumb resolves from the active
+session's project — a remote session's workspace label, a local session's
+project path and naming preference — and is omitted for a temporary chat with
+no project. Before the first prompt there is no session yet, so the active
+workspace names the draft. The title follows the crumb after a `/` separator.
+Its full text remains in the native tooltip as `Project · Task title`. The
+Composer owns the Agent/Plan/Goal control and the combined model × reasoning
+selection (§11).
+
+The local task title is a rename trigger. Activating it swaps the heading for a
+boxless inline editor seeded with the stored title; Enter or blur commits the
+trimmed value through the existing session-rename path, Escape cancels, and an
+in-flight IME composition owns both keys. Empty and unchanged drafts are
+no-ops. Remote and scheduled-run transcripts render a plain title because their
+titles are host-owned. The editor closes if the active session changes.
 
 ### 2.3 Layout
 
@@ -295,15 +316,15 @@ combined model × reasoning selection (§11).
   overlay hiding tabs or panel actions.
   Resource close actions stay in their tabs so a second header `×` does not echo
   the native Windows close control (D357).
-- Title cluster (task title) flexes to the remaining width after toolbar
-  reservations (sidebar lead-in, action icons, work-panel toggle, and
-  platform window controls). The visible title uses CSS ellipsis only when
-  that width overflows; the full title remains in the native tooltip.
-  The right cluster (action icons) is `flex: 0 0 auto`
-  and is never squeezed by a long title. The conversation surface keeps a
-  `min-width` so its content is not crushed on narrow windows.
-- Project scope is available from the title tooltip but is not rendered as a
-  second visible label.
+- Title cluster (project crumb, separator, task title) flexes to the remaining
+  width after toolbar reservations (sidebar lead-in, action icons, work-panel
+  toggle, and platform window controls). The crumb uses the 11px quiet text
+  scale, the `/` separator uses `border-strong`, and the title uses the 12.5px
+  medium scale. Project and title truncate with CSS ellipsis only when that
+  width overflows; the full breadcrumb remains in the native tooltip. The right
+  cluster (action icons) is `flex: 0 0 auto` and is never squeezed by a long
+  title. The conversation surface keeps a `min-width` so its content is not
+  crushed on narrow windows.
 - macOS fullscreen resets the left reserve to 8px (mirrors the sidebar header).
 - Sticky: `z-sticky`
 - Items: left-aligned controls, right-aligned actions
@@ -348,14 +369,19 @@ combined model × reasoning selection (§11).
 
 | Element | Default | Running | Error | No workspace |
 |---|---|---|---|---|
-| Task title | session title (or untitled), uses the available width, with an ellipsis only on overflow | same | same | same |
+| Project crumb | folder glyph + session project name, quiet text scale | same | same | omitted for a temporary chat |
+| Task title | session title (or untitled); local tasks are an inline rename trigger with ellipsis only on overflow; remote/scheduled titles are plain text | same | same | same |
+| Task title editor | boxless input, focused and selected, capped at the shared title limit | same | toast on failed save; the previous title remains | same |
 | New task / Search | icon buttons | same | same | same |
 | Composer stop control | hidden | visible only when the running composer draft is empty | hidden | hidden |
-| Project name | title tooltip only | same | same | omitted |
 
 ### 2.5 Accessibility
 
 - Every control is keyboard-reachable with Tab
+- The title rename trigger is a real button whose accessible name is
+  `Rename task {{title}}`; the inline editor is labelled with the task-name
+  label. Enter commits, Escape cancels, blur commits, and IME composition
+  suppresses both keys.
 - Composer stop control has `aria-label="Stop generating"`
 - The Composer renders no transcription or speech control; the host speech
   capability is reachable only from IPC and plugins (ADR 0291).
@@ -789,7 +815,7 @@ reading surface of the workstation.
 |   MessageBubble (user/assistant)     |
 |   ToolCallCard                       |
 |   TurnOutcomeCard (one Continue)     |
-|   InlineReviewCard · M App.tsx +8 −2 |
+|   ReviewChangeCard · M App.tsx +8 −2 |
 |   PermissionCard                     |
 |   ...                                |
 +--------------------------------------+
@@ -896,46 +922,60 @@ thinking never creates an empty wrapper. All three modes render exactly one
 top-level process disclosure and change neither what a tool received nor what is
 stored.
 
-The ordinary group owning the active execution segment starts open while a turn is
-active, then closes on completion only if untouched; other completed groups start
-closed. An untouched active group remains open when any failed or denied tool has
-been recorded, through later successful recovery, and closes on completion if still
-untouched. These group defaults are unified across modes and do not depend on the
-thinking preference. Group headers summarize count, running state and issue count
-without treating a failed child as a failed turn.
+Every ordinary group of a turn stays open while that turn is active, whether or
+not it still owns the live execution segment, so work never folds away mid-run.
+After the turn settles, ordinary groups with at most four visible items remain
+open, larger groups start closed, and Task topology groups remain open. A group
+that still renders a Thinking row also remains open: with `Show thinking` on the
+reasoning is content the reader asked to see, and folding the group around it
+would make the setting look broken. These defaults are unified across modes and
+otherwise do not depend on the thinking preference. Explicit user choices remain
+authoritative. Group headers summarize count, running state and issue count
+without treating a failed child as a failed turn; the issue counter is one inline
+non-wrapping chip whose icon and localized count share a centred line and
+truncate together when the band runs out of width.
 
-The turn disclosure header states the turn's outcome and never echoes the item it
-is working on, because a shell command or search query can be arbitrarily long. It
-reads `Failed`, `Stopped`, `Running`, or `Finished`, with failure outranking stop,
-stop outranking completion, and a live turn reporting running. While running,
-stages a reader can sit in front of (compaction, recovery) name themselves; a
-live reasoning step reads `Thinking`, and momentary stages read as plain running.
-Elapsed time is omitted when the
-transcript recorded no timing rather than shown as zero, and issue counts sit
-beside the label. The disclosure and the levels it reveals share one left edge;
-hierarchy is carried by type size and colour, not by indentation, so a nested
-group header and a run row start exactly where the turn header does.
+The turn disclosure header states the turn's outcome and carries only its bounded
+metadata: status, recorded duration and direct tool/search count. It never echoes
+the item it is working on, because a shell command or search query can be
+arbitrarily long. It reads `Failed`, `Stopped`, `Running`, or `Finished`, with
+failure outranking stop, stop outranking completion, and a live turn reporting
+running. While running, stages a reader can sit in front of (compaction, recovery)
+name themselves; a live reasoning step reads `Thinking`, and momentary stages read
+as plain running. Elapsed time is omitted when the transcript recorded no timing
+rather than shown as zero. Issue counts are not repeated at this level: a failed
+turn is already named by its status. The header is a full-width row separated by
+a 1px hairline; status, duration, tool count and the disclosure caret form one
+left-aligned run, so the caret trails the metadata. Hovering strengthens the text
+colour only and never paints a background. The disclosure and its group headers
+share one left edge; a nested activity group keeps the released v0.20.1 hierarchy
+below that header, indenting its child rows by 12px and keeping the group's
+collapse rail in that gutter. The rail stays invisible at rest, shows a 2px bar on
+hover or focus, and collapses the group when clicked. The outer turn fold adds no
+extra hierarchy.
 
 Except for the display mode's Thinking default, no item payload opens itself: a
 tool, hosted-search or plan call stays a header row until the user opens its
 disclosure, including a Bash row, whose detail stays closed until the user opens
-it. The activity groups keep their automatic open defaults, so
-a live turn still shows its work. With `Show thinking` on, Thinking rows expand by
-default in Flat and Commands first and collapse only on user action; Fully folded
-keeps the released exception where earlier rows stay collapsed and only the last
-active row opens while it is live. An expanded Thinking row shows its full
-reasoning markdown; a collapsed one shows only the Thinking indicator, with no
-summary or excerpt. With `Show thinking` off, no completed reasoning row renders;
-only a live whole-run TextShimmer `Thinking` indicator remains while reasoning is
-actively streaming, and empty thinking-only containers are omitted. The stored
-reasoning is retained and reappears when the preference is turned back on.
+it. Groups stay open while their turn runs; after it settles, small groups (up to
+four visible items), Task topology groups and groups that still render a Thinking
+row remain open, while larger ordinary groups of plain tool rows start closed.
+With `Show thinking` on, Thinking rows expand by default in every display mode and
+collapse only on user action. An expanded Thinking row shows its full reasoning
+markdown; a collapsed one shows only the Thinking indicator, with no summary or
+excerpt. With `Show thinking` off, no completed reasoning row renders; only a live
+whole-run TextShimmer `Thinking` indicator remains while reasoning is actively
+streaming, and empty thinking-only containers are omitted. The stored reasoning is
+retained and reappears when the preference is turned back on.
 
 Group, run row and item are independent controls. Closing an ancestor keeps
 descendant choices and reopening restores them; closing the turn's disclosure hides
 every row under it, and reopening restores the groups the user had opened. Opening
-a parent never expands all children. User interaction with a child claims its
-containing group without toggling it, so completion cannot close around opened,
-focused or selected content. Choices use stable turn/group/item identities and
+a parent never expands all children. An explicit choice belongs to its own level
+alone and never pins an ancestor; reading protection is transient instead: while
+focus or a selection is inside a level, an automatic close is deferred for that
+level and its ancestors, and leaving the content hands control straight back to
+the automatic default. Choices use stable turn/group/item identities and
 remain while the retained session pane lives, including preference changes and row
 remounts; pane eviction, deletion or renderer restart reapplies defaults rather
 than persisting disclosure state to messages or settings.
@@ -954,22 +994,24 @@ pending action cards remain reachable outside a hidden process. See
 | Empty | Restrained hero + optional onboarding checklist in a scrollable content region, with a bottom-reserved home composer and no starter-card or contextual quick-action layer (D111/D204/D206). An open project underlines the project name, including before its first session exists; the control opens a searchable switcher of the sidebar's open projects, with clone-git-project and open-project actions. |
 | Streaming | Auto-scroll follows while pinned; new tokens append |
 | Active progress | Immediately after send, before the first assistant or tool event, a compact localized `Working…` status with elapsed time appears inline. Its model and subagent elapsed labels use the carried-unit format in §9.1. When the runtime names a quiet interval, that same row identifies starting, waiting for the model, preparing the next request, compacting context, recovering an empty response, retrying, or waiting for delegated work (with each running subagent's latest coarse action). It remains visible through thinking, tool execution, completed-tool gaps, and partial answers until the turn ends. Runtime phases take precedence over the Planning/Goal or Working fallback. Pending permissions, questions, and plan/goal approvals suppress the row; history reading never shows live status; no large generic progress card is rendered. The row lives in the reserved tail lane, so it appears and clears mid-turn without changing the transcript's content height. A retrying row remains compact at rest; hovering or focusing it reveals an error-styled tooltip with the localized error summary, stable code/HTTP status, and bounded provider message. The tooltip mixes the error tint over `--ds-bg-elevated-opaque` so transcript text does not show through. |
-| Turn outcome | After a failed turn, a session-scoped recovery card summarizes the interruption and tool evidence. Completed turns use the existing transcript and message-scoped InlineReviewCard without an extra success card; failed turns can continue through one localized prompt without losing the transcript. |
+| Turn outcome | After a failed turn, a session-scoped recovery card summarizes the interruption and tool evidence. Completed turns use the existing transcript and message-scoped review rows without an extra success card; failed turns can continue through one localized prompt without losing the transcript. |
 | Session switch | A first-opened session paints at its latest record; a revisited pane paints at its own retained position. Bounded first commit and full-history expansion show the same position: no post-paint height correction may shift the visible rows, in either direction |
 | Turn start (send / retry / regenerate) | Re-pins and positions the latest content before paint, even if the user had scrolled up; the later persisted user-message event does not flash the transcript at its top, and the composer collapse / indicator layout clamps during the send never release follow mode |
 | Idle (after stream) | Auto-scroll unlocked; user can scroll freely |
-| Message-scoped review snapshot | Each successful workspace Write/Edit tool row is followed by one compact InlineReviewCard carrying that message's added/modified/deleted status and explicit addition/deletion totals. It renders as a single flat list row on the tool-row rhythm — disclosure caret, Git-style status letter (`A`/`M`/`D`), path, addition/deletion counts — with no card border, status rail, icon plate, or status pill; hover fill is the only row chrome, and a rolled-back change is struck through. Its hunks sit behind an expandable disclosure: every review card (inline and in the Review tab) is collapsed by default, and the user expands it on demand. The card remains after a Git commit, never becomes a bottom/global entry, and offers hash-guarded rollback without leaking into another session's transcript. |
+| Message-scoped review snapshot | Each successful workspace Write/Edit renders as one tool-level review row (`ReviewChangeCard`) carrying that message's added/modified/deleted status and explicit addition/deletion totals. The row itself is the file header — Git-style status letter (`A`/`M`/`D`), path, addition/deletion counts, disclosure caret — with no separate generic tool row above it, so the file header appears exactly once. It keeps the tool-row rhythm with no card border, status rail, icon plate, or status pill; hover fill is the only row chrome, and a rolled-back change is struck through. Its hunks sit in the diff body directly beneath that header behind the row's expandable disclosure: every review row (inline and in the Review tab) is collapsed by default, and the user expands it on demand. The diff body's action row keeps hash-guarded rollback and adds Copy for the hunks. The card remains after a Git commit, never becomes a bottom/global entry, and does not leak into another session's transcript. |
 
 ### 4.5 Accessibility
 
 - `role="log"` for transcript container
 - `aria-live="polite"` on transcript for new message announcements
 - Scroll-to-bottom button appears when user scrolls up during stream
-- InlineReviewCard uses a native button with `aria-expanded` and
-  `aria-controls`. Its localized accessible name includes the path, status,
-  addition count, and deletion count — and the rolled-back state, which the row
-  otherwise shows only as a strikethrough; the visible text and color are not
-  the only status signal (the row carries a Git-style status letter).
+- The review row (`ReviewChangeCard`) uses a native button with
+  `aria-expanded` and `aria-controls` for its diff body; the group's left rail
+  stays a separate control that collapses the surrounding activity group. Its
+  localized accessible name includes the path, status, addition count, and
+  deletion count — and the rolled-back state, which the row otherwise shows only
+  as a strikethrough; the visible text and color are not the only status signal
+  (the row carries a Git-style status letter).
 - Empty-home task entry starts in the always-visible bottom composer. There is
   no starter-card or contextual quick-action layer between the hero and
   composer.
@@ -1111,10 +1153,12 @@ entirely inside the plugin's isolated page:
 - Selecting a file replaces the tree with a focused viewer: syntax-highlighted
   editing with save, a Markdown preview toggle, image and audio/video viewing,
   CSV/TSV tables with paging and sorting, a JSON tree, and read-only SQLite
-  browsing with a SQL query box. Binaries report that they cannot be previewed
-  rather than being decoded, and every viewer names its own bound — 2 MiB for
-  text, 8 MiB for images, 24 MiB for media, none for databases, whose bytes stay
-  out of the page.
+  browsing with a SQL query box. The editor's CodeMirror find/replace fields
+  and buttons use the plugin theme surfaces and foreground in both light and
+  dark appearances. Binaries report that they cannot be previewed rather than
+  being decoded, and every viewer names its own bound — 2 MiB for text, 8 MiB
+  for images, 24 MiB for media, none for databases, whose bytes stay out of
+  the page.
 - Saving is atomic and refuses to overwrite a file that changed on disk since it
   was opened until the user confirms. Loading, read failures, unsupported
   binaries, oversized files, empty folders, and folders that fail to load each
@@ -1143,8 +1187,8 @@ entirely inside the plugin's isolated page:
   stays hidden until its current main-frame navigation commits. Root lookup or load
   completion from a superseded request cannot navigate, reveal, or publish the
   old session as current. A session without a remembered preview stays empty;
-  closing the panel or disposing the guest wins over pending work. Normal
-  navigation within the same session retains that session's visible content.
+  collapsing the panel hides presentation without canceling owned page work.
+  Normal navigation within the same session retains that session's visible content.
   The address bar immediately shows loading feedback. A current main-frame commit
   reveals the page without waiting for images or subframes; those continue to
   drive the loading/stop control. A failed switch or one exceeding the 15-second
@@ -1172,9 +1216,16 @@ entirely inside the plugin's isolated page:
   ordinary in-page navigation stay in the current tab. Website new-window links
   follow Link open destination: another work-panel tab, or the system browser.
 
-- BrowserPreview creates its resource tab before navigating and never rewrites
-  the prior tab. A background navigation is retained for its session's selected
-  tab (or consumed once by its first tab). A new blank tab reports empty state.
+- BrowserPreview creates and loads its host-owned page before requesting its
+  side-panel resource tab; it never rewrites the prior tab. Background navigation
+  runs immediately in the calling session's connected page. A blank tab stays empty.
+- The browser stays in the side panel. Collapsing it, switching conversations,
+  navigating to Settings, unmounting chrome or reloading the shell does not stop
+  a retained page or its AI operations. Main detaches presentation on shell reload
+  and provides session-owned metadata to restore tabs without reopening the panel.
+  AI connections do not follow presentation selection once established. Unknown
+  or closed targets fail rather than borrowing the visible page. Explicit tab or
+  session close, plugin disable, window destruction and app shutdown release pages.
 
 - Main-frame same-document navigation (fragment links and History API routes) updates
   the browser address, history controls, and loading state without requiring a
@@ -1225,7 +1276,7 @@ entirely inside the plugin's isolated page:
   Background artifacts may update that retained context but never reveal it,
   resize the window, or change visible selection/focus. The transcript does
   not create a global Review changes launcher: each successful workspace
-  Write/Edit row owns only its adjacent InlineReviewCard, and another session
+  Write/Edit renders only its own tool-level review row, and another session
   cannot render that card in its transcript. Repeated resources deduplicate
   within the originating session.
 - Review truth: host-core adds one bounded `details.review` record to each
@@ -1623,10 +1674,10 @@ storage but compose into one assistant turn until the next user message.
   spacing, including before the first assistant output. Opacity hides those
   buttons without removing their space, so hover does not shift content.
 - Toggle Thinking disclosure: expand/collapse reasoning independently from the
-  final answer. The latest reasoning row opens while it streams and closes when
-  the turn settles only if the user has not interacted with it. The expanded
-  content's left rule is itself a pointer and keyboard-focusable collapse
-  control.
+  final answer. With `Show thinking` on, every visible reasoning row starts
+  expanded and stays so after the turn settles unless the user collapses it. The
+  expanded content's left rule is itself a pointer and keyboard-focusable
+  collapse control.
 - Hover code block: copy button appears
 - Click a transcript file reference with `:line[:column]`: resolve the file
   first, then open it in the host `file:` tab and scroll the requested line into
@@ -1968,7 +2019,24 @@ Single message render — either user (plaintext) or assistant (markdown streami
   copies all contentful fragments in order; Fork and Regenerate target the last
   contentful fragment so existing durable transcript semantics remain intact
   (D157).
-- Assistant meta: optional model badge under the answer. The compact
+- Assistant meta: optional model badge under the answer, followed immediately
+  by the turn usage capsule whenever that completed visual turn has usage. The
+  capsule always shows the turn's average generation speed and compact total
+  tokens; hovering or keyboard-focusing it opens a fixed-position popover with
+  the compact total, the cache-read/input/output composition bar, exact
+  cache-read/input/output counts (cache write only when non-zero), and an
+  exact total. The total is `input + output + cacheRead + cacheWrite` summed
+  across the visual turn's assistant messages; `output` already carries the
+  reasoning tokens, so `reasoningTokens` is never added again, and subagent
+  spend is not included (D103). Speed is summed output tokens over summed
+  response duration. No meta row, and therefore no capsule, renders while the
+  turn is streaming. The capsule's
+  accessible name states the speed and total and that activating it shows the
+  breakdown. The popover portals to the document body, clamps to the
+  conversation pane, repositions on scroll, resize, and pane geometry, closes
+  on pointer leave after a short grace delay (unless the trigger still has
+  keyboard focus), Escape, or an outside pointer press, and disables its
+  transition under reduced motion. The compact
   Codex-style context inspector lives in the composer right toolbar,
   immediately left of the model × reasoning chip, and always mirrors the
   newest assistant turn that reported usage (D347). Occupancy, remaining
@@ -1977,8 +2045,9 @@ Single message render — either user (plaintext) or assistant (markdown streami
   assistant message (the last model request), using
   `input + output + cacheRead + cacheWrite` (D355; `output` already carries the
   reasoning tokens, so `reasoningTokens` is never added again). They are not
-  the sum of every model call in the visual tool-loop. It is hidden until that
-  usage exists. The trigger keeps a small capacity ring beside the
+  the sum of every model call in the visual tool-loop, and this last-request
+  occupancy stays deliberately distinct from the capsule's turn aggregate. It
+  is hidden until that usage exists. The trigger keeps a small capacity ring beside the
   percentage and omits the redundant `Context` label; the leading figure
   (ring arc, percentage, token label, popover heading, tooltip, and
   `aria-label`) follows `settings.contextUsageDisplay` — `"remaining"`
@@ -2315,9 +2384,10 @@ as its own row beside them, and a progress message or command ends a group. With
 `flat`, no group renders and the rows keep transcript order inside the outer
 disclosure. A singleton uses its item disclosure directly, and Task topology
 keeps its existing container. A Bash-only turn still has its one disclosure.
-While the turn is active, the ordinary group owning the execution segment opens;
-when it settles, an untouched group closes. These group defaults do not depend on
-the thinking preference. No item payload opens itself, except the display mode's
+While the turn is active, its ordinary group opens. After completion, ordinary
+groups with at most four visible items remain open; larger groups start closed,
+and Task topology groups remain open. These group defaults do not depend on the
+thinking preference. No item payload opens itself, except the display mode's
 Thinking default: a tool, hosted-search or plan row stays a header row until the
 user opens it, whichever item of the group it is, including a Bash row whose
 detail stays closed until opened.
@@ -2349,14 +2419,14 @@ seconds when non-zero) from one hour onward. Zero-value units are omitted, so
 - The leading Lucide icon reflects the action type: file, folder, search,
   edit, terminal, web, or generic tool.
 - A multi-item group header owns elapsed time plus item and issue counts and stays
-  in the transcript after completion. The active group starts open and closes on
-  completion only if untouched; completed groups otherwise start closed. These
-  defaults do not depend on the thinking preference. A singleton has no group
-  header.
+  in the transcript after completion. Active groups stay open; after completion,
+  groups with at most four visible items and Task topology groups remain open,
+  while larger ordinary groups start closed. These defaults do not depend on the
+  thinking preference. A singleton has no group header.
 - Tool/search payloads stay collapsed until the user opens them; no tool/search
-  row auto-opens, so a final thinking item never selects an earlier tool. Live
-  thinking follows its own indicator/disclosure policy and never opens sibling
-  payloads.
+  row auto-opens, so a final thinking item never selects an earlier tool. With
+  `Show thinking` on, reasoning rows open by default in every display mode and
+  never open sibling payloads.
 - `Bash` and run rows are revealed by the turn's process disclosure. In
   `fully-folded` they sit inside their group; in `command-first` they sit at its
   top level beside the groups with adjacent rows separate; in `flat` no groups
@@ -2435,7 +2505,7 @@ twice.
 | State | Header treatment | Expanded content |
 |---|---|---|
 | Running | Progressive action with readable text and a pulsing marker; a `run` row also shows its spinner and pulses the status dot beside `Working…` | The active multi-item group opens; no tool/search payload opens itself, except the display mode's Thinking default; live thinking follows its own indicator/disclosure policy |
-| Success | Past-tense action + result chips; no green success badge, except a `run` row's dot and `Done` | Result blocks, then arguments if not already shown; an untouched active group closes on completion, while manual group and item choices are retained |
+| Success | Past-tense action + result chips; no green success badge, except a `run` row's dot and `Done` | Result blocks, then arguments if not already shown; small groups and Task topology groups stay open, large untouched ordinary groups close, and manual group and item choices are retained |
 | Error | Past-tense action + compact danger status; details remain collapsed by default and open only on user request. A `run` row is in this state whenever its command exited nonzero, whatever the call reported (D227) | Error note first, then arguments |
 | Denied | Muted `Denied` status; payload remains closed until requested | Permission result when available |
 
@@ -2456,9 +2526,10 @@ twice.
   disclosure, and a reference that matches nothing reports itself without
   opening a panel. A tool surface picks no destination of its own.
 - Click the processing header: expand/collapse only that ordered activity list.
-  The active group opens and closes on settlement only if untouched; completed
-  groups otherwise start closed. Opening a group does not expand every item, and
-  sibling groups remain independent.
+  Active groups stay open; after completion, ordinary groups with at most four
+  visible items and Task topology groups remain open, while larger ordinary
+  groups start closed. Opening a group does not expand every item, and sibling
+  groups remain independent.
 - Click or keyboard-activate the left rule beside expanded thinking, tool details,
   delegated work, or processing steps: collapse that owning disclosure without
   changing adjacent expansion state. Item interaction also claims its containing
@@ -3883,7 +3954,7 @@ Transient, non-blocking feedback for completed actions and failures that have no
 ### 17.2 Anatomy
 
 ```text
-                        ┌  toast-viewport (fixed top-center, z-toast) ┐
+                        ┌  toast-viewport (fixed safe-area top-center, z-toast) ┐
                         │  ┌──────────────────────────────────────┐ │
    newest, at anchor →  │  │ (✓)  Provider saved               ✕  │ │
                         │  ├──────────────────────────────────────┤ │
@@ -3895,6 +3966,11 @@ Transient, non-blocking feedback for completed actions and failures that have no
 - `ToastHost` (in `components/Toast.tsx`) renders the stack; mounted once per shell branch in `App.tsx`
 - Each card: 16px variant icon (semantic tint) · message · X dismiss button
 - Surface: `bg-elevated-opaque` + 1px `border-subtle` + `shadow-dialog`, radius-md-plus — same floating family as menus; metrics in [07-ui-design-system.md §11.8](07-ui-design-system.md#118-toast)
+- The host remains portaled to `document.body` for global stacking, but AppShell
+  anchors its horizontal center and width to the live `.main-pane` bounds. A
+  docked or resized work panel and a reopened sidebar therefore cannot be
+  covered by the toast stack. Settings and any shell without a main-content
+  anchor retain viewport-centered fallback placement.
 
 ### 17.3 API
 
@@ -3924,7 +4000,7 @@ dismissToast(id: number); // ToastHost internal / tests
 
 - Auto-dismiss 4s (error 8s, `duration: 0` sticky); hovering a card pauses its timer, leaving resumes with remaining time
 - Stack caps at 4 — oldest drops first; re-raising an identical message+variant restarts the existing toast instead of stacking a twin
-- Newest toast enters at the top-center anchor (slide-down 200ms ease-out) pushing older cards down; exit is a 150ms ease-in fade
+- Newest toast enters at the main-content safe area's top-center anchor (slide-down 200ms ease-out) pushing older cards down; exit is a 150ms ease-in fade
 - Dismiss X always available; every card is an explicit non-drag pointer target
   so hover pause and dismissal remain interactive where the top-center stack
   overlaps frameless titlebar drag chrome

@@ -958,6 +958,10 @@ pi.browser.cdp(input: { method: string; params?: unknown }): Promise<unknown>
 `navigate` returns when the current main-frame navigation commits, including
 redirects; it does not wait for slow images or subframes. `browser:state` reports
 loading immediately and optionally includes `loadError` for failed navigation.
+Renderer page metadata stays session-scoped in background `browser/event/state`
+updates; the shared `browser:state` plugin chrome feed includes only the page
+currently selected for presentation. Background events cannot retarget the
+address bar or issue bounds/visibility updates for another page.
 Optional `sessionId` and `tabId` identify the host-owned work-panel destination;
 plugins do not select these identities through navigation arguments.
 With the high-risk `browser.cdp` permission, `navigate` may open an existing
@@ -966,21 +970,34 @@ workspace-scoped. A local file page may navigate to other existing local files;
 web pages retain only the prior in-workspace file-navigation allowance.
 
 The current guest page is a host-owned `WebContentsView` (`persist:work-browser`).
-Each resource tab retains its own page. A navigation for a background session is
-queued for that session's last selected tab, or its first tab when none exists.
-It does not navigate or return another session's visible page.
+Each resource tab retains its own page. Agent navigation executes immediately
+in the calling session's connected page, even when its panel is hidden or a
+different session is visible. It never returns or navigates another session's page.
 `setBounds` is content-relative to the calling plugin view and is clamped so
 the guest cannot cover chat/composer. `cdp` is deny-by-default; cookie,
 storage, target, and network-interception methods fail with
 `PERMISSION_DENIED`. Session identity for agent calls comes from the in-flight
 `plugins.execute` `sessionId`, not from plugin arguments (D333 / ADR 0170).
-Page operations (`navigate`, `action`, `openExternal`, `getState`, snapshot,
-screenshot, and CDP calls) are available only while the Browser view is
-visible. `reveal()` asks the host to activate the Browser tab for the calling
-session and resolves only after that session's view is visible. A background
-session never takes focus; if it cannot become visible, `reveal()` fails with
-`UNAVAILABLE`. The bundled Browser agent tool calls `reveal()` before each
-operation. `BrowserPreview` remains the live-reloading workspace-file preview.
+The host binds every agent page operation to the trusted in-flight tool session.
+The first navigation or BrowserPreview connects a page; browsing another side-panel
+tab does not retarget an established connection. A closed target fails with
+`UNAVAILABLE` until another navigation or preview connects a page. Unscoped plugin
+UI calls keep their visible-page requirement. The bundled Browser tool does not
+call `reveal()` before operations; an explicit `reveal()` still waits for the
+calling session's visible tab and never takes focus from a background session.
+Renderer reload detaches only presentation. Main retains live pages, inputs,
+history and CDP; session-scoped metadata restores the side-panel tabs without
+opening a collapsed panel. Closing a tab/session, disabling the plugin, window
+destruction or app shutdown releases the relevant pages. No restart DOM recovery
+or cross-session page sharing is introduced.
+Hidden guests are parked in a lazy, invisible sandboxed backing window, keeping
+Chromium's input/capture widget connected without a visible window or native focus.
+The same view moves back to the side panel on show; closing the last parked page
+releases the backing window. Host-only focus emulation and page-relative target
+coordinates do not expand raw-CDP permissions. Pointer/capture work pins the
+viewport per page, temporarily disables throttling and restores it on completion.
+`BrowserPreview` remains confined to its session's workspace/scratch roots and
+loads independently of renderer mounting.
 
 Full-page `screenshot` captures are proportionally scaled to no more than
 1280×2048 output pixels. Viewport screenshots and raw `Page.captureScreenshot`

@@ -43,14 +43,15 @@ export function ProcessActivityGroup({
           <span className={`tool-activity-label${active ? " running" : ""}`}>
             {t(summary.label, { count: summary.count })}
           </span>
+          {active ? <span className="activity-marker" aria-hidden /> : null}
           {summary.thinking > 0 && summary.tools > 0 ? (
             <span className="tool-activity-count">{t("chat.activityIncludesThinking")}</span>
           ) : null}
           {active ? <span className="tool-activity-count">{t("chat.running")}</span> : null}
           {summary.issues > 0 ? (
-            <span className="turn-process-error">
+            <span className="activity-issue-count">
               <IconCircleAlert size={14} aria-hidden />
-              {t("chat.activityFailures", { count: summary.issues })}
+              <span>{t("chat.activityFailures", { count: summary.issues })}</span>
             </span>
           ) : null}
           <span className="tool-activity-caret" aria-hidden><IconChevronRight size={12} /></span>

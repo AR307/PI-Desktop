@@ -26,7 +26,7 @@ export type ClassifiedAgentError = {
 const MAX_ERROR_MESSAGE_CHARS = 600;
 
 const NETWORK_PATTERN =
-  /ECONNREFUSED|ECONNRESET|ENOTFOUND|EAI_AGAIN|ETIMEDOUT|EPIPE|ENETUNREACH|EHOSTUNREACH|UND_ERR|fetch failed|socket hang up|network error|connection error|connection refused|dns/i;
+  /ECONNREFUSED|ECONNRESET|ECONNABORTED|ENOTFOUND|EAI_AGAIN|ETIMEDOUT|EPIPE|ENETUNREACH|EHOSTUNREACH|UND_ERR|fetch failed|socket hang up|network error|connection error|connection refused|connection abort|dns/i;
 
 const CONTEXT_PATTERN =
   /context[ _-]?length|maximum context|context window|too many tokens|prompt is too long|input token count|exceeds the (?:maximum|model)|token limit/i;
@@ -63,7 +63,7 @@ function isContextOverflowMessage(message: string): boolean {
 }
 
 const STREAM_TERMINATION_PATTERN =
-  /\bterminated\b|stream ended (?:without|before)|premature(?:ly)?\s+(?:closed|ended)|(?:stream|response).*(?:closed|interrupted)/i;
+  /\bterminated\b|stream ended (?:without|before)|premature(?:ly)?\s+(?:closed|ended)|(?:stream|response).*(?:closed|interrupted)|\bstream aborted\b|aborted the stream/i;
 
 /** An adapter refusing a request option, e.g. "Custom fetch is not supported
  * by the Google Generative AI adapter" (issue #1072). */
@@ -265,7 +265,7 @@ function networkCategoryFromText(text: string): NetworkFailureCategory {
     return "unreachable";
   }
   if (
-    /ECONNRESET|ECONNABORTED|EPIPE|socket hang up|premature close|reset by peer|connection (?:was )?(?:closed|lost|reset)/i.test(
+    /ECONNRESET|ECONNABORTED|EPIPE|socket hang up|premature close|reset by peer|connection (?:was )?(?:closed|lost|reset|abort)/i.test(
       text,
     )
   ) {

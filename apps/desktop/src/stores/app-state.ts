@@ -40,7 +40,7 @@ import type {
   SessionSort,
 } from "../lib/sidebar-preferences";
 import type { PermissionQueues } from "../lib/pending-permissions";
-import type { AskQueues } from "../lib/pending-asks";
+import type { AskDraft, AskDrafts, AskQueues } from "../lib/pending-asks";
 import type {
   QueuedPromptDirection,
   QueuedPrompts,
@@ -180,6 +180,8 @@ export type AppState = {
   pendingPermissions: PermissionQueues;
   /** Inline asktool requests, queued per session without an expiry. */
   pendingAsks: AskQueues;
+  /** In-progress AskTool answers keyed by requestId, so a remount keeps them. */
+  askDrafts: AskDrafts;
   /** Renderer-owned, in-memory prompt queue, isolated by session. */
   queuedPrompts: QueuedPrompts;
   /** Planning state is durable per session, including sessions outside view. */
@@ -385,6 +387,10 @@ export type AppState = {
     sessionId: string,
     resolution: AskToolResolution,
   ) => Promise<void>;
+  /** Persist one question card's in-progress answers by requestId. */
+  setAskDraft: (requestId: string, draft: AskDraft) => void;
+  /** Forget a request's draft once it is resolved or dismissed. */
+  dropAskDraft: (requestId: string) => void;
   resolvePlan: (resolution: PlanResolveRequest) => Promise<PlanResolutionResult>;
   showToast: (message: string, options?: ToastOptions) => void;
   dismissToast: (id: number) => void;
@@ -442,6 +448,7 @@ export type AppState = {
   ) => void;
   openUrlInWorkPanel: (url: string) => void;
   updateBrowserWorkPanelTab: (state: BrowserState) => void;
+  restoreBrowserWorkPanelTabs: (sessionId: string, pages: BrowserState[]) => void;
 };
 
 export type AppStateData = {

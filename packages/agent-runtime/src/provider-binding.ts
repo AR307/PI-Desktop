@@ -368,7 +368,7 @@ export function buildProviderModel(
   const binding = apiBindingForProviderModel(provider);
   const catalog = provider.modelConfig;
   const catalogModel = catalog
-    ? (({ source: _source, transcriptBinding: _transcriptBinding, nativeCost, ...model }) => ({
+    ? (({ source: _source, transcriptBinding: _transcriptBinding, supportsReasoningEffort: _supportsReasoningEffort, nativeCost, ...model }) => ({
         ...model,
         ...(nativeCost ? { cost: nativeCost } : {}),
       }))(catalog)
@@ -432,6 +432,10 @@ export function buildProviderModel(
           ...(thinkingProtocolCompat ?? {}),
           ...(zhipuCompat ?? {}),
           ...(deepseekCompat ?? {}),
+          // Only an explicit saved binding may override endpoint compatibility.
+          ...(typeof catalog?.supportsReasoningEffort === "boolean"
+            ? { supportsReasoningEffort: catalog.supportsReasoningEffort }
+            : {}),
           supportsDeveloperRole: catalogModel.compat?.supportsDeveloperRole === true,
         }
       : binding.api === "anthropic-messages" &&

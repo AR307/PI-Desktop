@@ -64,12 +64,15 @@ host-core 之前被解析为绝对路径。
  ├── review-changes/<sessionId>/<snapshotId>/
  │    ├── before          # bounded pre-tool bytes, when reversible
  │    └── meta.json       # path, hashes, diff state, and ownership
- └── scratch/<sessionId>/ # per-session agent temp files (D114), including
-                          # composer pasted files under pasted/ — deleted
-                          # with the session; startup sweep removes orphans
+ ├── scratch/<sessionId>/ # per-session agent temp files (D114), including
+ │                        # composer pasted files under pasted/ — deleted
+ │                        # with the session; startup sweep removes orphans
 
-                          # with the session; startup sweep removes orphans
-                          # and stale dirs
+ │                        # with the session; startup sweep removes orphans
+ │                        # and stale dirs
+ └── visualizations/<sessionId>/ # inline visualization .html fragments (D671) —
+                          # deleted with the session; startup sweep removes
+                          # orphans only, never by age
 ```
 
 一个数据库文件保持跨实体写入事务性（例如会话+
@@ -459,6 +462,9 @@ CREATE INDEX idx_session_import_origins_plugin
   删除原任务不会删除子任务的副本。未引用文件、截断点之后独有的输入和其他
   scratch 输出不复制；已过期的文件仍不可用，不新增跨任务读取授权。
   分支失败时清理已复制的输入及子任务转录本。
+- 分支只把复制的转录本所引用的 `visualizations/<sourceId>/` 片段复制到
+  `visualizations/<childId>/`，并改写这些 `::visualize` 路径；未引用的片段不复制。
+  卡片总是从所属会话的目录加载，所以删除原会话不影响分支（D671）。
 
 ### 4.6 turns — 每次 agent 运行一行
 
@@ -896,7 +902,7 @@ CREATE INDEX idx_artifacts_time ON artifacts(updated_at DESC);
 由 host-core 在与 `tool_execute` 审计行相同的事务中更新插入
 每当 Write/Edit（或声明文件效果的插件工具）成功时 -
 重复编辑更新 Write/Edit/`op`，每个会话每个文件保留一行。
-写入会话暂存目录 (D114) 被排除：工件列表
+写入会话暂存目录 (D114) 或会话可视化目录 (D671) 被排除：工件列表
 仅工作区可交付成果。
 
 ### 4.11 scheduled_tasks + task_runs — 自动化

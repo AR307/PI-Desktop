@@ -1,5 +1,6 @@
 import { withMirrorCodingFast } from "./mirrorcoding-fast.js";
 import { claudeCacheOptions } from "./claude-cache.js";
+import { createToolCallIdentity } from "./tool-call-dedupe.js";
 import { accountModelStream, type UsageObserver } from "./request-usage.js";
 import {
   buildProviderModel,
@@ -15,7 +16,7 @@ import {
 } from "./opencode-session-headers.js";
 import { withSessionAffinityOptions } from "./session-affinity.js";
 import { mergeProviderHeaders, withProviderHeaders } from "./provider-headers.js";
-import { clampOutputToContext } from "./output-cap.js";
+import { clampOutputToContext, requestTranscript } from "./output-cap.js";
 import {
   agentThinkingLevel as agentThinkingLevelFor,
   omitThinkingModel as withOmittedThinking,
@@ -46,6 +47,7 @@ export function subagentModelBinding(opts: {
   sessionId: string;
   maxTokens?: number;
   onUsage?: UsageObserver;
+  uniqueToolCalls?: ReturnType<typeof createToolCallIdentity>;
 }, retry: SubagentProviderRetryState) {
   // A definition may cap the delegate's own output (issue #171). The
   // catalog's published limit keeps applying otherwise, so this is an
@@ -66,6 +68,7 @@ export function subagentModelBinding(opts: {
   // provider receives no synthesized reasoning setting at all.
   const omitThinkingModel = omitThinking ? withOmittedThinking(model) : model;
   const requestKey = providerRequestKey(opts.provider);
+  const uniqueToolCalls = opts.uniqueToolCalls ?? createToolCallIdentity();
   return {
     model,
     agentThinkingLevel,
@@ -82,6 +85,7 @@ export function subagentModelBinding(opts: {
       retry.headers = undefined;
       retry.status = undefined;
       retry.failure = undefined;
+      const requestContext = requestTranscript(m, context);
       const requestOptions = withProviderHeaders(
         withOpenCodeSessionHeaders(
           {
@@ -90,7 +94,7 @@ export function subagentModelBinding(opts: {
             // Same request-side output cap as the parent runtime: the
             // `omit` branch hits pi-ai's low-level `stream` which never
             // re-derives max_tokens (issue B).
-            maxTokens: clampOutputToContext(m, context, options?.maxTokens),
+            maxTokens: clampOutputToContext(m, requestContext, options?.maxTokens),
             maxRetries: 0,
             sessionId: opts.sessionId,
             fetch: providerRequestFetch(
@@ -131,15 +135,15 @@ export function subagentModelBinding(opts: {
       const stallAbort = new AbortController();
       const retryStream = createProviderRetryStream(
         m,
-        context,
+        requestContext,
         withMirrorCodingFast({
           ...sessionOptions,
           signal: AbortSignal.any([...(options?.signal ? [options.signal] : []), stallAbort.signal]),
         }, opts.provider),
         (retryOptions) => accountModelStream(m, () =>
           omitThinking
-            ? models.stream(omitThinkingModel, context, retryOptions)
-            : models.streamSimple(m, context, retryOptions), {
+            ? models.stream(omitThinkingModel, requestContext, retryOptions)
+            : models.streamSimple(m, requestContext, retryOptions), {
               providerId: opts.provider.id,
               nativeCost: opts.provider.modelConfig?.nativeCost,
               onUsage: opts.onUsage,
@@ -151,7 +155,7 @@ export function subagentModelBinding(opts: {
           failure: () => retry.failure,
         },
       );
-      return withStreamIdleTimeout(retryStream, m, streamIdleTimeoutMs(), () => stallAbort.abort());
+      return uniqueToolCalls(withStreamIdleTimeout(retryStream, m, streamIdleTimeoutMs(), () => stallAbort.abort()), context.messages);
     },
     getApiKey: async () => requestKey || undefined,
   } satisfies Pick<AgentOptions, "streamFn" | "getApiKey"> & {

@@ -78,6 +78,9 @@ export type RegisterIpcDependencies = {
   activeUserSubagentDocuments: (...args: any[]) => Promise<any>;
   disabledBuiltinSubagents: () => Promise<string[]>;
   disabledBuiltinSkills: () => Promise<string[]>;
+  /** Host activation plus the inline-visualization switch, for runtime consumers. */
+  runtimeDisabledBuiltinSkills: () => Promise<string[]>;
+  completionNoticeTurns: Set<string>;
   liveCallService?: LiveCallService;
   liveVoiceWidget?: LiveVoiceWidget;
   restartForStorage: () => void;
@@ -118,6 +121,7 @@ export function registerIpcHandlers(dependencies: RegisterIpcDependencies) {
     updater,
     dataDir,
     activeTurns,
+    completionNoticeTurns,
     isTurnDispatchable,
     sessionProjects,
     persistenceOutbox,
@@ -152,6 +156,7 @@ export function registerIpcHandlers(dependencies: RegisterIpcDependencies) {
     activeUserSubagentDocuments,
     disabledBuiltinSubagents,
     disabledBuiltinSkills,
+    runtimeDisabledBuiltinSkills,
     pluginActiveInProject,
     getWorkPanelReservationWidth,
     setWorkPanelReservationWidth,
@@ -369,7 +374,7 @@ export function registerIpcHandlers(dependencies: RegisterIpcDependencies) {
     agentExtensions,
     optionalWorkspaceRoot,
     activeUserSkills,
-    disabledBuiltinSkills,
+    disabledBuiltinSkills: runtimeDisabledBuiltinSkills,
     pluginActiveInProject,
     loadComposerTemplatesCached,
   });
@@ -456,6 +461,7 @@ export function registerIpcHandlers(dependencies: RegisterIpcDependencies) {
     persistenceOutbox,
     dataDir,
     activeTurns,
+    completionNoticeTurns,
     recordTurnStart,
     isTurnDispatchable,
     activeTurnUsages,

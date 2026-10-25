@@ -112,7 +112,7 @@ This does not recreate an unavailable custom storage volume during startup.
 Rust's offline `--relocate-data <old-root> <copied-root>` mode owns structured
 path relocation in the copied SQLite index, transcripts/revisions/checkpoints,
 outbox, installed plugin registry and agent capability metadata. It does not boot
-RPC, upgrade schemas, recover turns, or sweep scratch. It changes only known
+RPC, upgrade schemas, recover turns, or sweep scratch or visualizations. It changes only known
 path-bearing fields under the old root. External projects, dev/builtin plugins,
 narrative text, commands, source code, secrets, and arbitrary plugin-private formats
 are preserved. Credentials and their machine key migrate as bytes with their
@@ -190,11 +190,14 @@ to an absolute path before it reaches host-core as a child-process variable.
  ├── review-changes/<sessionId>/<snapshotId>/
  │    ├── before          # bounded pre-tool bytes, when reversible
  │    └── meta.json       # path, hashes, diff state, and ownership
- └── scratch/<sessionId>/ # per-session agent temp files (D114), including
-                          # composer pasted files under pasted/ and replayed/
-                          # image fallbacks — deleted
-                          # with the session; startup sweep removes orphans
-                          # and stale dirs
+ ├── scratch/<sessionId>/ # per-session agent temp files (D114), including
+ │                        # composer pasted files under pasted/ and replayed/
+ │                        # image fallbacks — deleted
+ │                        # with the session; startup sweep removes orphans
+ │                        # and stale dirs
+ └── visualizations/<sessionId>/ # inline visualization .html fragments (D671) —
+                          # deleted with the session; startup sweep removes
+                          # orphans only, never by age
 ```
 
 One database file keeps cross-entity writes transactional (e.g. session +
@@ -706,6 +709,15 @@ CREATE INDEX idx_session_import_origins_plugin
   later-message inputs outside a bounded fork, and other scratch outputs are
   excluded. Missing expired inputs stay missing; no cross-session read grant
   is added. Handled fork failures remove copied inputs and child transcripts.
+- Forks copy only the `visualizations/<sourceId>/` fragments the copied
+  transcript references into `visualizations/<childId>/` and rewrite those
+  `::visualize` paths; unreferenced fragments stay behind. Cards always load
+  from the owning session's directory, so deleting the source session does not
+  affect the fork (D671).
+  Reference identity is the source session and file name, independent of the
+  old absolute data prefix, JSON escaping, or canonical alias spelling.
+  Relocating the data directory before forking must retain those child copies.
+  Cleanup and copying refuse redirected visualization base/session directories.
 
 ### 4.6 turns — one row per agent run
 
@@ -1202,8 +1214,8 @@ CREATE INDEX idx_artifacts_time ON artifacts(updated_at DESC);
 Upserted by host-core in the same transaction as the `tool_execute` audit row
 whenever Write/Edit (or a plugin tool declaring file effects) succeeds —
 repeat edits update `op`/`updated_at`, keeping one row per file per session.
-Writes into the session scratch directory (D114) are excluded: artifacts list
-workspace deliverables only.
+Writes into the session scratch directory (D114) or the session visualization
+directory (D671) are excluded: artifacts list workspace deliverables only.
 
 ### 4.11 scheduled_tasks + task_runs — automations
 

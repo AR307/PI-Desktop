@@ -1858,8 +1858,8 @@ through `session.get`, allowing its project-group folders (or its isolated
 worktree) and its own `<data_dir>/scratch/<sessionId>` directory. A temporary
 conversation needs no workspace to preview its generated HTML. A missing
 session fails explicitly; a background preview never inherits the visible
-session's roots. BrowserPreview validates realpath containment before emitting
-the absolute path to the existing resource-tab owner. Chat links to other
+session's roots. BrowserPreview validates realpath containment before creating
+its host-owned page and emitting the corresponding resource-tab identity.
 sessions' scratch files and attachments retain the read-only file surface.
 This does not restrict the Browser's explicit absolute-path / `file:` address
 entry or local-page navigation, which follow its existing local-file policy.
@@ -1889,12 +1889,15 @@ Renderer IPC kept for the Plan-safe preview facade and URL fallback:
   tab id is supplied). The shared plugin chrome is not closed with a sibling page.
 - event: `browser/event/state {url, title, isLoading, canGoBack, canGoForward, loadError?, sessionId?, tabId?}`
   (also pushed to plugin views as `browser:state`)
-- agent preview event: `browser/event/preview {sessionId, path?, url?}`.
-  Electron Main validates a workspace `path` inside that session's project,
-  asks the renderer to create a Browser resource tab before navigation, with
-  `location` in the matching
-  runtime panel context. Navigation of a background session does not steal the
-  visible guest.
+- `browser/getPages({sessionId})` → `BrowserState[]`. Returns only that session's
+  retained page metadata for shell-reload recovery, including blank/loading tabs.
+  It never returns DOM, credentials, another session's pages or shared plugin state.
+- agent preview event: `browser/event/preview {sessionId, tabId?, path?, url?, revealOnly?}`.
+  Electron Main validates a workspace `path`, starts its own resource page and
+  requests the corresponding renderer tab. Page execution does not wait for UI
+  mounting. Continuing operations use a trusted session connection rather than
+  visible selection. Explicit reveal remains presentation-only; background work
+  never steals focus. Shell reload hides presentation without destroying pages.
 - plugin file action: `browser/event/openFile {path}`. Electron Main emits this
   only after the plugin's `fs.openInBrowser` request passes its declared
   `fs.read` scope and HTML-file checks. The renderer opens the absolute path in a
@@ -1952,9 +1955,10 @@ Renderer IPC kept for the Plan-safe preview facade and URL fallback:
   other folders, which are then searched in the group's own order (ADR 0263),
   so a shorthand resolves in a sibling folder as readily as in the primary one,
   and the match names the folder that answered. Inside one root an exact path
-  beats a shorthand; among shorthands the longest matching tail wins, then the
-  shallowest path. Relative and indexed candidates must resolve to regular files
-  whose real paths remain inside their answering root; an exact path through an
+  beats a shorthand; a shorthand matches only when its complete supplied suffix
+  identifies one safe file. It never degrades to a shorter suffix, and an
+  ambiguous match returns `match: null`. Relative and indexed candidates must
+  resolve to regular files whose real paths remain inside their answering root; an exact path through an
   escaping or dangling link cannot fall back to a same-name indexed file. The
   files-panel ignore set applies. An absolute reference may also name a store
   the app reads without searching it: the whole scratch store

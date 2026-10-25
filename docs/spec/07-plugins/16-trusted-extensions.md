@@ -326,7 +326,7 @@ are honored where the event type defines a result.
 | `project_trust` | v1 note: not emitted; enablement per project is the trust decision | No |
 | `resources_discover` | v1 note: not emitted; skills and prompt discovery stay in Electron main | n/a |
 | `before_agent_start` | Before the first provider request of a turn | Yes, returned system prompt replacements chain in handler order |
-| `context` | `prepareNextTurn` | Yes, replacement message list |
+| `context` | `transformContext`, before every provider request of a run, including the first | Yes, replacement message list for that request only; the run context and transcript keep the original messages |
 | `before_provider_request`, `before_provider_headers`, `after_provider_response` | Provider call wrapper | Request return value; headers mutate the payload in place |
 | `agent_start`, `agent_end`, `agent_settled` | Agent loop boundaries | No |
 | `turn_start`, `turn_end` | Turn boundaries | No |
