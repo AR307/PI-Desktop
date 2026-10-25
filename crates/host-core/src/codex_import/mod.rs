@@ -5,7 +5,10 @@ mod catalog_tests;
 mod convert;
 mod history;
 mod projects;
+#[cfg(test)]
+mod real_format_tests;
 mod replay;
+mod source;
 #[cfg(test)]
 mod tests;
 
@@ -164,9 +167,12 @@ pub async fn handle(state: Arc<Mutex<AppState>>, method: &str, params: Value) ->
             }
             let mut converted = converted?;
             let history_only = params["historyOnly"] == true;
-            if !converted.complete && !history_only {
+            let partial = !converted.complete && !history_only;
+            let allow_partial =
+                params["allowPartialContext"] == true && !converted.context.is_empty();
+            if partial && !allow_partial {
                 return Ok(
-                    json!({"externalId":id,"status":"needsConfirmation","context":"historyOnly","warnings":converted.warnings}),
+                    json!({"externalId":id,"status":"needsConfirmation","context":"historyOnly","availableContextMessages":converted.context.len(),"warnings":converted.warnings}),
                 );
             }
             if converted.messages.is_empty() {
@@ -176,7 +182,7 @@ pub async fn handle(state: Arc<Mutex<AppState>>, method: &str, params: Value) ->
             // the source ended in an image-only or unfinished tool message.
             converted.messages.push(serde_json::from_value(json!({
                 "id":format!("codex-import-receipt-{id}"),"role":"user","status":"complete",
-                "content":if history_only { "[Imported from Codex: visible history only; prior context was not restored.]" } else { "[Imported from Codex: continuation context restored; historical tools will not run again.]" },
+                "content":if history_only { "[Imported from Codex: visible history only; prior context was not restored.]" } else if partial { "[Imported from Codex: recoverable context retained with user-confirmed gaps; historical tools will not run again.]" } else { "[Imported from Codex: continuation context restored; historical tools will not run again.]" },
                 "createdAt":candidate.updated_at
             }))?);
             let project_path = if params.get("projectPath").is_some() {
@@ -231,10 +237,13 @@ pub async fn handle(state: Arc<Mutex<AppState>>, method: &str, params: Value) ->
                 retained_tail: Some(if history_only {
                     json!([])
                 } else {
+                    if partial {
+                        converted.context.insert(0, json!({"role":"user","content":[{"type":"text","text":"[Codex import notice: this history is incomplete. Use the available context, ask for missing details when needed, and do not claim full recovery or replay historical tools.]"}],"timestamp":crate::db::ts_to_ms(&summary.updated_at)}));
+                    }
                     json!(converted.context)
                 }),
                 details: Some(
-                    json!({"importSource":"codex","externalId":id,"retainedTailShape":"recent_window","sourceModel":candidate.model,"sourceReasoningEffort":candidate.reasoning_effort,"sourceWorkingDirectory":candidate.cwd,"sourceArchived":candidate.archived,"sourceProject":catalog.projects.iter().find(|p| Some(&p.id) == candidate.project_id.as_ref()),"contextStatus":if history_only {"historyOnly"} else {"restored"},"warnings":converted.warnings}),
+                    json!({"importSource":"codex","externalId":id,"retainedTailShape":"recent_window","sourceModel":candidate.model,"sourceReasoningEffort":candidate.reasoning_effort,"sourceWorkingDirectory":candidate.cwd,"sourceArchived":candidate.archived,"sourceProject":catalog.projects.iter().find(|p| Some(&p.id) == candidate.project_id.as_ref()),"contextStatus":if history_only {"historyOnly"} else if partial {"partial"} else {"restored"},"warnings":converted.warnings}),
                 ),
                 provider_id: None,
                 model_id: None,
@@ -275,7 +284,7 @@ pub async fn handle(state: Arc<Mutex<AppState>>, method: &str, params: Value) ->
                 &[checkpoint],
             )?;
             Ok(
-                json!({"externalId":id,"sessionId":session_id,"archived":candidate.archived,"status":if imported {"imported"} else {"skipped"},"context":if history_only {"historyOnly"} else {"restored"},"warnings":converted.warnings}),
+                json!({"externalId":id,"sessionId":session_id,"archived":candidate.archived,"status":if imported {"imported"} else {"skipped"},"context":if history_only {"historyOnly"} else if partial {"partial"} else {"restored"},"warnings":converted.warnings}),
             )
         }
         _ => Err(anyhow!("Unknown Codex import method")),

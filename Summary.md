@@ -1487,6 +1487,23 @@ Captured native windows and the Android login screen were visually checked.
 
 ## 2026-10-25 - Explicit Codex native history import
 
+### Real-source recovery and import usability
+
+- Stream compressed rollout segments, resolve physical base segments separately
+  from logical threads, and scope imported message IDs per destination. These
+  fix false missing-base/cycle reports and batch-import collisions between forks.
+- Preserve dynamic tool results and activity as historical records. Explicit
+  partial-context consent keeps usable native checkpoint messages; history-only
+  remains available when source context is genuinely missing.
+- Keep list rows readable, collapse optional directory controls and raw warnings,
+  expose localized recovery actions, batch confirmation and current-item progress,
+  and clear completed selections without losing pending choices.
+- Authorized real-source acceptance imported six conversations into isolated
+  storage, verified restart/duplicates, and exercised the full Electron wizard.
+  Two real imports also continued through a controlled loopback provider with
+  two new sandbox-directory tool actions and no historical replay or paid calls.
+  Private records and screenshots remain untracked; see validation documentation.
+
 ### Project-search correction
 
 - Resolve Codex's saved local-host legacy project IDs to current SQLite project

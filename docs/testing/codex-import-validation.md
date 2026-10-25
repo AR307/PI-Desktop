@@ -1,5 +1,39 @@
 # Codex import candidate validation
 
+## Real-source recovery and usability correction (2026-10-25)
+
+- User-authorized read-only scans of local Codex source found 1,893 candidates.
+  The current conversation and five conversations from the reported project
+  were actually imported into fresh isolated PI storage, not merely scanned.
+- Five preserved available native checkpoint context with explicit partial
+  consent; one had no source rollout and imported 1,419 visible messages only.
+  The current conversation retained 5,171 visible rows and 116 context messages
+  at the test cutoff; the reported failing conversation retained 4,755 and 82.
+  Counts include native import receipts and may change as source conversations
+  continue. No missing content is represented as complete recovery.
+- All six survived Host restart and duplicate import skipped them. Actual tests
+  exposed and then regressed physical/logical segment aliasing and global native
+  message-ID collisions between forks. Both synthetic regressions failed before
+  their fixes. Compressed history and dynamic-tool records now import directly.
+- Two real imported conversations continued through the production sidecar and
+  a controlled loopback Responses endpoint. Four requests contained sampled
+  recovered context; two new Read/Write calls operated only inside a dedicated
+  fixture directory. No historical tools replayed, no paid provider was used.
+- Full AppShell acceptance clicked the sidebar entry, selected the real project
+  with five conversations, imported the reported conversation with partial
+  consent, then opened its transcript. Normal/narrow screenshots show readable
+  rows and visible confirmation buttons, with technical warnings collapsed.
+- Host import suite: 18/18. Shared contract: 2/2. Shared/i18n builds, Desktop
+  typecheck, Host debug build and all-target clippy passed. Electron acceptance
+  additionally covers partial consent and batch/history-only interactions.
+- Real histories, requests, screenshots and reports stay in untracked artifacts;
+  they are not repository fixtures. Codex source is read-only and account files
+  are not imported. The previous user testing profile is preserved.
+
+These results supersede the earlier synthetic-only boundary below for this
+specific Windows source snapshot, not for every possible Codex format. Native
+OS picker behavior and macOS/Linux builds remain outside this correction.
+
 ## Migrated-project search regression
 
 - A real-source, read-only metadata check found both a current SQLite project

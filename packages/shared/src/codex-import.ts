@@ -24,9 +24,12 @@ export type CodexImportRequest = {
   projectRoots?: Record<string, string | null>;
   providerId?: string; modelId?: string; thinkingLevel?: string;
   historyOnly?: boolean;
+  /** Explicit user consent to keep recoverable context despite listed gaps. */
+  allowPartialContext?: boolean;
 };
 export type CodexImportResult = {
   externalId: string; sessionId?: string; archived?: boolean;
   status: "imported" | "skipped" | "needsConfirmation" | "cancelled";
-  context: "restored" | "historyOnly"; warnings: string[];
+  context: "restored" | "partial" | "historyOnly"; warnings: string[];
+  availableContextMessages?: number;
 };

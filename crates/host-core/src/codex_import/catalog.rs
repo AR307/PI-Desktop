@@ -46,6 +46,7 @@ pub struct Catalog {
     pub source: PathBuf,
     pub root: PathBuf,
     pub sessions: BTreeMap<String, Candidate>,
+    pub segments: BTreeMap<String, Candidate>,
     pub projects: Vec<Project>,
     pub history_db: Option<PathBuf>,
     pub warnings: Vec<String>,
@@ -127,7 +128,7 @@ fn discover(dir: &Path, paths: &mut Vec<PathBuf>) -> Result<()> {
         let kind = entry.file_type()?;
         if kind.is_dir() {
             discover(&entry.path(), paths)?;
-        } else if kind.is_file() && entry.path().extension().is_some_and(|e| e == "jsonl") {
+        } else if kind.is_file() && super::source::is_rollout(&entry.path()) {
             paths.push(entry.path());
         }
     }
@@ -145,7 +146,7 @@ pub fn scan(directory: Option<String>) -> Result<Catalog> {
             })
             .ok_or_else(|| anyhow!("Codex data directory not found"))?,
     };
-    let standalone = if root.is_file() && root.extension().is_some_and(|e| e == "jsonl") {
+    let standalone = if root.is_file() && super::source::is_rollout(&root) {
         Some(root.clone())
     } else {
         None
@@ -165,6 +166,7 @@ pub fn scan(directory: Option<String>) -> Result<Catalog> {
         source,
         root: root.clone(),
         sessions: BTreeMap::new(),
+        segments: BTreeMap::new(),
         projects: vec![],
         history_db: db_file(&root, "thread_history_")?,
         warnings: vec![],
@@ -246,9 +248,8 @@ pub fn scan(directory: Option<String>) -> Result<Catalog> {
     }
     paths.sort();
     for path in paths {
-        let file = fs::File::open(&path)?;
         let mut line = String::new();
-        BufReader::new(file).read_line(&mut line)?;
+        super::source::reader(&path)?.read_line(&mut line)?;
         let Ok(record) = serde_json::from_str::<Value>(&line) else {
             catalog
                 .warnings
@@ -267,6 +268,31 @@ pub fn scan(directory: Option<String>) -> Result<Catalog> {
             ));
             continue;
         };
+        if let Some(segment_id) = super::source::segment_id(&path) {
+            let historical_segment = segment_id != id;
+            let cwd = text(meta, "cwd");
+            catalog.segments.insert(
+                segment_id.clone(),
+                Candidate {
+                    id: segment_id,
+                    title: "Codex history segment".into(),
+                    cwd,
+                    project_id: None,
+                    created_at: String::new(),
+                    updated_at: String::new(),
+                    archived: false,
+                    model: None,
+                    reasoning_effort: None,
+                    directory_exists: false,
+                    imported: false,
+                    files: vec![path.clone()],
+                    paginated: false,
+                },
+            );
+            if historical_segment && standalone.is_none() {
+                continue;
+            }
+        }
         if let Some(existing) = catalog.sessions.get_mut(&id) {
             if !existing.files.contains(&path) {
                 existing.files.push(path);

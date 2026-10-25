@@ -1,14 +1,14 @@
 import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import type { CodexImportCandidate, CodexImportResult, CodexImportScan, ProjectGroupRecord } from "@pi-desktop/shared";
+import type { CodexImportCandidate, CodexImportScan, ProjectGroupRecord } from "@pi-desktop/shared";
 import { Button, Checkbox, Input } from "../../components/ui";
 import { SettingsMenuSelect } from "../../components/settings/SettingsMenuSelect";
 import { api } from "../../lib/api";
 import { useAppStore } from "../../stores/app-store";
 import { ImportDialog } from "./ImportDialog";
+import { ImportResults, type ImportChoice, type ImportResult } from "./ImportResults";
 import { useCodexImport } from "./store";
 
-type Result = CodexImportResult | { externalId: string; status: "failed"; warnings: string[] };
 export function CodexImportWizard() {
   const open = useCodexImport((s) => s.open);
   return open ? <Wizard /> : null;
@@ -35,7 +35,9 @@ function Wizard() {
   const [busy, setBusy] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [results, setResults] = useState<Result[]>([]);
+  const [results, setResults] = useState<ImportResult[]>([]);
+  const [processing, setProcessing] = useState("");
+  const resultAnchor = useRef<HTMLDivElement>(null);
   const [progress, setProgress] = useState({ done: 0, total: 0 });
   const cancel = useRef(false);
   const runId = useRef("");
@@ -80,21 +82,34 @@ function Wizard() {
   const chooseSource = async () => { const path = await api.codexImportChoose(); if (path) { setSource(path); await rescan(path); } };
   const choosePath = async (id: string) => { const path = await api.codexImportChoose(); if (path) setPaths((old) => ({ ...old, [id]: path })); };
   const chooseRoot = async (root: string) => { const path = await api.codexImportChoose(); if (path) setRootPaths((old) => ({ ...old, [root]: path })); };
-  const run = async (ids: string[], historyOnly = false) => {
+  useEffect(() => {
+    if (!busy && results.length) {
+      resultAnchor.current?.scrollIntoView({ block: "nearest" });
+      resultAnchor.current?.focus({ preventScroll: true });
+    }
+  }, [busy, results]);
+  const run = async (ids: string[], choice: ImportChoice = "normal") => {
     if (!scan || busy) return;
     runId.current = crypto.randomUUID();
     setBusy(true); setError(null); cancel.current = false; setProgress({ done: 0, total: ids.length });
     try {
       for (const id of ids) {
         if (cancel.current) break;
+        setProcessing(candidates.current.get(id)?.title ?? id);
         const sourceProject = scan.projects.find((p) => p.sessionIds.includes(id));
         const target = sourceProject && mapping[sourceProject.id] ? groups.find((g) => g.id === mapping[sourceProject.id]) : undefined;
         const explicitPath = Object.prototype.hasOwnProperty.call(paths, id) ? paths[id] : undefined;
         const projectPath = explicitPath;
         try {
-          const result = await api.codexImportRun({ scanId: scan.scanId, runId: runId.current, externalId: id, projectPath, projectRoots: rootPaths, targetGroupId: target?.id, providerId: modelPair[0], modelId: modelPair[1], thinkingLevel: thinking || modelConfig?.defaultThinkingLevel || "off", historyOnly });
+          const result = await api.codexImportRun({ scanId: scan.scanId, runId: runId.current, externalId: id, projectPath, projectRoots: rootPaths, targetGroupId: target?.id, providerId: modelPair[0], modelId: modelPair[1], thinkingLevel: thinking || modelConfig?.defaultThinkingLevel || "off", historyOnly: choice === "history", allowPartialContext: choice === "partial" });
           if (result.status === "imported" && result.archived && result.sessionId) useAppStore.getState().archiveSession(result.sessionId);
           setResults((old) => [...old.filter((r) => r.externalId !== id), result]);
+          if (result.status === "imported" || result.status === "skipped") {
+            const candidate = candidates.current.get(id);
+            if (candidate) candidates.current.set(id, { ...candidate, imported: true });
+            select([id], false);
+            setRows((old) => old.map((row) => row.id === id ? { ...row, imported: true } : row));
+          }
         } catch (e) { setResults((old) => [...old.filter((r) => r.externalId !== id), { externalId: id, status: "failed", warnings: [String(e)] }]); }
         setProgress((old) => ({ ...old, done: old.done + 1 }));
       }
@@ -106,7 +121,12 @@ function Wizard() {
   const stop = async () => { cancel.current = true; if (scan) await api.codexImportCancel(scan.scanId, false, runId.current); };
   const openSession = async (sessionId: string) => { close(); await useAppStore.getState().selectSession(sessionId); useAppStore.getState().setPage("chat"); };
   const currentProject = scan?.projects.find((p) => p.id === project);
+  const projectSelectable = currentProject?.sessionIds.filter((id) => !candidates.current.get(id)?.imported && !results.some((r) => r.externalId === id && (r.status === "imported" || r.status === "skipped"))) ?? [];
+  const pending = [...selected].filter((id) => !results.some((r) => r.externalId === id && ["imported", "skipped", "needsConfirmation"].includes(r.status)));
+  const needsReview = results.some((r) => r.status === "needsConfirmation");
+  const selectable = rows.filter((r) => !r.imported);
   return <ImportDialog wide title={t("codexImport.action")} onClose={close} busy={busy}>
+    <div className="codex-import-content">
     <p className="codex-import-warning">{t("codexImport.explanation")}</p>
     <div className="codex-import-controls"><Input aria-label={t("codexImport.source")} value={source} disabled={busy || loading} onChange={(e) => setSource(e.target.value)} placeholder={t("codexImport.source")} />
       <Button disabled={busy || loading} onClick={() => void chooseSource().catch((e: unknown) => setError(String(e)))}>{t("codexImport.browse")}</Button>
@@ -116,29 +136,28 @@ function Wizard() {
       <SettingsMenuSelect label={t("codexImport.project")} value={project} options={[{ id: "", label: t("codexImport.allProjects") }, ...(scan?.projects ?? []).map((p) => ({ id: p.id, label: p.name }))]} disabled={busy} onChange={(value) => { setProject(value); setOffset(0); }} />
       <SettingsMenuSelect label={t("codexImport.filter")} value={archived} options={["all", "active", "archived"].map((id) => ({ id, label: t(`codexImport.${id}`) }))} disabled={busy} onChange={(value) => { setArchived(value); setOffset(0); }} />
     </div>
-    {currentProject && <div className="codex-import-controls">
-      <Checkbox label={t("codexImport.selectProject", { count: currentProject.sessionIds.length })} checked={currentProject.sessionIds.every((id) => selected.has(id))} disabled={busy} onChange={(e) => select(currentProject.sessionIds, e.target.checked)} />
+    {currentProject && <Checkbox label={t("codexImport.selectProject", { count: projectSelectable.length })} checked={projectSelectable.length > 0 && projectSelectable.every((id) => selected.has(id))} disabled={busy || loading || !projectSelectable.length} onChange={(e) => select(projectSelectable, e.target.checked)} />}
+    {currentProject && <details className="codex-import-options"><summary>{t("codexImport.advanced")}</summary><div className="codex-import-controls">
       <SettingsMenuSelect label={t("codexImport.targetProject")} value={mapping[project] ?? ""} options={[{ id: "", label: t("codexImport.keepProject") }, ...groups.map((g) => ({ id: g.id, label: g.name }))]} disabled={busy} onChange={(value) => setMapping((old) => ({ ...old, [project]: value }))} />
-    </div>}
-    {currentProject && <div className="codex-import-roots"><strong>{t("codexImport.sourceRoots")}</strong>{currentProject.roots.map((root) => <div key={root} className="codex-import-row">
+    </div><div className="codex-import-roots"><strong>{t("codexImport.sourceRoots")}</strong>{currentProject.roots.map((root) => <div key={root} className="codex-import-row">
       <small>{root}</small>
       <small>{Object.prototype.hasOwnProperty.call(rootPaths, root) ? rootPaths[root] ?? t("codexImport.leaveUnbound") : currentProject.missingRoots.includes(root) ? t("codexImport.missingDirectory") : t("codexImport.keepRoot")}</small>
       <div className="codex-import-controls"><Button variant="ghost" disabled={busy} onClick={() => void chooseRoot(root).catch((e: unknown) => setError(String(e)))}>{t("codexImport.rebind")}</Button>
       <Button variant="ghost" disabled={busy} onClick={() => setRootPaths((old) => ({ ...old, [root]: null }))}>{t("codexImport.leaveUnbound")}</Button></div>
-    </div>)}</div>}
-    <Checkbox label={t("codexImport.selectPage")} checked={rows.length > 0 && rows.filter((r) => !r.imported).every((r) => selected.has(r.id))} disabled={busy || loading} onChange={(e) => select(rows.filter((r) => !r.imported).map((r) => r.id), e.target.checked)} />
+    </div>)}</div></details>}
+    <div className="codex-import-controls"><Checkbox label={t("codexImport.selectPage")} checked={selectable.length > 0 && selectable.every((r) => selected.has(r.id))} disabled={busy || loading || !selectable.length} onChange={(e) => select(selectable.map((r) => r.id), e.target.checked)} /><small>{t("codexImport.selectedCount", { count: selected.size })}</small></div>
     <div className="codex-import-list" aria-busy={loading}>
-      {loading && <p role="status">{t("common.loading")}</p>}
+      {loading && <p role="status">{t("codexImport.scanning")}</p>}
       {!loading && !rows.length && <p>{t("codexImport.empty")}</p>}
       {rows.map((row) => <div key={row.id} className="codex-import-row">
         <Checkbox label={row.title} checked={selected.has(row.id)} disabled={busy || row.imported} onChange={(e) => select([row.id], e.target.checked)} />
         <small>{row.updatedAt} · {row.model ?? t("codexImport.unknownModel")} {row.reasoningEffort ?? ""} · {row.imported ? t("codexImport.skipped") : row.archived ? t("codexImport.archived") : t("codexImport.active")}</small>
         <small>{Object.prototype.hasOwnProperty.call(paths, row.id) ? paths[row.id] ?? t("codexImport.noDirectory") : row.cwd ?? t("codexImport.noDirectory")}</small>
-        {selected.has(row.id) && <div className="codex-import-controls">
+        {selected.has(row.id) && <details className="codex-import-options"><summary>{t("codexImport.conversationOptions")}</summary><div className="codex-import-controls">
           {!row.directoryExists && <span className="codex-import-warning">{t("codexImport.missingDirectory")}</span>}
           <Button variant="ghost" disabled={busy} onClick={() => void choosePath(row.id).catch((e: unknown) => setError(String(e)))}>{t("codexImport.rebind")}</Button>
           <Button variant="ghost" disabled={busy} onClick={() => setPaths((old) => ({ ...old, [row.id]: null }))}>{t("codexImport.noDirectory")}</Button>
-        </div>}
+        </div></details>}
       </div>)}
     </div>
     <div className="codex-import-controls"><Button disabled={busy || offset === 0} onClick={() => setOffset(Math.max(0, offset - 40))}>{t("codexImport.previous")}</Button>
@@ -147,17 +166,13 @@ function Wizard() {
       {!!modelConfig?.thinkingLevels.length && <SettingsMenuSelect label={t("codexImport.thinking")} value={thinking || modelConfig.defaultThinkingLevel || "off"} options={modelConfig.thinkingLevels.map((id) => ({ id, label: id }))} disabled={busy} onChange={setThinking} />}
     </div>
     {error && <p role="alert">{error}</p>}
-    {scan?.warnings.map((warning) => <p key={warning} className="codex-import-warning">{warning}</p>)}
-    <div className="codex-import-results" aria-live="polite">{results.map((result) => <div key={result.externalId}>
-      <strong>{candidates.current.get(result.externalId)?.title ?? result.externalId}: {t(`codexImport.${result.status}`)}</strong>
-      {result.warnings.map((warning) => <p key={warning}>{warning}</p>)}
-      {result.status === "needsConfirmation" && <Button disabled={busy} onClick={() => void run([result.externalId], true)}>{t("codexImport.confirmHistoryOnly")}</Button>}
-      {result.status === "failed" && <Button disabled={busy} onClick={() => void run([result.externalId])}>{t("codexImport.retry")}</Button>}
-      {"sessionId" in result && result.sessionId && <Button disabled={busy} onClick={() => void openSession(result.sessionId!).catch((e: unknown) => setError(String(e)))}>{t("codexImport.open")}</Button>}
-    </div>)}</div>
-    <footer>{busy ? <><span role="status">{t("codexImport.progress", progress)}</span><Button onClick={() => void stop().catch((e: unknown) => setError(String(e)))}>{t("common.cancel")}</Button></> : <>
+    {!!scan?.warnings.length && <details><summary>{t("codexImport.technicalDetails", { count: scan.warnings.length })}</summary>{scan.warnings.map((warning) => <p key={warning} className="codex-import-warning">{warning}</p>)}</details>}
+    <div ref={resultAnchor} tabIndex={-1}><ImportResults results={results} title={(id) => candidates.current.get(id)?.title ?? id} busy={busy} retry={(ids, choice) => void run(ids, choice)} open={(id) => void openSession(id).catch((e: unknown) => setError(String(e)))} /></div>
+    </div>
+    <footer>{busy ? <><span role="status">{t("codexImport.processing", { ...progress, title: processing })}</span><Button onClick={() => void stop().catch((e: unknown) => setError(String(e)))}>{t("common.cancel")}</Button></> : <>
+      {needsReview && <Button onClick={() => { resultAnchor.current?.scrollIntoView({ block: "start" }); resultAnchor.current?.focus({ preventScroll: true }); }}>{t("codexImport.reviewResults")}</Button>}
       <Button variant="ghost" onClick={close}>{t("common.close")}</Button>
-      <Button variant="primary" disabled={!scan || loading || !selected.size} onClick={() => void run([...selected])}>{t("codexImport.importSelected", { count: selected.size })}</Button>
+      <Button variant="primary" disabled={!scan || loading || !pending.length} onClick={() => void run(pending)}>{t("codexImport.importSelected", { count: pending.length })}</Button>
     </>}</footer>
   </ImportDialog>;
 }

@@ -51,6 +51,13 @@ cancel cannot stop a new retry or revive a cancelled batch. Completed sessions
 remain imported. Existing import-codex-<source-id> sessions are skipped without
 overwriting PI continuation. Closing the wizard releases its source catalog.
 
+Project/directory overrides start collapsed. Conversation rows do not shrink,
+and results use the dialog content scroller instead of another small scroll box.
+Localized warning categories precede collapsed technical details. Confirmation
+actions sit above warnings, with a persistent review shortcut in the footer.
+Completed selections clear; items awaiting review are not submitted again by the
+normal import button. Multiple incomplete items can be confirmed as one batch.
+
 ## Storage and recovery
 
 Rust Host owns source SQLite/JSONL reads, conversion, attachment persistence,
@@ -59,8 +66,12 @@ and forwards calls; Renderer owns interaction. No new database or schema is
 introduced: project mappings use the existing KV store, and recovery uses the
 native transcript compaction format. Other importers remain unchanged.
 
-The reader supports standalone JSONL, active/archived rollouts, state_N.sqlite,
+The reader supports standalone JSONL/Zstd, active/archived rollouts, state_N.sqlite,
 thread_history_N.sqlite and history_base chains with ordinal/byte boundaries.
+Zstd segments are decompressed as a stream without unpacking source files.
+Physical segment identities are distinct from logical conversation identities,
+including the initial segment whose ID equals the conversation ID. Importing
+several forks scopes native message/tool IDs to each destination conversation.
 Projected records and unprojected rollout tails retain source segment ordering.
 Source databases are opened read-only; projected items and watermarks share a
 read transaction. JSONL is read line by line, never head/tail sampled.
@@ -77,8 +88,15 @@ Visible history and effective model context are separate projections:
   quoted material, not executable calls. Incomplete calls are aborted history.
 - A stable import receipt anchors the native checkpoint even when the source
   ends with an image-only or incomplete row. New PI messages append normally.
-- Unsupported/missing context requires an explicit history-only confirmation
-  before persistence. Visible warnings are not represented as complete recovery.
+- Unsupported/missing context requires explicit confirmation before persistence.
+  When recoverable messages exist, the user may keep them with
+  `allowPartialContext`, producing a `partial` checkpoint and a notice describing
+  the gaps. Alternatively `historyOnly` imports visible history without retained
+  model context. If no usable context exists, only history-only import is offered.
+  Neither choice invents missing content or represents partial recovery as full.
+- Projected dynamic tool calls preserve their name, arguments, outputs and error
+  status. Plans, delegated-agent activity and image activity remain historical
+  references, never resumed tasks.
 - Local attachments are copied into PI's existing attachment store only from
   the selected source/project roots; remote downloads are not performed. Missing
   files, unsupported content and unavailable original file representations warn.
@@ -88,7 +106,9 @@ Visible history and effective model context are separate projections:
 Codex's local storage is an evolving external format. Interleaved automatic turns,
 future record kinds and unavailable fork segments are not proof of exact Codex
 runtime equivalence. The importer marks detected incomplete input for explicit
-history-only import. It does not resume live tasks, shells or delegated agents.
+partial-context or history-only import. It does not resume live tasks, shells or
+delegated agents. Genuinely missing rollout files cannot be reconstructed from
+the visible-history projection alone.
 JSONL input is streamed, but a selected session's converted transcript, effective
 context and attachment data are assembled in memory before native persistence;
 multi-gigabyte single-session memory usage has not been load-tested.

@@ -23,6 +23,7 @@ for (const id of ["first", "second"]) {
     { type: "compacted", payload: { message: "DO_NOT_DUPLICATE", replacement_history: [{ type: "message", role: "user", content: [{ type: "input_text", text: "EFFECTIVE_SUMMARY" }] }] } },
     { type: "response_item", payload: { type: "message", role: "assistant", content: [{ type: "output_text", text: "LATEST_ANSWER" }] } },
   ];
+  if (id === "second") records[2].payload.retained_context = { user_messages_incomplete: true };
   await writeFile(join(evidence, `source/${id === "first" ? "archived_sessions" : "sessions"}/${id}.jsonl`), records.map((r) => JSON.stringify(r) + "\n").join(""));
 }
 await build({ entryPoints: [join(root, "scripts/e2e/codex-import-ui.tsx")], outfile: join(evidence, "renderer.js"), bundle: true, platform: "browser", format: "iife", jsx: "automatic", loader: { ".png": "file", ".svg": "file", ".woff": "file", ".woff2": "file", ".ttf": "file" }, define: { "process.env.NODE_ENV": '"production"' }, alias: { "@pi-desktop/i18n": join(root, "packages/i18n/src/index.ts"), react: join(root, "apps/desktop/node_modules/react"), "react-dom": join(root, "apps/desktop/node_modules/react-dom") }, nodePaths: [join(root, "apps/desktop/node_modules")] });
@@ -45,6 +46,12 @@ app.whenReady().then(async()=>{
  database.prepare("INSERT OR IGNORE INTO project_roots VALUES('current-project',?,0)").run(workspace);
  for(const id of ["first","second"]) database.prepare("INSERT OR IGNORE INTO threads VALUES(?,?,?,?,?,NULL,?)").run(id,path.join(source,id==="first"?"archived_sessions":"sessions",id+".jsonl"),workspace,"Original request","Imported "+id,id==="first"?1:0);
  database.close();
+ if(process.env.CODEX_IMPORT_STAGE==="bulk-review") {
+  for(const id of ["third","fourth","missing-context"]) {
+   const records=[{type:"session_meta",payload:{id,title:"Review "+id,cwd:workspace}},{type:"response_item",payload:{type:"message",role:"user",content:"Visible history"}},{type:"compacted",payload:{replacement_history:id==="missing-context"?[]:[{type:"message",role:"user",content:"Available context"}],retained_context:{user_messages_incomplete:true}}}];
+   await fs.writeFile(path.join(source,"sessions",id+".jsonl"),records.map(r=>JSON.stringify(r)+"\\n").join(""));
+  }
+ }
  await fs.writeFile(path.join(source,".codex-global-state.json"),JSON.stringify({
   "local-projects":{"legacy-project":{name:"Imported workspace",rootPaths:[workspace]}},
   "thread-project-assignments":Object.fromEntries(["first","second"].map(id=>[id,{projectKind:"local",projectId:"legacy-project"}])),
@@ -76,7 +83,7 @@ app.whenReady().then(async()=>{
 });
 `);
 const electronBinary = process.env.PI_DESKTOP_ELECTRON_BIN || resolveElectronBinary(root).electronBinary;
-for (const stage of ["card", "dismiss", "card-open", "first", "restart-visible", "restart-hidden"]) {
+for (const stage of ["card", "dismiss", "card-open", "first", "restart-visible", "restart-hidden", "partial", "bulk-review"]) {
   const env = { ...process.env, CODEX_IMPORT_STAGE: stage }; delete env.ELECTRON_RUN_AS_NODE;
   const child = spawn(electronBinary, [join(evidence, "main.cjs")], { env, windowsHide: true, stdio: ["ignore", "pipe", "pipe"] });
   let output = ""; for (const stream of [child.stdout,child.stderr]) stream.on("data", d=> output+=d);

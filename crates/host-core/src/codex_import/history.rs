@@ -1,12 +1,7 @@
 use super::catalog::{check, has_table, readonly, text, Candidate, Catalog};
 use anyhow::{anyhow, Result};
 use serde_json::{json, Value};
-use std::{
-    collections::HashSet,
-    fs::File,
-    io::{BufRead, BufReader},
-    path::Path,
-};
+use std::{collections::HashSet, path::Path};
 
 pub struct History {
     pub records: Vec<Value>,
@@ -15,7 +10,7 @@ pub struct History {
     pub complete: bool,
 }
 fn read_file(path: &Path, limit: Option<u64>, catalog: &Catalog) -> Result<Vec<Value>> {
-    let mut reader = BufReader::new(File::open(path)?);
+    let mut reader = super::source::reader(path)?;
     let mut records = vec![];
     let mut offset = 0u64;
     let mut bytes = Vec::new();
@@ -54,11 +49,23 @@ fn chain(
     ordinal_limit: Option<u64>,
     visited: &mut HashSet<String>,
 ) -> Result<History> {
-    if !visited.insert(item.id.clone()) {
+    let path = item
+        .files
+        .iter()
+        .find_map(|p| super::source::existing_path(p));
+    let identity = path
+        .as_ref()
+        .map(|p| p.to_string_lossy().into_owned())
+        .unwrap_or_else(|| item.id.clone());
+    let source_id = path
+        .as_ref()
+        .and_then(|p| super::source::segment_id(p))
+        .unwrap_or_else(|| item.id.clone());
+    if !visited.insert(identity.clone()) {
         return Err(anyhow!("Codex history_base contains a cycle"));
     }
-    let mut records = match item.files.iter().find(|p| p.is_file()) {
-        Some(path) => read_file(path, byte_limit, catalog)?,
+    let mut records = match path {
+        Some(path) => read_file(&path, byte_limit, catalog)?,
         None => vec![],
     };
     if let Some(limit) = ordinal_limit {
@@ -69,7 +76,7 @@ fn chain(
         });
     }
     for record in &mut records {
-        record["importSource"] = json!(item.id);
+        record["importSource"] = json!(source_id);
     }
     let mut result = History {
         records: vec![],
@@ -81,8 +88,12 @@ fn chain(
         .first()
         .and_then(|r| r["payload"].get("history_base"))
     {
-        if let Some(base_id) = text(base, "thread_id").filter(|id| id != &item.id) {
-            if let Some(parent) = catalog.sessions.get(&base_id) {
+        if let Some(base_id) = text(base, "thread_id") {
+            if let Some(parent) = catalog
+                .segments
+                .get(&base_id)
+                .or_else(|| catalog.sessions.get(&base_id))
+            {
                 result = chain(
                     catalog,
                     parent,
@@ -141,7 +152,7 @@ fn chain(
                     }
                 };
                 value["importOrdinal"] = json!(row.get::<_, i64>(1)?);
-                value["importSource"] = json!(item.id);
+                value["importSource"] = json!(source_id);
                 value["importTimestamp"] = json!(crate::db::ms_to_ts(row.get(2)?));
                 result.projected.push(value);
             }
@@ -181,7 +192,7 @@ fn chain(
         );
     }
     result.records.extend(records);
-    visited.remove(&item.id);
+    visited.remove(&identity);
     Ok(result)
 }
 pub fn load(catalog: &Catalog, item: &Candidate) -> Result<History> {

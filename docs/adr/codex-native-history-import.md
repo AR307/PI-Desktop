@@ -32,8 +32,15 @@ plugin import contracts and Models/Skills/MCP import destinations are unchanged.
 
 Imported sessions continue independently with PI. Duplicate source IDs never
 overwrite them. Missing directories block continuation until explicitly bound.
-Unknown context requires user-confirmed history-only import rather than invented
-recovery. No source credentials or permission grants become active.
+Unknown context requires explicit consent: retain usable context with a visible
+partial-recovery notice, or import history only. With no usable context, only the
+latter is available. Rejecting every incomplete source would discard useful
+native compaction results; silently claiming full restoration would mislead the
+user. No source credentials or permission grants become active.
+
+Source adapters distinguish logical conversations from physical history segments
+and stream native Zstd files. Native message identities include the destination
+conversation so importing forks cannot collide on inherited source records.
 
 The format adapter must track upstream changes with fixtures. Streaming source
 reads avoid sampling, but native conversion currently materializes one session

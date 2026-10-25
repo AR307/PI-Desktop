@@ -61,6 +61,43 @@ globalThis.codexImportProbe = async (stage) => {
     return { ok: true, scenarios: ["sidebar-shared-wizard", "migrated-project-filter", "conversation-display-name-search"] };
   }
   if (stage === "dismiss") { click(button(i18n.t("codexImport.dismissTitle"))); return { ok: true }; }
+  if (stage === "bulk-review") {
+    click(button(i18n.t("codexImport.settingsAction")));
+    await until(() => document.querySelectorAll(".codex-import-list .codex-import-row").length === 5, "batch fixtures missing");
+    for (const row of document.querySelectorAll<HTMLElement>(".codex-import-list .codex-import-row")) {
+      if (row.textContent?.includes("Review ")) click(row.querySelector<HTMLInputElement>("input[type=checkbox]"));
+    }
+    click(button(i18n.t("codexImport.importSelected", { count: 3 })));
+    await until(() => document.querySelectorAll('.codex-import-result[data-status="needsConfirmation"]').length === 3 && !button(i18n.t("codexImport.confirmPartialAll", { count: 2 }))?.disabled, "batch review unavailable");
+    assert(document.querySelector(".codex-import-results")?.textContent?.includes(i18n.t("codexImport.noContext")), "missing context lacks a clear explanation");
+    assert(document.querySelectorAll(".codex-import-result details[open]").length === 0, "batch warning details expanded");
+    click(button(i18n.t("codexImport.confirmPartialAll", { count: 2 })));
+    await until(() => document.querySelectorAll('.codex-import-result[data-status="imported"]').length === 2 && !button(i18n.t("codexImport.confirmHistoryOnly"))?.disabled, "bulk partial confirmation failed");
+    click(button(i18n.t("codexImport.confirmHistoryOnly")));
+    await until(() => document.querySelectorAll('.codex-import-result[data-status="imported"]').length === 3 && !button(i18n.t("common.close"))?.disabled, "history-only confirmation failed");
+    assert(document.querySelector(".codex-import-results")?.textContent?.includes(i18n.t("codexImport.context_historyOnly")), "history-only result not labelled");
+    return {ok:true,scenarios:["multi-item-review","bulk-partial-consent","missing-context-explanation","explicit-history-only"]};
+  }
+  if (stage === "partial") {
+    click(button(i18n.t("codexImport.settingsAction")));
+    await until(() => document.querySelectorAll(".codex-import-list .codex-import-row").length === 2, "partial source list missing");
+    const row = [...document.querySelectorAll<HTMLElement>(".codex-import-list .codex-import-row")].find((r) => r.textContent?.includes("Imported second"))!;
+    assert(row.getBoundingClientRect().height >= 60, "conversation row is compressed");
+    click(row.querySelector<HTMLInputElement>("input[type=checkbox]"));
+    assert(!row.querySelector("details")?.open, "directory controls should start collapsed");
+    click(button(i18n.t("codexImport.importSelected", { count: 1 })));
+    await until(() => !!button(i18n.t("codexImport.confirmPartial")) && !button(i18n.t("codexImport.confirmPartial"))!.disabled, "partial confirmation unavailable");
+    const action = button(i18n.t("codexImport.confirmPartial"))!;
+    const bounds = action.getBoundingClientRect();
+    assert(bounds.height > 0 && bounds.top >= 0 && bounds.bottom < innerHeight, "recovery action is clipped");
+    assert(!document.querySelector<HTMLDetailsElement>(".codex-import-result details")?.open, "technical warnings expanded by default");
+    assert(button(i18n.t("codexImport.importSelected", { count: 0 }))?.disabled, "pending review permits repeat normal import");
+    click(action);
+    await until(() => !!document.querySelector('.codex-import-result[data-status="imported"]') && !button(i18n.t("common.close"))?.disabled, "partial import failed");
+    assert(document.querySelector(".codex-import-result")?.textContent?.includes(i18n.t("codexImport.context_partial")), "partial recovery is presented as complete");
+    assert(!row.querySelector<HTMLInputElement>("input[type=checkbox]")?.checked, "completed selection not cleared");
+    return {ok:true, scenarios:["partial-review", "recovery-action-visible", "collapsed-details", "native-partial-import", "selection-cleared"]};
+  }
   if (stage === "reload-hidden" || stage === "restart-hidden") {
     assert(!card(), "hidden card returned");
     if (stage === "reload-hidden") return { ok: true };
@@ -93,8 +130,8 @@ globalThis.codexImportProbe = async (stage) => {
   assert(!document.querySelector<HTMLInputElement>('.codex-import-row input[type="checkbox"]')?.checked, "scan auto selected history");
   click(document.querySelector<HTMLInputElement>('.codex-import-row input[type="checkbox"]'));
   click(button(i18n.t("codexImport.importSelected", { count: 1 })));
-  await until(() => !!document.querySelector(".codex-import-results strong")?.textContent?.includes(i18n.t("codexImport.imported")), "selected history failed to import");
-  await until(() => !!button(i18n.t("codexImport.importSelected", { count: 1 })) && !button(i18n.t("codexImport.importSelected", { count: 1 }))!.disabled, "import did not finish refreshing");
+  await until(() => !!document.querySelector('.codex-import-result[data-status="imported"]'), "selected history failed to import");
+  await until(() => !!button(i18n.t("codexImport.importSelected", { count: 0 })) && !button(i18n.t("common.close"))?.disabled, "import did not finish refreshing");
   assert(useAppStore.getState().sessionMeta["import-codex-first"]?.archived, "source archive status did not reach native sidebar preferences");
   assert(!card(), "import unexpectedly showed hidden card");
   return { ok: true, scenarios: ["permanent-hide", "settings-reenable", "shared-wizard", "real-host-import"] };

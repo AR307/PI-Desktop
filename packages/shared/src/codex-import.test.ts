@@ -8,11 +8,13 @@ describe("Codex import IPC contracts", () => {
     expect(() => validateCodexImportRequest("run", { scanId: "scan", runId: "batch", externalId: "session", projectPath: null, projectRoots: { old: null, other: "new" }, historyOnly: true })).not.toThrow();
     expect(() => validateCodexImportRequest("cancel", { scanId: "scan", runId: "batch", release: false })).not.toThrow();
     expect(() => validateCodexImportRequest("cancel", { scanId: "scan", release: true })).not.toThrow();
+    expect(() => validateCodexImportRequest("run", { scanId: "scan", runId: "batch", externalId: "session", allowPartialContext: true })).not.toThrow();
   });
   it("rejects malformed selections without interpreting them as default choices", () => {
     expect(() => validateCodexImportRequest("run", { scanId: "scan", externalId: "id" })).toThrow();
     expect(() => validateCodexImportRequest("cancel", { scanId: "scan" })).toThrow();
     expect(() => validateCodexImportRequest("scan", { directory: [] })).toThrow();
+    expect(() => validateCodexImportRequest("run", { scanId: "scan", runId: "batch", externalId: "id", allowPartialContext: "yes" })).toThrow();
     expect(() => validateCodexImportRequest("page", { scanId: "scan", offset: -1 })).toThrow();
     expect(() => validateCodexImportRequest("run", { scanId: "scan", runId: "batch", externalId: "id", projectRoots: { old: true } })).toThrow();
   });

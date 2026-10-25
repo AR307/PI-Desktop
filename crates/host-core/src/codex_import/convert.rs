@@ -236,13 +236,13 @@ impl Projection {
                     self.context.push(context_message("user", &format!("[Historical Codex tool result; do not execute again]\nTool: {name}\nArguments: {args}\nResult: {output}\nFailed: {failed}"), &self.timestamp));
                 }
             }
-            "commandExecution" | "mcpToolCall" | "fileChange" | "webSearch" | "web_search_call"
-            | "local_shell_call" => {
+            "commandExecution" | "mcpToolCall" | "dynamicToolCall" | "fileChange" | "webSearch"
+            | "web_search_call" | "local_shell_call" => {
                 if visible {
                     let id = text(raw, "id")
                         .unwrap_or_else(|| format!("codex-tool-{}", self.messages.len()));
                     if self.seen.insert(id.clone()) {
-                        self.messages.push(serde_json::from_value(json!({"id":id,"role":"tool","content":"","createdAt":self.timestamp,"toolName":kind,"toolCallId":id,"toolArgs":raw,"toolResult":raw.get("aggregatedOutput").or_else(|| raw.get("result")),"toolStatus":if raw["status"] == "failed" || raw["exitCode"].as_i64().is_some_and(|n| n != 0) {"error"} else if raw["status"] == "inProgress" {"aborted"} else {"success"}}))?);
+                        self.messages.push(serde_json::from_value(json!({"id":id,"role":"tool","content":"","createdAt":self.timestamp,"toolName":text(raw,"tool").unwrap_or_else(|| kind.into()),"toolCallId":id,"toolArgs":raw,"toolResult":raw.get("aggregatedOutput").or_else(|| raw.get("result")).or_else(|| raw.get("contentItems")),"toolStatus":if raw["status"] == "failed" || raw["success"] == false || raw["exitCode"].as_i64().is_some_and(|n| n != 0) {"error"} else if raw["status"] == "inProgress" {"aborted"} else {"success"}}))?);
                     }
                 }
                 if active {
@@ -275,6 +275,19 @@ impl Projection {
                 }
             }
             "contextCompaction" => {}
+            "plan"
+            | "subAgentActivity"
+            | "collabAgentToolCall"
+            | "imageView"
+            | "imageGeneration" => {
+                self.message(
+                    raw,
+                    "assistant",
+                    format!("[Historical Codex {kind}; not resumed]\n{raw}"),
+                    visible,
+                    false,
+                )?;
+            }
             _ => {
                 self.warnings
                     .push(format!("Unsupported history item: {kind}"));
@@ -570,6 +583,13 @@ pub fn convert(catalog: &Catalog, candidate: &Candidate, history: History) -> Re
     }
     p.warnings.sort();
     p.warnings.dedup();
+    // Native message IDs are global; separate forks can share source records.
+    for message in &mut p.messages {
+        message.id = format!("codex-{}-{}", candidate.id, message.id);
+        if let Some(call_id) = &mut message.tool_call_id {
+            *call_id = format!("codex-{}-{call_id}", candidate.id);
+        }
+    }
     Ok(Converted {
         messages: p.messages,
         context: p.context,

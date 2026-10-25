@@ -18,7 +18,7 @@ export function ImportDialog({ title, children, onClose, busy = false, wide = fa
     const keydown = (event: KeyboardEvent) => {
       if (event.key === "Escape") { event.preventDefault(); if (!busyRef.current) closeRef.current(); }
       if (event.key !== "Tab") return;
-      const nodes = ref.current?.querySelectorAll<HTMLElement>('button:not([disabled]),input:not([disabled]),select:not([disabled]),[tabindex="0"]');
+      const nodes = [...(ref.current?.querySelectorAll<HTMLElement>('button:not([disabled]),input:not([disabled]),select:not([disabled]),summary,[tabindex="0"]') ?? [])].filter((node) => node.getClientRects().length > 0);
       if (!nodes?.length) return;
       const first = nodes[0], last = nodes[nodes.length - 1];
       if (event.shiftKey && (document.activeElement === first || document.activeElement === ref.current)) { event.preventDefault(); last.focus(); }
