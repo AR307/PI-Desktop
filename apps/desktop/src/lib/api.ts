@@ -719,6 +719,12 @@ export const api = {
       id,
       config,
     ).then((result) => ({ ...result, session: normalizeSession(result.session) })),
+  codexImportScan: (directory?: string) => invoke<import("@pi-desktop/shared").CodexImportScan>(IPC.invoke.codexImportScan, { directory }),
+  codexImportPage: (input: import("@pi-desktop/shared").CodexImportPageRequest) => invoke<import("@pi-desktop/shared").CodexImportPage>(IPC.invoke.codexImportPage, input),
+  codexImportRun: (input: import("@pi-desktop/shared").CodexImportRequest) => invoke<import("@pi-desktop/shared").CodexImportResult>(IPC.invoke.codexImportRun, input),
+  codexImportCancel: (scanId: string, release = false, runId?: string) => invoke<{ ok: boolean }>(IPC.invoke.codexImportCancel, { scanId, release, runId }),
+  codexImportChoose: () => invoke<string | null>(IPC.invoke.codexImportChoose),
+  codexImportHint: (hidden?: boolean) => invoke<{ hidden: boolean }>(IPC.invoke.codexImportHint, { hidden }),
   scanImportSessions: () =>
     invoke<{
       sessions: ImportCandidate[];

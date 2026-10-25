@@ -28,3 +28,5 @@
 
 - [Image generation and editing](21-image-generation.md)
 - [Portable configuration sync](22-config-sync.md)
+
+- [Explicit Codex history import](codex-native-import.md)

@@ -274,6 +274,9 @@ export const SETTINGS_NAV: SettingsNavEntry[] = [
     group: "workspace",
     keywordKeys: [
       "project.title",
+      "codexImport.title",
+      "codexImport.action",
+      "codexImport.search",
       "project.searchPlaceholder",
       "project.archive",
       "project.restore",

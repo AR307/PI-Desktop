@@ -43,6 +43,7 @@ import {
 } from "../lib/project-archive";
 import { ProjectArchiveIndex, projectRowId } from "../features/projects/ProjectArchiveIndex";
 import { ProjectDetailPanel } from "../features/projects/ProjectDetailPanel";
+import { CodexImportSettings } from "../features/codex-import/CodexImportCard";
 
 export function ProjectsPage() {
   const { t, i18n } = useTranslation();
@@ -389,6 +390,7 @@ export function ProjectsPage() {
         </div>
       </div>
 
+      <CodexImportSettings />
       {groups.length === 0 ? (
         <div className="settings-panel projects-empty">
           <span className="projects-empty-icon" aria-hidden>

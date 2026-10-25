@@ -1484,3 +1484,19 @@ Captured native windows and the Android login screen were visually checked.
   release cases. It failed on the pre-fix code and passes on the fix.
 - Android-only release; the desktop stays at published 0.20.2. Phones holding a
   stale record need one manual install of 0.20.4. See docs/releases/0.20.4.md.
+
+## 2026-10-25 - Explicit Codex native history import
+
+- Add a modular Rust source catalog, paginated/segmented history reader, visible
+  transcript projection, effective-context recovery, attachment import and
+  project-root binding. Native checkpoints allow PI continuation without old
+  tool execution, source credentials or copied project code.
+- Add a typed thin Main bridge and one shared Renderer wizard, with the pinned
+  Sidebar card, three-way dismissal and persistent Project archive entry.
+- Preserve source identity and working directories, skip duplicate imports,
+  require confirmation for history-only recovery, and isolate cancellation
+  by batch identity. Missing directories block continuation until rebound.
+- Acceptance uses synthetic Host SQLite/JSONL fixtures, production Sidebar in
+  isolated Electron, and a real sidecar plus controlled endpoint with actual
+  tools and restart. See docs/testing/codex-import-validation.md for boundaries.
+- No push, merge, release, server change or real user-profile modification.

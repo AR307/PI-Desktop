@@ -18316,3 +18316,17 @@ increment and production update publication require later service validation.
   unsupported references, cancellation, download retry, restart and sign-out.
 - Runner: apps/desktop/test/e2e/images/acceptance.mjs. Real Electron/Rust/agent
   wiring uses only a local HTTP provider fixture; it is not paid-provider QA.
+
+## Codex native import (2026-10-25)
+
+| ID | User path and expected result |
+| --- | --- |
+| E2E-CODEX-ENTRY | First launch shows the pinned Sidebar card above chats without scanning; both Sidebar and Project archive open one wizard. |
+| E2E-CODEX-DISMISS | Cancel/Escape restore focus and visibility; current-run dismissal survives navigation/reload but not restart; permanent dismissal survives restart; Settings restores it. |
+| E2E-CODEX-SELECT | Scan a controlled directory, select one conversation, import, inspect its native history; no default select-all and no source modification. |
+| E2E-CODEX-CONTINUE | Native import, controlled-model follow-up, actual read/write, Host/runtime restart and another follow-up retain effective context; historical tools never execute. |
+| E2E-CODEX-COMPLEX | 301 candidates, paginated DB plus rollout, fork chains, rollback/compaction, Chinese, images, incomplete/unknown records, missing files and explicit history-only confirmation. |
+| E2E-CODEX-LIFECYCLE | Cancel one batch and retry with a new identity; completed imports survive and duplicates never overwrite PI work; missing cwd blocks execution until bound. |
+| E2E-CODEX-VISUAL | Production Sidebar/import components in isolated Electron, compiled themes, narrow dialogs, independent list layout, keyboard focus and retained screenshots. |
+
+Commands and coverage boundaries: [Codex import validation](../../testing/codex-import-validation.md).

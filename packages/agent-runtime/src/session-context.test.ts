@@ -67,6 +67,14 @@ function compaction(
 }
 
 describe("buildSessionContext", () => {
+  it("restores imported context without an empty or duplicate summary", () => {
+    const checkpoint = compaction("import", 2, [user("kept", "effective context", 0).message, assistant("reply", "latest answer", 1).message]);
+    checkpoint.summary = "";
+    const messages = buildSessionContext([user("old", "obsolete history", 0), checkpoint, user("new", "continue", 3)]).messages;
+    expect(messages.map((m) => m.role)).toEqual(["user", "assistant", "user"]);
+    expect(JSON.stringify(messages)).not.toContain("obsolete history");
+    expect(JSON.stringify(messages)).toContain("latest answer");
+  });
   it("passes message entries through and drops failed assistants", () => {
     const messages = buildSessionContext([
       user("u1", "hello", 0),

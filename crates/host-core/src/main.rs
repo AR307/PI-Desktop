@@ -25,6 +25,7 @@ mod session_collaboration;
 mod session_search;
 mod session_worktrees;
 mod sessions;
+mod codex_import;
 mod state;
 mod todos;
 mod tool_budget;

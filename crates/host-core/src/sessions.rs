@@ -3702,6 +3702,13 @@ pub fn import_session(
     summary: &SessionSummary,
     messages: &[UiMessage],
 ) -> Result<bool> {
+    import_session_with_compactions(db, summary, messages, &[])
+}
+
+pub fn import_session_with_compactions(
+    db: &Database, summary: &SessionSummary, messages: &[UiMessage],
+    compactions: &[CompactionRecord],
+) -> Result<bool> {
     validate_thinking_level(&summary.thinking_level)?;
     let mode = normalize_mode(Some(&summary.mode));
     let conn = db.conn();
@@ -3714,7 +3721,10 @@ pub fn import_session(
         return Ok(false);
     }
     let (records, texts) = records_and_texts(messages);
-    transcripts::write_transcript(db.data_dir(), &summary.id, &summary.created_at, &records)?;
+    for checkpoint in compactions {
+        if !compaction_valid_for_records(checkpoint, &records) { return Err(anyhow!("Invalid imported checkpoint anchor")); }
+    }
+    transcripts::write_transcript_with_compactions(db.data_dir(), &summary.id, &summary.created_at, &records, compactions)?;
     let indexed = (|| -> Result<()> {
         let tx = conn.unchecked_transaction()?;
         let project_id = match summary
@@ -3789,6 +3799,7 @@ pub fn begin_turn(
     provider_id: Option<&str>,
     model_id: Option<&str>,
 ) -> Result<String> {
+    crate::codex_import::require_bound_directory(db, session_id)?;
     let id = Uuid::new_v4().to_string();
     let inserted = db
         .conn()

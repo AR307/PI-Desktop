@@ -1,9 +1,11 @@
+import { codexImportZhCN } from "../codex-import.js";
 import { mobileSyncZhCN } from "../mobile-sync.js";
 import { mobileZhCN } from "../mobile.js";
 import { imagesZhCN } from "../images.js";
 import { en, type EnglishCatalog } from "../en/index.js";
 
 export const zhCN = {
+  codexImport: codexImportZhCN,
   ultra: {"label":"Ultra","hint":"{{reasoning}}Workflow + Subagent","unavailable":"请选择聊天模型并启用子代理后使用 Ultra。"},
   mobileSync: mobileSyncZhCN,
   mobile: mobileZhCN,

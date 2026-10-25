@@ -1,0 +1,20 @@
+.codex-import-pinned { flex: 0 0 auto; padding: 0 8px 8px; }
+.codex-import-card { padding: 9px 10px; border-radius: var(--radius-md); box-shadow: none; }
+.codex-import-card-head, .codex-import-dialog header, .codex-import-dialog footer, .codex-import-controls, .codex-import-settings, .codex-import-settings label { display: flex; align-items: center; gap: 8px; }
+.codex-import-card-head, .codex-import-dialog header { justify-content: space-between; }
+.codex-import-card p { margin: 3px 0 8px; color: var(--ds-text-secondary); font-size: var(--text-xs); line-height: 1.5; }
+.codex-import-card .btn { min-height: 26px; height: auto; padding: 4px 8px; font-size: var(--text-xs); white-space: normal; }
+.codex-import-dialog { width: min(480px, calc(100vw - 32px)); padding: 18px; max-height: calc(100vh - 48px); display: flex; flex-direction: column; gap: 12px; overflow: auto; }
+.codex-import-dialog.is-wide { width: min(840px, calc(100vw - 32px)); }
+.codex-import-dialog h2 { margin: 0; font-size: var(--text-base); }
+.codex-import-dialog footer { justify-content: flex-end; flex-wrap: wrap; }
+.codex-import-dialog p { margin: 0; overflow-wrap: anywhere; }
+.codex-import-controls { flex-wrap: wrap; }
+.codex-import-controls .field-input { flex: 1; min-width: 150px; }
+.codex-import-list { overflow: auto; min-height: 120px; max-height: 35vh; display: flex; flex-direction: column; gap: 8px; }
+.codex-import-row { padding: 8px; border: 1px solid var(--ds-border-subtle); border-radius: var(--radius-sm); }
+.codex-import-row small { display: block; color: var(--ds-text-secondary); overflow-wrap: anywhere; margin: 4px 0; }
+.codex-import-settings { flex-wrap: wrap; padding: 8px 0 12px; }
+.codex-import-settings label { font-size: var(--text-xs); }
+.codex-import-results { max-height: 22vh; overflow: auto; font-size: var(--text-xs); }
+.codex-import-warning { color: var(--ds-text-secondary); font-size: var(--text-xs); }

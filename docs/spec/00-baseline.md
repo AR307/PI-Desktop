@@ -188,7 +188,7 @@ ADR 0299. Historical baseline version references below describe their releases.
 39. Tool result limits: **per-tool budgets (128KB / 4000 lines search, 96KB / 4000 lines shell); `truncated` only when a result is cut short**
 40. Settings directory: **General / AI / Shortcuts / Instructions / Models / Skills / MCP / Subagents / Project archive / Cloud sync / Remote Hosts / Info**;
     external model, skill, and MCP scans live in their owning pages; session
-    import is plugin-owned;
+    import is plugin-owned, except the explicit native Codex import in [Codex history import](03-runtime/codex-native-import.md);
     the project archive owns durable project discovery, archive, restore, and
     reopen workflows;
     plugin management remains the app shell's independent **Plugins** destination

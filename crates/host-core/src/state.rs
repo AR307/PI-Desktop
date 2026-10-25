@@ -25,6 +25,7 @@ const PLUGIN_BATCH_IMPORT_RATE_LIMIT: usize = 5;
 const PLUGIN_DELETE_RATE_LIMIT: usize = 20;
 
 pub struct AppState {
+    pub codex_import: crate::codex_import::ImportRegistry,
     pub data_dir: std::path::PathBuf,
     pub db: Database,
     pub secrets: SecretStore,
@@ -137,6 +138,7 @@ impl AppState {
             user_skills,
             user_subagents,
             config_sync_lock: Arc::new(tokio::sync::Mutex::new(())),
+            codex_import: crate::codex_import::ImportRegistry::default(),
             config_sync_in_progress: Arc::new(AtomicBool::new(false)),
             started_at: Instant::now(),
             handshook: false,
