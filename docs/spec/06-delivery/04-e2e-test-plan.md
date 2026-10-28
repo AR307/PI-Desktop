@@ -12949,6 +12949,10 @@ This test plan spec is accepted when:
      parent requests have completion provenance, not a dispatch continuation.
   5. Repeat an invalid dispatch and ordinary-mode delegation. Rejected tools
      retain explanatory feedback; ordinary independent parent work is unchanged.
+  6. Use a model exposing both xhigh and max. Ultra selects xhigh for parent
+     and default workers while an explicit authorized max override stays max.
+     Then replace its adapter mapping with the app-only ultra alias; requests
+     still use xhigh and the saved model mapping remains unchanged.
 - **Automation**: apps/desktop/test/e2e/subagents/ultra-handoff.mjs, called from
   acceptance.mjs; runtime.test.ts also covers settlement before the native turn
   boundary, invalid dispatch and ordinary continuation with the real pi loop.

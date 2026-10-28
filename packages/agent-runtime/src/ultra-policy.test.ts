@@ -5,6 +5,11 @@ const provider: UltraThinkingCapabilities = { supportsReasoning: true, supported
 const definition: Pick<SubagentDefinition, "source" | "thinkingLevel"> = { source: "builtin", thinkingLevel: "low" };
 const options = { provider, definition, parent: "high" as const, ultra: true };
 describe("Ultra delegation selection", () => {
+  it("uses xhigh for unpinned Sol workers even when max is available", () => {
+    const sol: UltraThinkingCapabilities = { supportsReasoning: true, supportedThinkingLevels: ["low", "high", "xhigh", "max"] };
+    expect(resolveDelegationThinking({ ...options, provider: sol })).toBe("xhigh");
+    expect(resolveDelegationThinking({ ...options, provider: sol, requested: "max" })).toBe("max");
+  });
   it("uses the child model maximum, not the parent or builtin default", () => expect(resolveDelegationThinking(options)).toBe("max"));
   it("honors explicit requested and user-defined levels", () => {
     expect(resolveDelegationThinking({ ...options, requested: "low" })).toBe("low");

@@ -1882,3 +1882,14 @@ results are recorded in docs/releases/0.21.0-beta.5-validation.md.
   virtual-display CI lane and retain isolated fixture evidence for diagnosis.
 - Exclude the independent October 11 outbox and October 13-14 RPC recovery
   branches from this release, as confirmed by the user on October 25.
+
+## 2026-10-28 - Ultra native effort
+
+- Ultra prefers xhigh when the selected model supports it, while other models
+  retain their highest declared native tier and authorized explicit worker
+  overrides remain intact.
+- Normalize app-only ultra effort aliases to xhigh at the pi-ai adapter
+  boundary without changing saved model metadata.
+- Verify parent and worker Responses API configuration updates over local HTTP,
+  including turning Ultra off/on and an imported alias mapping. See
+  docs/spec/03-runtime/ultra-collaboration.md.

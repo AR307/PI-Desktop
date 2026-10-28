@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vitest";
 import { highestThinkingLevel, ultraReasoningPrefix } from "./ultra.js";
 describe("Ultra native reasoning", () => {
+  it("uses xhigh for collaboration even when a newer catalog also exposes max", () => {
+    const capabilities = { supportsReasoning: true, supportedThinkingLevels: ["low", "high", "xhigh", "max"] as const };
+    expect(highestThinkingLevel(capabilities)).toBe("xhigh");
+    expect(ultraReasoningPrefix(capabilities)).toBe("Xhigh + ");
+  });
   it("selects only the highest explicitly supported native level", () => {
     expect(highestThinkingLevel({ supportsReasoning: true, supportedThinkingLevels: ["high", "off", "low"] })).toBe("high");
     expect(highestThinkingLevel({ supportsReasoning: true, supportedThinkingLevels: ["max", "high"] })).toBe("max");
