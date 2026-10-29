@@ -1,3 +1,13 @@
+## 2026-10-29 - Prepare PI-Desktop 0.21.1
+
+- Release the Gemini MirrorCoding relay-binding fix and the Ultra-to-xhigh
+  upstream mapping with subagent spawning preserved.
+- Refresh the bundled models.dev catalog to 233 providers and 8,909 models;
+  publish synchronized 0.21.1 changelog entries in all shipped locales.
+- Validate the native Gemini tool-read and follow-up journey, Ultra Responses
+  SSE/subagent behavior, Windows x64 packages, and isolated packaged startup.
+  Detailed evidence is recorded in docs/releases/0.21.1-validation.md.
+
 # PI-Desktop MirrorCoding Edition
 
 ## 2026-10-25 - Repair Gemini loopback relay binding

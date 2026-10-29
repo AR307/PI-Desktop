@@ -2,6 +2,14 @@ import type { ChangelogEntry } from "./changelog.js";
 
 export const zhTWEntries: ChangelogEntry[] = [
   {
+    version: "0.21.1",
+    date: "2026-10-29",
+    highlights: [
+      "修正透過 MirrorCoding relay 啟動 Gemini 工作階段時遺失 Google 原生 API 金鑰綁定的問題。",
+      "Ultra 現在會以 xhigh 傳送至上游，並保留子代理啟動行為。",
+    ],
+  },
+  {
     version: "0.21.0",
     date: "2026-10-25",
     highlights: [
