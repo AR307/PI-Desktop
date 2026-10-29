@@ -1,4 +1,34 @@
+## 2026-10-29 - Prepare PI-Desktop 0.21.1
+
+- Release the Gemini MirrorCoding relay-binding fix and the Ultra-to-xhigh
+  upstream mapping with subagent spawning preserved.
+- Refresh the bundled models.dev catalog to 233 providers and 8,909 models;
+  publish synchronized 0.21.1 changelog entries in all shipped locales.
+- Validate the native Gemini tool-read and follow-up journey, Ultra Responses
+  SSE/subagent behavior, Windows x64 packages, and isolated packaged startup.
+  Detailed evidence is recorded in docs/releases/0.21.1-validation.md.
+
 # PI-Desktop MirrorCoding Edition
+
+## 2026-10-25 - Repair Gemini loopback relay binding
+
+- Fix the session-launch provider projection: merge the temporary binding into
+  `provider.headers`, rather than spreading HTTP header names onto the provider
+  object. Reuse the existing case-insensitive merge and retain custom headers.
+- Recognize Google's `x-goog-api-key` as a local binding carrier. Unknown,
+  missing and invalidated credentials still fail; no account/group substitution,
+  authentication bypass, server change or blind authorization-error retry.
+- Reproduce `relay_binding_missing` on the unchanged candidate with the actual
+  Google SDK and session-launch resolver. All three regression cases failed
+  before the fix and pass afterward, including ordinary/stale-header launches
+  and the native Google credential carrier.
+- Add isolated native Host/Agent Sidecar acceptance for `gemini-3.8-flash`:
+  start an Agent turn, read a real fixture file, receive the tool continuation,
+  and follow up with retained context. Only a controlled local endpoint is used.
+- Validation: 4 Gemini user-path/process cases, 18 existing relay/catalog cases,
+  81 provider/header/Fast runtime tests, and Desktop typecheck pass. User data,
+  active Desktop instances and paid services are not test targets. No release
+  or production-backend change is included.
 
 ## 2026-10-25 - Upstream integration acceptance corrections
 
@@ -1862,3 +1892,14 @@ results are recorded in docs/releases/0.21.0-beta.5-validation.md.
   virtual-display CI lane and retain isolated fixture evidence for diagnosis.
 - Exclude the independent October 11 outbox and October 13-14 RPC recovery
   branches from this release, as confirmed by the user on October 25.
+
+## 2026-10-28 - Ultra native effort
+
+- Ultra prefers xhigh when the selected model supports it, while other models
+  retain their highest declared native tier and authorized explicit worker
+  overrides remain intact.
+- Normalize app-only ultra effort aliases to xhigh at the pi-ai adapter
+  boundary without changing saved model metadata.
+- Verify parent and worker Responses API configuration updates over local HTTP,
+  including turning Ultra off/on and an imported alias mapping. See
+  docs/spec/03-runtime/ultra-collaboration.md.

@@ -35,6 +35,25 @@ it("carries provider-scoped relay headers into the pi-ai model", () => {
   expect(model.headers).toMatchObject({ "x-pi-mirrorcoding-key": "local-only" });
 });
 
+it("normalizes the app-only Ultra alias before it reaches a provider adapter", () => {
+  const modelConfig = {
+    ...genericModelConfig("gpt-6.1-sol", "https://api.acme.test/v1"),
+    thinkingLevelMap: { xhigh: "ultra", max: "ultra" },
+  };
+  const model = buildProviderModel({
+    ...keyedProvider,
+    supportsReasoning: true,
+    supportedThinkingLevels: ["xhigh", "max"],
+    modelConfig,
+  });
+  expect(model.thinkingLevelMap).toMatchObject({ xhigh: "xhigh", max: "xhigh" });
+  expect(modelConfig.thinkingLevelMap).toEqual({ xhigh: "ultra", max: "ultra" });
+  expect(buildProviderModel({
+    ...keyedProvider,
+    modelConfig: { ...modelConfig, thinkingLevelMap: { xhigh: "xhigh", max: "max" } },
+  }).thinkingLevelMap).toMatchObject({ xhigh: "xhigh", max: "max" });
+});
+
 describe("account-local Pi registries", () => {
   it("preserves native pricing tiers through a serialized model projection", () => {
     const native = builtinProviders().flatMap((provider) => provider.getModels())

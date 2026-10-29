@@ -2,6 +2,14 @@ import type { ChangelogEntry } from "./changelog.js";
 
 export const frEntries: ChangelogEntry[] = [
   {
+    version: "0.21.1",
+    date: "2026-10-29",
+    highlights: [
+      "Les sessions Gemini via le relais MirrorCoding conservent la liaison native de la clé API Google.",
+      "Ultra est envoyé comme xhigh au modèle amont, tout en conservant le lancement des sous-agents.",
+    ],
+  },
+  {
     version: "0.21.0",
     date: "2026-10-25",
     highlights: [

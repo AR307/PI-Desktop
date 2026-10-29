@@ -27,6 +27,7 @@ import {
   loadInstructionChain,
   loadSubagentDefinitions,
   modelConfigWithBinding,
+  mergeProviderHeaders,
   optionalProviderHeaders,
   resolveSubagentProviders,
   visionFromModelConfig,
@@ -818,8 +819,7 @@ export function createSessionLaunchRuntime({
           ...(mirrorCodingBinding?.defaultThinkingLevel !== undefined
             ? { defaultThinkingLevel: mirrorCodingBinding.defaultThinkingLevel }
             : {}),
-          ...optionalProviderHeaders(provider.headers),
-          ...(mirrorCodingBinding?.headers ?? {}),
+          ...optionalProviderHeaders(mergeProviderHeaders(provider.headers, mirrorCodingBinding?.headers)),
           supportsReasoning: thinkingCapabilities.supportsReasoning,
           supportsVision: visionFromModelConfig(modelConfig),
           supportedThinkingLevels: [...thinkingCapabilities.supportedThinkingLevels],

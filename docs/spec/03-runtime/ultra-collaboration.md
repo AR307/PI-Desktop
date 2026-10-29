@@ -9,11 +9,16 @@ explicitly enables it again. Fast is independent.
 
 ## Execution
 
-- Resolve each model's highest explicitly supported native reasoning at launch.
-  Models without declared reasoning receive no invented level.
+- Prefer xhigh when the selected model explicitly supports it; otherwise use
+  that model's highest explicitly supported native reasoning. Models without
+  declared reasoning receive no invented level.
+- Treat ultra only as the app's collaboration selection. Adapter-facing model
+  mappings normalize that app-only alias to xhigh; saved model metadata is not
+  rewritten. Ultra defaults parent and unpinned workers to xhigh where supported,
+  while explicit authorized worker levels such as max remain unchanged.
 - User and approved-plan launches can opt in. Auxiliary calls and image
   generation do not inherit proactive delegation. Plan/Goal planning keeps its
-  existing execution restrictions while allowing highest parent reasoning.
+  existing execution restrictions while using the same selected Ultra tier.
 - Reuse Task/TaskWait/TaskList/TaskStop and existing concurrency. Split substantial
   independent work, give workers non-overlapping responsibilities, and let the
   primary agent own integration, validation and user questions. No worker quota,
@@ -68,9 +73,10 @@ real model autonomously decomposes work. Paid/live-model evaluation is separate.
 ## Selected-tier summary
 
 Desktop and mobile show the Ultra summary only while Ultra is selected.
-The summary uses the selected model binding's highest declared native tier,
-followed by Workflow + Subagent (for example, Max + Workflow + Subagent or
-Xhigh + Workflow + Subagent). It is not inferred from a model-family name.
+The summary uses xhigh when the selected model binding declares it; otherwise
+it uses that model's highest declared native tier, followed by Workflow +
+Subagent (for example, Xhigh + Workflow + Subagent or Max + Workflow +
+Subagent). It is not inferred from a model-family name.
 Models without native reasoning display Workflow + Subagent without inventing
 a tier. Leaving Ultra or changing models hides the summary. This replaces the
 previous always-visible cost/delegation hint and does not change execution.

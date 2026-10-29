@@ -2,6 +2,14 @@ import type { ChangelogEntry } from "./changelog.js";
 
 export const trEntries: ChangelogEntry[] = [
   {
+    version: "0.21.1",
+    date: "2026-10-29",
+    highlights: [
+      "MirrorCoding aktarıcısı üzerinden başlatılan Gemini oturumlarında Google API anahtarı bağlantısı korunur.",
+      "Ultra, alt ajanları başlatma davranışı korunarak üst modele xhigh olarak gönderilir.",
+    ],
+  },
+  {
     version: "0.21.0",
     date: "2026-10-25",
     highlights: [

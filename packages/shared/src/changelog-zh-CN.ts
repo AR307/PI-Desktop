@@ -2,6 +2,14 @@ import type { ChangelogEntry } from "./changelog.js";
 
 export const zhCNEntries: ChangelogEntry[] = [
   {
+    version: "0.21.1",
+    date: "2026-10-29",
+    highlights: [
+      "修复通过 MirrorCoding relay 启动 Gemini 会话时丢失 Google 原生 API 密钥绑定的问题。",
+      "Ultra 现在向上游映射为 xhigh，并保留子代理启动行为。",
+    ],
+  },
+  {
     version: "0.21.0",
     date: "2026-10-25",
     highlights: [

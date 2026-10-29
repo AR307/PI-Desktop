@@ -76,6 +76,15 @@ The relay validates the model, selected group, endpoint and current catalog on
 every request. It does not switch model, group, endpoint, or account after an
 error. Existing non-MirrorCoding Provider and credential paths are unchanged.
 
+Session launch places the temporary relay credential inside the runtime
+provider's `headers` map, not at the provider object's top level. The current
+binding overrides a stored header with the same case-insensitive name while
+preserving unrelated custom headers. The relay recognizes the explicit
+`x-pi-mirrorcoding-key` and each supported SDK's API-key carrier, including
+Gemini's `x-goog-api-key`. All carriers still resolve an existing random local
+binding; missing, unknown and invalidated keys remain rejected. These local
+credentials are consumed at the relay and never forwarded upstream.
+
 ## Persistence and recovery
 
 An empty successful catalog disables the managed rows. A failed refresh keeps

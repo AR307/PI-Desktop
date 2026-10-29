@@ -2,6 +2,14 @@ import type { ChangelogEntry } from "./changelog.js";
 
 export const koEntries: ChangelogEntry[] = [
   {
+    version: "0.21.1",
+    date: "2026-10-29",
+    highlights: [
+      "MirrorCoding 릴레이를 통한 Gemini 세션에서 Google API 키 바인딩을 유지합니다.",
+      "Ultra를 상위 모델 요청에 xhigh로 전달하면서 하위 에이전트 실행은 유지합니다.",
+    ],
+  },
+  {
     version: "0.21.0",
     date: "2026-10-25",
     highlights: [

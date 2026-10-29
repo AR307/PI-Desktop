@@ -40,6 +40,7 @@ import {
   nativeWebSearchTransport,
   deepseekRequestCompat,
   zhipuRequestCompat,
+  THINKING_LEVELS,
   type SessionThinkingLevel,
   type ThinkingLevel,
 } from "@pi-desktop/shared";
@@ -455,8 +456,17 @@ export function buildProviderModel(
         : thinkingProtocolCompat
           ? { ...(catalogModel.compat ?? {}), ...thinkingProtocolCompat }
           : catalogModel.compat;
+  const thinkingLevelMap = catalogModel.thinkingLevelMap
+    ? { ...catalogModel.thinkingLevelMap }
+    : undefined;
+  if (thinkingLevelMap) {
+    for (const level of THINKING_LEVELS) {
+      if (thinkingLevelMap[level] === "ultra") thinkingLevelMap[level] = "xhigh";
+    }
+  }
   return {
     ...catalogModel,
+    ...(thinkingLevelMap ? { thinkingLevelMap } : {}),
     id: provider.modelId,
     api: binding.api,
     provider: provider.extensionAgentKey ? provider.id : (provider.vendorKey?.trim() || provider.id),
