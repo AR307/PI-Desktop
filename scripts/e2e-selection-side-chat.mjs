@@ -929,6 +929,7 @@ try {
   await assertSideChatLayout(evaluate, "drawer dark");
   await send("Emulation.clearDeviceMetricsOverride");
   await click('[data-nav="settings"]');
+  await click('.settings-nav-item:has-text("外观")');
   await waitFor(
     () => evaluate("!!document.querySelector('.settings-theme-trigger')"),
     10000,
