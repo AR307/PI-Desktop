@@ -15,6 +15,7 @@
 - Open Appearance explicitly in the side-chat theme journey while preserving
   Account as the default settings destination.
 - Publish Windows packages; keep other platform feeds on their existing release.
+- Record release checks and platform limits in docs/releases/0.21.2-validation.md.
 
 ## 2026-10-29 - Prepare PI-Desktop 0.21.1
 
