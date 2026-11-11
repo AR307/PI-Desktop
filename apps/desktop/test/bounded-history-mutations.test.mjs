@@ -82,7 +82,7 @@ function ipcHarness(pending = false, result = { ok: true }) {
   const handlers = new Map(); const events = [];
   const host = { call: async (method, input) => { events.push([method, input]); return typeof result === "function" ? result(method) : result; } };
   registerSessionIpc({ registrar: { handle: (channel, handler) => handlers.set(channel, handler) }, getHost: () => host,
-    getSidecar: () => ({ clearProjectInstructionRoot() {}, clearVendorAuthBindings() {}, call: async () => { events.push(["dispose"]); } }), activeTurns: new Map(),
+    getSidecar: () => ({ clearProjectInstructionRoot() {}, clearVendorAuthBindings() {}, call: async (method, input) => { events.push(method === "agent.disposeSession" ? ["dispose"] : [method, input]); } }), activeTurns: new Map(),
     persistenceOutbox: { prepareSessionMutation: async (id) => { events.push(["strict-drain", id]); if (pending) throw new Error("pending write"); }, prepareSessionReplacement: async () => { events.push(["replacement-drain"]); } },
     acquireSessionOperation: async () => { events.push(["lock"]); return () => events.push(["release"]); },
     beginTranscriptRewrite: () => { events.push(["fence"]); return { commit: () => events.push(["commit"]), rollback: () => events.push(["rollback"]) }; }, sessionProjects: new Map(), logger: {}, plugins: {},
@@ -150,6 +150,21 @@ test("refused conditional retraction rolls back its fence so late old-turn callb
   assert.equal(result.retracted, false);
   assert.deepEqual(h.events.slice(-2), [["rollback"], ["release"]]);
 });
+
+for (const retracted of [true, false]) {
+  test(`side-chat smart stop ${retracted ? "rewinds" : "preserves"} its live context after conditional retraction`, async () => {
+    const h = ipcHarness(false, { retracted });
+    const input = { sessionId: "side-child", userMessageId: "unanswered", turnId: "child-turn" };
+    const result = await h.invoke("sessionRetractPendingPrompt", input);
+    assert.equal(result.retracted, retracted);
+    assert.deepEqual(h.events, [
+      ["lock"], ["fence"], ["strict-drain", "side-child"],
+      ["session.retractPendingPrompt", input],
+      ...(retracted ? [["agent.rewindSideChat", { sessionId: "side-child", userMessageId: "unanswered" }]] : []),
+      [retracted ? "commit" : "rollback"], ["release"],
+    ]);
+  });
+}
 
 test("new ID mutations preserve the existing remote read-only capability boundary", () => {
   const { guardRemoteInvocation } = load("../src/lib/remote-ipc-safety.ts", {

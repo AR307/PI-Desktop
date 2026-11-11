@@ -594,11 +594,20 @@ export function registerSessionIpc({
         sessionId,
         "pending prompt retraction",
         currentHost,
-        () => currentHost.call<{ retracted: boolean }>("session.retractPendingPrompt", {
-          sessionId,
-          userMessageId: String(input?.userMessageId || ""),
-          ...(input?.turnId === undefined ? {} : { turnId: input.turnId }),
-        }),
+        async () => {
+          const childSidecar = sessionId.startsWith("side-") ? sidecar : null;
+          if (sessionId.startsWith("side-") && !childSidecar) throw new Error("sidecar unavailable");
+          const userMessageId = String(input?.userMessageId || "");
+          const result = await currentHost.call<{ retracted: boolean }>("session.retractPendingPrompt", {
+            sessionId,
+            userMessageId,
+            ...(input?.turnId === undefined ? {} : { turnId: input.turnId }),
+          });
+          if (result.retracted && childSidecar) {
+            await childSidecar.call("agent.rewindSideChat", { sessionId, userMessageId });
+          }
+          return result;
+        },
         { strictDrain: true, didRewrite: (result) => result.retracted },
       );
     },

@@ -10,6 +10,8 @@
   session-owned Fast/Ultra state.
 - Remove duplicated reasoning labels that overlapped the model list; retain
   native pointer and keyboard interaction for the slider, including Ultra.
+- Rewind the child runtime after a successful unanswered-prompt retraction so
+  Smart Stop restores the draft without replaying its discarded text.
 - Publish Windows packages; keep other platform feeds on their existing release.
 
 ## 2026-10-29 - Prepare PI-Desktop 0.21.1
