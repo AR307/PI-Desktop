@@ -34,7 +34,7 @@ test("composer converts oversized text paste and materializes clipboard files", 
   assert.doesNotMatch(composer, /const token = `@\$\{displayName\}`/);
   assert.match(composer, /sourceValue\.slice\(0, selectionStart\) \+/);
   assert.match(composer, /writeComposerDraft\(sessionId, \{/);
-  assert.match(composer, /if \(isLargeTextPaste \|\| files\.length\) \{/);
+  assert.match(composer, /if \(isLargeTextPaste \|\| files\.length \|\| nativeFilePaste\) \{/);
   assert.match(composer, /file\.arrayBuffer\(\)/);
   assert.match(
     composer,
@@ -265,7 +265,7 @@ test("file picker exposes files only", () => {
 test("large image attachments avoid whole-file startup reads", () => {
   assert.match(attachments, /async function hashFile\(path: string\)/);
   assert.match(attachments, /createReadStream\(path\)/);
-  assert.match(attachments, /const inline = supportsVision && size <= MAX_INLINE_IMAGE_BYTES/);
+  assert.match(attachments, /const read = supportsVision && size <= MAX_INLINE_IMAGE_BYTES/);
   assert.match(attachments, /await copyFile\(source, target, fsConstants\.COPYFILE_EXCL\)/);
   assert.doesNotMatch(attachments, /const bytes = readFileSync\(source\.absolute\)/);
   assert.match(history, /const size = \(await stat\(canonical\)\)\.size/);

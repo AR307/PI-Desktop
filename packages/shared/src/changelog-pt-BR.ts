@@ -2,6 +2,15 @@ import type { ChangelogEntry } from "./changelog.js";
 
 export const ptBREntries: ChangelogEntry[] = [
   {
+    version: "0.21.2",
+    date: "2026-11-11",
+    highlights: [
+      "Atualize para Pi 1.5.0 com modos personalizados, objetivos por etapas e configurações de uso do computador.",
+      "Melhora a seleção de modelos, a navegação das configurações e o histórico de conversas.",
+      "Preserva MirrorCoding, Gemini, Ultra, conversas laterais e dados móveis durante a atualização.",
+    ],
+  },
+  {
     version: "0.21.1",
     date: "2026-10-29",
     highlights: [

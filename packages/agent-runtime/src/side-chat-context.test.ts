@@ -63,6 +63,7 @@ function fixture(options: Partial<AgentRuntimeOptions> = {}) {
     commandShell,
     host: {
       call: async <T>(method: string, params?: unknown): Promise<T> => {
+        if (method === "tools.fileBatchCapabilities") return { version: 1, supported: false } as T;
         writes.push({ method, params });
         if (method !== "session.appendMessage")
           throw new Error("Unexpected host effect: " + method);

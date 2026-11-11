@@ -38,9 +38,9 @@ describe("Browser recovery IPC", () => {
 });
 
 describe("Plan protocol contracts", () => {
-  it("uses protocol v11/schema v26 and exposes the plan, schedule, and shell channels", () => {
+  it("uses protocol v11/schema v30 and exposes the plan, schedule, and shell channels", () => {
     expect(PROTOCOL_VERSION).toBe(11);
-    expect(SCHEMA_VERSION).toBe(26);
+    expect(SCHEMA_VERSION).toBe(30);
     expect(IPC_WHITELIST.has(IPC.invoke.sideChatOpen)).toBe(true);
     expect(IPC_WHITELIST.has(IPC.invoke.sideChatClose)).toBe(true);
     expect(IPC_WHITELIST.has(IPC.invoke.plansPending)).toBe(true);
@@ -77,6 +77,10 @@ describe("Plan protocol contracts", () => {
     expect(IPC_WHITELIST.has(IPC.invoke.appOpenFeedback)).toBe(true);
     expect(IPC.invoke.fsOpen).toBe("pi-desktop/fs/open");
     expect(IPC_WHITELIST.has(IPC.invoke.fsOpen)).toBe(true);
+    expect(IPC.invoke.workspaceReviewOpenFile).toBe("pi-desktop/workspace/review/openFile");
+    expect(IPC.invoke.workspaceReviewRollbackFile).toBe("pi-desktop/workspace/review/rollbackFile");
+    expect(IPC_WHITELIST.has(IPC.invoke.workspaceReviewOpenFile)).toBe(true);
+    expect(IPC_WHITELIST.has(IPC.invoke.workspaceReviewRollbackFile)).toBe(true);
     expect(IPC.invoke.statsGetTokenUsageHistory).toBe(
       "pi-desktop/stats/getTokenUsageHistory",
     );
@@ -137,12 +141,14 @@ describe("Plan protocol contracts", () => {
     expect(normalizeMode(undefined)).toBe("agent");
   });
 
-  it("pairs each contract mode with its proposal kind and back (D198)", () => {
+  it("only Plan submits new proposals; legacy Goal rows still read back (ADR mode-definitions)", () => {
     expect(PROPOSAL_KINDS).toEqual(["plan", "goal"]);
     expect(proposalKindForMode("plan")).toBe("plan");
-    expect(proposalKindForMode("goal")).toBe("goal");
-    // Agent negotiates no contract, so it has no kind.
+    // Goal is a staged mode run; it no longer negotiates an approval contract.
+    expect(proposalKindForMode("goal")).toBeNull();
+    // Agent and custom modes negotiate no contract, so they have no kind.
     expect(proposalKindForMode("agent")).toBeNull();
+    expect(proposalKindForMode("review")).toBeNull();
     expect(modeForProposalKind("goal")).toBe("goal");
     expect(modeForProposalKind("plan")).toBe("plan");
     // Rows written before the discriminator existed are Plan by definition.

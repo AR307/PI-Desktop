@@ -91,9 +91,9 @@ transcript replacement and regeneration.
 
 ## 3.1 Contributed theme CSS
 
-A theme contribution (`ui.theme`) is the one case where plugin-authored content
-runs inside the host renderer, so it crosses a sanitizer in the main process
-before it is ever sent to the UI:
+A theme contribution (`ui.theme`) sends CSS into the host renderer through a
+main-process sanitizer. The separate high-risk `renderer.extension` evaluates
+trusted plugin JavaScript in the host renderer and is not a sandbox:
 
 - Only CSS the browser applies is inspected: comment bodies and string literals
   are blanked first, with one space per masked character so any offset still
@@ -104,7 +104,7 @@ before it is ever sent to the UI:
   declared theme asset, a `url(` the parser cannot resolve, `javascript:`,
   `expression(`, and markup sequences (`<style`, `</style`, `<!--`); an empty
   sheet is refused too
-- Capped at 256KB per file, 8 themes per plugin
+- Capped at 256 KiB per file; no per-plugin theme-count cap
 - A theme may declare `assets` using whitelisted image/font extensions: either
   package-relative paths (resolved inside the plugin root; traversal and `node_modules`
   references are rejected) or absolute paths. The total is capped at 4MB.
@@ -118,7 +118,8 @@ before it is ever sent to the UI:
   `ui.window.appearance` and applies only while one of that plugin's themes is
   the selected one; leaving the theme restores the host background, because the
   appearance is derived from the live catalog rather than remembered. macOS
-  keeps `vibrancy` and its native corner behavior; Linux retains native corner
+  keeps native corners; its translucent vibrancy surface ignores the color,
+  while turning off Translucent window applies it to the opaque surface; Linux retains native corner
   behavior. Windows defaults to a 12 DIP corner request. On Windows 11 (build
   22000+), radius 0 requests square corners and positive values use the same
   system-rounded preference, while the OS chooses the actual radius; alpha
@@ -162,7 +163,11 @@ Plugins cannot access:
 - Other plugins' data
 - Host secrets through a general-purpose API; `provider.oauth` grants access
   only to the callback's own declared provider credential
-- The host's full session database (unless a controlled API exists in the future)
+- The host's full session database through any general-purpose surface. A
+  controlled API exists: `pi.session` with the `.own` grants (imported sessions
+  only) or the `session.*.all` grants (every live session, approved at install
+  and audited per call). There is no other path to sessions, no SQLite handle,
+  and no transcript file access
 
 ## 5.1 Inter-plugin message bus
 
@@ -314,16 +319,15 @@ self-declared risk level. A server's catalog is registered whole — the count i
 bounded only by the protocol guards in §8.1 — while at most 8 servers per plugin
 are admitted.
 
-Plan is an additional host policy boundary for agent tools:
-
-- no plugin tool is visible or executable in Plan;
-- the deny precedes manifest risk, declared/granted permissions, session
-  grants, and the `auto` permission mode;
-- a direct forged `tools.execute` call returns `PLUGIN_DISABLED_IN_PLAN` and is
-  audited; it is not forwarded to the plugin runtime;
-- plugin commands and panels may remain usable as explicit user UI actions,
-  but they cannot become model-callable Plan tools or silently mutate Plan
-  state.
+Plugin tools are hidden and denied in Plan/Goal by default. A runtime tool
+registration may opt in with non-empty `planSafeActions`; only an `args.action`
+in that list may execute in those modes. The list is checked against the schema's
+action enum when present. Keep the manifest descriptor and runtime registration
+in sync: the runtime registration drives the executable tool. Risk `low`, session
+grants, and `auto` do not substitute for the declaration. Host policy and the
+plugin runner both check it; a disallowed runner action is `PERMISSION_DENIED`.
+The declaration is an author assertion of read-only behavior, not a side-effect
+sandbox (ADR 0211).
 
 ## 8. Network and external links
 
@@ -348,8 +352,14 @@ outbound path the host owns answers to it.
 
 - **Panel sessions.** `sandbox: true` removes Node, not the network, so a panel
   was previously a full browser that never consulted `net.fetch`. The session now
-  runs a `webRequest` filter, refuses every device permission, and denies
-  `window.open`, which would otherwise mint a window outside the filtered session
+  runs a `webRequest` filter, refuses every device permission except an
+  audio-only microphone request from a plugin granted `ui.microphone` (§8.2), and
+  denies `window.open`, which would otherwise mint a window outside the filtered
+  session. The session is one persisted partition per plugin
+  (`persist:pi-plugin-<pluginId>`), shared by its panel window and its docked
+  views, and both get the same filter. `file:`, `data:`, `blob:`, `devtools:`,
+  `chrome-extension:`, and the read-only theme-asset scheme are not network
+  requests and pass the filter
 - **`pi.net.fetch`.** Checks the allowlist and follows redirects by hand, because
   an allowed host that 30x-es to an undeclared one would carry the request out.
   The host's shared hop loop owns both default and injected single-hop
@@ -371,8 +381,10 @@ outbound path the host owns answers to it.
   instead of being buffered, and a send queue above 4 MiB is refused rather
   than grown. Frames are addressed to the owning plugin only.
 
-An absent, empty, or malformed list means no egress at all, and a bare `*` is
-refused at install so nobody declares their way out. This is what makes a
+An absent, empty, or malformed list means no egress at all, and a bare `*`
+fails `validateManifest()` so nobody declares their way out: `pi-plugin check`
+reports it and the host refuses to load the plugin. The host-core installer
+does not read `net.domains`, so such a package installs and then fails to load. This is what makes a
 generous `fs.read` scope affordable (§6).
 
 Still open, tracked separately: `agent.prompt.inject` (skill text can ask a
@@ -470,8 +482,9 @@ user types. A plugin may only map an accelerator to one of its own registered
 commands, and an accelerator the OS reserves, that PI-Desktop itself currently
 spends (the plugin-launcher and window-toggle bindings, `Alt+Space` and
 `Alt+Shift+W` by default; a user rebinding one frees it for plugins), or that
-another plugin holds is refused with
-`LIMIT_EXCEEDED` (at most 8 per plugin) instead of being taken over. A trigger
+  another plugin holds is refused instead of being taken over. Registration
+  reports `SHORTCUT_CONFLICT`, `SHORTCUT_UNAVAILABLE`, or `INVALID_ACCELERATOR`
+  as applicable; `LIMIT_EXCEEDED` enforces at most 8 shortcuts per plugin. A trigger
 runs exactly that one command. Register, unregister, and trigger are audited
 with the plugin id and the result — a registration and a trigger also name the
 accelerator and command — and typed input is never recorded. Every entry is
@@ -509,7 +522,8 @@ The host should be able to:
 9. An MCP server declared with an absolute `command` fails manifest validation;
    a non-loopback plain-HTTP URL is accepted only when its host is declared in
    `manifest.net.domains` and the UI shows the unencrypted-connection warning
-10. A low-risk or granted plugin tool still fails closed in Plan
+10. A plugin tool without plan-safe actions, or an action outside its list,
+    still fails closed in Plan/Goal regardless of risk or grants
 
 
 ## 11. Implementation status
@@ -560,7 +574,7 @@ present in the plugin API: the methods are gated by those permissions and an
 authorized call is refused with a coded `UNSUPPORTED` refusal that is audited,
 because this host has no device backend yet, so nothing reaches a device.
 `net.websocket` is implemented: connections are host-owned, allowlist-checked,
-bounded, and released with the plugin (§8.1).
+bounded, and released with the plugin (§8.0).
 
 Not enforced yet:
 
@@ -570,7 +584,9 @@ Not enforced yet:
   API it is supposed to use, not one that bypasses it (ADR 0008 D009)
 - CPU / memory limits
 - Signature verification (packages are only sha256-checked)
-- Declared manifest permissions are auto-granted at load time, subject to the
-  user unchecking them at install
+- Declared manifest permissions are granted as a whole. The install review has
+  no per-permission toggle, and the installer refuses a grant that leaves out
+  any declared permission (`PLUGIN_PERMISSION_DENIED: missing grant for
+  <permission>`); a load with no recorded grant takes the declared set
 - A `userSelected` root does not survive a restart, so a plugin has to ask again
   each session

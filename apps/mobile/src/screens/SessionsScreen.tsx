@@ -10,7 +10,7 @@ import { EmptyState, SkeletonRows, StatusBadge } from "../ui/controls";
 import { BackgroundDeliveryNotice } from "../features/notifications/BackgroundDeliveryNotice";
 
 type Entry = { directory: DesktopDirectory; session: MobileSession; status: SessionStatusKind };
-const modeIcon = { agent: Sparkles, plan: ListChecks, goal: Target, image: ImageIcon } as const;
+const modeIcon: Record<string, typeof Sparkles> = { agent: Sparkles, plan: ListChecks, goal: Target, image: ImageIcon };
 
 export const SessionRow = memo(function SessionRow({ entry, showComputer, onOpen, locale }: { entry: Entry; showComputer: boolean; onOpen(desktopId: string, sessionId: string): void; locale: string }) {
   const { t } = useTranslation("translation", { keyPrefix: "mobile" });

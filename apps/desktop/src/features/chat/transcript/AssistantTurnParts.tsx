@@ -4,7 +4,7 @@ import type { AgentActivity, UiMessage } from "@pi-desktop/shared";
 import type { AssistantTurnPart } from "../../../lib/assistant-turns";
 import type { SubagentOutcome, SubagentTiming } from "../../../lib/subagent-topology";
 import { useAppStore } from "../../../stores/app-store";
-import { Markdown } from "../../../components/Markdown";
+import { TranscriptProse } from "./TranscriptProse";
 import { useSmoothText } from "../../../hooks/useSmoothText";
 import { useSlotSessionId } from "../../../plugins/renderer-slots/use-slots";
 import { GenUiCards } from "../gen-ui/GenUiCard";
@@ -38,7 +38,7 @@ const SmoothMessageBubble = memo(function SmoothMessageBubble({ message, streami
       className={`message-bubble assistant-turn-fragment${streaming ? " streaming" : ""}${showCursor ? " smooth-cursor" : ""}`}
       data-message-id={message.id}
     >
-      {message.imageGeneration ? <ImageResult message={message} /> : genUi.content ? <div className="prose-chat" data-quote-body={message.id}><Markdown source={genUi.content} streaming={streaming} /></div> : null}
+      {message.imageGeneration ? <ImageResult message={message} /> : genUi.content ? <div data-quote-body={message.id}><TranscriptProse source={genUi.content} streaming={streaming} /></div> : null}
       <GenUiCards references={genUi.references} sessionId={sessionId} remote={remote} />
       {message.error ? <AssistantErrorMessage message={message} /> : null}
     </div>

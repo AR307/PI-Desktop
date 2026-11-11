@@ -1,3 +1,4 @@
+import { builtinModeRuns } from "./helpers/builtin-mode-runs.mjs";
 import assert from "node:assert/strict";
 import { register } from "node:module";
 import test from "node:test";
@@ -79,6 +80,7 @@ test("prompt IPC persists original session text, skips slash expansion and binds
   };
   let released = false;
   registerAgentIpc({
+    modeRuns: builtinModeRuns,
     registrar: { handle: (channel, handler) => handlers.set(channel, handler) },
     getHost: () => host,
     getSidecar: () => ({
@@ -138,6 +140,7 @@ test("abort waits for prompt admission before dispatching to the sidecar", async
   const finishedTurns = [];
   registerAgentIpc({
     images: { abortSession: () => false },
+    modeRuns: builtinModeRuns,
     registrar: { handle: (channel, handler) => handlers.set(channel, handler) },
     getHost: () => host,
     getSidecar: () => ({

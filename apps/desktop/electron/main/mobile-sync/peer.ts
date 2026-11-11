@@ -5,7 +5,7 @@ import { encodeFrame, errorObjectFrom, isRequest, parseFrame } from "@pi-desktop
 import {
   APP_VERSION, MOBILE_ATTACHMENT_CHUNK_BYTES, MOBILE_ITEM_CONTENT_LIMIT, MOBILE_SESSION_ACTIVITY_NOTIFICATION,
   RACP_DEFAULT_LIMITS, RACP_DEFAULT_POLICY, RACP_EVENT_NOTIFICATION, RACP_PROTOCOL_VERSION, RACP_SUBSCRIPTION_CLOSED_NOTIFICATION,
-  SESSION_THINKING_LEVELS, validateImageOptions,
+  SESSION_THINKING_LEVELS, isModeId, validateImageOptions,
   protocolVersionsCompatible, type MobileAttention, type MobileDirectoryPage, type MobileGrant, type MobileProject, type MobileSession, type MobileSessionActivity, type MobileSessionChangesPage, type MobileSessionConfigureInput, type MobileSessionHistoryPage, type MobileSessionSnapshot, type MobileSessionState, type ProjectGroupRecord, type UiMessage,
   type RacpApprovalResponse, type RacpCursor, type RacpEventEnvelope, type RacpInitializeResult, type RacpInputResponse,
   type SessionSummary, type SessionDetail, type PlanProposal, type ThinkingLevel,
@@ -503,7 +503,7 @@ function parseConfiguration(params: Record<string, unknown>): MobileSessionConfi
   if (params.ultra !== undefined && typeof params.ultra !== "boolean") throw new RacpError("INVALID_ARGUMENT", "invalid_ultra");
   if (params.fast !== undefined && typeof params.fast !== "boolean") throw new RacpError("INVALID_ARGUMENT", "invalid_fast");
   const modeValue = params.mode;
-  if (modeValue !== undefined && modeValue !== "agent" && modeValue !== "plan" && modeValue !== "goal" && modeValue !== "image") {
+  if (modeValue !== undefined && !isModeId(modeValue)) {
     throw new RacpError("INVALID_ARGUMENT", "invalid_task_mode");
   }
   const providerId = params.providerId === undefined ? undefined : string(params.providerId, "provider_id");

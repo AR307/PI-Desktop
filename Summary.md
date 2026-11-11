@@ -1,3 +1,22 @@
+## 2026-11-11 - Synchronize upstream for PI-Desktop 0.21.2
+
+- Integrate upstream 4ad0094e: Pi 1.5.0, custom/staged modes, Computer Use,
+  model selection, settings, transcript and plugin improvements.
+- Preserve MirrorCoding accounts, Gemini relay bindings, Ultra-to-xhigh,
+  Claude cache controls, side chats and mobile synchronization.
+- Converge database schemas at 30 without resetting conversation or queue data.
+- Keep side-chat discard confirmation when closing multiple work-panel tabs.
+- Align model-selection and side-chat user-path tests with the source rail and
+  session-owned Fast/Ultra state.
+- Remove duplicated reasoning labels that overlapped the model list; retain
+  native pointer and keyboard interaction for the slider, including Ultra.
+- Rewind the child runtime after a successful unanswered-prompt retraction so
+  Smart Stop restores the draft without replaying its discarded text.
+- Open Appearance explicitly in the side-chat theme journey while preserving
+  Account as the default settings destination.
+- Publish Windows packages; keep other platform feeds on their existing release.
+- Record release checks and platform limits in docs/releases/0.21.2-validation.md.
+
 ## 2026-10-29 - Prepare PI-Desktop 0.21.1
 
 - Release the Gemini MirrorCoding relay-binding fix and the Ultra-to-xhigh

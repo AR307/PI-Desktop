@@ -11,6 +11,7 @@ import {
   isThemeColorScheme,
   traySessionTitle,
   migrateKeybindingOverrides,
+  resolveFontScale,
   type AppMenuCommand,
   type CloseBehavior,
   type KeybindingOverrides,
@@ -393,6 +394,17 @@ export function createApplicationLifecycle({
     });
   }
 
+  /**
+   * Window zoom composes with the Appearance type scale inside a docked plugin
+   * view, so a zoom applied to the main window has to reach those pages too.
+   * Otherwise a panel that was in proportion drifts as soon as the user zooms
+   * the app. A detached plugin window zooms only itself.
+   */
+  function resyncDockedPluginZoom(target: BrowserWindow) {
+    if (target !== state.mainWindow) return;
+    pluginViews.resyncZoom();
+  }
+
   function executeNativeMenuAction(
     action: NativeMenuAction,
     target: BrowserWindow | null = state.mainWindow,
@@ -435,12 +447,15 @@ export function createApplicationLifecycle({
         break;
       case "zoomIn":
         contents.setZoomFactor(Math.min(3, contents.getZoomFactor() * 1.1));
+        resyncDockedPluginZoom(target);
         break;
       case "zoomOut":
         contents.setZoomFactor(Math.max(0.5, contents.getZoomFactor() / 1.1));
+        resyncDockedPluginZoom(target);
         break;
       case "resetZoom":
         contents.setZoomFactor(1);
+        resyncDockedPluginZoom(target);
         break;
       case "toggleFullScreen": {
         // Entering fullscreen from a maximized window leaves both flags set on
@@ -635,6 +650,7 @@ export function createApplicationLifecycle({
     theme?: unknown;
     keybindings?: unknown;
     developerMode?: unknown;
+    fontScale?: unknown;
   } | null) {
     const locale =
       typeof settings?.language === "string" &&
@@ -656,6 +672,11 @@ export function createApplicationLifecycle({
         .catch(() => {});
     }
     applyAppThemePreference(settings?.theme);
+    // A docked plugin view is its own web page, so the renderer's `--font-scale`
+    // cannot reach it. The host repeats the Appearance type scale as that page's
+    // zoom, which is what keeps the bundled Browser and Files panels in
+    // proportion with the app (D343 / ADR 0180).
+    pluginViews.setFontScale(resolveFontScale({ fontScale: settings?.fontScale }));
     // Persisted keybindings can still carry the retired window ids (D438); the
     // main process is the only reader when the window never opens, so it folds
     // them itself instead of relying on a renderer write-back.

@@ -30,6 +30,8 @@ export const SessionPane = memo(function SessionPane({
   const transcript = useTranscriptView(sessionId);
   const loadTranscriptPage = useAppStore((state) => state.loadTranscriptPage);
   const returnToLatest = useAppStore((state) => state.returnToLatestTranscript);
+  const prepareReturnToLatest = useAppStore((state) => state.prepareReturnToLatestTranscript);
+  const prepareLatest = useCallback(() => prepareReturnToLatest(sessionId), [prepareReturnToLatest, sessionId]);
   const restoreTranscriptReading = useAppStore((state) => state.restoreTranscriptReading);
   const restoreReading = useCallback<RestoreTranscriptReading>(
     (position, signal) => restoreTranscriptReading(sessionId, position, signal),
@@ -79,16 +81,18 @@ export const SessionPane = memo(function SessionPane({
           onLoadOlder={() => loadTranscriptPage(sessionId, "before")}
           searchTarget={searchTarget}
           readingWindow={transcript.historical}
+          liveTail={transcript.liveTail}
           onRestoreReading={restoreReading}
           hasMoreAfter={transcript.hasMoreAfter}
           onLoadNewer={() => loadTranscriptPage(sessionId, "after")}
           onReturnToLatest={() => returnToLatest(sessionId)}
+          onPrepareReturnToLatest={prepareLatest}
           navigationLoading={transcript.loading}
           isRunning={isRunning}
-          pendingPermission={transcript.historical ? undefined : pendingPermission}
+          pendingPermission={transcript.liveTail ? pendingPermission : undefined}
           queuedPermissions={queuedPermissions}
-          askPending={transcript.historical ? false : askPending}
-          planningState={transcript.historical ? undefined : planningState}
+          askPending={transcript.liveTail ? askPending : false}
+          planningState={transcript.liveTail ? planningState : undefined}
           paneVisible={visible}
         />
       </TranscriptDisclosureProvider>

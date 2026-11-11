@@ -724,6 +724,18 @@ CSS custom properties on `:root` (D146):
 Interactive surfaces should reference these variables instead of hard-coded
 millisecond literals when practical.
 
+One duration sits outside this scale, and only one:
+
+| Token | CSS variable | Duration | Usage |
+|---|---|---|---|
+| `startup-reveal` | `--motion-startup-reveal` | 1000ms | Boot-animation reveal only (§8.3.1, D679) |
+
+The scale above is sized for in-flow UI feedback — a control answering a
+click. The reveal is the end of a cinematic the user supplied, so it is sized
+in that register instead. It is used by `.startup-animation` and nothing else,
+and it must stay matched to `STARTUP_ANIMATION_REVEAL_MS` in
+`@pi-desktop/shared`. New surfaces do not reference it.
+
 ### 8.2 Easing
 
 CSS custom properties on `:root` (D146):
@@ -762,6 +774,32 @@ plain status text:
   cross-fades in. Other platforms keep the opaque `--ds-bg-primary` fill
 
 This is boot-state feedback, not decorative chrome.
+
+#### 8.3.1 User-supplied startup animation (D679 / ADR 0338)
+
+A video in `<dataDir>/startup/` replaces the splash above for that launch
+(`StartupAnimation`, `data-testid="startup-animation"`). Without such a file
+the splash is unchanged, which is what every existing installation gets.
+
+- One layer, opaque `#000` for its whole life: the video sits on it, and once
+  the video is gone the same black is the mask the shell fades in from, so there
+  is no seam between the last frame and the mask. Literal black rather than
+  `--ds-bg-primary` so a video's own letterboxing and fades meet the same colour
+  under either theme.
+- `object-fit: cover`; the frame is filled and the edges are cropped, so the
+  settings copy tells the user to keep the subject centred.
+- The element is inert and silent: `muted`, `playsInline`, no controls, no
+  picture-in-picture, not focusable, `aria-hidden`. Accessible status copy comes
+  from `app.starting`, as the splash's does.
+- Sequence: play → opaque black hold until `ready` → `--motion-startup-reveal`
+  (1000ms) opacity fade with `pointer-events: none`, so the shell takes input
+  for the whole fade rather than after it.
+- A hold longer than 3s adds the splash's indeterminate bar, so an opaque mask
+  is not mistaken for a hang.
+- Reduced motion does not play it at all — a shorter cinematic is still a
+  cinematic, and the OS request is the opt-out.
+- Unlike the glass splash, this surface is opaque, so it needs no macOS rule
+  hiding the mounted shell beneath it.
 
 ### 8.4 Overlay / floating surface enter
 
@@ -946,19 +984,13 @@ The composer renders only controls connected to the active pi session:
   enhancement is not built in. The trigger shows a Bot icon, the current model,
   and reasoning level; `off` omits
   the level text. Its single `role="menu"`
-  popover opens above the trigger at `bottom: calc(100% + 8px)` and starts with
-  exactly two current-value entries. When the menu lists more than one
-  level (`omit` plus the binding's enabled canonical levels), a drag slider
-  sits directly beneath the Reasoning level entry; slider and tick commits
-  apply without leaving the root. Tick labels are not tab stops — the range
-  input is the accessible control. Each entry replaces
-  the menu contents in-place with a back row and its submenu. The Model
-  submenu contains search plus sticky provider groups. Each model row begins
-  at one tab stop beneath its provider heading, making the provider → model
-  hierarchy legible without altering the model label. The Reasoning submenu
-  lists `omit` then the enabled levels as radio rows with a selected-row
-  check; selecting from the list returns to the root without dismissing the
-  popover.
+  popover opens above the trigger. A source rail selects recent models or a
+  configured provider; search spans all sources. MirrorCoding model selection
+  opens its group choices in place. Reasoning uses one footer range control
+  with one label per stop, rendered inside its rail. Labels never cover the
+  model list. The native range owns pointer, keyboard and accessibility input;
+  commits keep the menu open. MirrorCoding Fast and Claude cache controls
+  retain their own settings.
 - While the active session is running, the draft and runtime controls stay
   editable as next-turn choices; only Send is disabled. Host configuration
   remains pinned for the in-flight turn and the latest queued choice is

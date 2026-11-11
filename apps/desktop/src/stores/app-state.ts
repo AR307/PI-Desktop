@@ -104,15 +104,20 @@ export type RefreshSessionsOptions = {
   revealImportedProjects?: boolean;
 };
 
-/** Toolbar selections retained on the unpersisted new-task draft. */
+/**
+ * Toolbar selections retained on the unpersisted new-task draft. An absent
+ * field keeps the default the new session would otherwise start with.
+ */
 export type DraftSessionConfiguration = {
   ultra?: boolean;
   fast?: boolean;
-  mode: Mode;
-  thinkingLevel: SessionThinkingLevel;
+  mode?: Mode;
+  thinkingLevel?: SessionThinkingLevel;
   providerId?: string;
   modelId?: string;
   permissionMode?: PermissionMode;
+  /** Session `/fast` switch carried into the created session (ADR 0334). */
+  fastMode?: boolean;
 };
 
 
@@ -216,6 +221,7 @@ export type AppState = {
   restoreTranscriptReading: (sessionId: string, position: TranscriptReadingPosition, signal: AbortSignal) => Promise<boolean>;
   loadTranscriptPage: (sessionId: string, direction: "before" | "after") => Promise<void>;
   returnToLatestTranscript: (sessionId: string) => void;
+  prepareReturnToLatestTranscript: (sessionId: string) => () => void;
   selectSession: (
     id: string,
     opts?: { record?: boolean } & NavigationOptions,
@@ -236,6 +242,7 @@ export type AppState = {
     modelId?: string;
     thinkingLevel: SessionThinkingLevel;
     permissionMode?: PermissionMode;
+    fastMode?: boolean;
   }, targetSessionId?: string) => Promise<void>;
   /** Returns true once accepted unless concurrent smart Stop restores it. */
   sendPrompt: (
@@ -436,6 +443,8 @@ export type AppState = {
   ) => void;
   closeWorkPanelTab: (tabId: string) => Promise<void>;
   releaseClosedSession: (sessionId: string) => void;
+  closeOtherWorkPanelTabs: (tabId: string) => void;
+  closeAllWorkPanelTabs: () => void;
   collapseWorkPanel: () => void;
   /** Hide the visible panel while retaining its session-owned context. */
   resetWorkPanelContext: () => void;

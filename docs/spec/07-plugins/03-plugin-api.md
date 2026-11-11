@@ -21,7 +21,7 @@ selectors, images, fonts, or arbitrary property names.
 Inside the plugin runtime, a global is available:
 
 ```ts
-declare const pi: PiPluginHostApi;
+declare const pi: PluginHostApi;
 ```
 
 ## 3. API overview (MVP)
@@ -98,8 +98,8 @@ pi.themes.list(): Promise<Array<{ id: string; themeId: string; label: string; ba
 ### plugin
 ```ts
 pi.plugin.getId(): string
-pi.plugin.getManifest(): PluginManifestV1
-pi.plugin.getSettings<T=Record<string, unknown>>(): Promise<T>
+pi.plugin.getManifest(): PluginManifest
+pi.plugin.getSettings(): Promise<Record<string, unknown>>
 pi.plugin.setSettings(partial: Record<string, unknown>): Promise<void>
 pi.plugin.getDataPath(): Promise<string> // plugin-private directory
 ```
@@ -109,8 +109,10 @@ persists edits in the plugin's private settings file. Supported generated
 controls are `string`, `number`, `boolean`, `select`, `json`, and `shortcut`.
 Generated `title` / `description` / `enum[].label` are author-language strings;
 the host does not resolve locale maps on them. A plugin that needs a localized
-settings surface ships `settingsDestinations` and reads `pi.app.getLocale`
-(ADR 0280). Shortcut settings are plugin-local: they invoke the declared
+settings surface uses its own panel/view and reads `pi.app.getLocale`.
+The data-only `scenicThemes` contribution has a host-rendered Settings surface;
+`settingsDestinations` is not an implemented public contribution (ADR 0287).
+Shortcut settings are plugin-local: they invoke the declared
 `command` only while the PI-Desktop app window is focused and while the plugin's
 activation scope matches the current project. They are never registered as
 OS-global shortcuts in this release. The host emits `plugin:settingsChanged`
@@ -127,6 +129,13 @@ pi.commands.register(def: {
 
 pi.commands.unregister(id: string): Promise<void>
 ```
+
+Command IDs are stored as supplied; the host does not add a prefix. Use a
+plugin-specific namespace to avoid collisions. A plugin may replace its own
+command, but registering an ID owned by another loaded plugin rejects with
+`CONFLICT`. Unregistering another plugin's command rejects with
+`PERMISSION_DENIED`. Unregistering an absent ID succeeds without changes.
+Disabling or unloading a plugin removes its commands and releases their IDs.
 
 ### Composer text transforms (`composer.transform`)
 
@@ -328,13 +337,23 @@ hold `project.create` when it supplies a project id. Omitting `projectId` keeps
 the imported session unbound; `projectPath` remains historical source metadata
 and never creates a project by itself.
 
-### workspace / fs
+### projects / workspace / fs
 ```ts
+pi.projects.list(): Promise<PluginProjectInfo[]>
+
+type PluginProjectInfo = {
+  projectId: string; // Base-10 projects.id, no prefix; stable for this row's lifetime.
+  name: string;
+  primaryPath: string;
+  roots: Array<{ path: string; name: string; primary: boolean }>;
+}
+
 pi.workspace.get(): Promise<{
   path: string;
   name: string;
   projectId?: string;
   roots?: Array<{ path: string; name: string; primary: boolean }>;
+  remote?: { path: string; readOnly: true }; // SSH projects only, see below
 } | null>
 
 pi.fs.readText(pathFromRoot: string): Promise<string>
@@ -348,18 +367,19 @@ pi.fs.readRange(
   length: number,
   grantId?: string,
 ): Promise<{ bytes: Uint8Array; totalSize: number }>
-pi.fs.readPreview(pathFromRoot: string): Promise<{
+pi.fs.readPreview(pathFromRoot: string, options?: { workspacePath: string }): Promise<{
   kind: "text" | "image" | "binary" | "tooLarge"
   content?: string     // UTF-8 when kind is "text"
   dataUrl?: string     // data URL when kind is "image"
   size: number
+  mtimeMs?: number     // Remote previews include the Host's file timestamp.
 }>
 pi.fs.openDefault(pathFromRoot: string): Promise<void>
 pi.fs.openInBrowser(pathFromRoot: string): Promise<void>
 pi.fs.reveal(pathFromRoot: string): Promise<void>
 pi.fs.writeText(pathFromRoot: string, content: string): Promise<void>
 pi.fs.glob(pattern: string): Promise<string[]>
-pi.fs.list(pathFromRoot: string): Promise<Array<{
+pi.fs.list(pathFromRoot: string, options?: { workspacePath: string }): Promise<Array<{
   name: string;
   path: string;        // root-relative, usable directly with readText / list
   isDirectory: boolean;
@@ -370,20 +390,62 @@ pi.fs.remove(pathFromRoot: string): Promise<void>
 pi.fs.requestDirectory(): Promise<{ path: string; name: string } | null>
 ```
 
-`workspace.get` answers with the primary root — `path` and its leaf `name`,
-both unchanged — plus, when that folder belongs to a project group (ADR 0249),
-`projectId` and `roots`: every registered folder of the group in its own order,
-primary first, each `{ path, name, primary }` (ADR 0263). `workspace:changed`
-carries the same object, and main answers both from the host-owned group
-records, so the event and the pull cannot disagree. A host that cannot resolve
-the group omits `projectId` and `roots` — the same `{ path, name }` a plugin
-already handles — and reading this metadata needs no new permission and adds no
-SDK method.
+`projects.list` returns one entry per durable `projects` row, including rows
+without a group, ordered by `lastOpenedAt` descending (numeric id ascending on
+ties), independently of pinning. `projectId` is the base-10 database primary key
+without a prefix, always non-empty and stable across rename and restart while
+that row exists. It is distinct from the optional **group** id reported by
+`workspace.get`; it is the string form of `project.create`'s numeric project id.
+`name` uses the matching primary group's display name, falling back to the row's
+name. `primaryPath` is that row's path. `roots` always starts with that path marked
+primary, followed by any additional roots of the group whose primary matches
+the row, in group order. Secondary-folder rows keep their own identity and
+single root. Group lookup failure falls back to single roots; unavailable or
+failed project lookup returns `[]`, with a host diagnostic. A result from a
+replaced or stopped Host is discarded. Remote identities remain opaque
+`remote-project:` paths; no Host keys or credentials are returned.
+
+This read-only metadata needs no permission and is also available through the
+panel bridge channel `projects.list`. It never creates, opens, switches, or
+grants access to a project. Filesystem and session permissions are unchanged.
+
+`workspace.get` uses the same trusted tool-session project as workspace-rooted
+filesystem calls (ADR 0266). A background session therefore receives its own
+`path`, `name`, `projectId`, group `roots`, and remote metadata even when another
+project is visible or no project is selected. Tool arguments do not select a
+workspace or impersonate a session. Panel calls and untracked sessions retain
+the visible-workspace fallback; `workspace:changed` continues to describe that
+visible workspace, so a background tool's pull can intentionally differ from
+the foreground event.
+
+Group metadata is resolved from the host-owned group snapshot for the selected
+path. An older metadata provider that answers for a different path is discarded
+in favor of the session's `{ path, name }`, without copying another group's
+roots or remote identity. The existing return shape, SDK method, permissions,
+and storage schema do not change. Absolute `openDefault`, `openInBrowser`, and
+`reveal` requests use the same invoking project's registered roots.
 
 `fs.readPreview` classifies one existing readable file for in-app display. It
 uses the same `fs.read` checks as `fs.readText`, rejects directories, and
 returns `text` (capped at 512 KiB), `image` (capped at 5 MiB, as a data URL),
 `binary`, or `tooLarge`. The plugin never receives an absolute path.
+
+For an SSH project, `workspace.get` preserves the opaque `remote-project:`
+identity and adds `remote: { path, readOnly: true }`; `remote.path` is a display
+path, never a local filesystem root. `fs.list` and `fs.readPreview` route these
+roots through the paired owner Host's optional `workspacePluginFiles`
+capability. The Host enforces canonical containment, protected paths, credential
+denials and the plugin's declared scope. The root must be below the Host's folder
+picker browse root or exactly match a canonical project root registered on that
+Host. Other filesystem channels remain local and reject opaque remote roots. A
+missing capability reports `HOST_VERSION_MISMATCH`; no request falls back to the
+Desktop filesystem.
+
+The optional `workspacePath` must equal the workspace identity captured by the
+view. A mismatch reports `WORKSPACE_CHANGED`. All reads capture their root
+before awaiting, including calls without this option, and discard results after
+a root change, remote binding replacement or plugin unload. See
+[the decision](/adr/plugin-remote-workspace-reads).
 
 `fs.openDefault` opens one existing file with the operating system's default
 associated application. It uses the same `fs.read` root, symlink, protected-path,
@@ -444,18 +506,22 @@ pi.agent.registerTool(tool: {
  description: string
  risk: "low"|"medium"|"high"
  schema: unknown
+ planSafeActions?: readonly string[]
  execute: (args: unknown, ctx: ToolExecContext) => Promise<unknown>
 }): Promise<void>
 
 pi.agent.unregisterTool(name: string): Promise<void>
 ```
 
-Registered plugin agent tools are Agent-only contributions. During Plan the
-host filters them out of the model tool list and rejects direct execution with
-`PLUGIN_DISABLED_IN_PLAN`, including when the manifest risk is `low`, the user
-has an `allow-session` grant, or the session permission mode is `auto`. A
-successful plan approval makes the same registered tools eligible again under
-the selected Agent permission policy.
+Plugin tools are hidden and denied in Plan/Goal by default. A runtime tool
+registration may opt in with non-empty `planSafeActions`; only an `args.action`
+in that list may execute in those modes. The list is checked against the schema's
+action enum when present. Keep the manifest descriptor and runtime registration
+in sync: the runtime registration drives the executable tool. Risk `low`, session
+grants, and `auto` do not substitute for the declaration. Host policy and the
+plugin runner both check it; a disallowed runner action is `PERMISSION_DENIED`.
+The declaration is an author assertion of read-only behavior, not a side-effect
+sandbox (ADR 0211).
 
 ```ts
 type ToolExecContext = {
@@ -482,6 +548,9 @@ type PluginModelInfo = {
   providerName: string
   modelId: string
   label: string
+  alias?: string
+  availableForSubagents?: boolean
+  isDefault?: boolean
   supportsReasoning: boolean
   thinkingLevels: ThinkingLevel[]
 }
@@ -677,14 +746,27 @@ update makes the result `{ updated: false }`. Both methods require
 `session.autoTitle`, which is high risk because the first-turn text can be sent
 to a model by a plugin holding `agent.complete`.
 
-### plugin-owned sessions (P0/P1; requires the matching permission)
+### plugin-owned and host-wide sessions (requires the matching permission)
 
-Plugins may import and manage only sessions whose origin belongs to that same
-plugin. The source must be declared in `manifest.contributes.sessionSources`;
-the host supplies the localized source label and generates the durable session
-and message ids. Imported sessions never bind a workspace, provider, or model;
-they bind a project only when the caller supplies an existing `projectId`. The
-original import values remain available in `get().history`.
+Plugins address sessions through two grants that share one set of verbs:
+
+- `session.read.own` / `session.update.own` / `session.delete.own` — the
+  ADR 0200 boundary: only sessions whose origin belongs to the calling plugin.
+- `session.read.all` / `session.update.all` / `session.delete.all` — every live
+  session, including the conversations the user created in this app (ADR 0340).
+
+`.all` is a separate grant, never a widening of `.own`, so an existing install
+keeps exactly the reach it was reviewed for. A manifest may declare both, and
+`.all` wins. The Electron broker resolves the scope from the granted
+permissions; a plugin never passes one, and a `scope` field in the payload is
+dropped. Every call is audited with the scope that authorised it.
+
+Import additionally requires the source to be declared in
+`manifest.contributes.sessionSources`; the host supplies the localized source
+label and generates the durable session and message ids. Imported sessions never
+bind a workspace, provider, or model; they bind a project only when the caller
+supplies an existing `projectId`. The original import values remain available in
+`get().history`.
 
 ```ts
 type PluginSessionSourceContrib = {
@@ -722,6 +804,7 @@ pi.session.importBatch(input: {
   mode?: "skip" | "fail"
 }): Promise<PluginSessionBatchImportResult>
 
+// session.read.own or session.read.all
 pi.session.list(input?: {
   limit?: number; cursor?: string; source?: string; updatedAfter?: string
 }): Promise<PluginSessionListResult>
@@ -730,37 +813,93 @@ pi.session.listMessages(input: {
   sessionId: string; limit?: number; cursor?: string
   order?: "asc" | "desc"; contentLimit?: number
 }): Promise<PluginSessionMessageListResult>
+
+// session.update.own or session.update.all
 pi.session.rename(input: { sessionId: string; title: string }): Promise<{ updated: boolean }>
+
+// session.delete.own or session.delete.all
 pi.session.delete(input: {
   sessionId: string; mode?: "trash" | "purge"
 }): Promise<{ deleted: boolean }>
+
+// Message-level writes exist only under `.all`: rewriting a transcript is never
+// an imported-session operation.
+type PluginSessionMessageInput = {
+  id?: string // host-generated when omitted; a supplied id makes a retry a no-op
+  role: "user" | "assistant" | "tool"
+  content: string
+  createdAt: string // monotonic within one call, newest last
+  modelId?: string
+  providerId?: string
+  toolName?: string
+  toolCallId?: string
+  toolStatus?: "success" | "error"
+  toolArgs?: unknown
+  toolResult?: unknown
+}
+
+// session.update.all
+pi.session.appendMessage(input: {
+  sessionId: string; message: PluginSessionMessageInput
+}): Promise<{ messageId: string }>
+pi.session.replaceMessages(input: {
+  sessionId: string; messages: PluginSessionMessageInput[] // at most 2,000
+}): Promise<{ messageCount: number }>
+
+// session.delete.all
+pi.session.deleteMessage(input: {
+  sessionId: string; messageId: string
+}): Promise<{ deleted: boolean; deletedCount: number }>
+pi.session.truncateFrom(input: {
+  sessionId: string; fromMessageId?: string; keepCount?: number
+}): Promise<{ keptCount: number; discardedCount: number }>
 ```
 
 Import is idempotent on `(pluginId, source, externalId)`. `skip` batches
 continue per item; `fail` batches validate and commit atomically. `trash` hides
 the session while retaining its transcript and origin; `purge` removes both and
-allows a later re-import. Reads, rename, and delete are ownership-scoped, and
-undeclared sources fail with `PERMISSION_DENIED`.
+allows a later re-import. Reads, rename, and delete are scope-checked, and
+undeclared sources fail with `PERMISSION_DENIED`. A session outside the scope is
+reported as `NOT_FOUND`, never as a permission error, so a plugin cannot probe
+for the existence of a row it may not see.
+
+Non-imported sessions report their real shape instead of an import projection:
+`originKind` is `"created"`, `source` is `"desktop"`, `externalId` is `null`,
+`modelId` / `providerId` / `bound.model` come from the session row, and every
+message carries `origin: "desktop"`. Imported sessions keep
+`originKind: "imported"`, their declared source id, and `origin: "external"`.
 
 When a session has an explicit project binding, `projectId` and
 `bound.workspace` report that binding, and `get().projectPath` resolves the
 bound project's current path. The original import `projectPath` remains in
 `get().history`.
 
-After a successful import, rename, or delete, Electron main emits one
-host-owned `sessionsChanged` event for the affected mutation. The renderer
-refreshes its authoritative session list and the Projects page refreshes its
-durable project index from that list. Plugins do not emit or coordinate this
-event themselves. A project created through this API is not automatically
-opened as a sidebar tab, preserving the existing closed-project behavior.
+After a successful import, rename, delete, or message-level write, Electron main
+emits one host-owned `sessionsChanged` event for the affected mutation, naming
+the `sessionId` it touched so the shell can repaint an open transcript. The
+renderer refreshes its authoritative session list and the Projects page
+refreshes its durable project index from that list. Plugins do not emit or
+coordinate this event themselves. A project created through this API is not
+automatically opened as a sidebar tab, preserving the existing closed-project
+behavior.
+
+`rename` claims the manual title source, so an installed `session.autoTitle`
+plugin cannot replace a title this plugin — and therefore the user — chose.
 
 The host enforces a 2,000-message/session, 100-session/batch, 512 KiB/message,
 256 KiB/tool-value, 32 MiB/payload, and JSON-depth-8 limit. Import is limited
 to 10 calls/minute plus 5 batch calls/minute per plugin; delete is limited to
-20 calls/minute. Tool `__pi*` and `piDesktop.*` object keys are removed before
-storage. P2/P3 operations (session create, message mutation, arbitrary re-binding,
-provider/model binding, batch delete, and tags) are intentionally not part of
-this contract.
+20 calls/minute; the four message-level writes share a 60 calls/minute budget.
+Tool `__pi*` and `piDesktop.*` object keys are removed before storage.
+
+Every message-level rewrite is refused with `TURN_RUNNING` while a turn owns the
+session, because the running agent is writing the same transcript; retry after
+the turn settles. `appendMessage` is the documented exception — appending is how
+a turn's own rows land. `deleteMessage` on a user prompt removes that prompt and
+its replies, and a missing target is a success with `deleted: false`, so a
+retried delete is safe. Remaining P3 operations (session create, arbitrary
+re-binding, provider/model binding, batch delete, and tags) are intentionally
+not part of this contract.
 
 ### usage (requires `usage.read`)
 
@@ -853,9 +992,11 @@ the target session and history.
 A named `spawn` `modelKey` is an AI-driven delegation choice and needs that
 model's own `ModelBinding.availableForSubagents` opt-in; the host answers
 `PERMISSION_DENIED` for a model the user has not enabled, before creating a
-worker. Omitting `modelKey` still inherits — the first enabled model, else the
-default — and naming the default model's own key is that same inheritance
-rather than a selection (ADR subagent-model-opt-in).
+worker. Explicitly naming the default model's own key is treated as inheritance
+rather than a selection. Omitting `modelKey` selects the first ready model
+enabled for AI delegation; if none exists, the call fails with
+`MODEL_NOT_CONFIGURED` instead of falling back to the default model
+(ADR subagent-model-opt-in).
 
 `list` returns at most 100 non-deleted Agent sessions that can receive a
 message, including sessions created independently of Session Orchestrator. Each
@@ -1089,12 +1230,12 @@ checks; these modes grant no additional network access. Policy refusals are
 audited without response bodies or headers.
 
 Before using the option on a potentially older host, query
-`pi.net.getCapabilities(): Promise<{ fetchRedirectModes: string[] }>` and require
+`pi.net.getCapabilities(): Promise<{ fetchRedirectModes: ("follow" | "error" | "manual")[] }>` and require
 the desired mode. This read-only query needs no network permission and performs
 no network I/O. A missing method, rejected query, or absent mode means
 unsupported: do not send the request. Older hosts may silently ignore unknown
 fetch options, so passing `redirect` alone is **not** capability detection.
-This API is unreleased; released 0.17.0 and older do not advertise it.
+Current source implements this query; older hosts may not advertise it.
 No same-origin-only mode is introduced by this change.
 
 `fetch` answers with the upstream response unchanged — `status`, `headers`, and
@@ -1313,11 +1454,37 @@ type PluginApiError = {
  | "RATE_LIMITED" // a rolling window is exhausted (e.g. bus publishes)
  | "CONFIRMATION_REQUIRED" // a dangerous desktop operation without confirm: true
  | "INTERNAL"
+ | string // see below
  message: string
 }
 ```
 
-All API failures throw an error carrying a `code`.
+All API failures throw an error carrying a `code`. The list above is the common
+set, not a closed enum: the host forwards whatever code the failing layer set,
+and an error without one reaches the plugin as `PLUGIN_API_FAILED`. Other codes
+the desktop host currently throws include `INVALID_PARAMS` (input validation of
+the session, usage, project, and desktop APIs, alongside `INVALID_ARGUMENT`
+elsewhere), `UNAVAILABLE` (a host service such as the browser is missing),
+`PLUGIN_UNLOADED` (the plugin was unloaded or reloaded while the call ran),
+`CONFLICT` (a speech protocol already in use), `PROVIDER_ERROR` (a speech
+adapter returned empty output), `WORKSPACE_CHANGED`, `OPEN_FAILED`,
+`REVEAL_FAILED`, and `CONNECT_FAILED`. Branch on the codes you handle and treat
+the rest as a generic failure.
+
+Additional host-originated errors:
+
+| Code | Trigger and meaning |
+|---|---|
+| `PLUGIN_INVALID_RESULT` | `onComposerTransform` returned a non-string, or the host received a string whose JavaScript `length` exceeds 100,000 UTF-16 code units. Return a string within that bound. |
+| `PLUGIN_TOOL_ABORTED` | A plugin tool invocation is cancelled, finished, unknown/expired, or no longer belongs to the calling plugin process. Pending and late host calls in that invocation are refused. An explicit Error abort reason may retain its own code. |
+| `SPEECH_PROTOCOL_UNSUPPORTED` | `runSpeechAdapter` found no registered adapter for the binding's protocol. An invalid adapter reply instead uses `INVALID_ARGUMENT`; empty text/audio uses `PROVIDER_ERROR`. The code is also documented in the [shared registry](../03-runtime/08-error-codes.md) and [speech specification](../03-runtime/20-speech.md). |
+
+Implementation evidence: `apps/desktop/electron/main/plugin-runtime.ts`
+(`MAX_COMPOSER_TRANSFORM_TEXT_LENGTH`, `runComposerTransform`,
+`runSpeechAdapter`, `sendToChild`), `plugin-tool-invocations.ts`
+(`run`, `assertActive`, `finish`) and `plugin-host-process.mjs`
+(`toolAbortedError`, `cancelInvocation`, `composer.transform`) in the same
+directory. The codes extend the open set above; no new SDK enum is introduced.
 
 ## 5. Events (host -> plugin)
 
@@ -1364,9 +1531,8 @@ Delivered today:
   in-flight tool of that turn has exited — late results can still arrive — so a
   plugin must serialise or otherwise scope its cleanup by `turnId`. The event
   also needs no new permission: it travels on the existing event channel, and
-  subscribing to an unknown event name does not error. No published host emits it
-  yet — 0.14.8 does not include it — so a plugin that depends on it must require
-  the release that actually ships it rather than assume 0.14.7 or 0.14.8.
+  subscribing to an unknown event name does not error. A plugin that depends on it must verify the host version it supports;
+  historical hosts may not emit this additive event.
 
 - `session:activated` — payload is the `PluginActiveSession` object or `null`,
   sent whenever that snapshot changes: the user selected another session (or
@@ -1375,6 +1541,10 @@ Delivered today:
   snapshot in the payload is the answer, so a missed delivery is repaired by one
   `pi.session.getActive()` call. Needs no permission, and the selected session's
   turn id is the same identity `session:turnEnded` reports.
+
+- `net:websocket:open` / `net:websocket:message` / `net:websocket:close` /
+  `net:websocket:error` — sent only to the plugin that owns the socket; see
+  `net.websocket` under §3 `net`.
 
 A throwing handler is logged and does not affect other listeners or the plugin.
 
@@ -1395,6 +1565,20 @@ list, the permission gate, and the preload are identical, so one HTML entry
 works in either placement. The only differences are chrome and the view
 `location` below: a docked view has no window-control capsule and no drag band,
 and its `--pi-plugin-titlebar-height` is `0px` rather than `46px`.
+
+A docked view also follows the host's type size. Its page cannot inherit the
+renderer's `--font-scale`, because it is not the app document, so the host
+repeats the Appearance font size (D343 / ADR 0180) multiplied by the window zoom
+as that page's zoom factor and re-applies it to every fresh document. At that
+factor one CSS pixel inside the plugin paints at the same DIP size as one CSS
+pixel in the app, so author-sized text and controls keep their proportion with
+the panel around them at every setting — no reload, and no host design tokens for
+the plugin to adopt. Two consequences a view author can observe: page pixels are
+the scaled page's own pixels, so a rect handed back to a host API that positions
+native content (`browser.setBounds` in `pi.browser`) is converted by the host,
+and a page that pins layout to fixed window metrics must scale them itself.
+Detached `ui.panel` windows and floating widgets keep their own base size: they
+are their own windows, not a surface composited inside the app.
 
 Detached panel pages using the current chrome contract declare
 `<meta name="pi-plugin-chrome" content="v2">` and use the published variable
@@ -1438,31 +1622,36 @@ is not discarded; re-opening the same location does nothing. The payload is
 opaque to the host — each plugin decides what its `location` means — and it
 needs no permission and adds no SDK method.
 
-The host-owned preload forwards only fixed channels to the plugin runtime:
+The host validates the sender and forwards calls to the plugin runtime,
+which handles these built-in channels before falling back to `onPanelInvoke`:
 
 | Channel | Required permission |
 |---|---|
 | `ui.showToast`, `ui.closePanel` | None beyond the loaded panel |
 | `ui.notify` | `notify` |
 | `ui.getNotificationPermission`, `ui.requestNotificationPermission`, `ui.showNativeNotification` | `notify` |
-| `plugin.getSettings`, `workspace.get`, `app.getAppearance` | None |
-| `app.setTheme`, `themes.upsert`, `themes.remove`, `themes.list` | `ui.theme` |
+| `plugin.getSettings`, `workspace.get`, `projects.list`, `app.getAppearance` | None |
+| `app.setTheme`, `themes.upsert`, `themes.remove`, `themes.list`, `themes.setVariables` | `ui.theme` |
 | `models.list` | `models.list` |
-| `fs.readText`, `fs.stat`, `fs.readRange`, `fs.readPreview`, `fs.openDefault`, `fs.openInBrowser`, `fs.reveal`, `fs.glob`, `fs.list` | `fs.read` |
+| `fs.readText`, `fs.stat`, `fs.readRange`, `fs.readPreview`, `fs.openDefault`, `fs.openInBrowser`, `fs.reveal`, `fs.glob`, `fs.list`, `fs.requestDirectory`, `fs.registerDropped` | `fs.read` |
 | `fs.writeText` | `fs.write` |
 | `clipboard.readText`, `clipboard.getHistory` | `clipboard.read` |
 | `clipboard.writeText` | `clipboard.write` |
 | `shell.openExternal` | `shell.openExternal` |
 | `net.fetch` | `net.fetch` |
+| `net.getCapabilities` | None |
 | `session.getActive` | None |
 | `ui.revealView` | `ui.view` |
 
 `plugin.setSettings`, `fs.remove`, and arbitrary Electron IPC are not exposed. A
 channel the host does not implement itself is forwarded to the plugin's
 `onPanelInvoke(channel, payload)`, so a plugin may define its own panel ↔ main
-channels; a plugin that exports no `onPanelInvoke` gets `UNSUPPORTED` from its own
-process. The host-supported channels include `skill.list`, `skill.read`,
-`skill.create`, `skill.update`, `skill.remove`, and `skill.setEnabled`.
+channels. Electron main brokers every custom channel call before the handler
+executes in the plugin's child process; the panel never calls the child directly.
+A plugin that exports no `onPanelInvoke` gets `UNSUPPORTED` from its own
+process. The `skill.list` / `read` / `create` / `update` / `remove` / `setEnabled`
+operations used by the bundled skill manager are plugin-owned `onPanelInvoke`
+channels, not general host bridge APIs.
 
 ### Panel events (host -> panel)
 
@@ -1525,10 +1714,12 @@ Log fields:
 
 ## 8. Versioning strategy
 
-- The API surface is managed by `apiVersion`
-- MVP `apiVersion = 1`
-- A deprecated API is retained for at least one major version cycle
-
+The manifest authoring contract uses `schemaVersion: 1`; the current injected
+API has no `apiVersion` property or negotiation call. Prefer additive APIs,
+feature-detect optional methods, query `net.getCapabilities` for redirect modes,
+and handle `UNSUPPORTED` on older hosts. Public SDK types and runtime dispatch
+are the current callable surface; planned names do not become callable by being
+listed in a document.
 
 ## 9. Implementation status
 
@@ -1562,9 +1753,10 @@ Native plugin notifications use the Electron main-process notification surface;
 they do not create durable rows in the task notification inbox and do not
 activate a session on click.
 
-Declarative contributions have no `pi.*` counterpart on purpose: skills, themes,
-and MCP servers are read from the manifest by the host, so a plugin cannot add
-one at runtime.
+Skills and MCP servers are manifest contributions with no general runtime
+registration API. Themes also support the permission-gated `pi.themes` runtime
+registry, and providers remain manifest-owned. Composer, session import/read/
+update/delete, usage, project, and desktop APIs follow their separate grants.
 
 All high-risk entry points assert declared+granted permissions and emit audit log lines.
 Plugin panels no longer receive the full `pi` object; they use `window.pluginBridge.invoke`.

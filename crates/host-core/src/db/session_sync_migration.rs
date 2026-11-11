@@ -84,7 +84,7 @@ mod tests {
                 |row| row.get(0),
             )
             .unwrap();
-        assert_eq!(title_source, "manual");
+        assert_eq!(title_source, "legacy");
         let changes = crate::sessions::list_session_changes(&db, &session.id, 0, 50, None).unwrap();
         assert_eq!(changes.changes.len(), 1);
         let indexes: i64 = db

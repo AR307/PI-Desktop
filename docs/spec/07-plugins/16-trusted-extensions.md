@@ -206,7 +206,7 @@ atomically and must not be inside the selected source.
 This is an explicit local import, not a pi CLI package manager. It never
 automatically imports `~/.pi`, does not read the CLI's installed package
 registry, and does not run npm lifecycle scripts. The Skills page separately
-discovers global npm skill candidates as described below. When dependencies
+discovers global npm skill candidates. When dependencies
 are declared, the bounded installer accepts only registry version specs and
 registry-resolved npm lockfiles, rejects unsafe package locations and nested
 dependency specs, disables git resolution, and isolates npm's config/cache from
@@ -250,7 +250,7 @@ never in Electron main, the renderer, or a plugin host process.
   does not load the full coding-agent runtime as a fallback.
   `TRUSTED_EXTENSION_KERNEL_VERSION` remains the legacy marker exposed as
   `VERSION` by this shim. It describes the compatibility subset modeled on the
-  0.87.1 API and deliberately does not mirror the installed 1.0.0 package.
+  0.87.1 API and deliberately does not mirror the installed package release.
 
 ### 4.3 Runner per session
 
@@ -395,6 +395,10 @@ are detached before publication so later extension mutations cannot rewrite them
 SDK `exec` owns its process group/tree and terminates it on scope retirement or
 its explicit timeout;
 disposal waits for tracked process cleanup, with cleanup failures diagnosed.
+Output is decoded across chunk boundaries. `maxBuffer` (default 10 MiB) caps
+stdout and stderr combined in bytes; overflow terminates the command and returns
+`truncated: true` with a nonzero `code`. A command that cannot be spawned
+resolves with `code: 1` and the spawn error in `stderr` instead of rejecting.
 Processes deliberately escaping the group and direct Node API spawns are outside
 this ownership contract.
 
@@ -522,7 +526,11 @@ The Plugins page shows agent extensions on the owning plugin's row:
 | v1.1 | Modules become `contributes.agentExtensions` with the `agent.extension` grant; import of pi CLI extensions as development plugins; the standalone registry and settings tab are removed | Shipped (D388) |
 | v1.1 amendment | Plugin-owned custom agents via `registerAgent`, provider compatibility alias, redacted model registry, idle-only session binding and restore through `extension-agent:` ids | Implemented (D426 / ADR 0258) |
 | v2 | Custom session entries (`sendMessage`, `appendEntry`) with a schema bump and a generic renderer, `sessionManager` read shim, `switchSession`, editor read and write, autocomplete providers, `registerShortcut`, markdown transformers | Planned, needs a decision on entry persistence and compaction |
-| v3 | `pi` package manifests and installation, read-only hints from the pi CLI's `settings.json`, unified skill and prompt discovery, remote-control routing for prompts, marketplace listing | Not scheduled |
+| v3 | Read-only hints from the pi CLI's `settings.json`, unified skill and prompt discovery, remote-control routing for prompts, marketplace listing | Not scheduled |
+
+Explicit local package import, including `pi.extensions` / `pi.skills` and bounded
+registry-only dependency preparation, is already implemented in §3.2. It is not
+a promise of a general pi package manager or automatic settings discovery.
 
 v1 delivery order: bundling spike (E2E-245), shared protocol types, then the
 runtime, main, and renderer tracks in parallel.
@@ -549,4 +557,4 @@ runtime, main, and renderer tracks in parallel.
 |---|---|
 | Should v2 custom entries persist to host-core and take part in compaction? | Persist; excluded from compaction summaries |
 | Should v3 read the pi CLI's `settings.json` enabled paths as discovery hints? | Read-only hints, never written |
-| Should extension tools be selectable per project like plugin tools? | Scope from §3.2 is the only gate |
+| Should extension tools be selectable per project like plugin tools? | The plugin activation scope in §2, item 4 is the only gate |

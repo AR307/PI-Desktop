@@ -335,6 +335,41 @@ describe("provider rate-limit retry", () => {
     });
   });
 
+  it.each([
+    '429: {"error":{"message":"You exceeded your current quota, please check your plan and billing details.","type":"insufficient_quota","code":"insufficient_quota"}}',
+    '429: {"type":"FreeUsageLimitError","message":"Free usage limit reached."}',
+  ])("does not retry explicit quota exhaustion on HTTP 429: %s", async (errorMessage) => {
+    let attempts = 0;
+    let retryableClaims = 0;
+    const claim = vi.fn((error: ClassifiedAgentError) => {
+      if (!error.retriable) return undefined;
+      retryableClaims += 1;
+      return retryableClaims === 1 ? 1 : undefined;
+    });
+    const sleep = vi.fn(async () => undefined);
+    const stream = createProviderRetryStream(
+      model,
+      context,
+      {},
+      () => {
+        attempts += 1;
+        return failedStream({ errorMessage });
+      },
+      { claim, headers: () => undefined, status: () => 429, sleep },
+    );
+
+    const events: string[] = [];
+    for await (const event of stream) events.push(event.type);
+
+    expect(attempts).toBe(1);
+    expect(claim).toHaveBeenCalledWith(
+      expect.objectContaining({ code: "PROVIDER_ERROR", retriable: false, message: errorMessage }),
+      "request",
+    );
+    expect(sleep).not.toHaveBeenCalled();
+    expect(events).toEqual(["error"]);
+  });
+
   it("prefers retry headers and bounds exponential fallback", () => {
     expect(providerRateLimitDelayMs(1, { "retry-after-ms": "1250" }, 0, 0)).toBe(1250);
     expect(providerRateLimitDelayMs(1, { "retry-after": "2" }, 0, 0)).toBe(2000);
@@ -435,6 +470,29 @@ describe("provider rate-limit retry", () => {
     expect(events).toEqual(["start", "done"]);
   });
 
+  it("does not replay a DashScope parameter rejection delivered over HTTP 200", async () => {
+    let retryClaims = 0;
+    const claim = vi.fn((error: ClassifiedAgentError) =>
+      error.retriable && retryClaims++ === 0 ? 1 : undefined);
+    const sleep = vi.fn(async () => undefined);
+    const createStream = vi.fn(() => failedStream({
+      errorMessage: "InvalidParameter: <400> InternalError.Algo.InvalidParameter: Repetitive tool calls detected in the conversation history.",
+    }));
+    const stream = createProviderRetryStream(model, context, {}, createStream, {
+      claim, sleep, headers: () => undefined, status: () => 200,
+    });
+
+    const events: string[] = [];
+    for await (const event of stream) events.push(event.type);
+
+    expect(createStream).toHaveBeenCalledTimes(1);
+    expect(sleep).not.toHaveBeenCalled();
+    expect(claim).toHaveBeenCalledWith(expect.objectContaining({
+      code: "PROVIDER_ERROR", retriable: false, details: { providerStatus: 400 },
+    }), "request");
+    expect(events).toEqual(["error"]);
+  });
+
   it("does not promote known non-retryable errors just because status is 429", async () => {
     const claim = vi.fn(() => undefined);
     const stream = createProviderRetryStream(
@@ -463,6 +521,28 @@ describe("provider rate-limit retry", () => {
 
     expect(claim).toHaveBeenCalledWith(
       expect.objectContaining({ code: "PROVIDER_UNAUTHORIZED", retriable: false }),
+      "request",
+    );
+    expect(events).toEqual(["error"]);
+  });
+
+  it("does not replay a Zhipu 1308 usage-limit 429 through the rate-limit budget", async () => {
+    const claim = vi.fn(() => undefined);
+    const sleep = vi.fn(async () => undefined);
+    const createStream = vi.fn(() => failedStream({
+      errorMessage: '429 {"error":{"code":"1308","message":"Usage limit reached for 5 hour."}}',
+    }));
+    const stream = createProviderRetryStream(model, context, {}, createStream, {
+      claim, sleep, headers: () => undefined, status: () => 429,
+    });
+
+    const events: string[] = [];
+    for await (const event of stream) events.push(event.type);
+
+    expect(createStream).toHaveBeenCalledTimes(1);
+    expect(sleep).not.toHaveBeenCalled();
+    expect(claim).toHaveBeenCalledWith(
+      expect.objectContaining({ code: "PROVIDER_ERROR", retriable: false }),
       "request",
     );
     expect(events).toEqual(["error"]);
@@ -1059,6 +1139,150 @@ describe("opaque bad-request repair", () => {
   });
 });
 
+const OPENAI_OUTPUT_CEILING =
+  "OpenAI API error (400): max_tokens is too large: 16384. This model supports at most 4096 completion tokens, whereas you provided 16384.";
+const ANTHROPIC_OUTPUT_CEILING =
+  'API Error: 400 {"type":"error","error":{"type":"invalid_request_error","message":"max_tokens: 65537 > 64000, which is the maximum allowed number of output tokens for claude-opus-4-5-20251101"}}';
+
+describe("explicit output-limit repair", () => {
+  async function repairPayload(
+    errorMessage: string,
+    payload: Record<string, unknown>,
+  ): Promise<{ attempts: number; repaired: unknown; claim: ReturnType<typeof vi.fn>; sleep: ReturnType<typeof vi.fn> }> {
+    let attempts = 0;
+    let repairOptions: { onPayload?: (payload: unknown) => Promise<unknown> } | undefined;
+    const claim = vi.fn(() => undefined);
+    const sleep = vi.fn(async () => undefined);
+    const stream = createProviderRetryStream(
+      model,
+      context,
+      {
+        onPayload: async (body: unknown) => ({
+          ...(body as Record<string, unknown>),
+          marked: true,
+        }),
+      } as any,
+      (options) => {
+        attempts += 1;
+        if (attempts === 1) return failedStream({ errorMessage });
+        repairOptions = options as typeof repairOptions;
+        return successfulStream();
+      },
+      {
+        claim,
+        headers: () => undefined,
+        status: () => undefined,
+        sleep,
+      },
+    );
+    for await (const _event of stream) {
+      // Drain so the repair hook is installed before we inspect it.
+    }
+    return {
+      attempts,
+      repaired: await repairOptions?.onPayload?.(payload),
+      claim,
+      sleep,
+    };
+  }
+
+  it("clamps an OpenAI completion ceiling instead of failing the turn", async () => {
+    const result = await repairPayload(OPENAI_OUTPUT_CEILING, {
+      model: "ft:gpt-4o",
+      max_tokens: 16384,
+      max_completion_tokens: 16384,
+      temperature: 0,
+    });
+
+    expect(result.attempts).toBe(2);
+    expect(result.claim).not.toHaveBeenCalled();
+    expect(result.sleep).not.toHaveBeenCalled();
+    expect(result.repaired).toEqual({
+      marked: true,
+      model: "ft:gpt-4o",
+      max_tokens: 4096,
+      max_completion_tokens: 4096,
+      temperature: 0,
+    });
+  });
+
+  it("clamps an Anthropic output ceiling without dropping max_tokens", async () => {
+    const result = await repairPayload(ANTHROPIC_OUTPUT_CEILING, {
+      model: "claude-opus-4-5-20251101",
+      max_tokens: 65537,
+      messages: [{ role: "user", content: "hi" }],
+    });
+
+    expect(result.attempts).toBe(2);
+    expect(result.claim).not.toHaveBeenCalled();
+    expect(result.sleep).not.toHaveBeenCalled();
+    expect(result.repaired).toEqual({
+      marked: true,
+      model: "claude-opus-4-5-20251101",
+      max_tokens: 64000,
+      messages: [{ role: "user", content: "hi" }],
+    });
+  });
+
+  it("leaves credit and context-overflow 400s terminal", async () => {
+    const credit = await repairPayload(
+      "400 This request requires more credits, or fewer max_tokens. You requested up to 65536 tokens, but can only afford 1000.",
+      { max_tokens: 65536 },
+    );
+    const overflow = await repairPayload(
+      "400 prompt is too long: 213462 tokens > 200000 maximum",
+      { max_tokens: 64000 },
+    );
+
+    expect(credit.attempts).toBe(1);
+    expect(overflow.attempts).toBe(1);
+    expect(credit.claim).toHaveBeenCalledTimes(1);
+    expect(overflow.claim).toHaveBeenCalledTimes(1);
+  });
+
+  it("clamps a proxy expected-value ceiling without adding a missing field", async () => {
+    const result = await repairPayload(
+      '400 {"error":{"code":"InvalidParameter","message":"The parameter max_tokens specified in the request is not valid: integer above maximum value, expected a value <= 32768, but got 64000 instead."}}',
+      { max_tokens: 64000, stream: true },
+    );
+
+    expect(result.attempts).toBe(2);
+    expect(result.repaired).toEqual({
+      marked: true,
+      max_tokens: 32768,
+      stream: true,
+    });
+  });
+
+  it("surfaces the original ceiling error when the clamped attempt fails the same way", async () => {
+    let attempts = 0;
+    const claim = vi.fn(() => undefined);
+    const stream = createProviderRetryStream(
+      model,
+      context,
+      {},
+      () => {
+        attempts += 1;
+        return failedStream({ errorMessage: OPENAI_OUTPUT_CEILING });
+      },
+      {
+        claim,
+        headers: () => undefined,
+        status: () => undefined,
+        sleep: async () => undefined,
+      },
+    );
+
+    const events: string[] = [];
+    for await (const event of stream) events.push(event.type);
+
+    expect(attempts).toBe(2);
+    expect(events).toEqual(["error"]);
+    expect((await stream.result()).errorMessage).toBe(OPENAI_OUTPUT_CEILING);
+    expect(claim).toHaveBeenCalledTimes(1);
+  });
+});
+
 describe("stream idle watchdog", () => {
   it("reads the idle budget from the environment with a safe default", () => {
     const previous = process.env.PI_DESKTOP_STREAM_IDLE_TIMEOUT_MS;
@@ -1080,12 +1304,10 @@ describe("stream idle watchdog", () => {
     }
   });
 
-  it("clamps a positive override up to the retry backoff floor", () => {
+  it("clamps a positive override up to the supported idle minimum", () => {
     const previous = process.env.PI_DESKTOP_STREAM_IDLE_TIMEOUT_MS;
     try {
-      // The watchdog wraps the retry adapter, so a budget under the largest
-      // retry delay would end a turn that is backing off exactly as the
-      // provider asked it to. `0` still disables it outright.
+      // Keep the existing positive minimum; `0` still disables the watchdog.
       process.env.PI_DESKTOP_STREAM_IDLE_TIMEOUT_MS = "1000";
       expect(streamIdleTimeoutMs()).toBe(STREAM_IDLE_TIMEOUT_FLOOR_MS);
       expect(STREAM_IDLE_TIMEOUT_FLOOR_MS).toBeGreaterThan(1_000);

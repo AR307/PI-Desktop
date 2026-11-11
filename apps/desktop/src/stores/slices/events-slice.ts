@@ -42,6 +42,7 @@ import {
 } from "../../lib/plan-mode-state";
 import { formatToolValue } from "../../lib/tool-display";
 import type { AppState } from "../app-state";
+import { modeAfterPlanningUpdate, visiblePlanningState } from "../helpers/planning-projection";
 import type { SessionRuntime } from "../runtime/session-runtime";
 import type { StoreAccess } from "./types";
 
@@ -171,9 +172,11 @@ export function createEventsSlice({
         const pendingPlans = activeProposal
           ? { ...state.pendingPlans, [event.sessionId]: activeProposal }
           : withoutRecordKey(state.pendingPlans, event.sessionId);
-        const nextMode = sessionModeForPlanningState(
-          event.state,
-          event.kind ?? checkpoint?.kind,
+        const currentMode = state.sessions.find(
+          (session) => session.id === event.sessionId,
+        )?.mode;
+        const nextMode = modeAfterPlanningUpdate(currentMode, event.state, () =>
+          sessionModeForPlanningState(event.state, event.kind ?? checkpoint?.kind),
         );
         const executionActive = isActivePlanExecution(checkpoint);
         const planExecutionWasActive = isActivePlanExecution(previousCheckpoint);
@@ -181,7 +184,11 @@ export function createEventsSlice({
         return {
           planningStates: {
             ...state.planningStates,
-            [event.sessionId]: event.state,
+            [event.sessionId]: visiblePlanningState(
+              currentMode,
+              event.state,
+              Boolean(activeProposal),
+            ),
           },
           planCheckpoints: checkpoint
             ? { ...state.planCheckpoints, [event.sessionId]: checkpoint }
@@ -260,12 +267,13 @@ export function createEventsSlice({
         const sessionId = envelope.sessionId;
         const reconcile = (messages: UiMessage[]) =>
           reconcilePersistedUserMessage(messages, event.optimisticMessageId, event.message);
+        const state = get();
+        const current = runtime.sessionTranscriptCache.get(sessionId) ??
+          state.retainedTranscripts[sessionId] ??
+          (state.activeSessionId === sessionId ? state.messages : undefined);
+        if (!current) return;
         runtime.liveSessionTranscripts.add(sessionId);
-        runtime.cacheSessionTranscript(sessionId, reconcile(
-          runtime.sessionTranscriptCache.get(sessionId) ??
-          get().retainedTranscripts[sessionId] ??
-          (get().activeSessionId === sessionId ? get().messages : []),
-        ));
+        runtime.cacheSessionTranscript(sessionId, reconcile(current));
         set((state) => ({
           ...(state.activeSessionId === sessionId ? { messages: reconcile(state.messages) } : {}),
           retainedTranscripts: state.retainedTranscripts[sessionId]

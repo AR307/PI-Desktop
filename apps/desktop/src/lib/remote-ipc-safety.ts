@@ -4,10 +4,13 @@ import i18n from "i18next";
 const localOnly = new Set<string>([
   IPC.invoke.sessionConfigure, IPC.invoke.sessionFork, IPC.invoke.sessionMoveProject,
   IPC.invoke.sessionReplaceMessages, IPC.invoke.sessionSaveRevision,
+  IPC.invoke.sessionDeleteMessage, IPC.invoke.sessionRetractPendingPrompt,
   IPC.invoke.sessionListRevisions, IPC.invoke.sessionActivateRevision,
   IPC.invoke.sessionGetScratchPath, IPC.invoke.sessionOpenScratchPath,
   IPC.invoke.agentSteer, IPC.invoke.agentQueuePush, IPC.invoke.agentQueueList,
   IPC.invoke.agentStopSubagents, IPC.invoke.workspaceReviewRollback,
+  IPC.invoke.workspaceReviewTurns, IPC.invoke.workspaceReviewChanges, IPC.invoke.workspaceReviewContext,
+  IPC.invoke.workspaceReviewOpenFile, IPC.invoke.workspaceReviewRollbackFile,
   IPC.invoke.extensionsCommandRun, IPC.invoke.browserNavigate,
   IPC.invoke.fsResolveRef,
 ]);

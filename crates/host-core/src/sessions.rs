@@ -12,11 +12,15 @@ use crate::transcripts::{self, CompactionRecord, MessageRecord, RevisionRecord};
 
 mod delegation_updates;
 mod fork_files;
+mod history_mutations;
+pub use history_mutations::{
+    activate_message_revision_canonical, delete_message, retract_pending_prompt, running_turn,
+};
 mod model_system;
 mod sync;
 mod usage;
 pub use sync::{list_session_changes, session_sync_revision};
-pub use usage::record_usage;
+pub use usage::{record_usage, session_usage_cost};
 
 pub const MODES: [&str; 3] = ["plan", "goal", "agent"];
 
@@ -38,26 +42,44 @@ pub struct AutoTitleContext {
     pub model_key: Option<String>,
 }
 
-/// Compatibility normalization for v7 callers and imported records. The
-/// persisted operating profile is now always `plan`, `goal` or `agent`.
+/// Compatibility normalization for v7 callers and imported records. `chat`
+/// is the old name of `plan`; any valid mode id (builtin or user-defined,
+/// ADR mode-definitions) is kept, and anything else reads as `agent`.
 pub fn normalize_mode(mode: Option<&str>) -> String {
     match mode {
-        Some("plan") | Some("chat") => "plan".into(),
-        Some("goal") => "goal".into(),
-        Some("agent") => "agent".into(),
+        Some("chat") => "plan".into(),
+        Some(mode) if is_valid_mode(mode) => mode.into(),
         _ => "agent".into(),
     }
 }
 
+/// Builtin-only normalization for surfaces that never carry a custom mode
+/// (scheduled tasks): unknown ids read as `agent`.
+pub fn normalize_builtin_mode(mode: Option<&str>) -> String {
+    match mode {
+        Some("plan") | Some("chat") => "plan".into(),
+        Some("goal") => "goal".into(),
+        _ => "agent".into(),
+    }
+}
+
+/// Any id a session may persist: a builtin or a user-defined mode.
 pub fn is_valid_mode(mode: &str) -> bool {
+    crate::mode_runs::is_mode_id(mode)
+}
+
+pub fn is_builtin_mode(mode: &str) -> bool {
     MODES.contains(&mode)
 }
 
 /// Plan and Goal negotiate a contract before executing (D198), so they share one
-/// tool allowlist and one hard deny. Agent is the only executing mode.
+/// tool allowlist and one hard deny. Agent is the only executing mode. This
+/// names the builtin modes only; authorization uses `tool_policy`.
 pub fn is_contract_mode(mode: &str) -> bool {
     matches!(mode, "plan" | "goal")
 }
+
+pub use crate::mode_runs::{tool_policy, ToolPolicy};
 
 /// Values accepted by the persisted per-session thinking selector.  Keep this
 /// list in the host boundary so old clients cannot write arbitrary provider
@@ -135,6 +157,10 @@ pub struct SessionSummary {
     pub thinking_level: String,
     #[serde(default = "default_permission_mode")]
     pub permission_mode: String,
+    /// The `/fast` switch for this session's main turns (ADR 0334). Requests
+    /// use the priority tier only when the model binding also allows it.
+    #[serde(default)]
+    pub fast_mode: bool,
     pub updated_at: String,
     pub created_at: String,
     /// True when this session is the transcript owned by a scheduled-task run.
@@ -212,6 +238,9 @@ pub struct UiMessage {
     /// Validated Skill tokens in `command`, with UTF-16 offsets for the renderer.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub skill_mentions: Option<Vec<SkillMention>>,
+    /// Validated `@agent` tokens in `command`, with UTF-16 offsets for the renderer.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub agent_mentions: Option<Vec<AgentMention>>,
     /// Host-authenticated agent-to-agent origin, never a human authorization.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub session_message: Option<Value>,
@@ -234,6 +263,11 @@ pub struct UiMessage {
     pub model_id: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub provider_id: Option<String>,
+    /// Concrete model the provider reports serving this turn when it differs
+    /// from `model_id` (virtual or fallback models). Stored in record meta; no
+    /// SQL migration, and older builds ignore it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub response_model_id: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub usage: Option<MessageUsage>,
     /// Elapsed model streaming time for the response throughput statistic.
@@ -295,6 +329,11 @@ pub struct UiMessage {
     /// Internal model-context state, preserved outside visible message text.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub model_system: Option<Value>,
+    /// Opaque provider replay data (thinking/text block boundaries and
+    /// signatures) for an assistant row. Stored in record meta; no SQL
+    /// migration, and older builds ignore it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub provider_replay: Option<Value>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -303,6 +342,14 @@ pub struct SkillMention {
     pub start: usize,
     pub end: usize,
     pub id: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentMention {
+    pub start: usize,
+    pub end: usize,
+    pub name: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -375,9 +422,8 @@ pub struct SearchHit {
 /// keys the renderer writes — `chat.untitledTask` and `nav.newChat` — have
 /// their own label per locale, and a non-ASCII uppercase letter (a future
 /// "Ñö..." entry) would slip past ASCII-case-insensitive matching (#1755).
-/// Keep this in sync with the migration list in
-/// `db/session_title_source_migration.rs` and `LEGACY_DEFAULT_TITLES` in the
-/// renderer.
+/// Keep this in sync with `LEGACY_DEFAULT_TITLES` in
+/// `apps/desktop/src/lib/session-title-utils.ts`.
 const PLACEHOLDER_TITLES: [&str; 19] = [
     "",
     "new task",
@@ -414,11 +460,17 @@ pub(crate) fn ui_to_record(message: &UiMessage) -> (MessageRecord, Option<String
     if let Some(system) = &message.model_system {
         meta_obj.insert("modelSystem".into(), system.clone());
     }
+    if let Some(replay) = &message.provider_replay {
+        meta_obj.insert("providerReplay".into(), replay.clone());
+    }
     if let Some(command) = &message.command {
         meta_obj.insert("command".into(), json!(command));
     }
     if let Some(mentions) = &message.skill_mentions {
         meta_obj.insert("skillMentions".into(), json!(mentions));
+    }
+    if let Some(mentions) = &message.agent_mentions {
+        meta_obj.insert("agentMentions".into(), json!(mentions));
     }
     if let Some(origin) = &message.session_message {
         meta_obj.insert("sessionMessage".into(), origin.clone());
@@ -440,6 +492,9 @@ pub(crate) fn ui_to_record(message: &UiMessage) -> (MessageRecord, Option<String
     }
     if let Some(provider_id) = &message.provider_id {
         meta_obj.insert("providerId".into(), json!(provider_id));
+    }
+    if let Some(response_model_id) = &message.response_model_id {
+        meta_obj.insert("responseModelId".into(), json!(response_model_id));
     }
     if let Some(usage) = &message.usage {
         meta_obj.insert("usage".into(), json!(usage));
@@ -582,12 +637,16 @@ pub(crate) fn record_to_ui(record: MessageRecord) -> UiMessage {
     };
     let meta = record.meta.unwrap_or(Value::Null);
     let model_system = meta.get("modelSystem").cloned();
+    let provider_replay = meta.get("providerReplay").cloned();
     let command = meta
         .get("command")
         .and_then(Value::as_str)
         .map(str::to_string);
     let skill_mentions = meta
         .get("skillMentions")
+        .and_then(|value| serde_json::from_value(value.clone()).ok());
+    let agent_mentions: Option<Vec<AgentMention>> = meta
+        .get("agentMentions")
         .and_then(|value| serde_json::from_value(value.clone()).ok());
     let session_message = meta.get("sessionMessage").cloned();
     let voice_origin = meta.get("voiceOrigin").cloned();
@@ -644,6 +703,10 @@ pub(crate) fn record_to_ui(record: MessageRecord) -> UiMessage {
     let error = meta.get("error").cloned();
     let response_duration_ms = meta.get("responseDurationMs").and_then(|v| v.as_i64());
     let response_output_tokens = meta.get("responseOutputTokens").and_then(|v| v.as_i64());
+    let response_model_id = meta
+        .get("responseModelId")
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string());
     let revision_root_id = meta
         .get("revisionRootId")
         .and_then(|v| v.as_str())
@@ -732,6 +795,7 @@ pub(crate) fn record_to_ui(record: MessageRecord) -> UiMessage {
             content: text,
             command: command.clone(),
             skill_mentions: skill_mentions.clone(),
+            agent_mentions: agent_mentions.clone(),
             session_message,
             voice_origin: voice_origin.clone(),
             quotes: quotes.clone(),
@@ -745,6 +809,7 @@ pub(crate) fn record_to_ui(record: MessageRecord) -> UiMessage {
             usage,
             response_duration_ms,
             response_output_tokens,
+            response_model_id: response_model_id.clone(),
             error,
             revision_root_id,
             revision_count,
@@ -774,6 +839,7 @@ pub(crate) fn record_to_ui(record: MessageRecord) -> UiMessage {
             assistant_replay: assistant_replay.clone(),
             image_generation: image_generation.clone(),
             model_system: None,
+            provider_replay: None,
         }
     } else {
         let content = blocks
@@ -790,6 +856,7 @@ pub(crate) fn record_to_ui(record: MessageRecord) -> UiMessage {
             content,
             command,
             skill_mentions,
+            agent_mentions,
             session_message,
             voice_origin,
             quotes,
@@ -803,6 +870,7 @@ pub(crate) fn record_to_ui(record: MessageRecord) -> UiMessage {
             usage,
             response_duration_ms,
             response_output_tokens,
+            response_model_id: response_model_id.clone(),
             error,
             revision_root_id,
             revision_count,
@@ -823,6 +891,7 @@ pub(crate) fn record_to_ui(record: MessageRecord) -> UiMessage {
             assistant_replay,
             image_generation,
             model_system,
+            provider_replay,
         }
     }
 }
@@ -1367,7 +1436,8 @@ const SUMMARY_SELECT: &str =
             s.thinking_level, s.permission_mode, s.updated_at, s.created_at,
             COALESCE((SELECT value_json = 'true' FROM kv WHERE ns = 'app' AND key = 'session-fast:' || s.id), 0) AS fast,
             COALESCE((SELECT value_json = 'true' FROM kv WHERE ns = 'app' AND key = 'session-ultra:' || s.id), 0) AS ultra,
-            EXISTS (SELECT 1 FROM task_runs r WHERE r.session_id = s.id) AS scheduled_run
+            EXISTS (SELECT 1 FROM task_runs r WHERE r.session_id = s.id) AS scheduled_run,
+            s.fast_mode
      FROM sessions s LEFT JOIN projects p ON p.id = s.project_id
      WHERE s.deleted_at IS NULL";
 
@@ -1389,6 +1459,7 @@ pub(crate) fn summary_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Sess
         // Read by name: search and listing build their own column lists, so the
         // alias keeps this mapper independent of any one query's column order.
         scheduled_run: row.get("scheduled_run")?,
+        fast_mode: row.get("fast_mode")?,
         worktree: None,
     })
 }
@@ -1448,6 +1519,8 @@ pub struct SessionCreateOptions {
     pub project_path: Option<String>,
     pub thinking_level: Option<String>,
     pub permission_mode: Option<String>,
+    /// The `/fast` switch (ADR 0334); false keeps the default service tier.
+    pub fast_mode: bool,
 }
 
 pub fn create_session_with_thinking(
@@ -1469,6 +1542,7 @@ pub fn create_session_with_thinking(
             project_path,
             thinking_level,
             permission_mode: None,
+            fast_mode: false,
         },
     )
 }
@@ -1490,6 +1564,7 @@ pub fn create_session_with_options(
         project_path,
         thinking_level,
         permission_mode,
+        fast_mode,
     } = options;
     let now = now_ms();
     let id = Uuid::new_v4().to_string();
@@ -1519,8 +1594,8 @@ pub fn create_session_with_options(
         .prepare_cached(
             "INSERT INTO sessions (
                 id, title, project_id, provider_id, model_id, mode, thinking_level,
-                permission_mode, title_source, created_at, updated_at
-             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?10)",
+                permission_mode, title_source, fast_mode, created_at, updated_at
+             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?11)",
         )?
         .execute(params![
             id,
@@ -1532,6 +1607,7 @@ pub fn create_session_with_options(
             thinking_level,
             permission_mode,
             title_source,
+            fast_mode,
             now
         ])?;
     Ok(SessionSummary {
@@ -1546,6 +1622,7 @@ pub fn create_session_with_options(
         mode,
         thinking_level,
         permission_mode,
+        fast_mode,
         updated_at: ms_to_ts(now),
         created_at: ms_to_ts(now),
         // The run row that owns this transcript is written after creation.
@@ -1897,10 +1974,11 @@ pub fn fork_session_through(
             .prepare_cached(
                 "INSERT INTO sessions (
                     id, title, project_id, provider_id, model_id, mode, thinking_level,
-                    permission_mode, source, pinned, last_seq, created_at, updated_at
+                    permission_mode, fast_mode, mode_snapshot_hash, source, pinned, last_seq,
+                    created_at, updated_at
                  )
                  SELECT ?1, ?2, project_id, provider_id, model_id, mode, thinking_level,
-                        permission_mode, NULL, 0, ?3, ?4, ?4
+                        permission_mode, fast_mode, mode_snapshot_hash, NULL, 0, ?3, ?4, ?4
                  FROM sessions WHERE id = ?5",
             )?
             .execute(params![id, title, records.len() as i64, now, source_id])?;
@@ -1933,6 +2011,7 @@ pub fn fork_session_through(
         mode: source.summary.mode,
         thinking_level: source.summary.thinking_level,
         permission_mode: source.summary.permission_mode,
+        fast_mode: source.summary.fast_mode,
         updated_at: created_at.clone(),
         created_at,
         // A fork is the user's own conversation, not the automation's transcript.
@@ -1981,8 +2060,68 @@ pub fn configure_session_with_thinking(
     fast: Option<bool>,
     ultra: Option<bool>,
 ) -> Result<Option<SessionSummary>> {
+    configure_session_with_mode_snapshot(
+        db,
+        id,
+        mode,
+        provider_id,
+        model_id,
+        thinking_level,
+        permission_mode,
+        None,
+        None,
+        fast,
+        ultra,
+    )
+}
+
+/// Full configurator. Every `None` preserves the persisted value, including
+/// the `/fast` switch (ADR 0334). The mode snapshot is cleared: a builtin
+/// mode configured here never carries one.
+#[allow(clippy::too_many_arguments)]
+pub fn configure_session_with_fast_mode(
+    db: &Database,
+    id: &str,
+    mode: &str,
+    provider_id: Option<&str>,
+    model_id: Option<&str>,
+    thinking_level: Option<&str>,
+    permission_mode: Option<&str>,
+    fast_mode: Option<bool>,
+) -> Result<Option<SessionSummary>> {
+    configure_session_with_mode_snapshot(
+        db,
+        id,
+        mode,
+        provider_id,
+        model_id,
+        thinking_level,
+        permission_mode,
+        fast_mode,
+        None,
+        None,
+        None,
+    )
+}
+
+/// `configure_session_with_fast_mode` that also writes the session's mode
+/// snapshot hash (ADR mode-definitions) in the same statement as the mode.
+#[allow(clippy::too_many_arguments)]
+pub fn configure_session_with_mode_snapshot(
+    db: &Database,
+    id: &str,
+    mode: &str,
+    provider_id: Option<&str>,
+    model_id: Option<&str>,
+    thinking_level: Option<&str>,
+    permission_mode: Option<&str>,
+    fast_mode: Option<bool>,
+    mode_snapshot_hash: Option<&str>,
+    fast: Option<bool>,
+    ultra: Option<bool>,
+) -> Result<Option<SessionSummary>> {
     if !(is_valid_mode(mode) || mode == "chat") {
-        return Err(anyhow!("mode must be plan or agent"));
+        return Err(anyhow!("mode must be a valid mode id"));
     }
     let mode = normalize_mode(Some(mode));
     if let Some(level) = thinking_level {
@@ -2022,7 +2161,9 @@ pub fn configure_session_with_thinking(
              SET mode = ?2, provider_id = COALESCE(?3, provider_id),
                  model_id = COALESCE(?4, model_id),
                  thinking_level = COALESCE(?5, thinking_level),
-                 permission_mode = COALESCE(?6, permission_mode), updated_at = ?7
+                 permission_mode = COALESCE(?6, permission_mode),
+                 fast_mode = COALESCE(?8, fast_mode), mode_snapshot_hash = ?9,
+                 updated_at = ?7
              WHERE id = ?1",
         )?
         .execute(params![
@@ -2032,7 +2173,9 @@ pub fn configure_session_with_thinking(
             model_id,
             thinking_level,
             permission_mode,
-            now_ms()
+            now_ms(),
+            fast_mode,
+            mode_snapshot_hash
         ])?;
     if changed == 0 {
         return Ok(None);
@@ -3123,38 +3266,66 @@ pub fn update_tool_review_state(
     snapshot_id: &str,
     state: &str,
 ) -> Result<bool> {
-    let Some(detail) = get_session(db, session_id)? else {
+    if !session_exists(db, session_id)? {
+        return Ok(false);
+    }
+    let record = transcripts::layout::with_layout_recovery(db.data_dir(), session_id, |layout| {
+        if layout.message_count() == 0 {
+            return Ok(None);
+        }
+        let Some(position) =
+            transcripts::find_message_position(db.data_dir(), session_id, layout, message_id)?
+        else {
+            return Ok(None);
+        };
+        Ok(transcripts::read_transcript_window_with_layout(
+            db.data_dir(),
+            session_id,
+            layout,
+            position,
+            Some(1),
+        )?
+        .messages
+        .pop())
+    })?;
+    let Some(record) = record else {
         return Ok(false);
     };
-    let mut messages = detail.messages;
-    let mut changed = false;
-    for message in &mut messages {
-        if message.id != message_id || message.role != "tool" {
-            continue;
-        }
-        let Some(tool_result) = message.tool_result.as_mut().and_then(Value::as_object_mut) else {
-            continue;
-        };
-        let Some(details) = tool_result
-            .get_mut("details")
-            .and_then(Value::as_object_mut)
-        else {
-            continue;
-        };
-        let Some(review) = details.get_mut("review").and_then(Value::as_object_mut) else {
-            continue;
-        };
-        if review.get("snapshotId").and_then(Value::as_str) != Some(snapshot_id) {
-            continue;
-        }
-        review.insert("state".into(), Value::String(state.to_string()));
-        changed = true;
-        break;
+    let message = record_to_ui(record);
+    let matches_snapshot = message.role == "tool"
+        && message
+            .tool_result
+            .as_ref()
+            .and_then(Value::as_object)
+            .and_then(|result| result.get("details"))
+            .and_then(Value::as_object)
+            .and_then(|details| details.get("review"))
+            .and_then(Value::as_object)
+            .and_then(|review| review.get("snapshotId"))
+            .and_then(Value::as_str)
+            == Some(snapshot_id);
+    if !matches_snapshot {
+        return Ok(false);
     }
-    if changed {
-        replace_messages(db, session_id, &messages)?;
+    if message
+        .tool_result
+        .as_ref()
+        .and_then(|result| result.get("details")?.get("review")?.get("state")?.as_str())
+        == Some(state)
+    {
+        return Ok(true);
     }
-    Ok(changed)
+    transcripts::append_tool_review_state(
+        db.data_dir(),
+        session_id,
+        message_id,
+        snapshot_id,
+        state,
+    )?;
+    db.conn()
+        .prepare_cached("UPDATE sessions SET updated_at = ?1 WHERE id = ?2")?
+        .execute(params![now_ms(), session_id])?;
+    Ok(true)
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -3593,6 +3764,23 @@ pub fn activate_message_revision(
     revision_index: i64,
     prefix: &[UiMessage],
 ) -> Result<Vec<UiMessage>> {
+    activate_message_revision_with_prefix(
+        db,
+        session_id,
+        root_user_id,
+        revision_index,
+        Some(prefix),
+    )
+}
+
+/// None requires a durable family anchor; Some preserves the legacy prefix API.
+fn activate_message_revision_with_prefix(
+    db: &Database,
+    session_id: &str,
+    root_user_id: &str,
+    revision_index: i64,
+    prefix: Option<&[UiMessage]>,
+) -> Result<Vec<UiMessage>> {
     let session_created = session_created_at(db, session_id)?;
     {
         let conn = db.conn();
@@ -3612,10 +3800,19 @@ pub fn activate_message_revision(
     let live = get_session(db, session_id)?
         .map(|detail| detail.messages)
         .unwrap_or_default();
+    if prefix.is_none()
+        && live_branch_start(&live, root_user_id)
+            .filter(|&index| live[index].role == "user")
+            .is_none()
+    {
+        return Err(anyhow!(
+            "NOT_FOUND: revision family anchor missing from canonical transcript"
+        ));
+    }
     let live_start = archive_live_branch(db, session_id, root_user_id, &live)?;
     let prefix: &[UiMessage] = match live_start {
         Some(start) => &live[..start],
-        None => prefix,
+        None => prefix.ok_or_else(|| anyhow!("NOT_FOUND: canonical revision prefix missing"))?,
     };
 
     let payload =
@@ -4410,6 +4607,28 @@ mod tests {
         Database::open(&dir.join("test.sqlite")).unwrap()
     }
 
+    #[test]
+    fn agent_mentions_round_trip_through_record_meta() {
+        let mut message = user_msg("u1", "Call the `Task` tool", "2026-01-01T00:00:00Z");
+        message.command = Some("look @explorer here".into());
+        message.agent_mentions = Some(vec![AgentMention {
+            start: 5,
+            end: 14,
+            name: "explorer".into(),
+        }]);
+        let (record, _) = ui_to_record(&message);
+        let restored = record_to_ui(record);
+        let mentions = restored.agent_mentions.expect("agent mentions survive");
+        assert_eq!(mentions.len(), 1);
+        assert_eq!((mentions[0].start, mentions[0].end), (5, 14));
+        assert_eq!(mentions[0].name, "explorer");
+        assert_eq!(restored.command.as_deref(), Some("look @explorer here"));
+
+        // A row written before the field existed reads back without it.
+        let (legacy, _) = ui_to_record(&user_msg("u2", "plain", "2026-01-01T00:00:00Z"));
+        assert!(record_to_ui(legacy).agent_mentions.is_none());
+    }
+
     fn user_msg(id: &str, content: &str, ts: &str) -> UiMessage {
         UiMessage {
             id: id.into(),
@@ -4417,6 +4636,7 @@ mod tests {
             content: content.into(),
             command: None,
             skill_mentions: None,
+            agent_mentions: None,
             attachments: None,
             voice_origin: None,
             quotes: None,
@@ -4429,6 +4649,7 @@ mod tests {
             usage: None,
             response_duration_ms: None,
             response_output_tokens: None,
+            response_model_id: None,
             error: None,
             revision_root_id: None,
             revision_count: None,
@@ -4449,6 +4670,7 @@ mod tests {
             assistant_replay: None,
             hosted_search: None,
             model_system: None,
+            provider_replay: None,
             session_message: None,
         }
     }
@@ -4860,7 +5082,7 @@ mod tests {
             .unwrap()
             .unwrap();
         assert_eq!(preserved.thinking_level, "high");
-        assert!(configure_session(&db, &session.id, "invalid", None, None).is_err());
+        assert!(configure_session(&db, &session.id, "Not A Mode", None, None).is_err());
         assert!(configure_session_with_thinking(
             &db,
             &session.id,
@@ -4887,6 +5109,76 @@ mod tests {
         .unwrap()
         .unwrap();
         assert_eq!(omitted.thinking_level, "omit");
+    }
+
+    /// ADR 0334: `/fast` is stored per session, survives configures that do
+    /// not mention it, and is copied by a fork.
+    #[test]
+    fn session_fast_mode_is_persisted_preserved_and_forked() {
+        let db = test_db();
+        let session = create_session(&db, None, None, None, None, None).unwrap();
+        assert!(!session.fast_mode);
+
+        let set = |enabled: Option<bool>, mode: &str| {
+            configure_session_with_fast_mode(
+                &db,
+                &session.id,
+                mode,
+                None,
+                None,
+                None,
+                None,
+                enabled,
+            )
+            .unwrap()
+            .unwrap()
+        };
+        assert!(set(Some(true), "agent").fast_mode);
+        assert!(set(None, "plan").fast_mode);
+        let kept = configure_session(&db, &session.id, "agent", None, None)
+            .unwrap()
+            .unwrap();
+        assert!(kept.fast_mode);
+        assert!(
+            get_session(&db, &session.id)
+                .unwrap()
+                .unwrap()
+                .summary
+                .fast_mode
+        );
+
+        let ForkSessionResult::Created(fork) =
+            fork_session_through(&db, &session.id, None, None).unwrap()
+        else {
+            panic!("expected fork");
+        };
+        assert!(fork.summary.fast_mode);
+        assert!(
+            get_session(&db, &fork.summary.id)
+                .unwrap()
+                .unwrap()
+                .summary
+                .fast_mode
+        );
+
+        assert!(!set(Some(false), "agent").fast_mode);
+
+        let created = create_session_with_options(
+            &db,
+            SessionCreateOptions {
+                fast_mode: true,
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        assert!(created.fast_mode);
+        assert!(
+            get_session(&db, &created.id)
+                .unwrap()
+                .unwrap()
+                .summary
+                .fast_mode
+        );
     }
 
     #[test]
@@ -5183,6 +5475,7 @@ mod tests {
             permission_mode: "inherit".into(),
             // Ownership is derived from `task_runs`, so an import is never one.
             scheduled_run: false,
+            fast_mode: false,
             worktree: None,
             created_at: "2025-01-01T00:00:00Z".into(),
             updated_at: "2025-01-02T00:00:00Z".into(),
@@ -5238,6 +5531,7 @@ mod tests {
             permission_mode: "inherit".into(),
             // Ownership is derived from `task_runs`, so an import is never one.
             scheduled_run: false,
+            fast_mode: false,
             worktree: None,
             created_at: "2025-01-01T00:00:00Z".into(),
             updated_at: "2025-01-01T00:00:00Z".into(),
@@ -5322,6 +5616,7 @@ mod tests {
             content: "ok".into(),
             command: None,
             skill_mentions: None,
+            agent_mentions: None,
             attachments: None,
             voice_origin: None,
             quotes: None,
@@ -5334,6 +5629,7 @@ mod tests {
             usage: None,
             response_duration_ms: None,
             response_output_tokens: None,
+            response_model_id: None,
             error: None,
             revision_root_id: None,
             revision_count: None,
@@ -5354,6 +5650,7 @@ mod tests {
             assistant_replay: None,
             hosted_search: None,
             model_system: None,
+            provider_replay: None,
             session_message: None,
         };
         append_message(&db, &session.id, &tool, None).unwrap();
@@ -5399,11 +5696,55 @@ mod tests {
             ],
         )
         .unwrap();
+        append_message(
+            &db,
+            &session.id,
+            &user_msg("m3", "继续", "2025-05-01T00:00:04Z"),
+            None,
+        )
+        .unwrap();
+        let transcript = db
+            .data_dir()
+            .join("sessions")
+            .join(format!("{}.jsonl", session.id));
+        let before_review_update = std::fs::read(&transcript).unwrap();
         assert!(
             update_tool_review_state(&db, &session.id, "m2", "snapshot-1", "rolledBack",).unwrap()
         );
+        let after_review_update = std::fs::read(&transcript).unwrap();
+        assert!(
+            after_review_update.starts_with(&before_review_update),
+            "review state updates must append instead of rewriting retained history"
+        );
+        assert!(after_review_update.len() - before_review_update.len() < 256);
+        assert!(
+            update_tool_review_state(&db, &session.id, "m2", "snapshot-1", "rolledBack").unwrap()
+        );
+        for (message_id, snapshot_id) in [
+            ("missing", "snapshot-1"),
+            ("m2", "wrong"),
+            ("m1", "snapshot-1"),
+        ] {
+            assert!(!update_tool_review_state(
+                &db,
+                &session.id,
+                message_id,
+                snapshot_id,
+                "rolledBack"
+            )
+            .unwrap());
+        }
+        assert_eq!(std::fs::read(&transcript).unwrap(), after_review_update);
         let updated = get_session(&db, &session.id).unwrap().unwrap();
-        assert_eq!(updated.summary.message_count, 2);
+        assert_eq!(updated.summary.message_count, 3);
+        assert_eq!(
+            updated
+                .messages
+                .iter()
+                .map(|message| message.id.as_str())
+                .collect::<Vec<_>>(),
+            vec!["m1", "m2", "m3"]
+        );
         assert_eq!(
             updated.messages[1].tool_result,
             Some(json!({
@@ -5427,7 +5768,139 @@ mod tests {
                 |r| r.get(0),
             )
             .unwrap();
-        assert_eq!(last_seq, 2);
+        assert_eq!(last_seq, 3);
+    }
+
+    #[test]
+    fn truncate_from_folds_review_state_into_the_retained_prefix() {
+        let db = test_db();
+        let session = create_session(&db, None, None, None, None, None).unwrap();
+        let mut tool = user_msg("review-tool", "written", "2025-05-01T00:00:01Z");
+        tool.role = "tool".into();
+        tool.tool_call_id = Some("review-call".into());
+        tool.tool_name = Some("Write".into());
+        tool.tool_result = Some(json!({"details": {"review": {
+            "snapshotId": "snapshot-1", "state": "active"
+        }}}));
+        for message in [
+            user_msg("root", "write", "2025-05-01T00:00:00Z"),
+            tool,
+            user_msg("later-root", "regenerate", "2025-05-01T00:00:02Z"),
+        ] {
+            append_message(&db, &session.id, &message, None).unwrap();
+        }
+        assert!(update_tool_review_state(
+            &db,
+            &session.id,
+            "review-tool",
+            "snapshot-1",
+            "rolledBack"
+        )
+        .unwrap());
+        truncate_from(&db, &session.id, Some("later-root"), None).unwrap();
+        let raw = std::fs::read_to_string(
+            db.data_dir()
+                .join("sessions")
+                .join(format!("{}.jsonl", session.id)),
+        )
+        .unwrap();
+        let lines = raw
+            .lines()
+            .map(|line| serde_json::from_str::<Value>(line).unwrap())
+            .collect::<Vec<_>>();
+        assert!(!lines.iter().any(|line| line["type"] == "tool_review_state"));
+        let stored_tool = lines
+            .iter()
+            .find(|line| line["id"] == "review-tool")
+            .unwrap();
+        assert_eq!(
+            stored_tool["blocks"][0]["result"]["details"]["review"]["state"],
+            "rolledBack"
+        );
+        let detail = get_session(&db, &session.id).unwrap().unwrap();
+        assert_eq!(
+            detail
+                .messages
+                .iter()
+                .map(|message| message.id.as_str())
+                .collect::<Vec<_>>(),
+            ["root", "review-tool"]
+        );
+        assert_eq!(
+            detail.messages[1].tool_result.as_ref().unwrap()["details"]["review"]["state"],
+            "rolledBack"
+        );
+    }
+
+    #[test]
+    fn tool_review_state_survives_fork_revision_activation_and_deletion() {
+        let db = test_db();
+        let session = create_session(&db, None, None, None, None, None).unwrap();
+        let mut tool = user_msg("review-tool", "written", "2025-05-01T00:00:01Z");
+        tool.role = "tool".into();
+        tool.tool_call_id = Some("review-call".into());
+        tool.tool_name = Some("Write".into());
+        tool.tool_result = Some(json!({"details": {"review": {
+            "snapshotId": "snapshot-1", "state": "active"
+        }}}));
+        let mut answer = user_msg("answer", "done", "2025-05-01T00:00:02Z");
+        answer.role = "assistant".into();
+        for message in [
+            user_msg("root", "write", "2025-05-01T00:00:00Z"),
+            tool,
+            answer,
+        ] {
+            append_message(&db, &session.id, &message, None).unwrap();
+        }
+        assert!(update_tool_review_state(
+            &db,
+            &session.id,
+            "review-tool",
+            "snapshot-1",
+            "rolledBack"
+        )
+        .unwrap());
+        let assert_rolled_back = |messages: &[UiMessage]| {
+            let tool = messages
+                .iter()
+                .find(|message| message.role == "tool")
+                .unwrap();
+            assert_eq!(
+                tool.tool_result.as_ref().unwrap()["details"]["review"]["state"],
+                "rolledBack"
+            );
+        };
+        let ForkSessionResult::Created(child) =
+            fork_session_through(&db, &session.id, None, None).unwrap()
+        else {
+            panic!("fork must succeed");
+        };
+        assert_rolled_back(&child.messages);
+
+        truncate_from(&db, &session.id, Some("root"), None).unwrap();
+        let mut replacement = user_msg("other-root", "new variant", "2025-05-01T00:00:03Z");
+        replacement.revision_root_id = Some("root".into());
+        replacement.revision_count = Some(2);
+        replacement.active_revision = Some(2);
+        append_message(&db, &session.id, &replacement, None).unwrap();
+        let restored = activate_message_revision_canonical(&db, &session.id, "root", 1).unwrap();
+        assert_rolled_back(&restored);
+        assert!(delete_message(&db, &session.id, "answer").unwrap().deleted);
+        let path = db.data_dir().join("test.sqlite");
+        drop(db);
+        let reopened = Database::open(&path).unwrap();
+        assert_rolled_back(
+            &get_session(&reopened, &session.id)
+                .unwrap()
+                .unwrap()
+                .messages,
+        );
+        assert_rolled_back(
+            &get_session(&reopened, &child.summary.id)
+                .unwrap()
+                .unwrap()
+                .messages,
+        );
     }
 
     #[test]
@@ -5944,6 +6417,7 @@ mod tests {
             content: "final answer".into(),
             command: None,
             skill_mentions: None,
+            agent_mentions: None,
             attachments: None,
             voice_origin: None,
             quotes: None,
@@ -5964,6 +6438,7 @@ mod tests {
             }),
             response_duration_ms: Some(2_000),
             response_output_tokens: Some(34),
+            response_model_id: Some("vendor/concrete-model".into()),
             error: None,
             revision_root_id: None,
             revision_count: None,
@@ -5984,6 +6459,7 @@ mod tests {
             assistant_replay: None,
             hosted_search: None,
             model_system: None,
+            provider_replay: None,
             session_message: None,
         };
         append_message(&db, &session.id, &assistant, None).unwrap();
@@ -6025,6 +6501,68 @@ mod tests {
         assert_eq!(usage.total_tokens, 48);
         assert_eq!(detail.messages[0].response_duration_ms, Some(2_000));
         assert_eq!(detail.messages[0].response_output_tokens, Some(34));
+        assert_eq!(
+            detail.messages[0].response_model_id.as_deref(),
+            Some("vendor/concrete-model")
+        );
+    }
+
+    #[test]
+    fn assistant_provider_replay_roundtrips_in_record_meta() {
+        let db = test_db();
+        let session = create_session(&db, None, None, None, None, None).unwrap();
+        let replay = json!({
+            "version": 1,
+            "blocks": [
+                { "type": "thinking", "length": 3, "signature": "sig-a" },
+                { "type": "text", "length": 6 }
+            ]
+        });
+        let assistant: UiMessage = serde_json::from_value(json!({
+            "id": "assistant-replay-1",
+            "role": "assistant",
+            "content": "answer",
+            "thinking": "abc",
+            "createdAt": "2025-05-01T00:00:01Z",
+            "status": "complete",
+            "providerReplay": replay,
+        }))
+        .unwrap();
+        let plain: UiMessage = serde_json::from_value(json!({
+            "id": "assistant-replay-2",
+            "role": "assistant",
+            "content": "plain",
+            "createdAt": "2025-05-01T00:00:02Z",
+            "status": "complete",
+        }))
+        .unwrap();
+        append_message(&db, &session.id, &assistant, None).unwrap();
+        append_message(&db, &session.id, &plain, None).unwrap();
+
+        let records = transcripts::read_transcript(db.data_dir(), &session.id).unwrap();
+        assert_eq!(
+            records[0]
+                .meta
+                .as_ref()
+                .and_then(|m| m.get("providerReplay")),
+            Some(&replay)
+        );
+        // Replay data lives in meta only: the visible blocks are unchanged.
+        assert_eq!(
+            records[0].blocks,
+            json!([{ "type": "thinking", "text": "abc" }, { "type": "text", "text": "answer" }])
+        );
+        assert!(records[1]
+            .meta
+            .as_ref()
+            .and_then(|m| m.get("providerReplay"))
+            .is_none());
+
+        let detail = get_session(&db, &session.id).unwrap().unwrap();
+        assert_eq!(detail.messages[0].provider_replay, Some(replay));
+        assert_eq!(detail.messages[0].thinking.as_deref(), Some("abc"));
+        assert_eq!(detail.messages[0].content, "answer");
+        assert_eq!(detail.messages[1].provider_replay, None);
     }
 
     #[test]
@@ -6056,6 +6594,7 @@ mod tests {
             content: "answer with sources".into(),
             command: None,
             skill_mentions: None,
+            agent_mentions: None,
             attachments: None,
             voice_origin: None,
             quotes: None,
@@ -6068,6 +6607,7 @@ mod tests {
             usage: None,
             response_duration_ms: None,
             response_output_tokens: None,
+            response_model_id: None,
             error: None,
             revision_root_id: None,
             revision_count: None,
@@ -6087,6 +6627,7 @@ mod tests {
             response_diagnostics: None,
             assistant_replay: None,
             model_system: None,
+            provider_replay: None,
             hosted_search: Some(json!({
                 "status": "completed",
                 "rounds": [
@@ -6213,6 +6754,7 @@ mod tests {
             permission_mode: "inherit".into(),
             // Ownership is derived from `task_runs`, so an import is never one.
             scheduled_run: false,
+            fast_mode: false,
             worktree: None,
             created_at: "2025-01-01T00:00:00Z".into(),
             updated_at: "2025-01-01T00:00:00Z".into(),

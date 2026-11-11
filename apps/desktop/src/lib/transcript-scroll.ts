@@ -53,6 +53,23 @@ export function isHistoryRevealPosition(
   return geometry.scrollTop <= HISTORY_REVEAL_THRESHOLD_PX;
 }
 
+/** Ahead-loading is gesture-driven, never a reason to drain history at rest. */
+export function isHistoryPrefetchPosition(
+  geometry: TranscriptScrollerGeometry,
+  pinned = false,
+  motion?: { upwardSpeed: number; latencyMs: number },
+): boolean {
+  if (pinned || !transcriptHasLayout(geometry)) return false;
+  const baseline = Math.min(2400, Math.max(HISTORY_REVEAL_THRESHOLD_PX, geometry.clientHeight * 3));
+  const speed = motion && Number.isFinite(motion.upwardSpeed) ? Math.max(0, motion.upwardSpeed) : 0;
+  const latency = motion && Number.isFinite(motion.latencyMs) ? Math.max(0, motion.latencyMs) : 250;
+  // Reserve a layout/commit margin as well as the measured read time. Neither
+  // a slow read nor an extreme gesture may turn this into eager full loading.
+  const ceiling = Math.max(baseline, Math.min(12000, geometry.clientHeight * 12));
+  const lead = Math.min(ceiling, Math.max(baseline, speed * (latency + 150)));
+  return geometry.scrollTop <= lead;
+}
+
 export type TranscriptScrollInput = {
   previousScrollTop: number;
   scrollTop: number;
@@ -147,8 +164,10 @@ export type ScrollInputType =
 export type ScrollInputContext = {
   /** Pressed key, for a `keydown`. */
   key?: string;
-  /** The key event came from a text field, which owns its own key input. */
+  /** The key event came from a field/select that owns its own key input. */
   editable?: boolean;
+  /** The focused control consumes this key as activation or selection. */
+  controlOwnsKey?: boolean;
   /**
    * A nearer, scrollable owner sits between the event target and this one, so
    * that owner consumes the input (`overscroll-behavior: contain` keeps it
@@ -196,7 +215,7 @@ export function isScrollGestureInput(
   if (context.nestedOwner) return false;
   if (type === "pointerdown") return context.pointerOnScrollSurface === true;
   if (type === "keydown") {
-    if (context.editable) return false;
+    if (context.editable || context.controlOwnsKey) return false;
     return context.key !== undefined && SCROLL_GESTURE_KEYS.has(context.key);
   }
   return true;

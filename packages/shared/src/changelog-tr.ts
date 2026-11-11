@@ -2,6 +2,15 @@ import type { ChangelogEntry } from "./changelog.js";
 
 export const trEntries: ChangelogEntry[] = [
   {
+    version: "0.21.2",
+    date: "2026-11-11",
+    highlights: [
+      "Özel modlar, aşamalı hedefler ve bilgisayar kullanımı ayarlarıyla Pi 1.5.0 sürümüne geçin.",
+      "Model seçimi, ayar gezintisi ve konuşma geçmişi iyileştirildi.",
+      "Yükseltme sırasında MirrorCoding, Gemini, Ultra, yan sohbetler ve mobil veriler korunur.",
+    ],
+  },
+  {
     version: "0.21.1",
     date: "2026-10-29",
     highlights: [

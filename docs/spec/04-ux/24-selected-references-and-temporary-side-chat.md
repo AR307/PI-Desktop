@@ -51,6 +51,8 @@ so it cannot write a summary of parent history into the child checkpoint.
 Changing child configuration retains its effective context, compaction and
 child message identities, including across runtime reconstruction. Smart Stop,
 edit and regeneration rewind child turns in memory rather than disposing this context.
+Conditional unanswered-prompt retraction rewinds the child only after Host
+accepts it; a refused retraction leaves its live context unchanged.
 Terminal assistant envelopes without text, reasoning or structured content are
 removed from the live transcript just as they are from persistence. After a
 completed tool turn, stopping the next unanswered request restores its text

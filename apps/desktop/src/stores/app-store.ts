@@ -20,6 +20,8 @@ import {
 } from "../lib/sidebar-session-status";
 import {
   projectWorkspaceFromPath,
+  restoreSidebarPreferences,
+  sidebarPreferencesState,
   saveSidebarPreferences,
 } from "../lib/sidebar-preferences";
 import {
@@ -238,6 +240,11 @@ export const useAppStore = create<AppState>((set, get) => {
     const generation = ++bootstrapGeneration;
     let recoveredSettings: AppSettings | undefined;
     try {
+      const sidebar = await restoreSidebarPreferences({
+        read: api.getSidebarPreferences, write: api.setSidebarPreferences, listProjects: api.listProjects,
+      });
+      if (generation !== bootstrapGeneration) return;
+      if (sidebar) set(sidebarPreferencesState(sidebar));
       const settingsRequest = api.getSettings().then(async (settingsRaw) => {
         let settings = settingsRaw
           ? {
@@ -360,12 +367,17 @@ export const useAppStore = create<AppState>((set, get) => {
         planningStates[proposal.sessionId] = "awaiting_approval";
       }
       if (generation !== bootstrapGeneration) return;
-      set({
+      set((state) => ({
         ready: true,
         version,
         healthOk: health.ok,
         settings,
         sessions: hydratedSessions,
+        runningSessions: {
+          ...Object.fromEntries((sessions.runningSessionIds ?? []).map((id) => [id, true])),
+          // Live start/end events received during bootstrap outrank its snapshot.
+          ...state.runningSessions,
+        },
         providers: providers.providers,
         providerModels: cachedProviderModels,
         workspace: currentWorkspace,
@@ -380,7 +392,7 @@ export const useAppStore = create<AppState>((set, get) => {
         notifications: notifications.notifications,
         unreadNotificationCount: notifications.unreadCount,
         sessionOutcomes: latestSessionOutcomes(notifications.notifications),
-      });
+      }));
 
       // The artifact's surface depends on which plugin views are launchable, and
       // the launcher list is only read after `ready`. Resolve it before the

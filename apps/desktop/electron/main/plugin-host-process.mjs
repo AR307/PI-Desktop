@@ -272,6 +272,9 @@ function buildApi() {
     workspace: {
       get: () => call("workspace.get"),
     },
+    projects: {
+      list: () => call("projects.list"),
+    },
     desktop: {
       listOperations: () => call("desktop.listOperations"),
       invoke: (input) => call("desktop.invoke", [input ?? {}]),
@@ -284,13 +287,13 @@ function buildApi() {
           ...result,
           bytes: normalizeBytes(result?.bytes),
         })),
-      readPreview: (path) => call("fs.readPreview", [path]),
+      readPreview: (path, options) => call("fs.readPreview", options === undefined ? [path] : [path, options]),
       openDefault: (path) => call("fs.openDefault", [path]),
       openInBrowser: (path) => call("fs.openInBrowser", [path]),
       reveal: (path) => call("fs.reveal", [path]),
       writeText: (path, content) => call("fs.writeText", [path, content]),
       glob: (pattern) => call("fs.glob", [pattern]),
-      list: (path) => call("fs.list", [path]),
+      list: (path, options) => call("fs.list", options === undefined ? [path] : [path, options]),
       remove: (path) => call("fs.remove", [path]),
       requestDirectory: () => call("fs.requestDirectory"),
     },
@@ -340,6 +343,13 @@ function buildApi() {
       importBatch: (input) => call("session.importBatch", [input ?? {}]),
       rename: (input) => call("session.rename", [input ?? {}]),
       delete: (input) => call("session.delete", [input ?? {}]),
+      // Message-level writes (`session.update.all` / `session.delete.all`, ADR
+      // 0339). The plugin supplies no scope: the main-process gateway derives it
+      // from the granted permissions.
+      appendMessage: (input) => call("session.appendMessage", [input ?? {}]),
+      replaceMessages: (input) => call("session.replaceMessages", [input ?? {}]),
+      deleteMessage: (input) => call("session.deleteMessage", [input ?? {}]),
+      truncateFrom: (input) => call("session.truncateFrom", [input ?? {}]),
     },
     // Read-only usage facts (`usage.read`). The main-process dispatch owns
     // the permission check and parameter bounds; the host returns per-turn

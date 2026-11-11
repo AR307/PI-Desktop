@@ -23,10 +23,15 @@ import { assistantReplay, prepareProviderRetryMessages, responseContentFacts, re
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
+import { toolExecutionMode, withDynamicTaskExecutionMode } from "./tool-execution-policy.js";
+import { DESKTOP_AGENT_IDENTITY } from "./agent-identity.js";
+import { initialSystemTranscript, replaceSystemPrompt } from "./system-transcript.js";
 import {
   Agent,
   type AfterToolCallContext,
   type AfterToolCallResult,
+  type BeforeToolCallContext,
+  type BeforeToolCallResult,
   type AgentEvent,
   type AgentLoopTurnUpdate,
   type AgentMessage,
@@ -49,6 +54,7 @@ import {
 } from "@pi-desktop/shared";
 import { classifyAgentError } from "./agent-errors.js";
 import { readLocalRequestErrorDetails } from "./local-request-errors.js";
+import { recoverMalformedToolCalls } from "./tool-call-recovery.js";
 import { withProviderFetchFailure } from "./provider-transport-recovery.js";
 import {
   assistantContent,
@@ -162,6 +168,10 @@ export type SubagentRunOptions = {
   /** Host-backed tools, built by the session runtime so a delegate's calls
    * take the exact same path as the parent's. */
   tools: AgentTool[];
+  /** Ordered preparation owned by this delegate, never the parent's prompt state. */
+  beforeToolCall?: (context: BeforeToolCallContext) => Promise<BeforeToolCallResult | undefined>;
+  /** After pi ends one turn of this delegate, its tool batch included. */
+  onTurnEnd?: (message: AgentMessage) => void;
   onEvent: (envelope: AgentEventEnvelope) => void;
   /**
    * Result of the parent's own `afterToolCall` bookkeeping for one call, so a
@@ -278,12 +288,14 @@ export class SubagentRun {
 
   constructor(opts: SubagentRunOptions) {
     this.opts = opts;
-    this.uniqueToolCalls = createToolCallIdentity(opts.initialMessages ?? []);
+    const initialMessages = recoverMalformedToolCalls(opts.initialMessages ?? []);
+    this.uniqueToolCalls = createToolCallIdentity(initialMessages);
     this.provider = opts.provider;
     this.thinkingLevel = opts.thinkingLevel;
     this.attemptedModels.add(`${opts.provider.id}/${opts.provider.modelId}`);
     const binding = this.modelBinding();
     this.agent = new Agent({
+      identity: DESKTOP_AGENT_IDENTITY,
       streamFn: binding.streamFn,
       getApiKey: binding.getApiKey,
       convertToLlm: (messages) =>
@@ -294,16 +306,34 @@ export class SubagentRun {
       prepareNextTurnWithContext: (context, signal) =>
         this.prepareNextTurn(context, signal),
       afterToolCall: async (context) => this.afterToolCall(context),
+      beforeToolCall: opts.beforeToolCall,
       initialState: {
         systemPrompt: opts.systemPrompt,
         model: binding.model,
-        tools: opts.tools,
+        // Preserve the parent's provenance decision; a same-name extension must
+        // not inherit the builtin allowlist. Also reject unproven parallel hints.
+        tools: opts.tools.map((tool) =>
+          withDynamicTaskExecutionMode(
+            {
+              ...tool,
+              executionMode:
+                tool.executionMode === "parallel"
+                  ? toolExecutionMode(tool.name, true)
+                  : "sequential",
+            },
+            () => this.agent?.state.messages.at(-1),
+          ),
+        ),
         thinkingLevel: binding.agentThinkingLevel,
-        messages: opts.initialMessages ? [...opts.initialMessages] : [],
+        messages: initialSystemTranscript(opts.systemPrompt, opts.tools, [...initialMessages]),
       },
-      toolExecution: "sequential",
+      toolExecution: "parallel",
     });
     this.agent.subscribe((event) => this.handleEvent(event));
+  }
+
+  setSystemPrompt(prompt: string): void {
+    this.agent.state.messages = replaceSystemPrompt(this.agent.state.messages, prompt);
   }
 
   async run(): Promise<SubagentRunResult> {
@@ -810,6 +840,9 @@ export class SubagentRun {
     switch (event.type) {
       case "turn_start":
         this.turns += 1;
+        break;
+      case "turn_end":
+        this.opts.onTurnEnd?.(event.message);
         break;
       case "message_start": {
         if (event.message.role !== "assistant") break;

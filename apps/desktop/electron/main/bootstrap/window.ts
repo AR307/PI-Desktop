@@ -6,14 +6,17 @@ import { getModuleDirectory } from "../module-path";
 import {
   APP_NAME,
   builtinWindowBackground,
+  encodeStartupAnimationArgument,
   IPC,
   MAC_TRAFFIC_LIGHT_POSITION,
   type CloseBehavior,
 } from "@pi-desktop/shared";
+import type { ResolvedStartupAnimation } from "../startup-animation";
 import type { BrowserHost } from "../browser-host";
 import type { HostProcess } from "../host-process";
 import type { Logger } from "../logger";
 import type { PluginViewHost } from "../plugin-view-host";
+import { detachPluginViewOnRendererReload } from "../plugin-view-navigation";
 import {
   baseWindowBounds,
   clampBoundsOriginToWorkArea,
@@ -94,6 +97,20 @@ export type WindowLifecycleState = {
    * `settings.macosWindowTranslucency` is.
    */
   macosWindowTranslucency: boolean;
+  /**
+   * Boot animation this launch resolved from the data directory, or null to
+   * keep the brand splash. Held for the whole process because the
+   * `pi-startup:` handler reads it per request, not once.
+   */
+  startupAnimation: ResolvedStartupAnimation | null;
+  /**
+   * Whether a window has already been created with the animation.
+   *
+   * The animation is a launch moment, so it plays for the first window of the
+   * process only: reopening from the tray or the Dock after the window was
+   * closed replays nothing.
+   */
+  startupAnimationPlayed: boolean;
   pluginLauncherWindow: BrowserWindow | null;
   host: HostProcess | null;
 };
@@ -191,6 +208,13 @@ export async function createWindow({
   const initialWindowBackground = builtinWindowBackground(
     nativeTheme.shouldUseDarkColors ? "dark" : "light",
   );
+  // Only the first window of the process plays the animation (D679). Claiming
+  // it here, before `new BrowserWindow`, is what keeps a reopened window — and
+  // a second window racing this one — on the brand splash instead.
+  const startupAnimation = windowState.startupAnimationPlayed
+    ? null
+    : windowState.startupAnimation;
+  if (startupAnimation) windowState.startupAnimationPlayed = true;
   const windows11NativeCorners = usesWindows11NativeCorners(
     process.platform,
     process.getSystemVersion(),
@@ -247,7 +271,15 @@ export async function createWindow({
       // Preload runs in a sandbox and cannot import Electron's main-only `app`
       // module. Pass the display locale at process creation so it remains
       // available synchronously before the renderer's first paint.
-      additionalArguments: [`--pi-desktop-locale=${app.getLocale()}`],
+      additionalArguments: [
+        `--pi-desktop-locale=${app.getLocale()}`,
+        // The boot animation has to be on screen in the renderer's first
+        // frame, so the descriptor travels as a creation argument like the
+        // locale does; an IPC round-trip would land after the first paint.
+        ...(startupAnimation
+          ? [encodeStartupAnimationArgument(startupAnimation.descriptor)]
+          : []),
+      ],
     },
   });
   const window = windowState.mainWindow;
@@ -767,6 +799,10 @@ export async function createWindow({
 
   browserHost.setWindow(window);
   pluginViews.setWindow(window);
+  detachPluginViewOnRendererReload(
+    window.webContents,
+    () => pluginViews.hideVisibleView(),
+  );
   window.on("closed", () => {
     screen.removeListener("display-metrics-changed", reconcileDisplayTopology);
     screen.removeListener("display-added", reconcileDisplayTopology);
@@ -1415,6 +1451,39 @@ export async function createWindow({
               `void window.__PI_DESKTOP__?.seedReviewChanges?.(0)`,
             );
             await new Promise((r) => setTimeout(r, 250));
+            // Per-turn changed-files card (D674): relaxed rows for a few
+            // files, dense rows plus `+N more` for many.
+            const shootTurnChanges = async (files: number, name: string) => {
+              await windowState.mainWindow!.webContents.executeJavaScript(
+                `void window.__PI_DESKTOP__?.seedTurnChanges?.(${files})`,
+              );
+              await new Promise((r) => setTimeout(r, 450));
+              await windowState.mainWindow!.webContents.executeJavaScript(
+                `document.querySelector(".turn-changes-card")?.scrollIntoView({ block: "center" })`,
+              );
+              await new Promise((r) => setTimeout(r, 250));
+              await shot(name);
+            };
+            await shootTurnChanges(3, "pi-turn-changes");
+            await shootTurnChanges(15, "pi-turn-changes-dense");
+            await windowState.mainWindow!.webContents.executeJavaScript(
+              `window.__PI_DESKTOP__?.setThemeAttr("dark")`,
+            );
+            await new Promise((r) => setTimeout(r, 350));
+            await shot("pi-turn-changes-dense-dark");
+            await windowState.mainWindow!.webContents.executeJavaScript(
+              `window.__PI_DESKTOP__?.setThemeAttr("light")`,
+            );
+            // A row click opens Review on that file with its change expanded.
+            await windowState.mainWindow!.webContents.executeJavaScript(
+              `document.querySelectorAll(".turn-changes-row")[1]?.click()`,
+            );
+            await new Promise((r) => setTimeout(r, 600));
+            await shot("pi-turn-changes-open-review");
+            await windowState.mainWindow!.webContents.executeJavaScript(
+              `void window.__PI_DESKTOP__?.seedTurnChanges?.(0)`,
+            );
+            await new Promise((r) => setTimeout(r, 250));
             // A run row keeps its command in the head and only its output in the
             // body (D226). Seed one row per state, open the activity groups, and
             // hover the open row so its copy control and caret are on screen.
@@ -1684,6 +1753,61 @@ export async function createWindow({
               `void window.__PI_DESKTOP__?.seedTranscript?.(0)`,
             );
             await new Promise((r) => setTimeout(r, 250));
+            // Radial menu scenes (D678): the opt-in ring on the transcript
+            // background, sector labels at rest, one sector hovered; light
+            // then dark.
+            await windowState.mainWindow!.webContents.executeJavaScript(`
+              void window.__PI_DESKTOP__?.seedTranscript?.(6);
+              window.__PI_DESKTOP__?.seedRadialMenu?.(true);
+            `);
+            await new Promise((r) => setTimeout(r, 500));
+            await setTheme("light");
+            const openRadialRing = async () => {
+              const opened = await windowState.mainWindow!.webContents.executeJavaScript(`(() => {
+                const scroller = document.querySelector(".thread-scroll");
+                if (!scroller) return false;
+                const rect = scroller.getBoundingClientRect();
+                scroller.dispatchEvent(new MouseEvent("contextmenu", {
+                  bubbles: true,
+                  cancelable: true,
+                  clientX: rect.left + rect.width / 2,
+                  clientY: rect.top + rect.height - 150,
+                }));
+                return true;
+              })()`);
+              if (!opened) throw new Error("radial scene: transcript not found");
+              await new Promise((r) => setTimeout(r, 450));
+            };
+            const hoverRadialWedge = async (degrees: number) => {
+              await windowState.mainWindow!.webContents.executeJavaScript(`(() => {
+                const menu = document.querySelector(".radial-menu");
+                if (!menu) return false;
+                const rect = menu.getBoundingClientRect();
+                const radius = rect.width * 0.34;
+                const angle = ${(Math.PI / 180) * degrees};
+                menu.dispatchEvent(new PointerEvent("pointermove", {
+                  bubbles: true,
+                  clientX: rect.left + rect.width / 2 + Math.cos(angle) * radius,
+                  clientY: rect.top + rect.height / 2 + Math.sin(angle) * radius,
+                }));
+                return true;
+              })()`);
+              await new Promise((r) => setTimeout(r, 250));
+            };
+            await openRadialRing();
+            await hoverRadialWedge(90);
+            await shot("pi-radial");
+            await setTheme("dark");
+            await new Promise((r) => setTimeout(r, 250));
+            await hoverRadialWedge(0);
+            await shot("pi-radial-dark");
+            await windowState.mainWindow!.webContents.executeJavaScript(`
+              window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+              window.__PI_DESKTOP__?.seedRadialMenu?.(false);
+              void window.__PI_DESKTOP__?.seedTranscript?.(0);
+            `);
+            await setTheme("light");
+            await new Promise((r) => setTimeout(r, 250));
             // Notification inbox: mixed status, long title, read state, 99+ badge,
             // both themes, then the responsive fixed-position popover.
             const openNotificationFixture = async () => {
@@ -1786,7 +1910,7 @@ export async function createWindow({
             await new Promise((r) => setTimeout(r, 800));
             await shot("pi-dark-project-archive");
             await setPage("settings");
-            await setSettingsTab("general");
+            await setSettingsTab("appearance");
             await new Promise((r) => setTimeout(r, 800));
             await shot("pi-dark-settings");
             await setTheme("light");
@@ -1986,9 +2110,10 @@ export async function createWindow({
                window.__PI_DESKTOP__?.seedPluginThemes?.(2)`,
             );
             await setPage("settings");
-            // The general tab carries the theme picker, including plugin themes
-            // (D175); earlier scenes leave the sidebar on the archive tab.
-            await setSettingsTab("general");
+            // The appearance destination carries the theme picker, including
+            // plugin themes (D175); earlier scenes leave the rail on the
+            // archive destination.
+            await setSettingsTab("appearance");
             // Seeding plugin themes activates one of them, which drags the
             // shell dark; the settings tabs are documented in light.
             await setTheme("light");

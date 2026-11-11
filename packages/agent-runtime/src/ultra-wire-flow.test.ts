@@ -89,6 +89,7 @@ describe("Ultra through the real parent and worker request path", () => {
       commandShell: { id: "bash", label: "Bash", dialect: "posix",
         available: true, isDefault: true },
       host: { async call<T>(method: string): Promise<T> {
+        if (method === "tools.fileBatchCapabilities") return { version: 1, supported: false } as T;
         if (method === "session.appendMessage" || method === "session.queuePush") return undefined as T;
         throw new Error("Unexpected acceptance host request: " + method);
       } },

@@ -234,7 +234,7 @@ test("work panel uses the fixed-window internal dock", () => {
   // guest clamped to the plugin view is gone before the dock CSS animation.
   assert.match(
     panelSource,
-    /blocked=\{\s*exiting \|\| panelBlocked \|\| blockingOverlayActive\s*\}/,
+    /blocked=\{\s*exiting \|\| panelBlocked \|\| blockingOverlayActive\s*\}/s,
   );
   assert.match(panelSource, /nativeSurfaceReadyForExit/);
   assert.match(panelSource, /is-exit-pending/);
@@ -316,7 +316,13 @@ test("work panel header exposes a scrollable tab strip and direct new-page actio
   );
   assert.doesNotMatch(pluginSurface, /isResizing/);
   assert.doesNotMatch(panelSource, /createPortal|newTabMenuRef|menuOpen/);
-  assert.doesNotMatch(panelSource, /onContextMenu|work-panel-context-menu/);
+  assert.match(panelSource, /onContextMenu=\{\(event\) =>/);
+  assert.match(panelSource, /id: "close-tab"/);
+  assert.match(panelSource, /id: "close-other-tabs"[\s\S]*?closeOtherTabsAndFocus\(tab\.id\)/);
+  assert.match(panelSource, /disabled: tabs\.length <= 1/);
+  assert.match(panelSource, /id: "close-all-tabs"[\s\S]*?closeAllTabsAndFocus/);
+  assert.match(panelSource, /<ContextMenu state=\{tabContextMenu\}/);
+  assert.doesNotMatch(panelSource, /work-panel-context-menu/);
   assert.doesNotMatch(globalStyles, /work-panel-new-menu|work-panel-menu-item|work-panel-open-dot/);
   assert.match(globalStyles, /\.work-panel-tab-strip \{[^}]*overflow-x:\s*auto;/s);
   assert.match(globalStyles, /\.work-panel-tab-strip \{[^}]*gap:\s*6px;/s);
@@ -556,8 +562,8 @@ test("file preview request ids stay unique across session contexts", () => {
     /const nextFileRequest = \(tab\?: WorkPanelTab\)[\s\S]*?createWorkPanelFileRequest\(tab, \+\+workPanelFileRequestSeq\)/,
   );
   assert.ok(
-    storeSource.match(/nextFileRequest\((?:tab|activeTab)\)/g)?.length === 4,
-    "open, replace, activation, and close paths must share the position-preserving request",
+    storeSource.match(/nextFileRequest\((?:tab|activeTab)\)/g)?.length === 5,
+    "open, replace, activation, close, and close-other paths must share the position-preserving request",
   );
   assert.doesNotMatch(storeSource, /seq:\s*\([^)]*fileRequest\?\.seq[^)]*\) \+ 1/);
 });
@@ -626,6 +632,33 @@ test("the panel and a new tab share the same launcher rows", async () => {
   assert.match(emptySource, /work-tab-empty-icon/);
   assert.match(emptySource, /work-tab-empty-title/);
   assert.match(emptySource, /work-tab-empty-body/);
+});
+
+test("the launcher tool list scrolls when it outgrows the panel body", () => {
+  // The launcher sits in the flex tabpane; without min-height: 0 it grows past
+  // the pane and the rows below the fold become unreachable (issue #2026).
+  const launcher = globalStyles.match(/\.work-panel-launcher \{[^}]*\}/)?.[0] ?? "";
+  assert.match(launcher, /min-height: 0/);
+  assert.match(launcher, /flex: 1/);
+  assert.match(launcher, /overflow: hidden/);
+  const list = globalStyles.match(/\.work-panel-launcher-list \{[^}]*\}/)?.[0] ?? "";
+  assert.match(list, /min-height: 0/);
+  assert.match(list, /overflow-y: auto/);
+  assert.match(list, /flex: 1/);
+  assert.match(list, /overflow-x: hidden/);
+  assert.match(list, /overscroll-behavior-y: contain/);
+  assert.match(list, /scrollbar-gutter: stable/);
+  // Rows are flex items of that list: without flex-shrink: 0 a constrained
+  // list first compresses them below their 40px height instead of scrolling.
+  const row = globalStyles.match(/\.work-panel-launcher-row \{[^}]*\}/)?.[0] ?? "";
+  assert.match(row, /flex-shrink: 0/);
+  // The title stays pinned; only the rows scroll.
+  const title = globalStyles.match(/\.work-panel-launcher-title \{[^}]*\}/)?.[0] ?? "";
+  assert.match(title, /flex: 0 0 auto/);
+  assert.doesNotMatch(title, /overflow-y/);
+  // Overflow remains discoverable without hover; use the shared theme ink.
+  const thumb = globalStyles.match(/\.work-panel-launcher-list::-webkit-scrollbar-thumb \{[^}]*\}/)?.[0] ?? "";
+  assert.match(thumb, /var\(--ds-text-primary\) 16%, transparent/);
 });
 
 test("work panel empty states match the app's other empty-state proportions", () => {

@@ -6,7 +6,7 @@ register(new URL("./helpers/ts-import-hooks.mjs", import.meta.url));
 const { createTranscriptReadingRuntime } = await import(
   "../src/stores/runtime/transcript-reading-runtime.ts"
 );
-const { transcriptViewMessages, transcriptViewFromSession } = await import("../src/lib/transcript-reading.ts");
+const { isTranscriptAtLiveTail, transcriptViewMessages, transcriptViewFromSession } = await import("../src/lib/transcript-reading.ts");
 const { getSessionMessageSnapshot } = await import("../src/lib/session-transcript-updates.ts");
 const { mergeLiveSessionMessages, upsertLiveSessionMessage, projectMessageEnd, removeLiveSessionMessage } = await import("../src/lib/session-transcript.ts");
 const { buildTranscriptEntries } = await import("../src/lib/assistant-turns.ts");
@@ -72,6 +72,36 @@ function reader(read, overrides = {}) {
     visible: () => transcriptViewMessages(state.messages, state.transcriptViews.s),
   };
 }
+
+test("a canonical empty transcript can present its first-event wait, while empty reading ranges cannot", () => {
+  assert.equal(isTranscriptAtLiveTail([], []), true);
+  const view = { ...transcriptViewFromSession(page([], { hasMoreAfter: false }).session), restored: true };
+  assert.equal(isTranscriptAtLiveTail([], transcriptViewMessages([], view), view), false);
+  assert.equal(isTranscriptAtLiveTail([message("tail")], [], view), false);
+  const disconnected = { ...view, messages: [message("old")] };
+  assert.equal(isTranscriptAtLiveTail([], transcriptViewMessages([], disconnected), disconnected), false);
+  const unidentified = [message("")];
+  assert.equal(isTranscriptAtLiveTail(unidentified, unidentified, view), false);
+});
+
+test("live-tail identity survives a restored navigation parent's object copy", () => {
+  const live = [message("tail", "live")];
+  const copied = { ...live[0] };
+  const view = { ...transcriptViewFromSession(page([copied], { hasMoreAfter: false }).session),
+    restored: true, parentMessage: copied };
+  const visible = transcriptViewMessages(live, view);
+  assert.notEqual(visible.at(-1), live.at(-1), "exercise the real navigation-parent projection");
+  assert.equal(isTranscriptAtLiveTail(live, visible, view), true);
+  assert.equal(isTranscriptAtLiveTail(live, [{ ...copied }], view), true, "copied rows keep their wire identity");
+});
+
+test("unread gaps, explicit search and different tail identities remain historical", () => {
+  const live = [message("tail")];
+  const view = transcriptViewFromSession(page(live, { hasMoreAfter: false }).session);
+  assert.equal(isTranscriptAtLiveTail(live, live, { ...view, hasMoreAfter: true }), false);
+  assert.equal(isTranscriptAtLiveTail(live, live, { ...view, focus: { ...target("tail"), requestId: 1 } }), false);
+  assert.equal(isTranscriptAtLiveTail(live, [message("other")], view), false);
+});
 
 test("a search jump keeps complete focused text without changing live/model input", async () => {
   const calls = [];
@@ -177,6 +207,41 @@ test("ordinary history uses the same page ownership and keeps receiving live out
   );
   assert.equal(r.visible().at(-1).content, "partial");
 });
+
+for (const prepared of [false, true]) {
+  test(`${prepared ? "animated" : "immediate"} latest preserves loaded pages, their cursor and live updates`, async () => {
+    const rows = Array.from({ length: 30 }, (_, i) => message(`row-${i}`));
+    const calls = [];
+    const r = reader(async (_id, options) => {
+      calls.push(options.messageBefore);
+      const end = options.messageBefore;
+      return page(rows.slice(Math.max(0, end - 10), end), {
+        messageStart: Math.max(0, end - 10), messageEnd: end,
+        hasMoreBefore: end > 10, hasMoreAfter: true,
+      });
+    }, {
+      messages: rows.slice(20),
+      sessionHistory: { s: { messageStart: 20, hasMoreBefore: true } },
+    });
+    const live = r.get().messages;
+    await r.loadTranscriptPage("s", "before");
+    const before = r.visible().map(row => row.id);
+    if (prepared) r.prepareReturnToLatestTranscript("s")();
+    else r.returnToLatestTranscript("s");
+    assert.deepEqual(r.visible().map(row => row.id), before, "arrival must not discard a loaded page");
+    assert.equal(r.view().focus, null);
+    assert(!r.view().restored);
+    assert.equal(r.get().messages, live, "old pages never become model input");
+    r.set({ runningSessions: { s: true }, messages: [...live, message("stream", "new output")] });
+    assert.equal(r.visible().at(-1).content, "new output");
+    await r.loadTranscriptPage("s", "before");
+    assert.deepEqual(calls, [20, 10], "continue beyond retained pages instead of rereading cursor 20");
+    assert.equal(r.visible().length, 31);
+    r.set({ runningSessions: {} });
+    r.set({ messages: [message("rewritten")] });
+    assert.equal(r.view(), undefined, "authoritative rewrites still invalidate the old pages");
+  });
+}
 
 test("search supersedes an ordinary page and return-to-latest cancels historical paging", async () => {
   const older = deferred();
@@ -643,4 +708,134 @@ test("a saved anchor does not supersede in-flight navigation when both rows are 
 
   assert.equal(await r.restoreTranscriptReading("s", bookmark, new AbortController().signal), false);
   assert.equal(r.view(), focused, "explicit navigation keeps ownership of the reading view");
+});
+
+test("prepareReturnToLatestTranscript invalidates pending read while keeping messages visible until completion", async () => {
+  const pendingPage = deferred();
+  const r = reader(() => pendingPage.promise, {
+    transcriptViews: {
+      s: {
+        messages: [message("hist-1"), message("hist-2")],
+        messageStart: 20,
+        messageEnd: 40,
+        hasMoreBefore: true,
+        hasMoreAfter: true,
+        focus: null,
+        restored: true,
+        loading: null,
+      },
+    },
+  });
+  assert.equal(r.view().loading, null);
+  assert.deepEqual(
+    r.visible().map((m) => m.id),
+    ["hist-1", "hist-2"],
+  );
+
+  const load = r.loadTranscriptPage("s", "before");
+  assert.equal(r.view().loading, "before");
+
+  const complete = r.prepareReturnToLatestTranscript("s");
+  assert.equal(r.view().loading, null, "loading cleared synchronously");
+  assert.deepEqual(
+    r.visible().map((m) => m.id),
+    ["hist-1", "hist-2"],
+    "messages stay visible",
+  );
+  assert.equal(r.view().restored, true);
+  assert.equal(r.view().hasMoreBefore, true);
+
+  pendingPage.resolve(page([message("stale-page")]));
+  await load;
+
+  assert.deepEqual(
+    r.visible().map((m) => m.id),
+    ["hist-1", "hist-2"],
+    "pending read stale completion ignored",
+  );
+  assert.equal(r.view().loading, null);
+
+  complete();
+  assert.equal(r.view(), undefined, "completion clears prepared view");
+  assert.deepEqual(
+    r.visible().map((m) => m.id),
+    ["tail"],
+  );
+});
+
+test("subsequent navigation survives stale completion from prepareReturnToLatestTranscript", async () => {
+  const r = reader(async () => page([message("search-hit")]), {
+    transcriptViews: {
+      s: {
+        messages: [message("hist-1")],
+        messageStart: 20,
+        messageEnd: 40,
+        hasMoreBefore: true,
+        hasMoreAfter: true,
+        focus: null,
+        loading: null,
+      },
+    },
+  });
+  const complete = r.prepareReturnToLatestTranscript("s");
+  assert.notEqual(r.view(), undefined);
+
+  await r.navigateTranscript(target("search-hit"));
+  assert.deepEqual(
+    r.visible().map((m) => m.id),
+    ["search-hit"],
+  );
+  assert.equal(r.view().focus.messageId, "search-hit");
+
+  complete();
+  assert.deepEqual(
+    r.visible().map((m) => m.id),
+    ["search-hit"],
+    "navigation view survived stale completion",
+  );
+  assert.equal(r.view().focus.messageId, "search-hit");
+});
+
+test("repeated preparation retires previous completion closure", () => {
+  const r = reader(async () => page([]), {
+    transcriptViews: {
+      s: {
+        messages: [message("hist-1")],
+        messageStart: 20,
+        messageEnd: 40,
+        hasMoreBefore: true,
+        hasMoreAfter: true,
+        focus: null,
+        loading: null,
+      },
+    },
+  });
+  const complete1 = r.prepareReturnToLatestTranscript("s");
+  const view1 = r.view();
+  const complete2 = r.prepareReturnToLatestTranscript("s");
+  const view2 = r.view();
+
+  assert.notEqual(view1, view2, "view identity replaced on each preparation");
+
+  complete1();
+  assert.equal(r.view(), view2, "previous completion is retired");
+
+  complete2();
+  assert.equal(r.view(), undefined, "current completion clears prepared view");
+});
+
+test("prepareReturnToLatestTranscript is a no-op when no historical view exists", () => {
+  const r = reader(async () => page([]));
+  assert.equal(r.view(), undefined);
+
+  const complete = r.prepareReturnToLatestTranscript("s");
+  assert.equal(typeof complete, "function");
+  assert.equal(r.view(), undefined, "did not create a transcript view");
+
+  complete();
+  assert.equal(r.view(), undefined, "completion is a no-op");
+  assert.deepEqual(
+    r.visible().map((m) => m.id),
+    ["tail"],
+  );
 });

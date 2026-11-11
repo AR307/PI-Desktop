@@ -2,6 +2,15 @@ import type { ChangelogEntry } from "./changelog.js";
 
 export const zhTWEntries: ChangelogEntry[] = [
   {
+    version: "0.21.2",
+    date: "2026-11-11",
+    highlights: [
+      "升級至 Pi 1.5.0，同步自訂模式、分階段目標和電腦操作設定。",
+      "改善模型選擇、設定導覽與對話歷史。",
+      "升級時保留 MirrorCoding、Gemini、Ultra、側聊和手機同步資料。",
+    ],
+  },
+  {
     version: "0.21.1",
     date: "2026-10-29",
     highlights: [

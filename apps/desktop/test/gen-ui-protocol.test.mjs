@@ -87,19 +87,32 @@ test("shell wraps the fragment between the kit stylesheet/host runtime and the k
   assert.ok(fragment > html.indexOf("<body>"));
   assert.ok(html.indexOf("<body>") > html.indexOf("pi-genui:size"));
   assert.ok(html.indexOf('id="pi-desktop-visualization-tabs"') > fragment);
+  // The fragment sits inside the kit's #widget container, which spaces its
+  // top-level blocks; the kit runtime stays outside it.
+  const widget = html.indexOf('<div id="widget">');
+  assert.ok(widget > html.indexOf("<body>") && widget < fragment);
+  assert.ok(html.indexOf("</div>", fragment + '<div id="viz">hello</div>'.length) < html.indexOf('id="pi-desktop-visualization-tabs"'));
   assert.doesNotMatch(html, /__INLINE_VISUALIZATION_FRAGMENT__/);
   assert.doesNotMatch(html, /zcode-visualization|window\.zcode/);
   // No remote script URL survives; bundled libraries load from pi-genui://assets.
   assert.doesNotMatch(html, /src="https:/);
   assert.match(html, /src="pi-genui:\/\/assets\/floating-ui-dom-1\.7\.4\.min\.js"/);
+  // D3 and the `viz` helpers are preloaded in <head>, D3 first, before the fragment.
+  const d3 = html.indexOf('<script src="pi-genui://assets/d3-7.9.0.min.js"></script>');
+  const helpers = html.indexOf("window.viz = Object.freeze(");
+  assert.ok(d3 > 0 && d3 < helpers && helpers < html.indexOf("</head>"));
+  assert.ok(helpers < fragment);
 });
 
-test("pinned library URLs in the fragment are rewritten to bundled copies; others are left to the CSP", () => {
+test("a fragment's pinned D3 tag is dropped (preloaded); other pinned URLs are rewritten; others are left to the CSP", () => {
   const html = buildGenUiDocument(
     `<script src="${D3_CDN}"></script><script src="https://cdn.jsdelivr.net/npm/d3@7.8.0/dist/d3.min.js"></script>`,
     { kit },
   );
-  assert.match(html, /<script src="pi-genui:\/\/assets\/d3-7\.9\.0\.min\.js"><\/script>/);
+  // Only the <head> preload remains, so the helpers' `d3` global is not replaced.
+  assert.equal(html.split("pi-genui://assets/d3-7.9.0.min.js").length - 1, 1);
+  assert.ok(html.indexOf("pi-genui://assets/d3-7.9.0.min.js") < html.indexOf("</head>"));
+  assert.doesNotMatch(html, /d3@7\.9\.0/);
   // An unpinned version stays remote and is blocked by script-src.
   assert.match(html, /d3@7\.8\.0/);
 });
@@ -118,7 +131,7 @@ test("vendor manifest: only https URLs with plain .js file names are mapped", ()
     "/kit/vendor",
   );
   assert.deepEqual([...vendorUrls], [["https://a.example/x.js", "pi-genui://assets/x.js"]]);
-  assert.deepEqual([...vendorFiles], [["x.js", join("/kit", "vendor", "x.js")]]);
+  assert.deepEqual([...vendorFiles], [["x.js", join("/kit/vendor", "x.js")]]);
   assert.deepEqual(
     [...kit.vendorFiles.keys()].sort(),
     ["d3-7.9.0.min.js", "floating-ui-core-1.7.3.min.js", "floating-ui-dom-1.7.4.min.js"],
@@ -279,7 +292,7 @@ test("scheme privileges: standard + secure only, registered in the single privil
   const schemes = await readMainModule("plugin-schemes.ts");
   assert.match(
     schemes,
-    /registerSchemesAsPrivileged\(\[\s*PLUGIN_ASSET_SCHEME_PRIVILEGES,\s*PLUGIN_RENDERER_SCHEME_PRIVILEGES,\s*GEN_UI_SCHEME_PRIVILEGES,\s*\]\)/,
+    /registerSchemesAsPrivileged\(\[\s*PLUGIN_ASSET_SCHEME_PRIVILEGES,\s*PLUGIN_RENDERER_SCHEME_PRIVILEGES,\s*GEN_UI_SCHEME_PRIVILEGES,\s*STARTUP_ANIMATION_SCHEME_PRIVILEGES,\s*\]\)/,
   );
   const startup = await readMainModule("bootstrap/startup.ts");
   const install = startup.indexOf("installGenUiProtocol({ getHost });");

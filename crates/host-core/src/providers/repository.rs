@@ -119,6 +119,7 @@ fn hydrate_dynamic_plugin_models(db: &Database, provider: &mut ProviderPublic) -
                 api_style: None,
                 temperature: None,
                 mirror_coding_group_id: None,
+                fast_mode_allowed: None,
             }
         })
         .collect();
@@ -485,6 +486,10 @@ pub fn update_provider(
                 .collect(),
         };
         forget_missing_discovered_models(db, &input.id, &configured)?;
+        db.conn().execute(
+            "UPDATE models SET discovery_state = NULL WHERE provider_id = ?1",
+            params![input.id],
+        )?;
     }
     get_provider(db, secrets, &input.id)
 }

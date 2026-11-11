@@ -1,4 +1,57 @@
-# 04. Data Storage (Schema v25)
+# 04. Data Storage (Schema v30)
+
+Schema 30 converges the released MirrorCoding schema 26 and upstream schema 29.
+Upgrade keeps a database backup and retains conversations, queued prompts,
+mobile revisions and side chats while adding model discovery and mode fields.
+No transcript rewrite or application-state reset is required.
+
+### Project path aliases (#2148)
+
+The v28-to-v29 upgrade creates a verified database backup and atomically merges
+case/separator spellings that native filesystem resolution identifies as the
+same local directory. Prefer a row with sessions, then the latest last-opened
+time and lowest id. Rebind every session and schedule before deleting duplicate
+rows; retain pinned state, the earliest creation and latest opening timestamps,
+and update the current project id. Transcript files are never rewritten or
+deleted by this repair. Original path-keyed memory records remain intact; a
+missing canonical memory record inherits the preferred row's value.
+
+Upsert, listing and removal repeat this reconciliation for directories that
+become available after startup. Missing directories retain their normalized
+spelling until resolution proves an alias. Do not lowercase all Windows/macOS
+paths: case-sensitive directories/volumes remain distinct, remote project ids
+are opaque, and a retargeted symlink must not redirect stored ownership.
+After reconciliation, removal prefers an exact stored path before filesystem
+canonicalization. Existing busy checks and permanent-deletion confirmation apply
+to the resulting unified project and all of its sessions.
+
+
+### Lossless tool-image storage (#1868)
+
+Transcript format 2 uses an optional storage-private `binaryStorage` version 1
+envelope. Each recognized image/blob string appears once in its record; typed
+JSON paths and exact text templates reconstruct the original structured result
+and JSON mirror. Templates preserve key order, whitespace and escape spelling. Nested proven
+mirrors share text references when their outer JSON string token has canonical
+JSON spelling, as produced by `JSON.stringify`; other spellings stay literal.
+Arbitrary narrative text is never inferred to be an image or a result mirror.
+The public `UiMessage`, plugin card inputs, extension context, model history and
+existing RPC request/response objects contain the complete decoded values.
+
+Live transcripts, revisions, checkpoints, compaction tails and the Desktop
+outbox share the lossless representation. A first append/update converts an
+existing legacy file through a verified sibling temporary file and atomic
+replacement. Reading alone never converts files. Conversion failure preserves
+the original and propagates an error. Invalid references/unknown codec versions
+are errors; restoration must not continue with an empty history.
+
+New code reads both plain legacy records and encoded records. Database schema
+26 is a version-only migration with a schema-25 backup: it stops older applications
+from misreading a new encoded file. It does not alter user configuration or
+rewrite transcripts at startup. Downgrading to an old application requires a
+complete compatible backup, not merely swapping the SQLite file. No external
+blob directory, new file cleanup lifecycle or lossy image transform is added.
+
 
 ## 0. Ownership decision
 
@@ -62,7 +115,7 @@ or transcript format change is required.
 
 ### User-selected storage location (issue #1213)
 
-Settings → General → Storage can select an empty directory on a different
+Settings → System → Storage can select an empty directory on a different
 volume. A selected directory contains `data/` (the complete host/application
 profile) and `browser/` (Chromium default and persistent plugin/browser session
 state). The existing default directories remain unchanged until the user
@@ -222,7 +275,8 @@ This does not change the SQLite schema or transcript retention.
 
 ### 2.0 Message-owned review snapshots (ADR 0043)
 
-Successful workspace `Write`/`Edit` tool results carry the bounded
+Successful authorized `Write`/`Edit` tool results, including scratch,
+visualization and approved external paths, carry the bounded
 `details.review` record described in [03-tools-and-permissions](03-tools-and-permissions.md).
 The transcript JSONL is the durable index for the visible card; the previous
 bytes and hashes live outside the workspace in
@@ -231,16 +285,35 @@ snapshot directory with `session.delete` and sweeps directories whose session
 no longer exists at startup. A snapshot is never inferred from Git, so a later
 commit does not remove historical review evidence.
 
+Review rollback state is persisted as a small append-only `tool_review_state`
+line (`messageId`, `snapshotId`, `state`) in the live transcript. It changes no
+message position, `seq`, `turn_id`, search text, or message count. Readers apply
+the latest state for the matching tool message and snapshot after decoding the
+selected messages, including bounded windows and nested-tool navigation.
+Repeated acknowledgements of the same state append nothing. Resolving the
+target scans cached message identities and decodes only its record; historical bodies
+are not materialized as a session-wide `UiMessage` array.
+
+The transcript layout separately indexes state-line offsets. Its disposable
+disk-cache version is 3; older caches are rebuilt from the JSONL source. A
+deliberate rewrite or revision archive stores the effective state in its message
+payload, so no mutation log is needed to restore that payload. The snapshot's
+own metadata continues to guard repeated rollback. Older app versions that
+ignore this additive line type can show the previous card state until it is
+folded into a rewritten message; they still enforce the snapshot rollback guard.
+No SQLite schema or RPC contract changes are involved.
+
 ### 2.1 Transcript files (D119)
 
 `sessions/<sessionId>.jsonl` — first line is a session header, then one line
 per message; `seq` is implied by line order:
 
 ```jsonl
-{"type":"session","schema":1,"sessionId":"0b0e…","createdAt":"2026-07-26T09:00:00.000Z"}
+{"type":"session","schema":2,"sessionId":"0b0e…","createdAt":"2026-07-26T09:00:00.000Z"}
 {"type":"message","id":"m1","role":"user","createdAt":"…","blocks":[{"type":"text","text":"…"}]}
 {"type":"message","id":"m2","role":"tool","toolName":"Write","blocks":[{"type":"tool_call","callId":"c1","args":{},"result":{},"status":"success"}]}
 {"type":"message","id":"m3","role":"assistant","createdAt":"…","blocks":[{"type":"thinking","text":"…"},{"type":"text","text":"…"}],"meta":{"usage":{},"modelId":"…"}}
+{"type":"tool_review_state","messageId":"m2","snapshotId":"snapshot-1","state":"rolledBack"}
 {"type":"compaction","id":"cp1","summary":"…","firstKeptMessageId":"m2","throughMessageId":"m3","tokensBefore":917000,"retainedTail":[…],"providerId":"…","modelId":"…","createdAt":"…"}
 ```
 
@@ -254,6 +327,31 @@ persisted before its preceding declaration; a surviving following anchor takes
 precedence, then a preceding anchor, then the record's continuation position.
 Forks remap surviving anchor IDs. Normal system notices remain visible; internal
 model-state rows do not produce transcript bubbles or search text.
+
+Assistant rows may carry `meta.providerReplay = { version: 1, blocks: [...] }`
+(#1972). Each block is `{ type: "thinking", length, signature?, redacted? }` or
+`{ type: "text", length, signature? }` in content order; `length` counts UTF-16
+units of that block's text inside the row's concatenated `thinking` or answer
+text, which are not duplicated here. The signatures are the provider replay
+data pi-ai keeps on content blocks (Anthropic thinking signatures and redacted
+payloads, Responses reasoning items and message ids, Gemini thought signatures,
+Completions reasoning field names). The field is written only when a block
+carries one, is never rendered or searched, and needs no migration; older
+builds ignore it. When a runtime is rebuilt from the transcript, the row's
+blocks are restored with their signatures so the replayed request matches the
+live one and keeps the provider prompt cache. If the stored lengths no longer
+add up to the row's text, or the reasoning text was cleaned on replay, the row
+falls back to the plain thinking-and-text rebuild.
+
+`meta.providerReplay.toolCalls = [{ id, signature }]` keeps the signature a
+provider put on a function call (Gemini `thoughtSignature`), keyed by the tool
+call id. The calls are rebuilt from their tool rows, which carry the same id,
+and get their signature back; this does not depend on the text lengths. A
+call-only reply that carries such signatures is persisted even though it has no
+text. pi-ai still drops a signature whose row came from a different provider or
+model. A row whose serialized replay data exceeds 64 KiB is stored without it
+and uses the plain rebuild, so opaque payloads cannot grow the transcript
+without bound.
 
 Compaction details may include one `systemMessageJson` checkpoint. It replaces old
 system updates in the retained tail and is restored before the summary. These
@@ -441,11 +539,22 @@ plugin's private data directory; the host settings schema does not change.
 New config domains (e.g. MCP servers) start as a namespace; they graduate to
 tables only when they need relations or indexes.
 
+#### Renderer review display preference
+
+The native Review context-line choice is stored as `1`, `3` or `5` under
+renderer localStorage key `pi.desktop.reviewContextLines`. It is shared across
+conversations and projects in the same application profile, survives panel and
+application reopening, and is not synchronized across devices. Missing, invalid
+or unreadable values fall back to 3; failed writes do not block the current
+view. Reading the preference does not rewrite storage. This presentation-only
+key does not change database schemas, transcript evidence or saved context hunks.
+
 #### Renderer sidebar preferences (D093)
 
-Sidebar organization is non-authoritative presentation state stored
-best-effort under renderer localStorage key
-`pi.desktop.sidebarPreferences`:
+Sidebar organization is non-authoritative presentation state. Main keeps an
+atomic `sidebar-preferences.json` backup in the selected app data root;
+renderer localStorage key `pi.desktop.sidebarPreferences` supplies first paint.
+See [sidebar layout recovery](../../adr/sidebar-layout-recovery.md).
 
 ```ts
 type SidebarPreferences = {
@@ -477,9 +586,16 @@ type SidebarPreferences = {
   Missing or invalid values fall back to stable path order; pinned and archived
   priority remains applied before manual order. Session `manual`/`order` remain
   compatibility fields and are not exposed by the sidebar.
-- Missing, malformed, or unwritable preferences fall back to empty metadata,
-  `recent`, archived hidden, and the host-selected project. Preference failure
-  never blocks a host operation.
+- Restore the application backup before bootstrap persists the selected Project.
+  Without a backup, migrate a valid legacy cache, including an explicitly empty
+  tab list. Only if neither copy is valid, recover registered Projects from
+  `projects.list`. Existing valid layouts never reopen intentionally closed tabs.
+- An unreadable backup must not be replaced with empty startup state; a failed
+  catalog read must not persist an empty recovery result. Writes are limited to
+  2 MiB, flushed and atomically renamed through dedicated trusted-Main-frame IPC.
+  Project/Session/Workspace authority remains with Rust. Offline storage
+  relocation remaps internal retained paths and Project metadata keys while
+  preserving external Projects and display labels.
 - The record never contains transcript content, tool arguments, provider
   configuration, or secrets. Clearing it changes presentation only.
 - `openProjectPaths` retains sidebar tabs. The selected workspace remains
@@ -571,6 +687,7 @@ CREATE TABLE models (
   context_window    INTEGER,
   max_output_tokens INTEGER,
   deprecated        INTEGER NOT NULL DEFAULT 0,
+  discovery_state   TEXT CHECK (discovery_state IN ('published', 'unlisted')),
   updated_at        INTEGER NOT NULL,
   PRIMARY KEY (provider_id, model_id)
 ) WITHOUT ROWID;
@@ -579,6 +696,14 @@ CREATE TABLE models (
 Refresh (spec 13 §6/§9) upserts `discovered` rows and **never overwrites
 `source='user'`** rows. Recent-model MRU stays in `kv(cache)` — it is a
 bounded display list, not relational data.
+
+Schema v25 adds nullable `discovery_state`, distinct from metadata deprecation.
+The v24 upgrade backs up first, adds the field transactionally, and marks
+existing discovered rows as past publication evidence. User-owned rows remain
+unknown. No provider configuration, credentials, sessions, or turns are changed.
+Configured missing rows retain an `unlisted` marker across restart; an endpoint
+change clears it. Older apps refuse the newer schema rather than interpreting
+it incorrectly; rollback requires the pre-migration backup.
 
 ### 4.5 sessions
 
@@ -597,6 +722,8 @@ CREATE TABLE sessions (
                                           'high', 'xhigh', 'max', 'omit')),
   permission_mode TEXT NOT NULL DEFAULT 'inherit' -- D115: inherit follows settings
                 CHECK (permission_mode IN ('inherit', 'ask', 'accept-edits', 'auto')),
+  fast_mode   INTEGER NOT NULL DEFAULT 0       -- ADR 0334: session /fast switch
+               CHECK (fast_mode IN (0, 1)),
   source      TEXT,                            -- import origin: claude-code | codex | opencode | pi
   deleted_at  INTEGER,                         -- plugin trash marker; null means active
   pinned      INTEGER NOT NULL DEFAULT 0,
@@ -647,16 +774,22 @@ CREATE INDEX idx_session_import_origins_plugin
   rename does not update `updated_at`, so changing a label cannot reorder
   recent activity; transcript rows, message count, and session state remain
   unchanged.
-- `title_source` records `legacy`, `default`, `manual`, or `generated`. Schema
-  v23 classifies pre-existing known placeholder titles as `default` and all
-  other titles as `manual`; new session creation and manual rename write the
-  corresponding source. `default` means "not chosen by the user and still
-  replaceable": it covers a new session's placeholder and the deterministic
+- `title_source` records `legacy`, `default`, `manual`, or `generated`. The
+  v22→v23 migration leaves pre-existing titles as `legacy`; new session creation
+  and manual rename write the corresponding source. `default` means "not chosen
+  by the user and still replaceable": it covers a new session's placeholder and
+  the deterministic
   first-prompt fallback, which host-core writes only while the stored title is
   still a recognized placeholder. A placeholder is recognized in every shipped
   locale, because the renderer writes its localized `chat.untitledTask` label
-  when it creates a session. The standalone title plugin can read
-  exact-title compare-and-set, so a manual rename wins a race.
+  when it creates a session; recognition trims and lowercases the stored title
+  against the placeholder set. Schema v23 retains pre-existing v22 titles as
+  `legacy` to protect them from automatic replacement, because historical
+  sessions lack provenance to distinguish an untouched placeholder from a
+  deliberate rename to the same text. Existing v23/v24 rows are not reclassified.
+  The standalone title plugin can read first-turn text only while `default`,
+  and writes using exact-title
+  compare-and-set, so a manual rename wins a race.
 - Import binds every non-empty normalized `projectPath` to `project_id`;
   path-less imports remain `NULL`. Re-importing a deterministic session id
   creates neither another session nor another project row.
@@ -1178,6 +1311,14 @@ CREATE INDEX idx_message_revisions_root
   tool line appended by the persistence outbox in the meantime survives. A
   whole-transcript rewrite from a snapshot taken outside the host lock would
   delete it (ADR 0060).
+- Electron acknowledges the stamped root with `user_message_persisted`, using
+  the root's current message `id` as `optimisticMessageId`. This updates the
+  pager only where that exact user row is already loaded: the active transcript,
+  retained pane, and session cache. A root outside the current history window
+  must not be appended after the latest reply. Archive completion is not a new
+  user-message lifecycle event and does not change the loaded history boundary.
+  If no projection exists, the acknowledgement leaves the cache absent and
+  does not mark the session live, so later prefetch still loads durable history.
 - A branch keeps growing after its archive: later prompts append to it and an
   error-ended turn never reaches `agent_end`. So every operation that discards
   the live branch first writes it back over the revision it belongs to (D307):
@@ -1452,6 +1593,11 @@ sweep promotes a leftover checkpoint whose final row never landed: as
 `aborted` turn. `completed`/`error` endTurn does not delete an unindexed
 checkpoint. A user Stop does not touch the checkpoint, because the runtime's
 own aborted final row is still on its way and removes it on arrival.
+Checkpoint writes are serialized per session even across message settlement:
+forgetting a pending snapshot does not cancel or release an already issued RPC.
+Shutdown drains both pending snapshots and unfinished writes before disposing
+the host. A final-message flush stays scoped to that message; later replies keep
+the streaming throttle, and other sessions can save independently.
 Electron handshake awaits the outbox drain before a cold `session.get`.
 Renderer-side Stop never rewrites a transcript that has a
 started reply (spec 01 §5.3); its only rewrite is the undo of an unanswered
@@ -1489,6 +1635,11 @@ prefix length those offsets describe. Serving a window seeks to its first
 selected line instead of parsing the history in front of it, so the common
 cached read is proportional to the requested page. Consequences:
 
+- A bounded tail page includes checkpoints appended after its last message,
+  so reopening a just-compacted session returns the newest checkpoint and its
+  context estimate. Middle pages retain the active checkpoint and only those
+  within their message offsets; they do not load the complete chain (#2163).
+
 - The layout is derived data, cached in memory and, when reliable file identity
   is available, in the sibling `<sessionId>.jsonl.layout` file. Unix uses the
   device and inode; Windows uses the volume serial number and file ID. If the
@@ -1499,8 +1650,15 @@ cached read is proportional to the requested page. Consequences:
   prefix before reuse. Missing, old, unknown, corrupt, or mismatched caches are
   ignored and rebuilt from the JSONL source. Cache read/write failures are
   diagnostic only and do not make the session unreadable.
-- A matching identity and complete prefix permits append-only incremental
-  scanning. A transcript rewrite invalidates both in-memory and disk layouts
+- Format 3 additionally caches parsed message identities, with malformed rows
+  retaining an unresolved identity for explicit validation on point reads.
+  A cold scan parses each identity once; cached identity lookup reads only the
+  selected message line and verifies its ID before returning its position.
+- Reuse requires a matching identity and modification/change-time generation.
+  Host-owned appends from that proven generation extend an in-memory prefix
+  incrementally. A lagging disk cache or an unknown change forces a rescan,
+  including an equal-length ID edit followed by append. A transcript rewrite
+  invalidates both in-memory and disk layouts
   only after its atomic replacement succeeds; delete also removes both. Cache
   invalidation stays in transcript rewrite/delete ownership, not the generic
   atomic-swap helper used by unrelated files.
@@ -1565,7 +1723,7 @@ truncating at a guessed position.
 - JSON columns are read blind on hot paths (shipped to the renderer as-is);
   anything filtered or summed is a promoted column by rule.
 
-## 7. Versioning, v7 reset, and v8-to-v25 migration
+## 7. Versioning, v7 reset, and v8-to-v30 migration
 
 - `PRAGMA user_version` stays the schema authority; future structural changes
   add ordered Rust migration fns again, each in one transaction, with a
@@ -1576,7 +1734,7 @@ truncating at a guessed position.
   Sessions, providers, and settings from the old file are not carried over;
   the archive remains for manual recovery. All pre-v7 migration code
   (v1 `settings.sqlite` import, v2→v6 chain) is deleted.
-- Fresh installs run the full v25 DDL directly.
+- Fresh installs run the full v30 DDL directly.
 - **Schema v25 combines both released v24 histories.** Upstream v24 added the
   worktree registry; MirrorCoding v24 already carried the durable mobile change
   index. The v24-to-v25 transaction ensures both sets of tables and the session
@@ -1644,9 +1802,22 @@ truncating at a guessed position.
 - **Schema v22 is additive.** It replaces `idx_sessions_updated` with
   `idx_sessions_updated_id(updated_at DESC, id DESC)` for session-list ordering.
   It changes no rows or persisted fields; a v21 backup precedes the migration.
-- **Schema v23 is additive.** It adds `sessions.title_source` and classifies
-  existing placeholder titles as `default`; every other existing title is
-  preserved and classified as `manual`. The migration keeps a v22 backup.
+- **Schema v23 is additive.** It adds `sessions.title_source` with default
+  `legacy`. Pre-existing v22 titles remain `legacy`, safely protecting deliberate
+  renames from automatic replacement. The migration keeps a v22 backup.
+- **Schema v24 is additive.** It adds the `worktrees` registry and
+  `projects.worktree_setup_command` for isolated sessions (ADR 0329). The
+  migration keeps a v23 backup.
+- **Schema v25 is additive.** It adds nullable `models.discovery_state` (§ 4).
+  The migration keeps a v24 backup.
+- **Schema v26 is additive.** It marks the storage-private lossless tool-image
+  envelope (#1868). It is a version-only migration with a v25 backup: it stops
+  older applications from misreading an encoded transcript file, without
+  altering user configuration or rewriting transcripts at startup.
+- **Schema v27 is additive.** It adds `sessions.fast_mode` (ADR 0334), the
+  session `/fast` switch, defaulting to `0` for every existing session. Forks
+  copy it; scheduled runs and delegated workers start at `0`. The migration
+  keeps a v26 backup.
 - **Schema v14 is additive.** It adds nullable `sessions.deleted_at`, the
   partial deletion index, and `session_import_origins`. Existing sessions stay
   active and have no origin rows. The migration runs in the same guarded
@@ -1938,3 +2109,37 @@ An unknown price is distinct from a known zero price; partial known costs remain
 on the individual operations. Late usage targets its captured turn and does not
 revive it or debit the currently active turn. Immediate nested parent and owning
 Task remain separate optional transcript/event fields.
+
+## Round review reader
+
+New native review snapshots may include a bounded `contexts.json` containing
+only 1/3/5-line context hunks and optional execution-root/context-availability
+metadata. No complete after-image or full-file context cache is written. Existing `before` bytes
+and post-tool hashes retain their rollback roles. Extended context never reads
+current workspace bytes; legacy snapshots without the preview remain readable
+and report that extended context is unavailable. No database schema change or
+second capture store is introduced; normal session-owned cleanup applies.
+
+Preview computation removes identical line prefixes/suffixes before allocating
+its LCS matrix, then reattaches those equal lines to preserve original hunk
+coordinates and finite context. The existing 512 KiB-per-image, 4000-total-lines
+per side, 2,000,000-middle-cell, and context serialization caps are unchanged.
+This affects new captures only; missing historical previews are not reconstructed
+from current disk contents.
+
+
+## User-defined mode runs (schema 29)
+
+ADR `mode-definitions` adds one v28-to-v29 migration. It backs up the existing
+database before adding `mode_snapshots`, `mode_runs`, `mode_gate_results` and
+`sessions.mode_snapshot_hash`. Existing sessions and Plan approvals are retained.
+Mode ids remain in `sessions.mode`; `chat` still normalizes to `plan`.
+
+A run references an immutable definition snapshot, its current stage, revision,
+claim, permission origin, budgets, token usage and completed-round count.
+Gate results record the stage, action, outcome and bounded evidence. At most
+one open run exists per session. Restart clears in-flight claims and pauses
+those runs without replaying work. Deleting a session cascades its run records.
+
+Host-started turns evaluate Auto as Accept edits. A run's original snapshot
+remains authoritative even when its source file changes.

@@ -601,7 +601,7 @@ mod tests {
             assert_eq!(entries[0].content, "existing");
             assert_eq!(entries[0].user_message_id.as_deref(), mobile_message_id);
             assert!(entries[0].voice_origin.is_none());
-            assert_eq!(crate::db::SCHEMA_VERSION, 26);
+            assert_eq!(crate::db::SCHEMA_VERSION, 30);
         }
     }
 
