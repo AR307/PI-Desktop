@@ -72,7 +72,7 @@ export function ThinkingLevelSlider({ levels, level, label, commit }: Props) {
           data-hovered={hoveredIndex === stop ? "true" : undefined}
           className={`composer-thinking-tick ${index === stop ? "active" : ""}`}
           onMouseDown={(event) => event.preventDefault()}
-          onClick={() => select(stop)}>{candidate}</button>)}
+          onClick={() => select(stop)}>{candidate === "ultra" ? "Ultra" : candidate}</button>)}
       </div>
       <input
         type="range"
@@ -96,13 +96,6 @@ export function ThinkingLevelSlider({ levels, level, label, commit }: Props) {
           if (SLIDER_KEYS.has(event.key)) event.stopPropagation();
         }}
       />
-    </div>
-    <div className="composer-thinking-ticks" aria-hidden="true">
-      {levels.map((candidate, stop) => <button key={candidate} type="button" tabIndex={-1}
-        data-hovered={hoveredIndex === stop ? "true" : undefined}
-        className={`composer-thinking-tick ${index === stop ? "active" : ""}`}
-        title={candidate} onMouseDown={(event) => event.preventDefault()}
-        onClick={() => select(stop)}>{candidate === "ultra" ? "Ultra" : candidate}</button>)}
     </div>
   </div>;
 }

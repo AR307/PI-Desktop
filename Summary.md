@@ -6,6 +6,10 @@
   Claude cache controls, side chats and mobile synchronization.
 - Converge database schemas at 30 without resetting conversation or queue data.
 - Keep side-chat discard confirmation when closing multiple work-panel tabs.
+- Align model-selection and side-chat user-path tests with the source rail and
+  session-owned Fast/Ultra state.
+- Remove duplicated reasoning labels that overlapped the model list; retain
+  native pointer and keyboard interaction for the slider, including Ultra.
 - Publish Windows packages; keep other platform feeds on their existing release.
 
 ## 2026-10-29 - Prepare PI-Desktop 0.21.1

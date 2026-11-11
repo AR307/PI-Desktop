@@ -52,7 +52,9 @@ const models: ModelInfo[] = ["model-a", "model-b"].map((modelId) => ({
   source: "user",
 }));
 
-useAppStore.setState({ providers: [provider], providerModels: { [provider.id]: models },
+useAppStore.setState({
+  sessions: [{ id: "fixture-session", fast: false, ultra: false }],
+  providers: [provider], providerModels: { [provider.id]: models },
   recentModels: ["model-d", "model-c", "model-b", "model-a"].map(modelId => ({ providerId: provider.id, modelId })),
 });
 
@@ -104,6 +106,11 @@ globalThis.composerModelSelectionProbe = async () => {
   await settle();
   document.querySelector<HTMLButtonElement>(".composer-model-thinking-chip")!.click();
   await settle();
+  const range = document.querySelector<HTMLInputElement>(".composer-thinking-range")!;
+  const ticks = document.querySelectorAll(".composer-thinking-tick");
+  if (ticks.length !== Number(range.max) + 1) {
+    throw new Error("Reasoning labels must render once inside their slider rail");
+  }
   const modelRows = () => Array.from(document.querySelectorAll<HTMLButtonElement>(".composer-model-list [role=menuitemradio]"));
   const railItems = () => Array.from(document.querySelectorAll<HTMLButtonElement>(".composer-model-rail [role=menuitemradio]"));
   const recentRows = modelRows();

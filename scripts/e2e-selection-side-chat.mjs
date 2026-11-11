@@ -634,10 +634,7 @@ try {
   await key("Home", 36);
   await send("Emulation.clearDeviceMetricsOverride");
   await click(".side-chat-pane .composer-model-thinking-chip");
-  await click(".composer-menu-entry[aria-haspopup=menu]");
-  await evaluate(
-    "[...document.querySelectorAll('.composer-menu-entry')].find(e=>/其他模型|Other models/.test(e.textContent))?.click()",
-  );
+  await click('.composer-model-rail-item[title="Local fixture"]');
   await waitFor(
     () =>
       evaluate("!!document.querySelector('.composer-model-option[title=\"fixture-reasoning\"]')"),
@@ -651,11 +648,24 @@ try {
     "side model saved",
   );
   await waitFor(
-    () => evaluate("!!document.querySelector('.composer-thinking-tick[title=\"high\"]')"),
+    () => evaluate("[...document.querySelectorAll('.composer-thinking-rail .composer-thinking-tick')].some(tick => tick.textContent === 'high')"),
     5000,
     "reasoning options",
   );
-  await click('.composer-thinking-tick[title="high"]');
+  const reasoningPoint = await evaluate(`(() => {
+    const rail = document.querySelector('.composer-thinking-rail');
+    const ticks = [...rail.querySelectorAll('.composer-thinking-tick')];
+    const index = ticks.findIndex(tick => tick.textContent === 'high');
+    const bounds = rail.getBoundingClientRect();
+    const x = bounds.left + bounds.width * (index + 0.5) / ticks.length;
+    const y = bounds.top + bounds.height / 2;
+    if (!document.elementFromPoint(x, y)?.matches('.composer-thinking-range')) {
+      throw new Error('The reasoning slider must receive pointer input');
+    }
+    return {x, y};
+  })()`);
+  await send("Input.dispatchMouseEvent", {type: "mousePressed", button: "left", clickCount: 1, ...reasoningPoint});
+  await send("Input.dispatchMouseEvent", {type: "mouseReleased", button: "left", clickCount: 1, ...reasoningPoint});
   await waitFor(
     async () => (await invoke("sessionGet", sideId)).session.thinkingLevel === "high",
     10000,

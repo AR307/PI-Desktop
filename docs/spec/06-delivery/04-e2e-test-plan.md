@@ -20016,6 +20016,10 @@ host-created files. The full app's file-preview viewer is covered separately.
   image model selection and provider configuration remain available.
 - Coverage: recent-models.test.mjs, recent-model-flow.test.mjs,
   default-model-picker.test.mjs, and scripts/e2e-composer-model-selection.mjs.
+- Open the source rail in a side chat, select another model and click its high
+  reasoning stop through the native range. Labels render once inside the rail;
+  the selected child configuration persists without changing the parent.
+  Coverage: scripts/e2e-selection-side-chat.mjs.
 
 ### MC installation recovery and scratch HTML (2026-10-06)
 

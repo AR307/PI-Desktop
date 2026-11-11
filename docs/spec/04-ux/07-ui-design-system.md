@@ -984,19 +984,13 @@ The composer renders only controls connected to the active pi session:
   enhancement is not built in. The trigger shows a Bot icon, the current model,
   and reasoning level; `off` omits
   the level text. Its single `role="menu"`
-  popover opens above the trigger at `bottom: calc(100% + 8px)` and starts with
-  exactly two current-value entries. When the menu lists more than one
-  level (`omit` plus the binding's enabled canonical levels), a drag slider
-  sits directly beneath the Reasoning level entry; slider and tick commits
-  apply without leaving the root. Tick labels are not tab stops — the range
-  input is the accessible control. Each entry replaces
-  the menu contents in-place with a back row and its submenu. The Model
-  submenu contains search plus sticky provider groups. Each model row begins
-  at one tab stop beneath its provider heading, making the provider → model
-  hierarchy legible without altering the model label. The Reasoning submenu
-  lists `omit` then the enabled levels as radio rows with a selected-row
-  check; selecting from the list returns to the root without dismissing the
-  popover.
+  popover opens above the trigger. A source rail selects recent models or a
+  configured provider; search spans all sources. MirrorCoding model selection
+  opens its group choices in place. Reasoning uses one footer range control
+  with one label per stop, rendered inside its rail. Labels never cover the
+  model list. The native range owns pointer, keyboard and accessibility input;
+  commits keep the menu open. MirrorCoding Fast and Claude cache controls
+  retain their own settings.
 - While the active session is running, the draft and runtime controls stay
   editable as next-turn choices; only Send is disabled. Host configuration
   remains pinned for the in-flight turn and the latest queued choice is

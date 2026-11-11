@@ -1,8 +1,9 @@
 import type { RecentModel } from "../../../apps/desktop/src/lib/recent-models";
 import { useSyncExternalStore } from "react";
-import type { ModelInfo, ProviderPublic } from "@pi-desktop/shared";
+import type { ModelInfo, ProviderPublic, Session } from "@pi-desktop/shared";
 
 type StoreState = {
+  sessions: Pick<Session, "id" | "fast" | "ultra">[];
   providers: ProviderPublic[];
   recentModels: RecentModel[];
   providerModels: Record<string, ModelInfo[]>;
@@ -13,6 +14,7 @@ type StoreState = {
 
 const listeners = new Set<() => void>();
 let state: StoreState = {
+  sessions: [],
   providers: [],
   recentModels: [],
   providerModels: {},
