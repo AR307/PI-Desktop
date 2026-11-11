@@ -157,6 +157,7 @@ const { MessageRow } = load(new URL("../src/features/chat/transcript/MessageRow.
     useTranscriptMenu: () => () => {},
     useChatTextActions: () => ({ copyText: () => {}, selectText: () => {} }),
   },
+  "../DirectoryReferenceCard": { DirectoryReferenceCard: () => null },
   "./shared": shared,
 });
 

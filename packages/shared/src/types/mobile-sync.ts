@@ -2,6 +2,7 @@ import type { RacpItemSummary, RacpSession, RacpSessionChangesPage, RacpSessionS
 import type { ImageGenerationCapability, ImageGenerationState, ImageSessionConfig } from "./images.js";
 import type { ModelModalities, SessionThinkingLevel, ThinkingLevel } from "./models.js";
 import type { PlanProposal } from "./plans.js";
+import type { Mode } from "./common.js";
 
 /** A desktop-owned share. Project membership is resolved at request time. */
 export type MobileSyncScope = { kind: "account" | "project" | "session"; id: string; label: string };
@@ -85,7 +86,7 @@ export type MobileSessionHistoryPage = {
 };
 
 export type MobileSessionChangesPage = RacpSessionChangesPage;
-export type MobileTaskMode = "agent" | "plan" | "goal" | "image";
+export type MobileTaskMode = Mode | "image";
 
 /** Image capability metadata exposed to the mobile picker. */
 export type MobileImageGenerationCapability = ImageGenerationCapability;

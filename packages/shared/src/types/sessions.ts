@@ -27,6 +27,7 @@ export type SessionConfigurationInput = {
   permissionMode?: PermissionMode;
   ultra?: boolean;
   fast?: boolean;
+  fastMode?: boolean;
 };
 
 export type SessionCapabilities = {
@@ -72,6 +73,12 @@ export type SessionSummary = {
   thinkingLevel: SessionThinkingLevel;
   /** Per-session permission mode; `inherit` follows the global default (D115). */
   permissionMode: PermissionMode;
+  /**
+   * Session `/fast` switch (ADR 0334). Requests use the priority tier only
+   * when the selected model also allows it. Older hosts and remote sessions
+   * omit it, meaning off.
+   */
+  fastMode?: boolean;
   /** Effective capability for this session's exact provider/model pair. */
   supportsReasoning?: boolean;
   /** Effective image-input capability for this session's exact model. */
@@ -147,6 +154,12 @@ export type ContextCompactionStatus = {
   generation: number;
   /** Estimated tokens the summary itself occupies in the model context. */
   summaryTokens: number;
+  /**
+   * Estimated tokens of the whole next request right after this checkpoint
+   * was installed. The composer shows it until a newer request reports
+   * provider usage (#2015). Absent on checkpoints written before it existed.
+   */
+  contextTokens?: number;
 };
 
 /**
@@ -159,6 +172,9 @@ export type ContextCompactionStatus = {
  */
 export type ContextCompactionMark = ContextCompactionStatus & {
   id: string;
+  /** Model that rebuilt the compacted context, when recorded by the runtime. */
+  providerId?: string;
+  modelId?: string;
   /** Last message the checkpoint covers; the row renders right after it. */
   throughMessageId: string;
   /** False when the window rolled over without asking for a summary. */
@@ -221,6 +237,7 @@ export type AgentActivity =
   | { phase: "starting"; since: number }
   | { phase: "waiting-model"; since: number }
   | { phase: "preparing"; since: number }
+  | { phase: "waiting-tool-stop"; since: number }
   | {
       phase: "compacting";
       since: number;

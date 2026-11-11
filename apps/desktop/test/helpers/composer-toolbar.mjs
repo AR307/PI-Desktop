@@ -36,7 +36,7 @@ export const TOOLBAR_PROPS = {
     task: "chat", view: "root", showView: noop,
     open: false,
     setOpen: noop,
-    otherModelsExpanded: false, setOtherModelsExpanded: noop, hasOtherModels: false,
+    sections: [], activeSection: null, sectionStep: 0, selectSection: noop, showSectionRail: false, paneRows: 0, searching: false,
     query: "",
     setQuery: noop,
     modelHighlight: -1,

@@ -11,6 +11,8 @@ import type {
 import { editorSelectionRange, readEditorValue } from "./editor";
 import { ComposerImagePreview } from "./ComposerImagePreview";
 import { ComposerImageHover } from "./ComposerImageHoverPreview";
+import { DirectoryReferenceCard } from "../DirectoryReferenceCard";
+import type { ComposerFileReference } from "./model";
 import { composerSuggestionKeyAction } from "./plugins/suggestion-keys";
 import type { ComposerSuggestionView } from "./hooks/useComposerSuggestion";
 import type { CompletionController } from "./hooks/useComposerCompletions";
@@ -18,6 +20,8 @@ import type { ComposerImagePreviewController } from "./hooks/useComposerImagePre
 
 export type ComposerInputProps = {
   imagePreview?: ComposerImagePreviewController;
+  directoryReferences?: ComposerFileReference[];
+  onRemoveDirectory?: (id: string) => void;
   inputRef: RefObject<HTMLDivElement | null>;
   value: string;
   placeholderText: string;
@@ -37,7 +41,7 @@ export type ComposerInputProps = {
   onAcceptCompletion: (index: number) => void;
   onSubmit: (steering?: boolean) => void;
   onInsertNewline: () => void;
-  onInput: (source: string, caret: number) => void;
+  onInput: (source: string, caret: number, composing: boolean) => void;
   /** Terminal-style recall; returns true when the arrow key was consumed. */
   onHistoryNavigate: (direction: "older" | "newer") => boolean;
   onCompositionStart: () => void;
@@ -56,6 +60,8 @@ export type ComposerInputProps = {
 /** Rich contenteditable input; draft state and async operations stay outside. */
 export function ComposerInput({
   imagePreview,
+  directoryReferences = [],
+  onRemoveDirectory,
   inputRef,
   value,
   placeholderText,
@@ -86,6 +92,19 @@ export function ComposerInput({
     <div className="composer-input-wrap">
       {imagePreview ? <ComposerImagePreview controller={imagePreview} /> : null}
       {imagePreview ? <ComposerImageHover controller={imagePreview} editorRef={inputRef} /> : null}
+      {directoryReferences.length > 0 ? (
+        <div className="directory-reference-list">
+          {directoryReferences.map((reference) => (
+            <DirectoryReferenceCard
+              key={reference.id}
+              path={reference.path}
+              name={reference.name}
+              disabled={inputBlocked}
+              onRemove={() => onRemoveDirectory?.(reference.id)}
+            />
+          ))}
+        </div>
+      ) : null}
       <div className="composer-input-stage">
         {/* React does not render children into this node; the editor module
           paints atomic attachment chips imperatively. */}
@@ -118,13 +137,20 @@ export function ComposerInput({
             const element = event.currentTarget;
             const source = readEditorValue(element);
             const { start } = editorSelectionRange(element);
+            const native = event.nativeEvent as InputEvent;
             // An input outside a composition proves the previous one ended,
             // even when the IME never sent compositionend (#929).
-            if (!(event.nativeEvent as InputEvent).isComposing) onSettledInput();
-            onInput(source, start);
+            if (!native.isComposing) onSettledInput();
+            onInput(source, start, native.isComposing);
           }}
           onCompositionStart={onCompositionStart}
-          onCompositionEnd={onCompositionEnd}
+          onCompositionEnd={(event) => {
+            const element = event.currentTarget;
+            const source = readEditorValue(element);
+            const { start } = editorSelectionRange(element);
+            onCompositionEnd(event);
+            onInput(source, start, false);
+          }}
           onFocus={onFocus}
           onBlur={onBlur}
           onKeyDown={(event: ReactKeyboardEvent<HTMLDivElement>) => {

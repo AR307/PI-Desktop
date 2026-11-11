@@ -13,7 +13,9 @@
 
 use std::collections::{HashMap, VecDeque};
 use std::sync::Arc;
-use std::time::Instant;
+use std::time::{Duration, Instant};
+
+pub(crate) mod jobs;
 
 use crate::tools;
 use serde::Serialize;
@@ -97,6 +99,16 @@ pub struct BackgroundTask {
     pub shared: Arc<Mutex<TaskShared>>,
     stop: watch::Sender<bool>,
     finished: watch::Sender<bool>,
+    settled: watch::Sender<Option<Duration>>,
+}
+
+impl BackgroundTask {
+    fn elapsed_ms(&self) -> u64 {
+        self.settled
+            .borrow()
+            .unwrap_or_else(|| self.started_at.elapsed())
+            .as_millis() as u64
+    }
 }
 
 #[derive(Serialize)]
@@ -195,7 +207,7 @@ impl BackgroundTaskRegistry {
                     command: task.command.clone(),
                     command_shell_id: task.command_shell_id.clone(),
                     state,
-                    elapsed_ms: task.started_at.elapsed().as_millis() as u64,
+                    elapsed_ms: task.elapsed_ms(),
                     exit_code,
                 }
             })
@@ -334,6 +346,7 @@ fn register_spawned_task(
         })),
         stop,
         finished,
+        settled: watch::channel(None).0,
     };
     registry.order.push(task.id.clone());
     registry.tasks.insert(task.id.clone(), task.clone());
@@ -370,11 +383,23 @@ async fn supervise(
     // deadlock the readers, and disable recv after EOF to avoid a busy loop.
     while exit.is_none() || !output_closed {
         tokio::select! {
+            // An already observed exit takes precedence over a concurrent
+            // stop, and stopping takes precedence over a busy output pipe.
+            biased;
             waited = &mut wait, if exit.is_none() => {
                 exit = Some(waited);
                 if let Err(error) = runner.ownership.terminate_fail_closed(runner.pid) {
                     tracing::error!(task_id = %task.id, %error, "background task exit cleanup failed");
                     lifecycle_failed = true;
+                }
+            }
+            changed = stop_rx.changed(), if exit.is_none() && !stopping => {
+                if changed.is_err() || *stop_rx.borrow() {
+                    stopping = true;
+                    if let Err(error) = runner.ownership.terminate_fail_closed(runner.pid) {
+                        tracing::error!(task_id = %task.id, %error, "background task stop failed");
+                        lifecycle_failed = true;
+                    }
                 }
             }
             chunk = chunk_rx.recv(), if !output_closed => {
@@ -392,15 +417,6 @@ async fn supervise(
                 };
                 if dropped {
                     shared.truncated = true;
-                }
-            }
-            changed = stop_rx.changed(), if !stopping => {
-                if changed.is_err() || *stop_rx.borrow() {
-                    stopping = true;
-                    if let Err(error) = runner.ownership.terminate_fail_closed(runner.pid) {
-                        tracing::error!(task_id = %task.id, %error, "background task stop failed");
-                        lifecycle_failed = true;
-                    }
                 }
             }
         }
@@ -423,8 +439,7 @@ async fn supervise(
         }
     };
 
-    let stopped = *stop_rx.borrow();
-    let state = match (exit_code, stopped, lifecycle_failed) {
+    let state = match (exit_code, stopping, lifecycle_failed) {
         (_, _, true) => BackgroundTaskState::Failed,
         (_, true, false) => BackgroundTaskState::Stopped,
         (Some(0), false, false) => BackgroundTaskState::Exited,
@@ -437,6 +452,7 @@ async fn supervise(
         shared.truncated |= stdout_dropped || stderr_dropped;
         shared.state = state;
         shared.exit_code = exit_code;
+        task.settled.send_replace(Some(task.started_at.elapsed()));
     }
     task.finished.send_replace(true);
     on_changed();
@@ -471,14 +487,7 @@ pub async fn stop_task(registry: &BackgroundTaskRegistry, id: &str) -> Result<bo
     let Some(task) = registry.tasks.get(id).cloned() else {
         return Ok(false);
     };
-    let shared = task.shared.lock().await;
-    // Idempotent: a task that already finished or is already stopping reports
-    // "nothing to do" so a double click cannot queue a second kill.
-    if shared.state != BackgroundTaskState::Running || *task.stop.borrow() {
-        return Ok(false);
-    }
-    let _ = task.stop.send(true);
-    Ok(true)
+    jobs::stop(&task).await
 }
 
 /// Explicit temporary-session closure also ends detached commands before its
@@ -551,6 +560,9 @@ impl BackgroundTaskRegistry {
     }
 }
 
+#[cfg(all(windows, test))]
+mod windows_tests;
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -558,7 +570,7 @@ mod tests {
 
     /// A real session row, because a background spawn now refuses to start for
     /// a session that no longer exists.
-    fn new_session(st: &crate::state::AppState) -> String {
+    pub(super) fn new_session(st: &crate::state::AppState) -> String {
         crate::sessions::create_session(&st.db, Some("test".into()), None, None, None, None)
             .unwrap()
             .id
@@ -593,6 +605,9 @@ mod tests {
             runner,
             Arc::new(move || notify.notify_one()),
         );
+        // On this current-thread runtime the stop is queued before the
+        // supervisor first polls the already-finished child.
+        assert!(jobs::stop(&task).await.unwrap());
         tokio::time::timeout(Duration::from_secs(5), changed.notified())
             .await
             .expect("the process must settle after draining both pipes");
@@ -600,6 +615,13 @@ mod tests {
         assert_eq!(output["state"], "exited");
         assert_eq!(output["stdout"], "final-stdout");
         assert_eq!(output["stderr"], "final-stderr");
+        let elapsed = jobs::snapshot(&task, false).await["elapsedMs"].clone();
+        tokio::time::sleep(Duration::from_millis(20)).await;
+        assert_eq!(jobs::snapshot(&task, false).await["elapsedMs"], elapsed);
+        assert_eq!(
+            serde_json::json!(registry.summaries()[0].elapsed_ms),
+            elapsed
+        );
     }
 
     #[tokio::test]

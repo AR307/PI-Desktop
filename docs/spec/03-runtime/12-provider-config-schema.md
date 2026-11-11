@@ -706,10 +706,21 @@ The canonical DDL lives in [04-data-storage](04-data-storage.md) (D086). Summary
   never overwrites an edit or delete made while it was in flight.
 
 ### `providers.cacheModels` (internal host RPC)
-- in: `{ providerId, models: DiscoveredModelInput[] }`
-- behavior: transactionally upsert successful live discovery into `models` as
-  `source='discovered'`; never overwrite `source='user'` rows and never delete
-  prior cache rows on a failed or partial refresh
+- in: `{ providerId, models: DiscoveredModelInput[], complete?: boolean }`
+- behavior: atomically upsert discovered rows with `discoveryState: "published"`.
+  Only an explicitly complete, nonempty, valid answer marks previously published
+  missing rows `"unlisted"`; missing configured rows are retained with that state,
+  while unconfigured discovered rows may be pruned. An omitted `complete` means
+  additive-only for backward compatibility. User-owned rows, bindings, defaults,
+  and conversation history are never rewritten by discovery.
+- failure/partial behavior: failed or empty responses cannot narrow the cache;
+  paginated, truncated, malformed-row, and larger-reported-total responses are
+  additive-only. The client does not claim to detect undisclosed truncation.
+- consumers: settings keep saved bindings editable; Composer excludes explicitly
+  unlisted rows from ordinary and recent choices. Manual ids never discovered
+  remain selectable. Reappearance restores publication; endpoint edits clear
+  previous publication evidence. Existing selections/defaults are not switched.
+  Unlisted means absent from the last complete list, not proven uncallable.
 - out: `{ cached: number, models: ModelCatalogItem[] }`
 - raw secrets and authorization headers are never part of this call
 

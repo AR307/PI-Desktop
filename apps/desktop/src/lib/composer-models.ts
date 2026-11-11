@@ -41,6 +41,7 @@ export function composerModelsForProvider(
   const task = typeof imageGenerationOrTask === "string" ? imageGenerationOrTask : "chat";
   const imageGeneration = typeof imageGenerationOrTask === "string" ? undefined : imageGenerationOrTask;
   return configuredModelIds(provider).filter((modelId) => {
+    if ((discovered ?? []).some(model => sameComposerModelId(model.modelId, modelId) && model.discoveryState === "unlisted")) return false;
     if (provider.mirrorCoding) {
       return task === "image"
         ? Boolean(provider.mirrorCoding.imageRoutes?.[modelId] || provider.mirrorCoding.imageModels?.[modelId])

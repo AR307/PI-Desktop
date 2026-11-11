@@ -2,6 +2,15 @@ import type { ChangelogEntry } from "./changelog.js";
 
 export const esEntries: ChangelogEntry[] = [
   {
+    version: "0.21.2",
+    date: "2026-11-11",
+    highlights: [
+      "Actualiza a Pi 1.5.0 con modos personalizados, objetivos por etapas y ajustes de uso del ordenador.",
+      "Mejora la selección de modelos, la navegación de ajustes y el historial de conversaciones.",
+      "Conserva MirrorCoding, Gemini, Ultra, conversaciones laterales y datos móviles al actualizar.",
+    ],
+  },
+  {
     version: "0.21.1",
     date: "2026-10-29",
     highlights: [

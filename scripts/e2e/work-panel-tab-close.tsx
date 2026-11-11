@@ -4,6 +4,8 @@ import { createInstance } from "i18next";
 import { I18nextProvider } from "react-i18next";
 import { catalogs } from "@pi-desktop/i18n";
 import { WorkPanel } from "../../apps/desktop/src/components/workpanel/WorkPanel";
+import { IPC, type WorkPanelTabMenuAction, type WorkPanelTabMenuRequest } from "@pi-desktop/shared";
+import { pluginWorkPanelTab, toolWorkPanelTab } from "../../apps/desktop/src/lib/work-panel-tabs";
 import { useAppStore } from "../../apps/desktop/src/stores/app-store";
 
 /*
@@ -29,8 +31,22 @@ type CloseGeometry = {
   hitIsClose: boolean;
   hitIsDescendant: boolean;
 };
+
+type TabContextMenuPathResult = {
+  stage: "context-menu-user-path";
+  passed: true;
+  remainingTabs: number;
+  activeTabId: string | null;
+};
+
+type PluginViewMenuLayerResult = {
+  stage: "plugin-view-menu-layer";
+  pageRemainsVisibleWhileMenuOpen: boolean;
+  pageRemainsVisibleAfterMenuClose: boolean;
+  nativeMenuRequested: boolean;
+};
 declare global {
-  var tabCloseProbe: (stage: string) => Promise<CloseGeometry>;
+  var tabCloseProbe: (stage: string) => Promise<CloseGeometry | TabContextMenuPathResult | PluginViewMenuLayerResult>;
 }
 
 const assert = (condition: unknown, message: string) => {
@@ -47,6 +63,33 @@ const ready = i18n.init({
   resources: { en: { translation: catalogs.en } },
   interpolation: { escapeValue: false },
 });
+const nativeMenuRequests: WorkPanelTabMenuRequest[] = [];
+const nativeMenuSelections: (WorkPanelTabMenuAction | null)[] = [];
+let deferNextNativeMenu = false;
+let finishNativeMenu: (() => void) | null = null;
+const pluginViewVisibility: boolean[] = [];
+window.piDesktop = {
+  channels: IPC,
+  platform: "darwin",
+  invoke: async (channel, ...args) => {
+    if (channel === IPC.invoke.workPanelTabMenu) {
+      nativeMenuRequests.push(args[0] as WorkPanelTabMenuRequest);
+      if (deferNextNativeMenu) {
+        deferNextNativeMenu = false;
+        return await new Promise((resolve) => {
+          finishNativeMenu = () => resolve({ ok: true, data: null });
+        });
+      }
+      return { ok: true, data: nativeMenuSelections.shift() ?? null };
+    }
+    if (channel === IPC.invoke.pluginViewSetVisible) {
+      const payload = args[0] as { visible?: boolean } | undefined;
+      if (typeof payload?.visible === "boolean") pluginViewVisibility.push(payload.visible);
+    }
+    return { ok: true, data: undefined };
+  },
+  on: () => () => undefined,
+};
 
 function element(selector: string): HTMLElement {
   const found = host.querySelector<HTMLElement>(selector);
@@ -131,8 +174,217 @@ function measure(stage: string): CloseGeometry {
   };
 }
 
+async function runTabContextMenuUserPath(): Promise<TabContextMenuPathResult> {
+  useAppStore.setState({
+    workPanelOpen: true,
+    workPanelTabs: [],
+    activeWorkPanelTabId: null,
+    workPanelFileRequest: null,
+    workPanelContexts: {},
+  });
+  renderPanel(1000);
+  openManyLongTabs(3);
+  await rendered();
+
+  const tabIds = () =>
+    [...host.querySelectorAll<HTMLElement>(".work-panel-tab")].map(
+      (tab) => tab.dataset.workPanelTabId,
+    );
+  const initialIds = tabIds();
+  assert(initialIds.length === 3, "fixture did not create three tabs");
+  const firstId = initialIds[0];
+  const secondId = initialIds[1];
+  if (!firstId || !secondId) throw new Error("fixture tab ids are missing");
+
+  const openTabMenu = async (tabId: string, keyboard = false) => {
+    const wrapper = host.querySelector<HTMLElement>(
+      `[data-work-panel-tab-id="${CSS.escape(tabId)}"]`,
+    );
+    assert(wrapper, "target tab wrapper is missing");
+    const tabButton = wrapper!.querySelector<HTMLElement>("[role=tab]");
+    assert(tabButton, "target tab button is missing");
+    window.getSelection()?.removeAllRanges();
+    if (keyboard) tabButton!.focus({ preventScroll: true });
+    const event = new MouseEvent("contextmenu", {
+      bubbles: true,
+      cancelable: true,
+      clientX: keyboard ? 0 : 24,
+      clientY: keyboard ? 0 : 24,
+    });
+    flushSync(() => wrapper!.dispatchEvent(event));
+    assert(event.defaultPrevented, "tab context menu did not prevent the platform menu");
+    await rendered();
+    const menu = document.body.querySelector<HTMLElement>('[role="menu"]');
+    assert(
+      menu,
+      `tab context menu did not open (menus=${document.body.querySelectorAll("[role=menu]").length}; tabs=${host.querySelectorAll(".work-panel-tab").length})`,
+    );
+    assert(
+      menu!.getAttribute("aria-label") === "Side panel tabs",
+      "tab context menu label was not localized",
+    );
+    return menu!;
+  };
+  const menuItem = (menu: HTMLElement, id: string) => {
+    const item = menu.querySelector<HTMLButtonElement>(
+      `[data-context-menu-item="${id}"]`,
+    );
+    assert(item, "missing context-menu item " + id);
+    return item!;
+  };
+
+  let menu = await openTabMenu(firstId, true);
+  document.activeElement?.dispatchEvent(
+    new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true, cancelable: true }),
+  );
+  await rendered();
+  assert(
+    (document.activeElement as HTMLElement | null)?.dataset.contextMenuItem ===
+      "close-other-tabs",
+    "ArrowDown did not move focus through the tab menu",
+  );
+  document.activeElement?.dispatchEvent(
+    new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true }),
+  );
+  await rendered();
+  assert(!document.body.querySelector('[role="menu"]'), "Escape did not close the tab menu");
+
+  menu = await openTabMenu(firstId);
+  flushSync(() => menuItem(menu, "close-tab").click());
+  await rendered();
+  assert(!tabIds().includes(firstId), "Close Tab left the target tab open");
+
+  menu = await openTabMenu(secondId);
+  flushSync(() => menuItem(menu, "close-other-tabs").click());
+  await rendered();
+  assert(tabIds().length === 1 && tabIds()[0] === secondId, "Close Other Tabs did not retain its target");
+  assert(activeTabId() === secondId, "Close Other Tabs did not activate its target");
+
+  menu = await openTabMenu(secondId);
+  assert(menuItem(menu, "close-other-tabs").disabled, "Close Other Tabs must be disabled for one tab");
+  flushSync(() => menuItem(menu, "close-all-tabs").click());
+  await rendered();
+  assert(tabIds().length === 0, "Close All Tabs left resources open");
+  assert(useAppStore.getState().activeWorkPanelTabId === null, "Close All Tabs retained an active tab");
+  assert(useAppStore.getState().workPanelOpen, "Close All Tabs collapsed the work panel");
+  assert(host.querySelector('[data-testid="work-panel-empty"]'), "Close All Tabs did not show the New launcher");
+
+  return {
+    stage: "context-menu-user-path",
+    passed: true,
+    remainingTabs: tabIds().length,
+    activeTabId: useAppStore.getState().activeWorkPanelTabId,
+  };
+}
+
+async function runPluginViewMenuLayerPath(): Promise<PluginViewMenuLayerResult> {
+  const tab = pluginWorkPanelTab("pi.browser", "browser");
+  const reviewTab = toolWorkPanelTab("review");
+  nativeMenuRequests.length = 0;
+  deferNextNativeMenu = true;
+  finishNativeMenu = null;
+  host.style.width = "1000px";
+  pluginViewVisibility.length = 0;
+  flushSync(() => {
+    useAppStore.setState({
+      activeSessionId: "tab-close-plugin",
+      workPanelOpen: true,
+      workPanelTabs: [tab, reviewTab],
+      activeWorkPanelTabId: tab.id,
+      workPanelFileRequest: null,
+      workPanelContexts: {},
+      pluginViews: [{
+        pluginId: "pi.browser",
+        viewId: "browser",
+        ref: "pi.browser/browser",
+        title: "Browser",
+        pluginName: "PI-Desktop",
+        order: 0,
+      }],
+    });
+    root.render(
+      <I18nextProvider i18n={i18n}>
+        <WorkPanel containerWidth={1000} sidebarCollapsed />
+      </I18nextProvider>,
+    );
+  });
+  await rendered();
+  assert(pluginViewVisibility.at(-1) === true, "Browser view did not become visible");
+
+  const reviewTabWrapper = host.querySelector<HTMLElement>(
+    `[data-work-panel-tab-id="${CSS.escape(reviewTab.id)}"]`,
+  );
+  assert(reviewTabWrapper, "Review tab wrapper is missing");
+  const event = new MouseEvent("contextmenu", {
+    bubbles: true,
+    cancelable: true,
+    clientX: 32,
+    clientY: 32,
+  });
+  flushSync(() => reviewTabWrapper!.dispatchEvent(event));
+  assert(event.defaultPrevented, "Review tab did not invoke the native menu over Browser");
+  assert(nativeMenuRequests.length === 1, "Review tab did not request the native menu over Browser");
+  const menuRequest = nativeMenuRequests[0];
+  assert(menuRequest?.canCloseOthers === true, "native menu request has incorrect close-other state");
+  const pageRemainsVisibleWhileMenuOpen = pluginViewVisibility.at(-1) === true;
+  assert(pageRemainsVisibleWhileMenuOpen, "Browser page disappeared while its native menu was open");
+  assert(!document.body.querySelector('[role="menu"]'), "native tab menu must not render underneath the Browser view");
+
+  const cancelNativeMenu = finishNativeMenu;
+  assert(cancelNativeMenu, "native menu test boundary did not open");
+  cancelNativeMenu!();
+  await rendered();
+  const pageRemainsVisibleAfterMenuClose = pluginViewVisibility.at(-1) === true;
+  assert(pageRemainsVisibleAfterMenuClose, "Browser page disappeared after cancelling its native menu");
+  nativeMenuSelections.push("closeTab");
+  const closeEvent = new MouseEvent("contextmenu", {
+    bubbles: true,
+    cancelable: true,
+    clientX: 32,
+    clientY: 32,
+  });
+  flushSync(() => reviewTabWrapper!.dispatchEvent(closeEvent));
+  assert(closeEvent.defaultPrevented, "native menu action could not be reopened");
+  await rendered();
+  assert(
+    useAppStore.getState().workPanelTabs.length === 1 &&
+      useAppStore.getState().workPanelTabs[0]?.id === tab.id,
+    "native Close Tab action did not close only the clicked tab",
+  );
+  assert(pluginViewVisibility.at(-1) === true, "Browser page disappeared after closing the other tab");
+
+  const browserTabWrapper = host.querySelector<HTMLElement>(
+    `[data-work-panel-tab-id="${CSS.escape(tab.id)}"]`,
+  );
+  assert(browserTabWrapper, "Browser tab wrapper is missing");
+  const singleTabEvent = new MouseEvent("contextmenu", {
+    bubbles: true,
+    cancelable: true,
+    clientX: 32,
+    clientY: 32,
+  });
+  flushSync(() => browserTabWrapper.dispatchEvent(singleTabEvent));
+  assert(singleTabEvent.defaultPrevented, "Browser tab did not invoke the native menu");
+  assert(nativeMenuRequests.at(-1)?.canCloseOthers === false, "Close Other Tabs should be disabled for one tab");
+
+
+  return {
+    stage: "plugin-view-menu-layer",
+    pageRemainsVisibleWhileMenuOpen,
+    pageRemainsVisibleAfterMenuClose,
+    nativeMenuRequested: nativeMenuRequests.length === 3,
+  };
+}
+
 globalThis.tabCloseProbe = async (stage) => {
   await ready;
+  if (stage === "context-menu-user-path") {
+    await ready;
+    return runTabContextMenuUserPath();
+  }
+  if (stage === "plugin-view-menu-layer") {
+    return runPluginViewMenuLayerPath();
+  }
 
   if (stage === "narrow-active") {
     renderPanel(900);

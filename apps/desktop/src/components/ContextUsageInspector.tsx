@@ -19,7 +19,7 @@ import { TooltipButton } from "./ui";
 import {
   aggregateToolTokenUsage,
   calculateCacheRate,
-  calculateContextUsage,
+  composerContextUsage,
   calculateTokenRate,
   contextOccupancyTokens,
   contextUsageView,
@@ -30,6 +30,7 @@ import {
   type ContextInspectorPlacement,
 } from "../lib/context-inspector-position";
 import { useSessionTiming } from "../features/chat/context-usage/useSessionTiming";
+import { ContextCostKpis } from "../features/chat/context-usage/ContextCostKpis";
 
 const CONTEXT_RING_RADIUS = 9;
 const CONTEXT_RING_CIRCUMFERENCE = 2 * Math.PI * CONTEXT_RING_RADIUS;
@@ -38,18 +39,22 @@ export function ContextUsageInspector({
   usage,
   turnUsage,
   contextWindow,
+  contextWindowEstimated = false,
   tools,
   responseDurationMs,
   responseOutputTokens,
   responseOutputEstimated = false,
+  compactedContextTokens,
 }: {
   usage: MessageUsage;
   turnUsage: MessageUsage;
   contextWindow: number;
+  contextWindowEstimated?: boolean;
   tools: UiMessage[];
   responseDurationMs?: number;
   responseOutputTokens?: number;
   responseOutputEstimated?: boolean;
+  compactedContextTokens?: number;
 }) {
   const { t } = useTranslation();
   const panelId = useId();
@@ -94,7 +99,11 @@ export function ContextUsageInspector({
     isRunning: isSessionRunning,
     modelRequestActivity,
   });
-  const context = calculateContextUsage(usage, contextWindow);
+  const context = composerContextUsage({
+    usage,
+    contextWindow,
+    compactedContextTokens,
+  });
   // The display preference flips the leading figure only; capacity colors
   // still follow remaining space so the warning state keeps one meaning.
   const usageDisplay = useAppStore((state) =>
@@ -329,7 +338,7 @@ export function ContextUsageInspector({
         <strong>
           {t("chat.usageContextTokens", {
             used: formatCompactTokenCount(context.usedTokens),
-            window: formatCompactTokenCount(contextWindow),
+            window: `${contextWindowEstimated ? "≈ " : ""}${formatCompactTokenCount(contextWindow)}`,
           })}
         </strong>
         <span className="context-inspector-window-percent">
@@ -357,6 +366,12 @@ export function ContextUsageInspector({
           </strong>
         </div>
       </div>
+      <ContextCostKpis
+        open={open}
+        sessionId={sessionId ?? undefined}
+        turnUsage={turnUsage}
+        refreshKey={`${session?.updatedAt ?? ""}:${isSessionRunning}:${turnUsage.totalTokens}:${turnUsage.cost?.total ?? ""}`}
+      />
       {sessionTiming.timing ? (
         <div className="context-inspector-kpis">
           <div>

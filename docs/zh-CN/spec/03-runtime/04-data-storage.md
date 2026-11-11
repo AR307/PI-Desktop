@@ -1,6 +1,39 @@
-# 04. 数据存储（架构 v25）
+# 04. 数据存储（架构 v30）
+
+Schema 30 converges the released MirrorCoding schema 26 and upstream schema 29.
+Upgrade keeps a database backup and retains conversations, queued prompts,
+mobile revisions and side chats while adding model discovery and mode fields.
+No transcript rewrite or application-state reset is required.
 
 > **翻译说明：** 本页是与 [英文源规格](/spec/03-runtime/04-data-storage) 一一对应的机器辅助翻译。代码、协议字段和标识符保持原文；如翻译与英文源事实有歧义，以英文版本为准。
+
+
+
+### Lossless tool-image storage (#1868)
+
+Transcript format 2 uses an optional storage-private `binaryStorage` version 1
+envelope. Each recognized image/blob string appears once in its record; typed
+JSON paths and exact text templates reconstruct the original structured result
+and JSON mirror. Templates preserve key order, whitespace and escape spelling. Nested proven
+mirrors share text references when their outer JSON string token has canonical
+JSON spelling, as produced by `JSON.stringify`; other spellings stay literal.
+Arbitrary narrative text is never inferred to be an image or a result mirror.
+The public `UiMessage`, plugin card inputs, extension context, model history and
+existing RPC request/response objects contain the complete decoded values.
+
+Live transcripts, revisions, checkpoints, compaction tails and the Desktop
+outbox share the lossless representation. A first append/update converts an
+existing legacy file through a verified sibling temporary file and atomic
+replacement. Reading alone never converts files. Conversion failure preserves
+the original and propagates an error. Invalid references/unknown codec versions
+are errors; restoration must not continue with an empty history.
+
+New code reads both plain legacy records and encoded records. Database schema
+26 is a version-only migration with a schema-25 backup: it stops older applications
+from misreading a new encoded file. It does not alter user configuration or
+rewrite transcripts at startup. Downgrading to an old application requires a
+complete compatible backup, not merely swapping the SQLite file. No external
+blob directory, new file cleanup lifecycle or lossy image transform is added.
 
 
 ## 0. 所有权决定
@@ -98,7 +131,7 @@ commit 不会删除历史审查证据。
 每条消息； `seq` 由行顺序隐含：
 
 ```jsonl
-{"type":"session","schema":1,"sessionId":"0b0e…","createdAt":"2026-07-26T09:00:00.000Z"}
+{"type":"session","schema":2,"sessionId":"0b0e…","createdAt":"2026-07-26T09:00:00.000Z"}
 {"type":"message","id":"m1","role":"user","createdAt":"…","blocks":[{"type":"text","text":"…"}]}
 {"type":"message","id":"m2","role":"tool","toolName":"Write","blocks":[{"type":"tool_call","callId":"c1","args":{},"result":{},"status":"success"}]}
 {"type":"message","id":"m3","role":"assistant","createdAt":"…","blocks":[{"type":"thinking","text":"…"},{"type":"text","text":"…"}],"meta":{"usage":{},"modelId":"…"}}
@@ -222,9 +255,10 @@ CREATE TABLE kv (
 
 #### Renderer 侧边栏首选项 (D093)
 
-侧边栏组织是非权威的呈现状态存储
-渲染器 localStorage 键下的尽力而为
-`pi.desktop.sidebarPreferences`：
+Sidebar organization remains non-authoritative presentation state. Main keeps
+an atomic `sidebar-preferences.json` backup in the selected app data root;
+`pi.desktop.sidebarPreferences` in renderer localStorage supplies first paint.
+See [sidebar layout recovery](/adr/sidebar-layout-recovery).
 
 ```ts
 type SidebarPreferences = {
@@ -254,9 +288,16 @@ type SidebarPreferences = {
   拖动项目标题或在该标题上使用键盘箭头会为可见的规范化路径写入连续顺序值。
   缺失或无效值回落到稳定路径顺序；置顶和归档优先级仍在手动顺序之前应用。
   会话 `manual`/`order` 仍是兼容性字段，侧边栏不会公开会话手动重排。
-- 缺失、格式错误或不可写的首选项回退到空元数据，
-  `recent`，存档隐藏，以及主机选择的项目。偏好失败
-  永远不会阻止主机操作。
+- Restore the application backup before bootstrap persists the selected Project.
+  Without a backup, migrate a valid legacy cache, including an explicitly empty
+  tab list. Only if neither copy is valid, recover registered Projects from
+  `projects.list`. Existing valid layouts never reopen intentionally closed tabs.
+- An unreadable backup must not be replaced with empty startup state; a failed
+  catalog read must not persist an empty recovery result. Writes are limited to
+  2 MiB, flushed and atomically renamed through dedicated trusted-Main-frame IPC.
+  Project/Session/Workspace authority remains with Rust. Offline storage
+  relocation remaps internal retained paths and Project metadata keys while
+  preserving external Projects and display labels.
 - 记录从不包含转录内容、工具参数、提供商
   配置或秘密。清除它仅更改显示。
 - `openProjectPaths` 保留侧边栏选项卡。选定的工作空间仍然存在
@@ -365,6 +406,8 @@ CREATE TABLE sessions (
                                           'high', 'xhigh', 'max', 'omit')),
   permission_mode TEXT NOT NULL DEFAULT 'inherit' -- D115: inherit follows settings
                 CHECK (permission_mode IN ('inherit', 'ask', 'accept-edits', 'auto')),
+  fast_mode   INTEGER NOT NULL DEFAULT 0       -- ADR 0334: session /fast switch
+               CHECK (fast_mode IN (0, 1)),
   source      TEXT,                            -- import origin: claude-code | codex | opencode | pi
   deleted_at  INTEGER,                         -- plugin trash marker; null means active
   pinned      INTEGER NOT NULL DEFAULT 0,
@@ -377,14 +420,14 @@ CREATE INDEX idx_sessions_project ON sessions(project_id) WHERE project_id IS NO
 CREATE INDEX idx_sessions_deleted ON sessions(deleted_at) WHERE deleted_at IS NOT NULL;
 ```
 
-`title_source` 记录 `legacy`、`default`、`manual` 或 `generated`。架构 v23 会将已有的
-已知占位标题归类为 `default`，其余标题归类为 `manual`，不改写标题。新建会话和手动重命名
+`title_source` 记录 `legacy`、`default`、`manual` 或 `generated`。v22→v23 迁移将已有标题
+保留为 `legacy`，不改写标题；已有 v23/v24 数据不会重新分类。新建会话和手动重命名
 会写入相应来源。`default` 表示“非用户选择、仍可替换”：它既覆盖新会话的占位标题，也覆盖
 确定性的首条提示兜底标题（host-core 只在存储标题仍是可识别占位标题时才写入）。占位标题在
-所有已发布的语言下都会被识别，因为渲染器创建会话时会写入本地化的 `chat.untitledTask` 文案。
-独立标题插件只能读取 `default` 会话的首轮文本，并且只能用精确标题比较并设置，因此并发手动
-重命名会胜出。
-会胜出。
+所有已发布的语言下都会被识别，因为渲染器创建会话时会写入本地化的 `chat.untitledTask` 文案；
+识别会先 trim 再转小写，并与占位标题集合比较。架构 v23 将已有的 v22 标题保留为 `legacy`，以防止
+其被自动替换，因为历史会话缺少来源元数据来区分未修改的占位符与同名的主动重命名。独立标题插件只能读取
+`default` 会话的首轮文本，并且只能用精确标题比较并设置，因此并发手动重命名会胜出。
 
 插件导入增加一个由主机拥有的来源 sidecar。它与核心会话身份分离，
 每次插件读写都必须匹配创建该行的 `plugin_id`：
@@ -780,6 +823,22 @@ meta.agentName?: string         // the definition name, e.g. "code-reviewer"
 无列、无表、无迁移：属性是有关消息的元数据，并且
 推广它会引起没人提出的疑问。
 
+assistant 行还可以带 `meta.providerReplay = { version: 1, blocks: [...] }`
+（#1972）。每个块按内容顺序记录为 `{ type: "thinking", length, signature?, redacted? }`
+或 `{ type: "text", length, signature? }`；`length` 是该块文本在行内拼接后的
+`thinking` 或正文中的 UTF-16 长度，文本本身不重复保存。签名就是 pi-ai 挂在内容块上
+的 provider 回放数据（Anthropic thinking 签名与 redacted 载荷、Responses 的
+reasoning item 与 message id、Gemini thought signature、Completions 推理字段名）。
+只有块上确实带签名时才写入；不渲染、不参与搜索、无需迁移，旧版本会忽略它。
+runtime 从转录重建时按原块和签名还原，使重放请求与在线请求一致，保住 provider 的
+prompt cache。长度对不上，或推理文本在回放时被清理过，就退回原来的纯文本重建。
+
+`meta.providerReplay.toolCalls = [{ id, signature }]` 按工具调用 id 保存 provider
+挂在函数调用上的签名（Gemini `thoughtSignature`）。工具调用从带同一 id 的工具行重建，
+并据此补回签名，这一步不依赖文本长度。只有函数调用、但带这类签名的回复即使没有文本
+也会持久化。来自不同 provider 或模型的行，pi-ai 仍会丢弃其签名。序列化后的回放数据
+超过 64 KiB 的行不保存该字段，改用纯文本重建，避免不透明载荷让转录无限增长。
+
 这两个字段都可以在重新加载后保存下来，这就是恢复会话嵌套的原因
 就像现场一样（`04-ux/08-component-spec.md` §9.9）。两位消费者阅读了它们：
 
@@ -1166,7 +1225,7 @@ outbox 排空。渲染器侧的停止绝不重写已有已开始回复的转录
 - JSON 列在热路径上盲读（按原样发送到渲染器）；
   任何过滤或求和的内容都是按规则提升的列。
 
-## 7. 版本控制、v7 重置和 v8 到 v25 迁移
+## 7. 版本控制、v7 重置和 v8 到 v30 迁移
 
 - `PRAGMA user_version` 保留模式权限；未来的结构性变化
   再次添加有序的 Rust 迁移 fns，每个都在一个事务中，并带有一个
@@ -1177,7 +1236,7 @@ outbox 排空。渲染器侧的停止绝不重写已有已开始回复的转录
   旧文件中的会话、提供程序和设置不会保留；
   存档仍保留以供手动恢复。所有 v7 之前的迁移代码
   （v1 `settings.sqlite` 导入，v2→v6 链）被删除。
-- 全新安装直接运行完整的 v25 DDL。
+- 全新安装直接运行完整的 v30 DDL。
 - **Fork schema v25 combines the two released v24 histories.** Upstream v24
   introduced the worktree registry; the fork v24 introduced mobile delta tables.
   The v24-to-v25 migration creates whichever structures are missing, preserves
@@ -1191,10 +1250,19 @@ outbox 排空。渲染器侧的停止绝不重写已有已开始回复的转录
 - **架构 v17 是增量的。** 它增加可为空的 `providers.owner_plugin_id` 归属列及其部分索引
   （ADR 0259），从而把插件在 `contributes.providers` 中声明的 provider 行与用户创建的行区分开
   —— 所有 v17 之前的行保持 NULL 归属。该步骤之前保留 `pi.sqlite.v16.bak` 副本。
-- **架构 v23 是增量的。** 它增加 `sessions.title_source`，并将现有占位标题归类为
-  `default`；其余现有标题保持原样并归类为 `manual`。迁移前保留 v22 备份。
+- **架构 v23 是增量的。** 它增加 `sessions.title_source`，默认值为 `legacy`。已有
+  v22 标题保留为 `legacy`，防止主动重命名被自动覆盖。迁移前保留 v22 备份。
   v15→v16 会话协作步骤现在写入 `16`（它自己的版本）而不是最新的架构常量，
   因此 v15 文件可以在一次启动中走完两个步骤。
+- **架构 v24 是增量的。** 它为隔离会话增加 `worktrees` 登记表和
+  `projects.worktree_setup_command`（ADR 0329）。迁移前保留 v23 备份。
+- **架构 v25 是增量的。** 它增加可空的 `models.discovery_state`。迁移前保留 v24 备份。
+- **架构 v26 是增量的。** 它标记存储私有的无损工具图片信封（#1868）。这是只写版本的
+  迁移，保留 v25 备份：让旧版本应用拒绝读取已编码的转录文件，而不修改用户配置或
+  在启动时改写转录文件。
+- **架构 v27 是增量的。** 它增加 `sessions.fast_mode`（ADR 0334），即会话的 `/fast`
+  开关，所有已有会话默认为 `0`。fork 会复制该值；定时任务运行和委托子会话从 `0` 开始。
+  迁移前保留 v26 备份。
 - **架构 v7 首先到达 v8，然后使用受保护的路径。** v7→v8
   迁移之后是相同的受保护的 v8→v15 迁移；架构-v9 和
   schema-v10 数据库采用相同的受保护路径并接收精确的可读数据
@@ -1426,3 +1494,25 @@ An unknown price is distinct from a known zero price; partial known costs remain
 on the individual operations. Late usage targets its captured turn and does not
 revive it or debit the currently active turn. Immediate nested parent and owning
 Task remain separate optional transcript/event fields.
+
+### 末尾压缩检查点读取（#2163）
+
+有界末尾页包含最后一条消息之后追加的压缩记录，重新打开或重启后立即返回
+最新检查点和上下文估算。历史中间页只保留生效的检查点及页内记录，不读取全链。
+
+
+## User-defined mode runs (schema 29)
+
+ADR `mode-definitions` adds one v28-to-v29 migration. It backs up the existing
+database before adding `mode_snapshots`, `mode_runs`, `mode_gate_results` and
+`sessions.mode_snapshot_hash`. Existing sessions and Plan approvals are retained.
+Mode ids remain in `sessions.mode`; `chat` still normalizes to `plan`.
+
+A run references an immutable definition snapshot, its current stage, revision,
+claim, permission origin, budgets, token usage and completed-round count.
+Gate results record the stage, action, outcome and bounded evidence. At most
+one open run exists per session. Restart clears in-flight claims and pauses
+those runs without replaying work. Deleting a session cascades its run records.
+
+Host-started turns evaluate Auto as Accept edits. A run's original snapshot
+remains authoritative even when its source file changes.

@@ -415,3 +415,20 @@ test("Pi registry capabilities drive the composer after the runtime upgrade", ()
   const selected = thinkingProviderForModel(provider, row.modelId, [row]);
   assert.deepEqual(selected.supportedThinkingLevels, ["low", "high"]);
 });
+
+test("unlisted configured models leave the menu without deleting bindings or changing the current default", () => {
+  const provider = { id: "relay", defaultModelId: "beta", models: [binding("alpha"), binding("beta"), binding("manual")] };
+  const original = structuredClone(provider);
+  const snapshot = [
+    { ...model("alpha"), discoveryState: "published" },
+    { ...model("BETA"), discoveryState: "unlisted" },
+  ];
+  assert.deepEqual(composerModelsForProvider(provider, snapshot).map(row => row.modelId), ["alpha", "manual"]);
+  assert.deepEqual(composerModelsForProvider(provider, JSON.parse(JSON.stringify(snapshot))).map(row => row.modelId), ["alpha", "manual"]);
+  assert.deepEqual(provider, original);
+  snapshot[1].discoveryState = "published";
+  assert.deepEqual(composerModelsForProvider(provider, snapshot).map(row => row.modelId), ["alpha", "beta", "manual"]);
+  assert.deepEqual(composerModelsForProvider({ id: "relay", defaultModelId: "beta" }, [
+    { ...model("beta"), discoveryState: "unlisted" },
+  ]), []);
+});

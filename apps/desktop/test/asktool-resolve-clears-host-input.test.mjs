@@ -1,3 +1,4 @@
+import { builtinModeRuns } from "./helpers/builtin-mode-runs.mjs";
 import assert from "node:assert/strict";
 import test from "node:test";
 import { register } from "node:module";
@@ -131,6 +132,7 @@ test("a Host-owned answer does not re-enter its own IPC handler", async () => {
 
   const noop = () => undefined;
   registerAgentIpc({
+    modeRuns: builtinModeRuns,
     registrar,
     getHost: () => null,
     getSidecar: () => sidecar,

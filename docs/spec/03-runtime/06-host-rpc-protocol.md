@@ -1,5 +1,33 @@
 # 06. Host RPC Protocol
 
+
+### Bounded existing-history operations (#1868)
+
+The Desktop uses additive Host methods for existing history: `session.deleteMessage`
+takes `sessionId/messageId` and returns `ok/deleted/deletedCount`;
+`session.retractPendingPrompt` takes `sessionId/userMessageId` and optional
+`turnId`, returning `ok/retracted/removedCount` and a refusal `reason` when needed.
+Host verifies canonical message/turn ownership and meaningful reply activity;
+a refused retract leaves history intact. Repeating an already completed deletion
+or retraction does not delete another prompt. No history array is required.
+
+`session.activateRevision` accepts optional `requireCanonicalPrefix: true` to
+require a durable Host prefix; a missing family/anchor fails explicitly. Existing
+explicit-prefix activation, `session.replaceMessages`, `session.saveRevision`
+and their original request/response forms remain supported. Existing edit and
+regenerate continue using `session.truncateFrom`; branch archival and fork
+remain Host-owned. Oversized local requests report the method and UTF-8 byte count without payload
+content; the caller sees a local-transport explanation and the existing session
+Fork recovery path. No identical oversized payload is retried.
+The unchanged 64 MiB limit still applies to arbitrary incoming
+requests, including a genuinely oversized single tool result.
+
+ID mutations use the same session operation lock, rewrite fence and runtime
+disposal boundary. Their outbox drain must confirm all target-session entries
+were written; failure preserves the queue and rejects the mutation. Smart-stop
+restores a draft only after Host confirmation, and exposes failures.
+
+
 ## 1. Goal
 
 Define the local protocol between:
@@ -216,6 +244,12 @@ type ToolBudgetHealth = {
   `rolledBack`, `alreadyRolledBack`, `conflict`, or `unavailable`.
 
 ### Projects
+- Before upsert, list or removal, reconcile local case/separator aliases proven
+  by filesystem resolution, preserving all session/schedule ownership. Removal
+  prefers the stored selected path; it must not delete another stored project
+  merely because a symlink now resolves there. Missing paths, distinct
+  case-sensitive directories and opaque remote ids are preserved. See storage
+  schema v28 and `E2E-PROJECT-case-alias-upgrade-and-delete`.
 - `projects.list` — returns durable project records ordered pinned-first, then
   by last-opened time; includes records materialized by session imports
 - `projects.create({ path })` — upserts a durable project record without
@@ -296,6 +330,8 @@ to later refresh and inference; the vendor picker does not collect them.
   `inheritPermissionFromSessionId`; when present, the host copies the existing
   session's persisted permission mode atomically, while omission preserves the
   existing `inherit` default. Missing/null thinking level defaults to `off`.
+  Optional boolean `fastMode` (ADR 0334) stores the session `/fast` switch;
+  missing/null means `false` and a non-boolean returns `INVALID_PARAMS`.
   Optional `isolated: true` (ADR 0329) also requires `projectPath` and gives
   the new session its own git worktree before it returns; if the worktree
   cannot be created the session is deleted again and the call fails with a
@@ -337,6 +373,11 @@ to later refresh and inference; the vendor picker does not collect them.
   branch (discarding unmerged work)
 - `session.getScratchPath` — the session's scratch directory (D114), created
   on demand
+- `session.usageCost({ sessionId })` — read-only cost rollup of the session's
+  `turns.usage_json` ledgers, grouped by `providerId`: `{ sessionId, turnCount,
+  requestCount, providers: [{ providerId?, total, pricedRequests,
+  reportedRequests, unpricedRequests }] }`. No schema change; a missing
+  `sessionId` is `INVALID_PARAMS`.
 - `visualizations.readFragment({ sessionId, fileName })` — private Main-to-Host
   reader for `pi-genui:` documents (D671). No renderer IPC or Plugin SDK method
   is added. Parameters contain only a validated session ID and direct `.html`
@@ -366,7 +407,9 @@ to later refresh and inference; the vendor picker does not collect them.
 - `session.configure` — atomically persists `mode`, `providerId`, `modelId`,
   and optional `thinkingLevel` (`off|minimal|low|medium|high|xhigh|max|omit`)
   for the next pi turn; omitting/null
-  `thinkingLevel` preserves the current value; invalid modes or levels return
+  `thinkingLevel` preserves the current value; optional boolean `fastMode`
+  (ADR 0334) follows the same rule, and a non-boolean is `INVALID_PARAMS`;
+  invalid modes or levels return
   `INVALID_PARAMS`; mode is `plan | goal | agent` and changing any session
   configuration is allowed only while idle and without a pending/queued/running
   Plan or Goal record
@@ -791,7 +834,11 @@ against a live host, and replaying one after the final row would be wrong.
   deletes the stored key. Returns `{ provider }`, or `null` for an unknown id
 - `providers.getSecret` — main/host only, never reachable from the renderer
 - `providers.listModels` / `providers.cacheModels` — discovered model rows
-  and their host-side cache (ADR 0027 / ADR 0134)
+  and their host-side cache (ADR 0027 / ADR 0134). `cacheModels` accepts optional
+  `complete` (default false). Model rows expose optional `discoveryState`
+  (`published` / `unlisted`); omission is unknown. Only complete, nonempty
+  snapshots reconcile missing discovered rows, without changing configuration.
+  See provider-config schema for the conservative refresh and consumer rules.
 - `providers.testConnection`
 
 ### Agent capabilities (skills, subagents, MCP servers)
@@ -1381,6 +1428,14 @@ ScheduledTaskUpdate and ScheduledTaskDelete tools. They run through
 the scheduled RPC domain handlers. List is low risk; mutations require normal
 approval in Ask/Accept Edits. Plan/Goal deny all four even under Auto.
 
+`AppSettings.scheduledTasksEnabled` is an optional boolean, enabled when absent.
+When false, `tools.list` omits all four tools and stale calls are rejected.
+The Host returns no ids from `scheduled.due` and rejects `scheduled.run`,
+create/update/delete with `INVALID_PARAMS` before admission or mutation.
+Read/import/finish-run operations remain available so saved data and in-flight
+completion are preserved. Re-enabling retains per-task enable states and the
+existing no-catch-up due-time policy; no schema or protocol version changes.
+
 The Host rechecks durable session mode and derives project scope from the
 calling session, never the foreground workspace or model-supplied paths.
 Create binds that scope; list filters it; update/delete require matching scope.
@@ -1464,3 +1519,131 @@ metadata. Approval/rejection remain digest-bound. Only the new S3 format is
 supported; there is no old-data detection or migration. Disconnect removes
 only current S3 credentials, keys and local sync metadata/staging; unrelated
 files and remote objects remain intact. See `22-config-sync.md`.
+
+
+## Host file batch admission (version 1)
+
+The sidecar proxy explicitly allows tools.fileBatchCapabilities, tools.fileBatchRegister,
+tools.fileBatchSeal, tools.fileBatchAbandon and tools.fileBatchClose. No wildcard
+method authorization is added. Capabilities takes sessionId and returns
+{version:1,supported:boolean}; remote-workspace sessions return supported:false.
+Register takes sessionId, optional delegationId, batchId, ordinal, toolCallId,
+toolName and args, and returns {ticket}. Only builtin file tool names are
+accepted. Seal/Close take sessionId/batchId; Abandon takes sessionId/ticket.
+The latter methods return {ok:true}. Metadata is bounded (512 calls, 128 per
+batch, 32 MiB retained arguments), process-local and never grants permission.
+
+The additive tools.execute field fileBatchTicket binds the actual request to a
+sealed single-use registration. Session/delegation, call/name and args must
+match; replay, tampering and pre-seal execution fail. Existing callers without
+tickets still receive Host resource exclusion but cannot claim batch source
+order. Runtime only opens write parallelism after the capability handshake.
+Permissions, roots, leases and resource identities are recomputed by Host;
+clients never supply authoritative identities. A changed workspace binding
+reports TOOL_CONTEXT_CHANGED; an identity/address change fails before writing.
+Close/expiry cannot release a running disk task; no failed/uncertain write is
+automatically replayed. See the Host file admission ADR for lifecycle and limits.
+
+## Round review reader
+
+- `review.turns({sessionId, before?, limit?})` returns `turns` (newest user round
+  first, each with `id`, `userMessageId`, `createdAt`, `title`, `changeCount`,
+  `additions`, `deletions`) and
+  optional `nextBefore`. Only rounds with valid successful Write/Edit review
+  evidence are listed, including approved targets outside the workspace.
+  Source `details.root` is preserved; workspace-relative and non-workspace
+  absolute paths retain distinct identities. Limit is bounded to 100; title is a short excerpt.
+  Added/deleted totals sum deduplicated successful operation evidence, not a net
+  diff. Saved valid counters remain available even when binary/truncated previews
+  are unavailable. Unsafe totals yield null for both counts; malformed evidence
+  remains filtered. Preview trimming does not discard known counts. Older
+  Hosts may omit these additive fields; consumers show unknown.
+- `review.changes({sessionId, turnId?, snapshotId?, offset?, limit?})` returns
+  `turnId`, `changes: [{message, root?}]`, and optional `nextOffset`. Without a
+  selector it resolves the latest modified user round; a snapshot selector locates
+  its owning round, or returns null when absent. Transport omits unrelated tool
+  arguments and result bodies. Oversized previews are explicitly truncated, never
+  silently dropped. Parent Task ancestry and durable message-turn ownership beat
+  arrival order. Duplicate snapshots are emitted once.
+- `review.context({sessionId, snapshotId, context})` accepts only 1, 3 or 5
+  and returns `hunks`, optionally `unavailable: legacy | binary | tooLarge`.
+  Content comes only from bounded immutable context hunks, not current workspace files.
+  Normal containment, session ownership and remote-workspace capability rules apply.
+
+These reads do not replace the chat transcript window or alter execution state.
+
+`review.fileTarget({sessionId, snapshotId})` authenticates a persisted native
+snapshot in the session transcript and returns its exact existing regular file
+path. Replaced symlinks and sensitive targets are rejected. It is used only by
+Main's explicit reviewed-file open/reveal action; it is not a directory grant.
+`review.rollbackFile({sessionId, snapshotId})` selects the complete same-file
+snapshot chain in the anchor's round, returning `{status, changes}`. All active
+links and the current file are checked before one restoration; conflicts leave
+both content and states untouched. Success persists each affected review state.
+The old `review.rollback` contract remains unchanged. Both rollback methods
+participate in Host file-resource exclusion and re-resolve the session root after
+admission. Both new operations reject remote workspaces. See [ADR 0341](../../adr/0341-explicit-reviewed-file-actions.md).
+
+
+### Session-scoped background job RPC
+
+Only these model proxy methods are allowlisted. The desktop's global
+backgroundTasks methods remain outside the model proxy.
+
+| Method | Parameters | Result |
+| --- | --- | --- |
+| backgroundJobs.capabilities | sessionId | {version: 1, supported: true} |
+| backgroundJobs.list | sessionId | {tasks: BackgroundJobSummary[]} |
+| backgroundJobs.wait | sessionId, id, timeoutMs? | BackgroundJobSnapshot |
+| backgroundJobs.stop | sessionId, id, timeoutMs? | BackgroundJobSnapshot |
+
+Each method requires an existing local Agent-mode session. Foreign and missing
+job IDs both return NOT_FOUND. Invalid parameters return INVALID_PARAMS; a
+contract-mode session returns PERMISSION_DENIED. Calls never rebind an existing
+job. Session identity comes from the runtime rather than model tool arguments.
+
+timeoutMs is an integer in 0–1000, default 0. Wait observes a per-job completion
+signal without holding AppState. Stop signals the existing supervisor before
+observing completion. The returned state is authoritative; stopRequested is
+only an acknowledgement, and a running job may need another wait. Snapshot
+metadata includes job {kind: bash, id}, command (at most 1024 UTF-8 bytes),
+elapsedMs, state, nullable exitCode and stopRequested. Wait/stop additionally
+return stdout and stderr (each at most 8192 UTF-8 bytes), and truncated for
+either Host retention loss or this observation's clipping.
+
+Terminal state and final drained output share one snapshot lock. Reads do not
+consume output. An observer holds a job handle until the bounded request ends,
+so pruning cannot split an admitted read. After waiting the session is checked
+again. An abandoned RPC never stops a process. Capability absence is an older
+Host limitation; other failures must not be silently converted into an empty
+list. This additive protocol preserves the existing desktop RPC shapes.
+
+The supervisor gives an observed exit precedence over a pending stop and preserves that exit outcome while draining the pipes. Elapsed time freezes when the final state and output are published.
+
+
+## User-defined mode run RPC
+
+ADR `mode-definitions` adds the following Host methods. Parameters use camelCase.
+
+| Method | Parameters | Result |
+| --- | --- | --- |
+| `modes.get` | `sessionId` | `{ run }`, null when no open run exists |
+| `modes.start` | `sessionId, input, turnId` | `{ claimed, run, enteredStage, definition }` |
+| `modes.claimTurn` | `sessionId, runId, expectedRevision, turnId, origin` | claim result; origins: user, approval, host |
+| `modes.completeStage` | `sessionId, runId, turnId, summary, artifacts?, input?` | failed, run, awaiting_approval, advanced, goto, blocked or finished outcome; `MODE_INPUT_CHANGED` when `input` (the input the turn was claimed with) differs from the run's current input |
+| `modes.gateResult` | `sessionId, runId, turnId, gateIndex, toolCallId` | next stage outcome |
+| `modes.settleTurn` | `sessionId, runId, turnId, tokens, outcome, error?` | `{ run, continue }` |
+| `modes.control` | `sessionId, runId, expectedRevision, action` | `{ run, continue }`; pause, resume, stop or remove. Stop and remove both end the run; Electron main interrupts the active turn only for stop |
+| `modes.update` | `sessionId, runId, expectedRevision, input?, budget?` | `{ run, continue: false }`; edits an open run's input and `{ maxTurns, maxTokens }` budget (both fields required, `null` is unlimited), effective from the next claim |
+| `modes.resolve` | `sessionId, runId, expectedRevision, action` | `{ run, continue }`; approve or reject |
+| `modes.settleReturn` | `sessionId, runId, mode?, modeSnapshot?` | `{ pending, applied }`; after a run closed, reports the custom `returnTo` the session waits on (`pending`). Called again with that `mode`, it stores `modeSnapshot` for it, or moves the session to `agent` when the snapshot is absent because the mode no longer exists |
+
+`session.configure` accepts an optional validated `modeSnapshot`. Custom mode
+ids require a snapshot. Agent and Plan retain their builtin policies. Host
+notifications use `modes.changed { sessionId, run }`. Renderer catalog editing
+uses the `pi-desktop/modes/*` IPC channels and never writes SQLite directly.
+
+`tools.execute` accepts `modeGate { runId, gateIndex }` only for the exact
+pending Bash gate command. The Host records the exit code; a model-supplied
+verdict cannot pass a command gate. Stage completion may write only declared
+artifacts within the workspace. Staged runs reject remote workspaces.

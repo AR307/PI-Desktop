@@ -4,6 +4,9 @@
 - Date: 2026-10-08
 - Supersedes: ADR 0186
 - Amended: 2026-10-08 (D654 restores the deterministic first-prompt fallback)
+- Amended: 2026-10-20 (ADR 0340 adds `session.read.all`, so the rejected
+  "give the plugin a broader session read" alternative below no longer fails
+  for the reason recorded here)
 
 ## Context
 
@@ -57,10 +60,9 @@ model-composed title moves to the plugin.
 - The new permission allows the plugin to see bounded excerpts from any
   active default-titled Desktop session. It does not expose attachments, tools,
   later messages, or a general transcript-read method.
-- Schema v23 classifies existing default placeholders as `default` and other
-  existing titles as `manual`, preserving user-chosen titles during migration.
-- Existing sessions that still hold a known placeholder title receive the
-  first-prompt fallback on their next prompt, exactly like a new session.
+- Schema v23 leaves pre-existing v22 titles as `legacy` to protect deliberate
+  renames from automatic replacement; newly created sessions receive `default`
+  or `manual` as appropriate.
 
 ## Alternatives considered
 
@@ -71,6 +73,11 @@ model-composed title moves to the plugin.
   spend model tokens and mutate titles when the optional plugin is absent.
 - Give the plugin `session.read` or `session.read.own`: rejected because those
   permissions either expose a general transcript projection or only imported
-  sessions and do not match the required boundary.
+  sessions and do not match the required boundary. *(Corrected by ADR 0340: the
+  reason this alternative failed was that no grant described "read the user's
+  own session". `session.read.all` now does, so a title plugin that wants more
+  than the first turn can say so at install and ask for that grant instead.
+  `session.autoTitle` stays the narrow path and this ADR's boundary is
+  unchanged for plugins that keep it.)*
 - Run a second title flow in Electron main: rejected because title policy and
   user-configured prompts/models belong to the plugin after this change.

@@ -1,6 +1,6 @@
 import { useId, useMemo } from "react";
 import { useTranslation } from "react-i18next";
-import type { SessionTodo } from "@pi-desktop/shared";
+import { isModeRunOpen, type SessionTodo } from "@pi-desktop/shared";
 import type { BackgroundTaskOutput, BackgroundTaskSummary } from "../lib/api";
 import { Button } from "./ui";
 import { IconChevronDown, IconChevronUp } from "./icons";
@@ -8,6 +8,7 @@ import { TodoPanel, todoProgress } from "./TodoDock";
 import { useAppStore } from "../stores/app-store";
 import { useBackgroundTasks } from "../features/chat/background-tasks/useBackgroundTasks";
 import { useSessionTodosRecovery } from "../features/chat/todos/useSessionTodosRecovery";
+import { useModesStore } from "../features/modes/modes-store";
 
 /**
  * The composer's shared Todo + background-task container.
@@ -21,7 +22,20 @@ import { useSessionTodosRecovery } from "../features/chat/todos/useSessionTodosR
  * rows. Filtering, removal and the badge all live in the hook, so this file stays
  * presentational.
  */
+/**
+ * While a builtin Goal run is open, its status bar is the session's progress
+ * surface, so the dock is hidden. The AI todo list and background tasks stay
+ * in the session and show again once the run ends.
+ */
 export function TaskDock({ sessionId }: { sessionId: string }) {
+  const goalRunOpen = useModesStore((state) => {
+    const run = state.runs[sessionId];
+    return Boolean(run && run.modeId === "goal" && isModeRunOpen(run.state));
+  });
+  return goalRunOpen ? null : <TaskDockPanel sessionId={sessionId} />;
+}
+
+function TaskDockPanel({ sessionId }: { sessionId: string }) {
   const { t } = useTranslation();
   const snapshot = useAppStore((state) => state.sessionTodos[sessionId]);
   const panelId = useId();
@@ -43,7 +57,6 @@ export function TaskDock({ sessionId }: { sessionId: string }) {
   // whether a new task needs a badge.
   const {
     tasks,
-    sessionTasks,
     activeTab,
     openTasksTab,
     openTodoTab,
@@ -60,8 +73,13 @@ export function TaskDock({ sessionId }: { sessionId: string }) {
     stoppingIds,
   } = useBackgroundTasks(sessionId, todos);
 
-  const hasTasks = sessionTasks.length > 0;
-  const running = sessionTasks.filter((task) => task.state === "running").length;
+  // Presence, the live count, and the header count describe the rows the
+  // container can render. Host-core keeps a finished task in its registry after
+  // the row's grace window closes, so deriving them from the session's full
+  // task list would leave a permanent "1 background tasks" header with no row
+  // to stop, dismiss, or read.
+  const hasTasks = tasks.length > 0;
+  const running = tasks.filter((task) => task.state === "running").length;
   const showTabs = hasTodo && hasTasks;
 
   if (!hasTodo && !hasTasks && !error) return null;
@@ -75,7 +93,7 @@ export function TaskDock({ sessionId }: { sessionId: string }) {
 
   const headerText = progress
     ? progress.label
-    : t("backgroundTasks.headerCount", { count: sessionTasks.length });
+    : t("backgroundTasks.headerCount", { count: tasks.length });
 
   return (
     <div className={`dock${collapsed ? "" : " is-expanded"}`}>
@@ -177,14 +195,14 @@ export function TaskDock({ sessionId }: { sessionId: string }) {
               {t(`backgroundTasks.${error === "remove" ? "removeFailed" : `${error}Failed`}`)}
             </p>
           ) : null}
-          {hasTodo ? (
+          {hasTodo && tab === "todo" ? (
             <TodoPanel
               todos={todos}
               listId={`${panelId}-todo`}
               interactive={!collapsed && tab === "todo"}
             />
           ) : null}
-          {hasTasks ? (
+          {hasTasks && tab === "tasks" ? (
             <TaskPanel
               listId={`${panelId}-tasks`}
               tasks={tasks}

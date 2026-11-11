@@ -168,6 +168,14 @@ jobs:
       - name: Build host-core
         run: cargo build -p host-core --locked
 
+      - name: Run staged mode Host/process E2E
+        env:
+          PI_SCRATCH_DIR: ${{ runner.temp }}
+        run: node scripts/e2e-mode-definitions.mjs
+
+      - name: Run plugin project enumeration Host/process E2E
+        run: pnpm test:e2e:plugin-projects
+
       - name: Run inline GenUI interaction and isolation E2E
         run: xvfb-run --auto-servernum pnpm test:e2e:gen-ui
 
@@ -182,8 +190,16 @@ jobs:
 
       - name: Run File Manager light and dark theme user path
         run: xvfb-run --auto-servernum node --test apps/desktop/test/file-manager-theme-user-path.test.mjs
+      - name: Run transcript turn-completion E2E
+        run: xvfb-run --auto-servernum sh -c 'openbox >/dev/null 2>&1 & exec node scripts/e2e-transcript-turn-completion.mjs'
 
       - name: Run trusted extensions E2E
         env:
           DEBUG_E2E: "1"
         run: xvfb-run --auto-servernum pnpm test:e2e:trusted-extensions
+      - name: Run MCP market owner E2E
+        run: xvfb-run --auto-servernum node --test apps/desktop/test/mcp-market-owner-user-path.test.mjs
+      - name: Run File Manager theme E2E
+        run: xvfb-run --auto-servernum pnpm test:e2e:file-manager-theme
+      - name: Run File Manager directory location E2E
+        run: xvfb-run --auto-servernum pnpm test:e2e:file-manager-directory

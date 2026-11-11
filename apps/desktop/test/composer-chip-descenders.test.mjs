@@ -65,20 +65,24 @@ test("mode selector reserves the longest localized label width", () => {
   );
 
   const block = styles.match(/\.composer-mode-chip\s*\{[^}]+\}/)?.[0] ?? "";
-  assert.match(block, /width:\s*96px;/);
-  assert.match(block, /min-width:\s*96px;/);
-  assert.match(block, /max-width:\s*96px;/);
-  assert.match(block, /flex:\s*0 0 96px;/);
+  // The reservation scales with the label's font (--font-scale), so the
+  // localized mode name stays complete at every appearance font size (#1866).
+  for (const prop of ["width", "min-width", "max-width", "flex"]) {
+    assert.match(
+      block,
+      new RegExp(`${prop.replace("-", "\\-")}:\\s*${prop === "flex" ? "0 0 " : ""}calc\\(96px \\* var\\(--font-scale, 1\\)\\);`),
+    );
+  }
   assert.match(styles, /\.composer-mode-chip-label\s*\{[\s\S]*?text-overflow:\s*ellipsis;/);
 });
 
 test("mode chip cross-fades on switch and pulses while planning is live", () => {
-  assert.match(composerSource, /const isPlanning = planningLive && mode !== "image";/);
-  assert.match(composerSource, /data-planning=\{isPlanning \? "true" : undefined\}/);
+  assert.match(composerSource, /data-planning=\{planningLive \? "true" : undefined\}/);
   assert.match(composerSource, /className="composer-mode-chip-face"/);
   assert.match(
     composerSource,
-    /const planningLive =\s*isRunning &&\s*planningState === "planning" &&\s*\(mode === "plan" \|\| mode === "goal"\)/,
+    // Only the builtin Plan negotiates a proposal; Goal runs as a staged mode.
+    /const planningLive =\s*isRunning && planningState === "planning" && mode === "plan";/,
   );
   assert.match(
     styles,

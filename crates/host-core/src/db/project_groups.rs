@@ -209,12 +209,14 @@ impl Database {
         let mut used_paths = std::collections::HashSet::new();
         let mut groups = Vec::with_capacity(stored.len() + projects.len());
 
-        for group in stored {
-            for root in &group.roots {
+        for mut group in stored {
+            for root in &mut group.roots {
                 let path = canonical_project_path(&root.path)
                     .ok_or_else(|| anyhow!("project group root path must not be blank"))?;
+                root.path = path.clone();
                 used_paths.insert(path);
             }
+            group.primary_path = group.roots[0].path.clone();
             for path in &group.detached_paths {
                 if let Some(path) = canonical_project_path(path) {
                     used_paths.insert(path);
@@ -367,7 +369,12 @@ impl Database {
         for raw in paths {
             let path = canonical_project_path(raw)
                 .ok_or_else(|| anyhow!("project group root path must not be blank"))?;
-            if !Path::new(&path).is_dir() {
+            // A root this group already owns may have been renamed or unmounted
+            // externally since it was stored; editing the group must still be
+            // able to keep, reorder, or drop it (#1869). Only folders that are
+            // new to the group must exist on disk.
+            let is_current_root = current.roots.iter().any(|root| root.path == path);
+            if !is_current_root && !Path::new(&path).is_dir() {
                 return Err(anyhow!("project group root is not a directory: {path}"));
             }
             if selected.iter().any(|candidate| candidate == &path) {

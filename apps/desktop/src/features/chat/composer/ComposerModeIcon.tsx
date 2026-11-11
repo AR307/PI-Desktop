@@ -1,9 +1,18 @@
 import type { Mode } from "@pi-desktop/shared";
-import { IconImage, IconListChecks, IconShield, IconTarget } from "../../../components/icons";
+import {
+  IconImage,
+  IconListChecks,
+  IconShield,
+  IconSparkles,
+  IconTarget,
+  IconWorkflow,
+} from "../../../components/icons";
 
-export function ModeIcon({ mode }: { mode: Mode | "image" }) {
+/** Builtins keep their glyphs; a user mode shows whether it runs in stages. */
+export function ModeIcon({ mode, staged }: { mode: Mode | "image"; staged?: boolean }) {
   if (mode === "image") return <IconImage size={14} />;
   if (mode === "plan") return <IconListChecks size={14} />;
   if (mode === "goal") return <IconTarget size={14} />;
-  return <IconShield size={14} />;
+  if (mode === "agent" || staged === undefined) return <IconShield size={14} />;
+  return staged ? <IconWorkflow size={14} /> : <IconSparkles size={14} />;
 }

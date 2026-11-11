@@ -11,6 +11,7 @@ ADR 记录那些不应被静默改变的架构选择。中文入口与英文索�
 
 | 决策 | 说明 |
 |---|---|
+| [插件远程工作区读取](/adr/plugin-remote-workspace-reads) | 通过独立 owner-only 服务保留插件文件范围；只读预览和工作区切换隔离 |
 | [配置同步中的本机项目列表](/adr/device-local-project-lists-in-config-sync) | 移除 projects 类别，忽略旧项目实体，保留云端历史及项目级能力的本地映射 |
 | [ADR 0001：Electron 桌面壳](/adr/0001-use-electron) | 桌面窗口与平台能力的承载层 |
 | [ADR 0005：本地插件系统](/adr/0005-user-installable-plugin-system) | 用户安装插件的第一阶段边界 |
@@ -315,6 +316,9 @@ ADR 记录那些不应被静默改变的架构选择。中文入口与英文索�
 | 0311 | [在 Host 受理时重新核验 Live Work 工作空间身份](/adr/0311-live-work-workspace-admission-guard) | 已实现候选 |
 | 0312 | [会话级 Todo 清单](/adr/0312-session-scoped-todo-checklist) | 已接受实施 |
 | registry-header-variable-spelling | [Remote header variables accept the registry's `{name}` spelling](/adr/registry-header-variable-spelling) | Proposed |
+| 0342 | [内置电脑操作是宿主拥有、以用户挑选的作用域授权为门的能力](/adr/0342-os-computer-use-capability) | 提议中（D681；修订非目标第 9 条） |
+| 0340 | [插件可访问任意会话（新增 .all 权限）](/adr/0340-plugin-session-all-scope) | 已接受（修订 ADR 0200、ADR 0323；D680） |
+| 0344 | [电脑操作默认授权整个桌面，“停止”就是边界](/adr/0344-computer-use-whole-desktop-grant) | 已接受（D682；修订 ADR 0342 第 4、6 条） |
 
 ## 什么时候看 ADR
 
@@ -324,7 +328,7 @@ ADR 记录那些不应被静默改变的架构选择。中文入口与英文索�
 
 前往 [英文 ADR 索引](/adr/README) 查看完整记录，或打开 [中文决策日志](/zh-CN/spec/08-meta/decisions-log) 按编号检索。
 
-## Tray session shortcuts
+## 托盘会话快捷方式
 
 定时任务的调度、存储、权限与桌面入口决策见
 [ADR: Desktop automations](/adr/scheduled-desktop-automations)。

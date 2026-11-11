@@ -2,6 +2,15 @@ import type { ChangelogEntry } from "./changelog.js";
 
 export const koEntries: ChangelogEntry[] = [
   {
+    version: "0.21.2",
+    date: "2026-11-11",
+    highlights: [
+      "Pi 1.5.0으로 업데이트하고 사용자 지정 모드, 단계별 목표 및 컴퓨터 사용 설정을 추가합니다.",
+      "모델 선택, 설정 탐색 및 대화 기록을 개선합니다.",
+      "업데이트 시 MirrorCoding, Gemini, Ultra, 보조 대화 및 모바일 데이터를 보존합니다.",
+    ],
+  },
+  {
     version: "0.21.1",
     date: "2026-10-29",
     highlights: [

@@ -1,9 +1,16 @@
 # 02. Agent 运行时
 
+受信扩展的 `setThinkingLevel` 同时更新运行时公开值和后续请求使用的 Pi Agent
+状态。继续按模型能力限制档位，已报告的调整不会留下旧的请求思考强度。
+
+接收 steering 后结束此前尚未落定的回复片段，下一条回复使用新身份。
+提供商、溢出、空回复及进度恢复仍属于原持久化回合，但不会覆盖位于用户
+补充消息之前的旧回复（Refs #1699）。
+
 > **翻译说明：** 本页是与 [英文源规格](/spec/03-runtime/02-agent-runtime) 一一对应的机器辅助翻译。代码、协议字段和标识符保持原文；如翻译与英文源事实有歧义，以英文版本为准。
 
 
-## 1. Goal
+## 1. 目标
 
 应用决策：**D002/D003/D008/D158/D189/D190/D193/D194**。
 
@@ -27,7 +34,7 @@ crates/host-core (tool execution + permissions)
 
 ## 3. 核心对象
 
-### 3. 1 PiRuntime (Node)
+### 3.1 PiRuntime（Node）
 - 初始化 models/providers
 - 创建 Agent
 - 绑定工具桥
@@ -112,6 +119,7 @@ pi 消费排队输入时保留渲染器提供的消息 id；即使补充输入�
 6. 在 Electron main 的会话绑定路径边界上校验结构化附件，按 SHA-256 持久化
    图片字节，持久用户消息中只保留附件引用。只有处于视觉模型 10 MB 内联上限
    之内的图片才会被读进内存；更大的图片走流式哈希/复制以及既有的安全路径回退。
+   文件头显示最长边超过 8000 px 的图片（D675）同样走路径回退。
    草稿内联命名过位置的图片会把那段 `@path` 文本作为 `inlinePath` 随持久消息和
    sidecar 附件传递；运行时据此把图片块放在用户写下的位置，而不是统一追加在提示文本之后
    草稿里的 `pi-desktop://session/<id>` 链接在同一步骤里解析成有界摘录附件：只限
@@ -147,7 +155,7 @@ pi 消费排队输入时保留渲染器提供的消息 id；即使补充输入�
 ### 5d。有界提供商流恢复和诊断（D186、D245、D259、ADR 0091、ADR 0128）
 
 提供程序请求设置和流式传输交付是两个独立的故障阶段，但
-HTTP 429 处理是一个响应恢复策略。此路径禁用了 pi-ai 的嵌套
+吞吐限流 HTTP 429 使用同一个响应恢复策略。此路径禁用了 pi-ai 的嵌套
 适配器重试，因此运行时可以在两个阶段之间共享一个预算。
 
 `PROVIDER_RATE_LIMITED` 在初始尝试之后最多重试 10 次，总共 11 次
@@ -156,7 +164,9 @@ HTTP 429 处理是一个响应恢复策略。此路径禁用了 pi-ai 的嵌套
 回合中调用 `continue()`。两个阶段占用同一个计数器，因此设置阶段的
 429 后跟流阶段的 429 无法重置或倍增该预算。在两个阶段中，
 捕获的响应状态都会在对提供商消息进行分类之前应用，因此通用的
-429 正文仍会进入 429 预算，而已知的不可重试分类仍然是终止的。
+429 正文仍会进入 429 预算，而已知的不可重试分类仍然是终止的。明确的
+账单/账户额度耗尽（包括 `insufficient_quota`、消费限额代码和智谱/Z.ai 用量上限代码 `1308`）即使状态为
+HTTP 429，也会成为终止的 `PROVIDER_ERROR`。
 主会话和内置子代理使用相同的控制器和策略。
 
 429 重试在转录生命周期上是静默的：没有中间助手错误、生命周期 `error`、
@@ -383,7 +393,9 @@ pi 0.84.4+ 只在循环将要在同一次运行中开启另一个助手回合时
 以及标记出现之前写入的记录——仍会归一化为只保留最新的用户消息，因此重启无法
 恢复一串看起来可执行的旧请求。放弃助理消息也会丢弃其工具调用，回退还会丢弃
 它没有保留的调用所对应的结果，因此没有孤立的工具调用或不匹配的结果可以到达
-提供商。保留的尾部用持久化之前的摘要重新估计，并且在继续之前再次估计，
+提供商。助手思考与正文共用同一字符预算。正文先保留；必须缩短的思考块会丢掉
+提供商签名，以免回放一段被改过的已签名推理。仍然放得下的块保留签名，脱敏思考
+块保持不变。保留的尾部用持久化之前的摘要重新估计，并且在继续之前再次估计，
 所以超大的请求仍然无法通过警卫。回退还会记录 `details.failureReason`——
 `no_new_history`、`summary_budget`、`summary_provider` 或 `checkpoint_oversized`——
 一个封闭词表，而不是可能带有端点细节的提供商错误文本。
@@ -623,7 +635,9 @@ Goal 批准所承诺的内容与 Plan 批准所承诺的内容完全相同：`mo
   同样的重复还会让下一个边界的估算翻倍，并让备用模型拿到的末行无法被 `continue()` 续跑（D620）。
 - 视觉运行时只从会话绑定的附件、scratch 与项目根目录中水合持久化的图片引用。
   处于 10 MB 内联安全上限之内的图片会成为临时的 pi-ai 图片块；超限或不可用的
-  图片则退化为安全的 `@path` 回退。消息里内联命名过位置的图片（`inlinePath`）
+  图片则退化为安全的 `@path` 回退；文件头显示最长边超过 8000 px 的图片（D675）
+  同样如此。每次提供商请求还会把超过该像素上限的图片块（用户提示与工具结果都算）
+  替换成写明尺寸的文本说明，因此已经带着这种图片的会话也能恢复。消息里内联命名过位置的图片（`inlinePath`）
   会按那个位置拼回提示内容，重启后仍是用户写下的顺序。超限历史的水合会直接复制文件，不会先把内容
   读进内存。Base64 绝不会被还原进持久的 UI 消息或转录记录。
 - 失败的助理消息仍然是持久的诊断记录条目，但
@@ -666,8 +680,8 @@ Frontmatter 新增 `permission: inherit | ask | accept-edits | auto`（默认
 `ui-designer` 也默认继承父会话：`auto` 下跟随父会话自动放行，而 `ask` 和
 `accept-edits` 仍保留各自的审批边界。显式声明的内置或用户作用域仍然是一次有意的覆盖。
 
-**工具（ADR 0089）。** 委托是四个工具的生命周期，仅在 Agent 模式下且目录
-非空时构建，四个工具都属于 Agent 核心集而不是第 7.1 节的按需目录：
+**工具（ADR 0089）。** Task 要求非空子代理目录，三个作业控制工具始终声明。
+它们属于 Agent 核心集，仅在 Agent 模式允许执行。
 
 - `Task(agent, task, description?, model?)` — 验证其参数（未知的 `agent`、空的
   `task`、无法解析的模型引脚以及工具全部不可用的定义，各自返回一个工具
@@ -704,6 +718,10 @@ Frontmatter 新增 `permission: inherit | ask | accept-edits | auto`（默认
   报告。未完成的委托在回合结束后转入后台继续运行，报告经回合边界投递或唤醒
   回合送达（D628）。只有 `TaskStop` 或运行时销毁才会中止委托。
 - `TaskList()` — 报告会话的每个委托及其状态和运行中心跳。
+  报告。运行时会保持父级回合打开，并在它们完成时把剩余报告交回，即使父级已经
+  停止调用工具。只有 `TaskStop` 或用户 Stop 才会中止委托。
+- `TaskList()` — 报告会话的每个委托及其状态和运行中心跳，并给出父级可用
+  `Task(resume: ...)` 继续的可复用链（`details.resumable`）；这是该清单唯一的读取路径（ADR 0337）。
 - `TaskStop(delegationIds?)` — 停止正在运行的委托（默认全部）；等待每次
   中止结算后，在 `details.stopped[]` 上持久化 `status: "stopped"` 与
   `completedAt`。被停止的委托读作 `stopped`。
@@ -805,10 +823,11 @@ fallbacks, session inheritance, and current override grants; other definitions'
 private pins are excluded. A denied known key never selects another account by
 model id (#841).
 
-父级通过系统提示发现可复用的链：那里列出每条链最新的 `delegationId`、它的目标，以及它
-读过的文件最多 `MAX_RESUMABLE_LISTED_FILES`（8）个（超出部分带 `(+N more)` 后缀）。
-清单会在委托结算时围绕既有的提示段落重新组装。对 `MAX_SUBAGENT_CONCURRENCY`、
-`TaskWait`、`TaskList`、`TaskStop` 以及生命周期快照而言，恢复来的运行就是一个普通
+父级通过 `TaskList` 发现可复用的链：它的结果列出每条链最新的 `delegationId`、它的目标，
+以及它读过的文件最多 `MAX_RESUMABLE_LISTED_FILES`（8）个（超出部分带 `(+N more)` 后缀）。
+这份清单**不进系统提示**：它每次结算都会变，而中途改写指令会使 provider 缓存的请求前缀失效
+（ADR 0337）。对 `MAX_SUBAGENT_CONCURRENCY`、`TaskWait`、`TaskList`、`TaskStop`
+以及生命周期快照而言，恢复来的运行就是一个普通委托。
 委托。`Task` 的立即返回结果与生命周期 details 会增加 `resumedFrom` 以便追溯；
 transcript 把一条链渲染成它最新 `Task` 卡片下的一段连续多轮对话，不带单独的
 “已恢复”标记。
@@ -1062,9 +1081,7 @@ sidecar 构建了一个完整的工具注册表，但它不会序列化每个工
 - Agent：`Read`、`Bash`、`Edit` 和 `Write`（匹配 pi 的编码代理核心）
 - Agent：只要技能目录非空，`Skill` 也在核心集中（D404、ADR 0230）——`# Skills`
   段落与用户输入的 `/skill:<skill-id>` 都要求模型调用它，而模式中缺失的工具根本无法被调用
-- Agent：当子代理目录非空时，`Task`、`TaskWait`、`TaskList` 和
-  `TaskStop` 也是如此 (§5f) — 模型必须寻找的能力是它不会使用的能力，
-  委托生命周期值得每个请求的额外模式
+- Agent：始终提供 `TaskWait`、`TaskList`、`TaskStop`，子代理目录非空时另提供 `Task`（§5f）。
 - Plan：`Read`、`Glob`、`Grep`、`BrowserPreview` 和 `Bash`
 - 两种模式：`ToolSearch`（当至少存在一种延迟功能时）
 
@@ -1224,16 +1241,14 @@ sidecar 从不直接读取工作区指令。改变的根链
 | 工具 | 默认情况下是顺序的 |
 | `Task` 通过一条助理消息进行呼叫 | 并行，每会话 10 个运行委托 (ADR 0089) |
 
-工具并发性通过 pi 执行模式来表示：每个目录工具都是
-`sequential` 和 `Task` 单独为 `parallel`，并且 pi 按顺序运行批处理
-一旦它包含一个顺序工具。因此，全 `Task` 批次是唯一的批次
-扇出，并且所有其他订购保证均不变。代表问题
-主机独立调用，以及 host-core 的每次会话一次突变准入
-防止写入撕裂，但留下两个无序的相同路径突变，因此
-sidecar 序列化针对相同标准化路径的 IPC/`sequential` 调用
-在到达宿主之前；不同路径上的调用永远不会相互等待。
-这就是保持每个路径编辑恢复规则的原因
-`03-tools-and-permissions.md` §4d 在扇出下有意义。
+工具并发使用 pi 的有序准备与源序结果契约。Read/Glob/Grep 保持并行；本地 Host
+文件批次能力握手成功后 Write/Edit 才加入。旧 Host 和远程 Host 保持含写整批串行。
+符合条件的批次按源序登记、执行前封存。Host 先检查权限，再解析文件身份，按原始
+序号排序同批冲突，并一次授予资源与容量。原生文件身份覆盖父子代理和会话之间的
+别名；未知身份与命名空间变化保守互斥。取消传输等待后，实际 blocking 任务继续
+持有 permit。支持路径绕过 sidecar PathMutex；legacy 路径保留原锁，变更恢复规则
+继续生效。身份、生命周期和保证范围见工具权限规格 §0 与 host-file-batch-admission ADR。
+仅含 Task 的扇出、Task/文件混批屏障不变；父子路径指令只更新各自提示词。
 
 选择另一个项目选项卡仅影响可见的 shell 工作区。它
 不会处置、中止或重新启动属于另一个会话的运行时。
@@ -1272,7 +1287,7 @@ sidecar 序列化针对相同标准化路径的 IPC/`sequential` 调用
 跟踪差距（MVP 后积压）：更丰富的系统提示组成 (§7) 和
 provider/model 目录发现超出当前有线路径。
 
-### Provider certificate trust（issue #714）
+### Provider 证书信任（issue #714）
 
 桌面 sidecar 使用 Node 的 `--use-system-ca` 启动，同时保留内置根证书和继承的
 `NODE_EXTRA_CA_CERTS`，并排除操作系统信任库中已过期的证书，因为平台证书库可能保留
@@ -1285,7 +1300,7 @@ System/Direct/Custom 代理路由保持不变。
 provider transport 重建。`EPROTO` 等协议错误继续使用原有重试行为。详见
 [证书信任 ADR](../../../adr/provider-system-certificates.md)。
 
-## Pi 1.1.0 execution boundary
+## Pi 1.1.0 执行边界
 
 Published model metadata and account entitlement come from one account-scoped
 Pi Models collection. Effective binding projection is shared by launch, delegates
@@ -1299,3 +1314,52 @@ retries and images retain physical account/model attribution. Nested immediate
 parent and owning Task remain distinct. The migration does not add coding-agent
 AgentSession, Codemode or virtual routing. See the coding-agent design review for
 future adoption conditions.
+
+
+Complete assistant responses are checked for malformed tool calls before any
+call in that response can execute. Missing or blank names/IDs, an empty
+Responses wire ID, and non-JSON-object arguments produce the existing terminal
+local `context-validation` error. The unexecuted batch is excluded from model
+context; visible text/thinking and the error remain available in the transcript.
+This does not guess a tool identity, repair arguments into an executable call,
+or spend the transport retry budget. Ordinary tool-schema failures still return
+tool feedback through Pi's existing validation path.
+
+Continue must also recover a runtime retained from an earlier failure. Model
+context projection removes malformed tool calls and their associated results,
+including retained compaction tails and resumed delegates, while preserving
+valid sibling calls/results, system updates, user messages and useful assistant
+content. The durable transcript is unchanged and completed tools are not
+re-executed. Other malformed context remains subject to strict validation.
+Tool token estimates are optional telemetry: an invalid call identity must not
+prevent the corresponding terminal tool event from being delivered.
+
+Complete Qwen-style `<tool_call><function=Name><parameter=...>...</parameter>
+</function></tool_call>` blocks emitted as assistant text for a known tool
+receive a visible `TOOL_CALL_NOT_EXECUTED` diagnostic on that response. This
+also applies when normal text precedes the block or structured sibling calls
+execute successfully. The original text is preserved; the affected message
+has error status, while valid structured calls and normal continuation remain
+unchanged. Text is never parsed into executable arguments, tools are never
+silently activated, and no provider retry is spent. Fenced, inline, quoted and
+indented examples, unknown tool names and incomplete blocks are not diagnosed.
+This is a conservative format diagnostic, not a general XML parser or proof
+that the model intended an action.
+
+### 会话作业控制
+
+Agent 模式下，即使没有配置子代理，也提供 TaskWait、TaskList 和 TaskStop。Task 仍要求子代理目录。Plan/Goal 保留声明以兼容对话历史，执行时拒绝这些工具。
+
+后台 Bash 和 Task 的启动结果新增 `job: {kind, id}`，kind 为 bash 或 delegation，同时保留原 ID 字段。TaskList 保留 delegations 和 resumable，增加 backgroundJobs 的 supported 和 tasks；委派摘要也包含 job。Bash 列表不带日志，命令文字限制为 1 KiB。
+
+TaskWait/TaskStop 接受单个显式 job，与 delegationIds、mode、minCompleted 混用会报错。无 job 时保留原委派默认集合。旧 backgroundTaskId 可写成 `{kind: "bash", id: backgroundTaskId}`。
+
+Bash 等待返回状态、可空退出码、停止请求标记及分别最多 8 KiB 的 stdout/stderr 尾部，按 UTF-8 边界截断。truncated 同时表示 Host 历史丢失或本次截断。查询可重复且不消耗桌面日志。等待默认 600 秒，接受 1–900 秒；details.status 为 completed、timeout 或 interrupted，与作业状态独立。新输入或父回合取消只结束等待。停止返回 completed 或 stopPending，stopRequested 本身不代表进程已退出。
+
+Bash 由 Host 管理，完成后不自动投递结果或延长父回合。原委派报告交付和恢复规则继续生效。能力按连接探测；旧 Host 和远程工作区明确返回后台 Bash 控制不可用，委派操作仍可用。其他传输或 Host 错误会正常呈现。
+
+等待时限包含能力探测和在途请求。超时返回最近一次已观察的快照。如果首次观察尚未返回，工具返回作业引用和 `snapshotAvailable: false`，省略进程状态。聊天记录区分显式 Bash 目标，混合作业列表显示后台命令数量。
+
+### 公共提示前缀与 scratch（#1926）
+
+基础 runtime 段保留 shell、scratch 变量及临时文件规则，具体路径移到项目/记忆上下文之后，Bash 工具描述继续提供路径。改善跨会话系统文本公共前缀，不承诺供应商缓存命中，不更改历史重建。

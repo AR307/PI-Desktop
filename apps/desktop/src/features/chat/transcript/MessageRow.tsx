@@ -10,7 +10,8 @@ import {
 } from "react";
 import { useTranslation } from "react-i18next";
 import type { UiMessage } from "@pi-desktop/shared";
-import { splitInlineContent } from "@pi-desktop/shared";
+import { splitComposerDirectoryPrompt, splitInlineContent } from "@pi-desktop/shared";
+import { DirectoryReferenceCard } from "../DirectoryReferenceCard";
 import { useOpenChatFileRef } from "../../../hooks/use-preview-target";
 import { sessionAllows } from "../../../lib/remote-session-safety";
 import { useSlotSessionId } from "../../../plugins/renderer-slots/use-slots";
@@ -40,9 +41,16 @@ import {
 } from "./TranscriptMenu";
 import { getExtraMessageAttachments } from "./extra-attachments";
 
-function SkillInvocationText({ message }: { message: UiMessage }) {
+/**
+ * The typed form of a Skill or `@agent` invocation (ADR 0346): each validated
+ * mention is a chip, and the text around it stays text.
+ */
+function MentionInvocationText({ message }: { message: UiMessage }) {
   const command = message.command ?? "";
-  const mentions = message.skillMentions ?? [];
+  const mentions = [
+    ...(message.skillMentions ?? []).map((mention) => ({ ...mention, sigil: "/", title: mention.id, agent: false })),
+    ...(message.agentMentions ?? []).map((mention) => ({ ...mention, sigil: "@", title: `@${mention.name}`, agent: true })),
+  ].sort((a, b) => a.start - b.start);
   const parts: ReactNode[] = [];
   let cursor = 0;
   for (const mention of mentions) {
@@ -51,7 +59,7 @@ function SkillInvocationText({ message }: { message: UiMessage }) {
       !Number.isInteger(mention.end) ||
       mention.start < cursor ||
       mention.end > command.length ||
-      !command.slice(mention.start, mention.end).startsWith("/")
+      !command.slice(mention.start, mention.end).startsWith(mention.sigil)
     ) {
       return <LinkifiedText text={command} attachments={message.attachments} />;
     }
@@ -59,7 +67,12 @@ function SkillInvocationText({ message }: { message: UiMessage }) {
       parts.push(<LinkifiedText key={`text-${cursor}`} text={command.slice(cursor, mention.start)} attachments={message.attachments} />);
     }
     parts.push(
-      <code key={`skill-${mention.start}`} className="chat-command-chip" title={mention.id}>
+      <code
+        key={`mention-${mention.start}`}
+        className="chat-command-chip"
+        title={mention.title}
+        {...(mention.agent ? { "data-agent-mention": "" } : {})}
+      >
         {command.slice(mention.start, mention.end)}
       </code>,
     );
@@ -113,6 +126,12 @@ export const MessageRow = memo(function MessageRow({
   // Runtime chunks are already progressive. Rendering that source directly
   // avoids a second per-frame state loop while Markdown memoizes stable blocks.
   const displayed = message.content || "";
+  const directories = useMemo(
+    () => isUser ? splitComposerDirectoryPrompt(displayed) : { text: displayed, paths: [] },
+    [isUser, displayed],
+  );
+  const folderSessionId = sessionAllows(session ?? { id: paneSessionId }, "canUseLocalTools")
+    ? paneSessionId : undefined;
   const hasAnswer = Boolean((message.content || "").trim());
   const revisionCount = message.revisionCount ?? 0;
   const activeRevision = message.activeRevision ?? revisionCount;
@@ -127,8 +146,8 @@ export const MessageRow = memo(function MessageRow({
   // The user's own order: an image chip the draft named inline renders between
   // the text runs it sat between, exactly where the Composer showed it.
   const userContentParts = useMemo(
-    () => splitInlineContent(String(message.content || ""), message.attachments ?? []).parts,
-    [message.attachments, message.content],
+    () => splitInlineContent(directories.text, message.attachments ?? []).parts,
+    [message.attachments, directories.text],
   );
   const renderContentPart = (
     part: (typeof userContentParts)[number],
@@ -314,19 +333,26 @@ export const MessageRow = memo(function MessageRow({
             ) : isUser ? (
               <>
                 <MessageQuotes quotes={message.quotes} />
-                {message.content ? (
+                {directories.paths.length ? (
+                  <div className="directory-reference-list">
+                    {directories.paths.map((path, index) => (
+                      <DirectoryReferenceCard key={`${index}:${path}`} path={path} sessionId={folderSessionId} />
+                    ))}
+                  </div>
+                ) : null}
+                {directories.text || message.command ? (
                   <div className="message-user-text selectable" data-quote-body={message.id}>
                     {editableUserMessage && message.command ? (
                       <>
-                        {message.skillMentions?.length ? (
-                          <SkillInvocationText message={message} />
+                        {message.skillMentions?.length || message.agentMentions?.length ? (
+                          <MentionInvocationText message={message} />
                         ) : (
                           // Templates retain the existing whole-invocation chip.
                           <code
                             className="chat-command-chip"
                             data-source-start={0}
                             data-source-end={message.content.length}
-                            title={String(message.content || "")}
+                            title={directories.text}
                           >
                             {message.command}
                           </code>

@@ -9,7 +9,7 @@ import {
   type SessionThinkingLevel,
   type PluginComposerTransformMeta,
 } from "@pi-desktop/shared";
-import type { AppState } from "../../../stores/app-store";
+import { type AppState, useAppStore } from "../../../stores/app-store";
 import { ComposerPermissionPicker } from "./ComposerPermissionPicker";
 import { ContextUsageInspector } from "../../../components/ContextUsageInspector";
 import { ComposerControlSlots } from "./ComposerControlSlots";
@@ -23,6 +23,7 @@ import {
 } from "../../../components/icons";
 import { ComposerModePicker, type ComposerMode } from "./ComposerModePicker";
 import { LiveVoiceControls } from "../../voice/live/LiveVoiceControls";
+import { ComputerUseIndicator } from "../../computer-use/ComputerUseIndicator";
 import { ComposerModelPicker } from "./ComposerModelPicker";
 import type { ComposerTask } from "./model";
 import type { useComposerModelMenu } from "./hooks/useComposerModelMenu";
@@ -55,6 +56,8 @@ export type ComposerToolbarProps = {
   modelMenu: ModelMenuController;
   modelLabel: string;
   thinkingLabel: string;
+  /** The selected model asks for OpenAI's priority tier (ADR 0334). */
+  modelFastMode?: boolean;
   contextUsage: ContextUsage | null;
   value: string;
   modelReady: boolean;
@@ -100,6 +103,7 @@ export function ComposerToolbar({
   modelMenu,
   modelLabel,
   thinkingLabel,
+  modelFastMode = false,
   contextUsage,
   value,
   modelReady,
@@ -139,6 +143,7 @@ export function ComposerToolbar({
           </TooltipButton>
         </div>
         {task === "chat" && localToolsAllowed && globalComposerControlsAllowed ? <LiveVoiceControls t={t} workSessionId={workSessionId} /> : null}
+        {task === "chat" && localToolsAllowed && globalComposerControlsAllowed ? <ComputerUseIndicator sessionId={workSessionId ?? null} abort={abort} /> : null}
         <ComposerModePicker
           t={t}
           mode={task === "image" ? "image" : mode}
@@ -187,11 +192,13 @@ export function ComposerToolbar({
           controller={modelMenu}
           modelLabel={modelLabel}
           thinkingLabel={thinkingLabel}
+          fastMode={modelFastMode}
           thinkingLevel={thinkingLevel}
           selectedProviderId={task === "image" ? modelMenu.selectedImage?.providerId : providerId}
           selectedModelId={task === "image" ? modelMenu.selectedImage?.modelId : modelId}
           controlsBlocked={controlsBlocked}
           onCloseOtherMenus={() => setPermissionOpen(false)}
+          onOpenModelSettings={() => useAppStore.getState().setSettingsTab("agent")}
         />
         {task === "chat" && composerTransforms.map((transform) => {
           const key = `${transform.pluginId}/${transform.id}`;

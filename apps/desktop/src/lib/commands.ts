@@ -1,6 +1,7 @@
 import i18n from "i18next";
 import { api } from "./api";
 import { useAppStore } from "../stores/app-store";
+import { toggleSessionFastMode } from "./fast-mode-command";
 import { trustedExtensionCommandName, type Mode } from "@pi-desktop/shared";
 
 /**
@@ -18,6 +19,9 @@ export async function runPaletteCommand(commandId: string, targetSessionId?: str
       break;
     case "builtin.agent.compact":
       await store.compactContext(sessionId);
+      break;
+    case "builtin.session.fast":
+      await toggleSessionFastMode();
       break;
     case "builtin.mode.agent":
     case "builtin.mode.plan":

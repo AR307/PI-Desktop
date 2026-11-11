@@ -53,6 +53,7 @@ export function copyProviderConfiguration(provider: ProviderPublic, name: string
       ...(model.temperature !== undefined ? { temperature: model.temperature } : {}),
       ...(model.apiStyle !== undefined ? { apiStyle: model.apiStyle } : {}),
       ...(model.mirrorCodingGroupId !== undefined ? { mirrorCodingGroupId: model.mirrorCodingGroupId } : {}),
+      ...(model.fastModeAllowed !== undefined ? { fastModeAllowed: model.fastModeAllowed } : {}),
     })),
   };
 }

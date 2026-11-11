@@ -1,6 +1,6 @@
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { imageGenerationPrompts, readNdjsonLines, rpcTimeoutMs, rpcErrorFromWire, rpcErrorToWire } from "@pi-desktop/shared";
+import { COMPUTER_CALL_TIMEOUT_MS, DEFAULT_RPC_TIMEOUT_MS, IMAGE_BATCH_TIMEOUT_MS, imageGenerationPrompts, readNdjsonLines, rpcTimeoutMs, rpcErrorFromWire, rpcErrorToWire } from "@pi-desktop/shared";
 import type { ProcessExitHandler, StderrHandler } from "./host-process.js";
 
 // stderr lines kept per sidecar so an unexpected exit can be reported with the
@@ -50,6 +50,15 @@ export type VendorAuthResolver = (input: {
 // session, so it cannot reach a credential the session was not launched with.
 const HOST_PROXY_ALLOWED = new Set([
   "tools.execute",
+  "backgroundJobs.capabilities",
+  "backgroundJobs.list",
+  "backgroundJobs.wait",
+  "backgroundJobs.stop",
+  "tools.fileBatchCapabilities",
+  "tools.fileBatchRegister",
+  "tools.fileBatchSeal",
+  "tools.fileBatchAbandon",
+  "tools.fileBatchClose",
   "tools.abort",
   "tools.list",
   "session.get",
@@ -267,9 +276,10 @@ export class AgentSidecar {
     const controller = new AbortController();
     this.localToolControllers.set(key, controller);
     const imageGeneration = params.toolName === "GenerateImages";
+    const computerUse = params.toolName === "Computer";
     try {
-      if (imageGeneration) {
-        imageGenerationPrompts(input.args);
+      if (imageGeneration || computerUse) {
+        if (imageGeneration) imageGenerationPrompts(input.args);
         if (!this.host) throw new Error("host unavailable");
         const gate = await this.host.call<LocalToolResult>("tools.execute", params);
         if (!gate.ok) return gate;

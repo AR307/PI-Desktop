@@ -10,6 +10,7 @@ import {
   type ComponentType,
   type CSSProperties,
   type KeyboardEvent as ReactKeyboardEvent,
+  type MouseEvent as ReactMouseEvent,
 } from "react";
 import { useTranslation } from "react-i18next";
 import { useBlockingOverlayActive } from "../../lib/blocking-overlay";
@@ -26,10 +27,16 @@ import {
   toolWorkPanelTab,
 } from "../../lib/work-panel-tabs";
 import type { PluginViewMeta } from "@pi-desktop/shared";
+import { api } from "../../lib/api";
 import { pluginViewIcon, pluginViewInitial } from "../../lib/plugin-view-icons";
 import { useAppStore } from "../../stores/app-store";
 import type { WorkPanelTab } from "../../stores/app-store";
 import { cx } from "../ui";
+import {
+  ContextMenu,
+  useContextMenu,
+  type ContextMenuItem,
+} from "../ContextMenu";
 import { TooltipButton } from "../ui";
 import type { IconProps } from "../icons";
 import {
@@ -210,6 +217,11 @@ function LocalWorkPanel({
 }) {
   const { t } = useTranslation();
   const blockingOverlayActive = useBlockingOverlayActive();
+  const {
+    contextMenu: tabContextMenu,
+    openContextMenu: openTabContextMenu,
+    closeContextMenu: closeTabContextMenu,
+  } = useContextMenu();
   const rawTabs = useAppStore((s) => s.workPanelTabs);
   const tabs = rawTabs.filter(isKnownWorkPanelTab);
   const activeTabId = useAppStore((s) => s.activeWorkPanelTabId);
@@ -221,6 +233,8 @@ function LocalWorkPanel({
   const reorderTabs = useAppStore((s) => s.reorderWorkPanelTabs);
   const closeTab = useAppStore((s) => s.closeWorkPanelTab);
   const openWorkPanelTab = useAppStore((s) => s.openWorkPanelTab);
+  const closeOtherTabs = useAppStore((s) => s.closeOtherWorkPanelTabs);
+  const closeAllTabs = useAppStore((s) => s.closeAllWorkPanelTabs);
   const openNewWorkPanelTab = useAppStore((s) => s.openNewWorkPanelTab);
   const replaceWorkPanelTab = useAppStore((s) => s.replaceWorkPanelTab);
   const setWidth = useAppStore((s) => s.setWorkPanelWidth);
@@ -229,6 +243,7 @@ function LocalWorkPanel({
   const tabSignature = JSON.stringify(
     tabs.map(({ id, kind, resource, location }) => [id, kind, resource, location]),
   );
+
   // Subagent tabs may share an agent name; repeats gain a 1-based `#n`
   // suffix in strip order so the row stays unambiguous. The base label
   // already falls back to panel.tabs.subagent when no name was captured.
@@ -651,6 +666,61 @@ function LocalWorkPanel({
     },
     [closeTab, tabs],
   );
+  const closeOtherTabsAndFocus = useCallback(
+    (tabId: string) => {
+      closeOtherTabs(tabId);
+      requestAnimationFrame(() => tabButtonRefs.current[tabId]?.focus());
+    },
+    [closeOtherTabs],
+  );
+  const closeAllTabsAndFocus = useCallback(() => {
+    closeAllTabs();
+    requestAnimationFrame(() => newTabButtonRef.current?.focus());
+  }, [closeAllTabs]);
+  const openNativeTabMenu = useCallback(
+    (
+      event: ReactMouseEvent<HTMLDivElement>,
+      tabId: string,
+      label: string,
+    ) => {
+      event.preventDefault();
+      event.stopPropagation();
+      const sessionId = activeSessionId;
+      const rect = event.currentTarget.getBoundingClientRect();
+      const point =
+        event.clientX === 0 && event.clientY === 0
+          ? { x: rect.left + Math.min(24, rect.width / 2), y: rect.top + Math.min(24, rect.height / 2) }
+          : { x: event.clientX, y: event.clientY };
+      void api.openWorkPanelTabMenu({
+        closeTabLabel: t("panel.closeTab", { name: label }),
+        closeOtherTabsLabel: t("panel.closeOtherTabs"),
+        closeAllTabsLabel: t("panel.closeAllTabs"),
+        canCloseOthers: tabs.length > 1,
+        x: point.x,
+        y: point.y,
+      }).then((action) => {
+        if (!action || !sessionId) return;
+        const current = useAppStore.getState();
+        if (
+          current.activeSessionId !== sessionId ||
+          !current.workPanelTabs.some((tab) => tab.id === tabId)
+        ) return;
+        if (action === "closeTab") closeTabAndFocus(tabId);
+        else if (action === "closeOtherTabs") closeOtherTabsAndFocus(tabId);
+        else closeAllTabsAndFocus();
+      }).catch((error) => {
+        useAppStore.getState().showToast(String(error), { variant: "error" });
+      });
+    },
+    [
+      activeSessionId,
+      closeAllTabsAndFocus,
+      closeOtherTabsAndFocus,
+      closeTabAndFocus,
+      t,
+      tabs.length,
+    ],
+  );
   const onTabKeyDown = useCallback(
     (event: ReactKeyboardEvent<HTMLButtonElement>, tabId: string) => {
       const index = tabs.findIndex((tab) => tab.id === tabId);
@@ -920,6 +990,35 @@ function LocalWorkPanel({
                       // revealing opacity is not enough when the control sits
                       // outside the strip, so bring the whole box in first.
                       onPointerEnter={() => revealTab(tab.id)}
+                      onContextMenu={(event) => {
+                        if (activeTab?.kind === "plugin") {
+                          openNativeTabMenu(event, tab.id, label);
+                          return;
+                        }
+                        const items: ContextMenuItem[] = [
+                          {
+                            id: "close-tab",
+                            label: t("panel.closeTab", { name: label }),
+                            onSelect: () => closeTabAndFocus(tab.id),
+                          },
+                          {
+                            id: "close-other-tabs",
+                            label: t("panel.closeOtherTabs"),
+                            disabled: tabs.length <= 1,
+                            separatorBefore: true,
+                            onSelect: () => closeOtherTabsAndFocus(tab.id),
+                          },
+                          {
+                            id: "close-all-tabs",
+                            label: t("panel.closeAllTabs"),
+                            onSelect: closeAllTabsAndFocus,
+                          },
+                        ];
+                        openTabContextMenu(event, {
+                          label: t("panel.tabsLabel"),
+                          items,
+                        });
+                      }}
                       key={tab.id}
                     >
                       <button
@@ -1097,6 +1196,7 @@ function LocalWorkPanel({
           )}
         </div>
       </div>
+      <ContextMenu state={tabContextMenu} onClose={closeTabContextMenu} />
     </aside>
   );
 }

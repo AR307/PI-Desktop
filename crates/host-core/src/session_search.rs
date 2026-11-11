@@ -109,7 +109,8 @@ pub fn search(db: &Database, query: &str, offset: i64, limit: i64) -> Result<Sea
                  OR pi_search_contains(p.path, ?1)) AS metadata_match,
                 COALESCE((SELECT value_json = 'true' FROM kv WHERE ns = 'app' AND key = 'session-fast:' || s.id), 0) AS fast,
                 COALESCE((SELECT value_json = 'true' FROM kv WHERE ns = 'app' AND key = 'session-ultra:' || s.id), 0) AS ultra,
-                EXISTS (SELECT 1 FROM task_runs r WHERE r.session_id = s.id) AS scheduled_run
+                EXISTS (SELECT 1 FROM task_runs r WHERE r.session_id = s.id) AS scheduled_run,
+                s.fast_mode
          FROM sessions s LEFT JOIN projects p ON p.id = s.project_id
          LEFT JOIN matched ON matched.session_id = s.id
          WHERE s.deleted_at IS NULL AND s.id NOT LIKE 'side-%' AND (matched.count > 0 OR metadata_match)

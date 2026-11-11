@@ -25,6 +25,7 @@ const PLUGIN_IMPORT_RATE_WINDOW: Duration = Duration::from_secs(60);
 const PLUGIN_IMPORT_RATE_LIMIT: usize = 10;
 const PLUGIN_BATCH_IMPORT_RATE_LIMIT: usize = 5;
 const PLUGIN_DELETE_RATE_LIMIT: usize = 20;
+const PLUGIN_MESSAGE_WRITE_RATE_LIMIT: usize = 60;
 
 pub struct AppState {
     pub codex_import: crate::codex_import::ImportRegistry,
@@ -62,6 +63,9 @@ pub struct AppState {
     pub plugin_import_rates: HashMap<String, Vec<Instant>>,
     pub plugin_batch_import_rates: HashMap<String, Vec<Instant>>,
     pub plugin_delete_rates: HashMap<String, Vec<Instant>>,
+    /// Message-level rewrites are one row at a time but each one rewrites the
+    /// transcript, so they get their own, wider window (ADR 0339).
+    pub plugin_message_write_rates: HashMap<String, Vec<Instant>>,
     /// Chat-started processes detached from their turn (dev servers, etc.).
     /// Lives with the host process; `shutdown` stops every running task.
     pub background_tasks: crate::background_tasks::BackgroundTaskRegistry,
@@ -90,6 +94,17 @@ pub struct AppState {
     /// Session-scoped Read/Edit snapshot store (ADR 0087). Interior mutex so
     /// tool execution does not hold the AppState lock.
     pub hashline: crate::tools::HashlineStore,
+    /// The single active computer-use grant (ADR 0342). Process-local and
+    /// never persisted: a restart must not hand a new process authority over
+    /// the user's screen.
+    pub computer_grant: Option<crate::computer::Grant>,
+    /// When the user last stopped computer use. The grant is automatic
+    /// (ADR 0344), so Stop has to block the agent's next mint for a cooldown —
+    /// otherwise the same turn re-grants itself and Stop means nothing.
+    pub computer_stopped_at: Option<std::time::Instant>,
+    /// Exit codes of staged-mode `run` gate commands, keyed by
+    /// (session_id, tool_call_id), until `modes.gateResult` consumes them.
+    pub mode_gate_executions: crate::mode_runs::GateExecutions,
 }
 
 impl AppState {
@@ -116,6 +131,13 @@ impl AppState {
             }
             Ok(_) => {}
             Err(error) => tracing::warn!(%error, "in-flight reply sweep failed"),
+        }
+        // A staged mode run's claim dies with the process that dispatched
+        // its turn: such runs pause and nothing is replayed.
+        match crate::mode_runs::recover(&db) {
+            Ok(0) => {}
+            Ok(count) => tracing::info!(count, "paused mode runs with stale claims"),
+            Err(error) => tracing::error!(%error, "mode run recovery failed"),
         }
         let secrets = SecretStore::open(data_dir)?;
         // The marketplace channel is read before the manager builds its first
@@ -164,6 +186,7 @@ impl AppState {
             plugin_import_rates: HashMap::new(),
             plugin_batch_import_rates: HashMap::new(),
             plugin_delete_rates: HashMap::new(),
+            plugin_message_write_rates: HashMap::new(),
             tool_budget: ToolBudget::new(),
             active_bash_cancellations: HashMap::new(),
             active_tool_cancellations: HashMap::new(),
@@ -171,6 +194,9 @@ impl AppState {
             pending_bash_aborts: HashMap::new(),
             pending_tool_aborts: HashMap::new(),
             hashline: crate::tools::HashlineStore::new(),
+            computer_grant: None,
+            computer_stopped_at: None,
+            mode_gate_executions: crate::mode_runs::GateExecutions::default(),
         })
     }
 
@@ -210,6 +236,16 @@ impl AppState {
             &mut self.plugin_delete_rates,
             plugin_id,
             PLUGIN_DELETE_RATE_LIMIT,
+        )
+    }
+
+    /// One budget for every plugin message-level rewrite: append, replace,
+    /// delete, and truncate each cost one slot.
+    pub fn allow_plugin_message_write(&mut self, plugin_id: &str) -> bool {
+        Self::rate_allowed(
+            &mut self.plugin_message_write_rates,
+            plugin_id,
+            PLUGIN_MESSAGE_WRITE_RATE_LIMIT,
         )
     }
 

@@ -57,6 +57,7 @@ import { AssistantTurnParts } from "./AssistantTurnParts";
 import { TurnProcess } from "./TurnProcess";
 import { ActionSlotSide } from "./ActionBarSlots";
 import { EntryExtraStack } from "./EntryExtraStack";
+import { TurnChangesCard } from "./TurnChangesCard";
 import { slotMessage } from "../../../plugins/renderer-slots/slot-message";
 
 type AssistantTurnProps = {
@@ -175,17 +176,23 @@ type TranscriptHistoryProps = {
   entries: TranscriptEntry[];
   isRunning: boolean;
   liveDelegations?: ReadonlyMap<string, true>;
+  /** The running session's live turn, when it renders inside the history list (#1949). */
+  liveTurnId?: string;
 };
 
 /**
  * Keep the completed transcript out of the streaming reconciliation path.
  * The projection is still rebuilt for correctness, but React can now bail out
- * before walking every historical row when only the active tail changed.
+ * before walking every historical row when only the active tail changed. A
+ * live turn that is not the tail entry still renders active via `liveTurnId`;
+ * its streaming rows rebuild the projection anyway, so the bail-out only ever
+ * skips settled rows.
  */
 export const TranscriptHistory = memo(function TranscriptHistory({
   entries,
   isRunning,
   liveDelegations,
+  liveTurnId,
 }: TranscriptHistoryProps) {
   return (
     <>
@@ -194,7 +201,7 @@ export const TranscriptHistory = memo(function TranscriptHistory({
           key={transcriptEntryKey(entry)}
           entry={entry}
           isRunning={isRunning}
-          isActive={false}
+          isActive={entry.kind === "assistant-turn" && entry.id === liveTurnId}
           delegationsLive={entry.kind === "assistant-turn" && liveDelegations?.has(entry.id)}
         />
       ))}
@@ -204,6 +211,7 @@ export const TranscriptHistory = memo(function TranscriptHistory({
   if (
     previous.isRunning !== next.isRunning ||
     previous.liveDelegations !== next.liveDelegations ||
+    previous.liveTurnId !== next.liveTurnId ||
     previous.entries.length !== next.entries.length
   ) {
     return false;
@@ -282,7 +290,9 @@ export const AssistantTurn = memo(function AssistantTurn({
   const canEditMessages = sessionAllows(session ?? (paneSessionId.startsWith("remote:") ? { id: paneSessionId } : undefined), "canEditMessages");
   const summary = getAssistantTurnSummary(entry);
   const { actionMessage, metaMessage, latestUsageMessage, usage, responseDurationMs, responseOutputTokens } = summary;
-  const modelId = metaMessage?.modelId ?? latestUsageMessage?.modelId;
+  const modelSource = metaMessage?.modelId ? metaMessage : latestUsageMessage;
+  const modelId = modelSource?.modelId;
+  const responseModelId = modelSource?.responseModelId;
   const complete = !isActive && !summary.hasError && summary.hasContent && Boolean(actionMessage);
   // A live reply is joined only on menu/copy demand. Finished reply plugins
   // still receive exactly the text that the completed turn's Copy action uses.
@@ -408,8 +418,8 @@ export const AssistantTurn = memo(function AssistantTurn({
             processParts={process}
             turnParts={entry.parts}
             visibleSteps={visibleSteps}
-            isActive={isActive}
             delegationStatuses={turnDelegationStatuses}
+            isActive={isActive}
             failed={summary.hasError}
             activity={runtimeActivity}
           >
@@ -427,9 +437,13 @@ export const AssistantTurn = memo(function AssistantTurn({
             produced, not part of what it did. */}
         <AssistantTurnParts parts={responses} {...partContext} />
         {generatedImages}
+        {/* Mounted with the reply slots, so a streaming turn never grows it;
+            plugin entry extras stay beneath it. */}
+        {slotReply ? <TurnChangesCard tools={tools} /> : null}
         {!isActive && metaMessage ? (
           <MessageMeta
             modelId={modelId}
+            responseModelId={responseModelId}
             usage={usage}
             responseDurationMs={responseDurationMs}
             responseOutputTokens={responseOutputTokens}

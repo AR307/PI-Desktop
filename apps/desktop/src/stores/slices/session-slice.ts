@@ -55,6 +55,7 @@ import type {
 import {
   type SessionRuntime,
 } from "../runtime/session-runtime";
+import { modeAfterPlanningUpdate, visiblePlanningState } from "../helpers/planning-projection";
 import type { StoreAccess } from "./types";
 import { switchWorkPanelSession } from "./work-panel-slice";
 
@@ -207,25 +208,29 @@ export function createSessionSlice({
         const durableMode = get().sessions.find(
           (session) => session.id === sessionId,
         )?.mode;
-        const nextState =
+        const hostState =
           result.state ??
           (proposal?.status === "pending"
             ? "awaiting_approval"
             : durableMode === "plan" || durableMode === "goal"
               ? "planning"
               : "inactive");
+        // Goal and user modes are not Plan negotiations (ADR mode-definitions).
+        const nextState = visiblePlanningState(
+          durableMode,
+          hostState,
+          proposal?.status === "pending" || wasPending,
+        );
         const nextKind: ProposalKind | undefined =
           result.kind ??
           proposal?.kind ??
-          (durableMode === "plan" || durableMode === "goal"
-            ? durableMode
-            : undefined);
+          (durableMode === "plan" ? "plan" : durableMode === "goal" ? "goal" : undefined);
         const checkpoint =
           proposal ??
           (existingCheckpoint?.status === "pending" &&
           nextState === "awaiting_approval"
             ? existingCheckpoint
-            : terminalizeMissingPlan(existingCheckpoint, nextState));
+            : terminalizeMissingPlan(existingCheckpoint, hostState));
         const activeProposal =
           nextState === "awaiting_approval" && isPendingPlan(checkpoint)
             ? checkpoint
@@ -254,7 +259,9 @@ export function createSessionSlice({
             session.id === sessionId
               ? {
                   ...session,
-                  mode: sessionModeForPlanningState(nextState, nextKind),
+                  mode: modeAfterPlanningUpdate(durableMode, hostState, () =>
+                    sessionModeForPlanningState(hostState, nextKind),
+                  ),
                 }
               : session,
           ),
@@ -622,10 +629,20 @@ export function createSessionSlice({
                 thinkingLevel: selected.thinkingLevel,
               });
             } else {
-              void api.configureSession(id, {
+              // The active-session branch reports a refused write through its
+              // flush; a background session must not drop the pin silently,
+              // because the row keeps the optimistic value while the host
+              // reverts to the previous model on the next launch.
+              const pinWrite = api.configureSession(id, {
                 mode: selected.mode,
                 providerId: pin.providerId,
                 modelId: pin.modelId,
+              });
+              void pinWrite.catch((error) => {
+                get().showToast(
+                  error instanceof Error ? error.message : String(error),
+                  { variant: "error" },
+                );
               });
             }
           }
@@ -677,12 +694,12 @@ export function createSessionSlice({
           const workspace = await get().activateProject(requestedProjectPath, {
             navigationIntent: intent,
           });
-          if (!runtime.navigationIntentIsCurrent(intent)) return;
+          if (!runtime.navigationIntentIsCurrent(intent)) return null;
           if (!workspace) throw new Error(i18n.t("errors.workspaceActivationFailed"));
         }
         if (requestedProjectPath === null && get().workspace) {
           await get().clearProject({ navigationIntent: intent });
-          if (!runtime.navigationIntentIsCurrent(intent)) return;
+          if (!runtime.navigationIntentIsCurrent(intent)) return null;
         }
 
         const latest = runtime.latestSessionInScope(
@@ -699,12 +716,12 @@ export function createSessionSlice({
             submitted: runtime.submittedComposerDrafts.has(latest.id),
           })
         ) {
-          if (get().activeSessionId === latest.id && get().page === "chat") return;
+          if (get().activeSessionId === latest.id && get().page === "chat") return latest.id;
           await get().selectSession(latest.id, { navigationIntent: intent });
-          return;
+          return runtime.navigationIntentIsCurrent(intent) ? latest.id : null;
         }
 
-        await persistSessionAndSelect({
+        return await persistSessionAndSelect({
           intent,
           projectPath: requestedProjectPath,
           draftConfiguration: null,
@@ -802,6 +819,7 @@ export function createSessionSlice({
             modelId: config.modelId ?? state.draftConfiguration?.modelId,
             permissionMode:
               config.permissionMode ?? state.draftConfiguration?.permissionMode,
+            fastMode: config.fastMode ?? state.draftConfiguration?.fastMode,
           },
         }));
         return;
@@ -831,15 +849,12 @@ export function createSessionSlice({
     /** Abort one session's running turn, whether or not it is the visible one. */
     abortSession: async (sessionId) => {
       if (!sessionId) return;
-      try {
-        await api.abort(sessionId);
-      } finally {
-        set((state) => ({
-          isRunning:
-            state.activeSessionId === sessionId ? false : state.isRunning,
-          runningSessions: { ...state.runningSessions, [sessionId]: false },
-        }));
-      }
+      await api.abort(sessionId);
+      set((state) => ({
+        isRunning:
+          state.activeSessionId === sessionId ? false : state.isRunning,
+        runningSessions: { ...state.runningSessions, [sessionId]: false },
+      }));
     },
   };
 }

@@ -5,9 +5,11 @@ import { copyFile, mkdir, open, realpath, stat } from "node:fs/promises";
 import { isAbsolute, relative, resolve } from "node:path";
 import {
   formatFileInsert,
+  imageExceedsInlineDimensions,
   isSvgAttachment,
   MAX_INLINE_IMAGE_BYTES,
   MAX_INLINED_IMAGE_HISTORY_BYTES,
+  probeImageDimensions,
   SVG_MIME_TYPE,
   type MessageAttachment,
   type UiMessage,
@@ -177,43 +179,38 @@ export async function hydrateAttachmentHistory(
     }),
   );
 
-  // Allocate the byte budget in reverse transcript order, then reverse attachment
-  // order within a message. This preserves every image when the history fits while
-  // keeping the most recent visual context when the aggregate exceeds the cap.
+  // Newest transcript first, then newest attachment within a message. Charge
+  // the byte budget only after the pixel probe accepts the file. A tall
+  // screenshot keeps the path fallback (#1913) and must not starve an older
+  // image that still fits. Images past the remaining budget are not read.
   let remainingBytes = maxInlinedImageBytes;
-  const selectedForInlining: ResolvedAttachment[] = [];
+  const inlineCandidates: ResolvedAttachment[] = [];
   for (let messageIndex = resolvedHistory.length - 1; messageIndex >= 0; messageIndex--) {
     const resolved = resolvedHistory[messageIndex];
     if (!resolved) continue;
     for (let attachmentIndex = resolved.length - 1; attachmentIndex >= 0; attachmentIndex--) {
       const item = resolved[attachmentIndex];
-      if (
-        !item?.canonicalPath ||
-        item.size === undefined ||
-        item.size > remainingBytes
-      ) {
-        continue;
-      }
-      remainingBytes -= item.size;
-      selectedForInlining.push(item);
+      if (!item?.canonicalPath || item.size === undefined) continue;
+      inlineCandidates.push(item);
     }
   }
 
-  await Promise.all(
-    selectedForInlining.map(async (item) => {
-      try {
-        const bytes = await readFileAtRecordedSize(item.canonicalPath!, item.size!);
-        if (!bytes) return;
-        item.attachment = {
-          ...item.attachment,
-          data: bytes.toString("base64"),
-        };
-        item.inlined = true;
-      } catch {
-        // A failed transient read should not prevent the remaining history restoring.
-      }
-    }),
-  );
+  for (const item of inlineCandidates) {
+    if (item.size === undefined || item.size > remainingBytes) continue;
+    try {
+      const bytes = await readFileAtRecordedSize(item.canonicalPath!, item.size);
+      if (!bytes) continue;
+      if (imageExceedsInlineDimensions(probeImageDimensions(bytes))) continue;
+      remainingBytes -= item.size;
+      item.attachment = {
+        ...item.attachment,
+        data: bytes.toString("base64"),
+      };
+      item.inlined = true;
+    } catch {
+      // A failed transient read should not prevent the remaining history restoring.
+    }
+  }
 
   const fallbackTasks: Promise<void>[] = [];
   for (const resolved of resolvedHistory) {
