@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { createRequire } from "node:module";
-import { spawn } from "node:child_process";
+import { execFileSync, spawn } from "node:child_process";
 import { once } from "node:events";
 import { createServer } from "node:http";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
@@ -52,7 +52,7 @@ try {
   const env = { ...process.env, PI_DESKTOP_DATA_DIR: join(scratch, "data"), PI_DESKTOP_START_MAXIMIZED: "0", ELECTRON_RENDERER_URL: "" };
   delete env.ELECTRON_RUN_AS_NODE;
   const port = Number(process.env.PI_SCREENSHOT_CDP_PORT || 9493);
-  child = spawn(resolveElectronBinary(root).electronBinary, [`--remote-debugging-port=${port}`, `--user-data-dir=${join(scratch, "profile")}`, "."], { cwd: appDir, env, windowsHide: true, stdio: ["ignore", "pipe", "pipe"] });
+  child = spawn(resolveElectronBinary(root).electronBinary, [`--remote-debugging-port=${port}`, `--user-data-dir=${join(scratch, "profile")}`, "."], { cwd: appDir, env, stdio: ["ignore", "pipe", "pipe"] });
   closed = once(child, "close");
   for (const stream of [child.stdout, child.stderr]) stream.on("data", data => { log += data; });
   await waitFor(async () => {
@@ -71,6 +71,7 @@ try {
   await page.locator('.composer-input[contenteditable="true"]').waitFor({ timeout: 60000 });
   const skip = page.getByRole("button", { name: /Skip for now/ });
   if (await skip.isVisible()) await skip.click();
+  if (process.platform === "win32") execFileSync("powershell.exe", ["-NoProfile", "-File", join(root, "scripts/e2e/show-fixture-window.ps1"), "-targetProcessId", String(child.pid)], { windowsHide: true });
   const images = () => {
     const path = join(scratch, "data", "scratch");
     return existsSync(path) ? readdirSync(path, { recursive: true }).filter(name => name.endsWith(".png")).map(name => join(path, name)) : [];
@@ -159,6 +160,12 @@ try {
     assert.equal(images().length, existingImages.length);
     assert.match(await editor.innerText(), /Keep this screenshot draft/);
     assert.equal(requests.length, requestCount, "cancellation never sends a message");
+    await page.evaluate(() => {
+      const marker = document.createElement("div");
+      marker.dataset.captureFixture = "";
+      marker.style.cssText = "position:fixed;left:40vw;top:30vh;width:48px;height:48px;z-index:2147483647;background:rgb(239,23,191);pointer-events:none";
+      document.body.append(marker);
+    });
     overlay = await openCapture(screenshotButton);
     const frame = await overlay.locator("img").evaluate(image => ({ width: image.naturalWidth, height: image.naturalHeight, viewportWidth: window.innerWidth, viewportHeight: window.innerHeight }));
     // Select a region inside the maximized fixture, never an unrelated desktop window.
@@ -172,9 +179,15 @@ try {
       canvas.width = width; canvas.height = height;
       const ctx = canvas.getContext("2d");
       ctx.drawImage(image, x, y, width, height, 0, 0, width, height);
+      const pixels = ctx.getImageData(0, 0, width, height).data;
+      let markerPixels = 0;
+      for (let index = 0; index < pixels.length; index += 4) {
+        if (Math.abs(pixels[index] - 239) < 5 && Math.abs(pixels[index + 1] - 23) < 5 && Math.abs(pixels[index + 2] - 191) < 5) markerPixels++;
+      }
       const samples = [0.1, 0.5, 0.9].flatMap(px => [0.1, 0.5, 0.9].map(py => [...ctx.getImageData(Math.floor(px * width), Math.floor(py * height), 1, 1).data]));
-      return { width, height, samples };
+      return { width, height, samples, markerPixels };
     }, area);
+    assert.ok(expected.markerPixels > 100, "native capture includes the visible fixture window, not only wallpaper");
     await overlay.mouse.move(area.x + area.width, area.y + area.height);
     await overlay.mouse.down();
     await overlay.mouse.move(area.x, area.y, { steps: 4 });
@@ -182,6 +195,7 @@ try {
     // Retain only the selected fixture region, not a full desktop screenshot.
     await overlay.screenshot({ path: join(scratch, "region-selector.png"), clip: area });
     await overlay.mouse.up();
+    await page.evaluate(() => document.querySelector("[data-capture-fixture]")?.remove());
     await waitFor(() => overlays().length === 0 && images().length === existingImages.length + 1, 10000, "cropped screenshot imported");
     await editor.locator(".composer-chip[data-image]").waitFor();
     assert.match(await editor.innerText(), /Keep this screenshot draft/);

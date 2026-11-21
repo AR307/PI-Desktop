@@ -18,6 +18,9 @@
   crop dimensions/pixels, explicit vision input, narrow layout and owner reload.
   Candidate/base revisions and native evidence are recorded locally under
   .artifacts/evidence; macOS/Linux and secondary-monitor crops are not validated.
+- Native acceptance explicitly shows its own Windows fixture and requires its
+  colored marker in the captured pixels; CDP-only interaction with a hidden
+  window must not count as screen-capture acceptance.
 - Existing composer-paste acceptance still fails its preview-cancel focus probe
   on both this candidate and the unchanged release worktree. No unrelated
   preview behavior is changed, and no production profile or database is used.
