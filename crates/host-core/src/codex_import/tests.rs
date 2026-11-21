@@ -281,7 +281,7 @@ async fn incomplete_history_requires_confirmation_and_directory_binding_before_e
             .to_string()
             .contains("DIRECTORY_REQUIRED")
     );
-    sessions::move_session_project(&st.db, "import-codex-fixture", path.to_str().unwrap()).unwrap();
+    sessions::move_session_project(&st.db, "import-codex-fixture", path.to_str()).unwrap();
     assert!(sessions::begin_turn(&st.db, "import-codex-fixture", None, None).is_ok());
 }
 

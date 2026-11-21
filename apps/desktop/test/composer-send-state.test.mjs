@@ -68,7 +68,7 @@ test("composer send/stop button follows draft content and the visible session's 
   assert.match(composer, /const activeSessionId = targetSessionId \?\? globalSessionId;/);
   assert.match(composer, /const isRunning = useAppStore\(\(s\) => activeSessionId \? !!s\.runningSessions\[activeSessionId\] : false\);/);
   assert.match(submitSlot, /stopGenerating/);
-  assert.match(submitSlot, /onClick=\{\(\) => void abort\(\)\}/);
+  assert.match(submitSlot, /onClick=\{\(\) => void abort\(\)\.catch/);
   assert.doesNotMatch(composerRight, /\{runActive \? \(/);
   const modelIndex = composerRight.indexOf("<ComposerModelPicker");
   const transformIndex = composerRight.indexOf("composerTransforms.map");
@@ -100,10 +100,10 @@ test("composer send/stop button follows draft content and the visible session's 
   assert.doesNotMatch(composer, /const inputBlocked = [^;]*runActive/);
 });
 
-test("running session configuration uses the shared host authority", () => {
-  assert.doesNotMatch(store, /pendingSessionConfigurations = new Map/);
+test("next-turn session configuration stages fields and persists through the shared host authority", () => {
+  assert.match(sessionSlice, /runtime\.pendingSessionConfigurations\.set/);
   assert.match(sessionSlice, /api\.configureSession/);
-  assert.doesNotMatch(eventsSlice, /flushPendingSessionConfiguration/);
+  assert.match(store, /flushPendingSessionConfiguration/);
 });
 
 test("running prompts use a removable per-session queue with priority actions", () => {

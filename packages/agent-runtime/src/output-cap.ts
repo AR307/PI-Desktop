@@ -37,6 +37,7 @@ import {
   hostedSearchReplayProjection,
   type HostedSearchReplayOptions,
 } from "@earendil-works/pi-ai/utils/hosted-search";
+import { truncateTextWithMarker } from "./agent-messages.js";
 
 /** Structural view of the request context; assignable from pi-ai's `Context`. */
 export type OutputCapContext = {
@@ -115,7 +116,13 @@ const ESTIMATED_CHARS_PER_IMAGE = 4800;
 // Han, Japanese kana, and Korean Hangul tokenize at ~1 token per character,
 // as do CJK punctuation and full-width forms. The chars/4 baseline charges
 // all of these 0.25.
-function countCjkChars(text: string): number {
+/**
+ * CJK characters (Han, kana, Hangul, full-width forms) tokenize at roughly one
+ * token each. Exposed for estimators outside this module — e.g. the compaction
+ * summary prompt sizer, which sizes serialized prompt text with the chars/3.5
+ * baseline — that need the same CJK definition and correction coefficient.
+ */
+export function countCjkChars(text: string): number {
   let count = 0;
   for (const ch of text) {
     const code = ch.codePointAt(0) ?? 0;
@@ -282,6 +289,70 @@ export function estimateOutputCapInputTokens(
 }
 
 /**
+ * Largest character budget in `1..charCeiling` for which `textAt` stays within
+ * `tokenBudget` under {@link estimateOutputCapInputTokens}.
+ *
+ * `charCeiling` is the historical ASCII cap (token budget times the 3.5
+ * chars-per-token ratio). Latin text already estimates under that cap, so it
+ * is returned unchanged. CJK text estimates near one token per character, and
+ * the cap is walked down until the same estimator that gates the output
+ * ceiling fits. A budget too small to hold the truncation marker may still
+ * exceed it by that marker alone.
+ */
+export function charBudgetWithinOutputCap(
+  tokenBudget: number,
+  charCeiling: number,
+  textAt: (maxChars: number) => string,
+): number {
+  const budget = Math.max(
+    1,
+    Math.floor(Number.isFinite(tokenBudget) ? tokenBudget : 1),
+  );
+  const ceiling = Math.max(
+    1,
+    Math.floor(Number.isFinite(charCeiling) ? charCeiling : 1),
+  );
+  const tokensAt = (maxChars: number) =>
+    estimateOutputCapInputTokens({
+      messages: [{ role: "user", content: textAt(maxChars) }],
+    });
+  if (tokensAt(ceiling) <= budget) return ceiling;
+
+  let low = 1;
+  let high = ceiling - 1;
+  let best = 1;
+  while (low <= high) {
+    const mid = Math.floor((low + high) / 2);
+    if (tokensAt(mid) <= budget) {
+      best = mid;
+      low = mid + 1;
+    } else {
+      high = mid - 1;
+    }
+  }
+  return best;
+}
+
+/**
+ * Cut `text` with `marker` so {@link estimateOutputCapInputTokens} fits
+ * `tokenBudget`. See {@link charBudgetWithinOutputCap} for why ASCII keeps
+ * the character ceiling.
+ */
+export function truncateTextWithinOutputCap(
+  text: string,
+  tokenBudget: number,
+  marker: string,
+  charCeiling: number,
+): string {
+  const maxChars = charBudgetWithinOutputCap(
+    tokenBudget,
+    charCeiling,
+    (chars) => truncateTextWithMarker(text, chars, marker),
+  );
+  return truncateTextWithMarker(text, maxChars, marker);
+}
+
+/**
  * The transcript the adapter puts on the wire. Unless the model declares
  * mid-conversation system support, every adapter folds the later system
  * messages into one leading message holding the current instructions and
@@ -294,12 +365,23 @@ export function requestTranscript(
   model: Pick<Model<Api>, "compat">,
   context: TranscriptContext,
 ): TranscriptContext {
+  return resolveTranscript(context, supportsMidConversationSystemMessages(model));
+}
+
+/**
+ * Whether the adapter keeps later system messages in place. Without it pi-ai
+ * folds every system update into the leading system message, so a system
+ * section added mid-run rewrites the request prefix.
+ */
+export function supportsMidConversationSystemMessages(
+  model: Pick<Model<Api>, "compat">,
+): boolean {
   const compat = model.compat;
-  const midConversation =
+  return (
     compat !== undefined &&
     "supportsMidConvoSystemMessages" in compat &&
-    compat.supportsMidConvoSystemMessages === true;
-  return resolveTranscript(context, midConversation);
+    compat.supportsMidConvoSystemMessages === true
+  );
 }
 
 /**

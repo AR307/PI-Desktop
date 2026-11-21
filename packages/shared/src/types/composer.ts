@@ -41,13 +41,39 @@ export type ComposerPasteFile = {
   data: ArrayBuffer;
 };
 
-/** A clipboard file materialized in the originating session's scratch root. */
+/** One pasted item: an original disk-file reference or a materialized payload. */
 export type ComposerPastedFile = {
-  /** UUID-backed canonical path used by the prompt and file tools. */
+  /** Durable main-owned selection record; contents are read only through tools. */
+  localReference?: string;
+  /** Canonical original path for references, or a unique session scratch path. */
   path: string;
   /** Sanitized original leaf name used only for compact composer display. */
   name: string;
   kind: "image" | "file";
   mimeType: string;
   size: number;
+};
+
+/** Trusted main/renderer transport; the renderer revision is never sent to plugins. */
+export type ComposerSuggestionMessage =
+  | { kind: "target"; requestId: string; sessionId: string }
+  | ({
+      kind: "offer";
+      requestId: string;
+      pluginId: string;
+      sessionId: string;
+      turnId?: string;
+      expiresAt: number;
+    } & (
+      | { text: string }
+      | { candidates: readonly string[]; revision: string; validUntil: number }
+    ))
+  | { kind: "clear"; pluginId?: string; sessionId?: string };
+
+export type ComposerSuggestionAnswer = {
+  requestId: string;
+  shown: boolean;
+  reason?: "session-not-visible" | "draft-not-empty" | "stale-turn" | "replaced" | "unsupported";
+  /** Present only when the renderer has an eligible empty composer for the target probe. */
+  revision?: string;
 };

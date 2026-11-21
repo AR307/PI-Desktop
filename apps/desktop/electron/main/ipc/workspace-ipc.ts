@@ -2,6 +2,7 @@ import { clipboard } from "electron";
 import { registerSidebarPreferencesIpc } from "./sidebar-preferences-ipc";
 import { readComposerClipboardDirectories } from "../composer-clipboard-directories";
 import { captureComposerScreenshot } from "../composer-screenshot";
+import { referenceComposerFiles } from "../composer-file-references";
 import { BrowserWindow, dialog, shell, type OpenDialogOptions } from "electron";
 import { dirname } from "node:path";
 import { homedir } from "node:os";
@@ -603,8 +604,9 @@ export function registerWorkspaceIpc({
     IPC.invoke.composerImportFiles,
     async (
       event,
-      input: { sessionId?: unknown; token?: unknown } = {},
+      input: { sessionId?: unknown; token?: unknown; reference?: unknown } = {},
     ) => {
+      assertMainWindowSender(event);
       if (!host) throw new Error("host unavailable");
       const sessionId =
         typeof input.sessionId === "string" ? input.sessionId.trim() : "";
@@ -613,8 +615,8 @@ export function registerWorkspaceIpc({
           errorCode: ErrorCodes.INVALID_ARGUMENT,
         });
       }
-      const session = (await host.call("session.get", { id: sessionId })) as {
-        session?: unknown;
+      const session = (await host.call("session.get", { id: sessionId, messageLimit: 1 })) as {
+        session?: { projectPath?: string; remoteWorkspace?: unknown };
       };
       if (!session.session) {
         throw Object.assign(new Error("session not found"), {
@@ -622,6 +624,10 @@ export function registerWorkspaceIpc({
         });
       }
       const paths = consumeComposerPickerSelection(input.token, event.sender.id);
+      if (input.reference === true) {
+        if (!session.session.projectPath || session.session.remoteWorkspace) throw new Error("local file references require a local project");
+        return { files: await referenceComposerFiles(dataDir, sessionId, session.session.projectPath, paths) };
+      }
       return {
         files: await importComposerFiles(
           dataDir,
@@ -677,7 +683,7 @@ handleWithEvent(
           errorCode: ErrorCodes.INVALID_ARGUMENT,
         });
       }
-      const session = (await host.call("session.get", { id: sessionId })) as {
+      const session = (await host.call("session.get", { id: sessionId, messageLimit: 1 })) as {
         session?: unknown;
       };
       if (!session.session) {

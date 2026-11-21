@@ -168,10 +168,17 @@ jobs:
       - name: Build host-core
         run: cargo build -p host-core --locked
 
-      - name: Run staged mode Host/process E2E
+      - name: Run staged mode and Goal Host/process E2E
         env:
           PI_SCRATCH_DIR: ${{ runner.temp }}
-        run: node scripts/e2e-mode-definitions.mjs
+        run: |
+          pnpm --filter @pi-desktop/agent-runtime bundle
+          node scripts/e2e-mode-definitions.mjs
+          node scripts/e2e-goal-run-repairs.mjs
+          node scripts/e2e-goal-completion.mjs
+
+      - name: Run background completion Host/process E2E
+        run: pnpm test:e2e:background-continuation
 
       - name: Run plugin project enumeration Host/process E2E
         run: pnpm test:e2e:plugin-projects
@@ -197,6 +204,8 @@ jobs:
         env:
           DEBUG_E2E: "1"
         run: xvfb-run --auto-servernum pnpm test:e2e:trusted-extensions
+      - name: Run editable context menu interaction test
+        run: xvfb-run --auto-servernum sh -c 'openbox >/dev/null 2>&1 & exec node --test apps/desktop/test/editable-context-menu-user-path.test.mjs'
       - name: Run MCP market owner E2E
         run: xvfb-run --auto-servernum node --test apps/desktop/test/mcp-market-owner-user-path.test.mjs
       - name: Run File Manager theme E2E

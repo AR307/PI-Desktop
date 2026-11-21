@@ -62,6 +62,8 @@ export type ComposerPrefill = {
 };
 
 export type ComposerFileReference = {
+  size?: number;
+  localReference?: string;
   id: string;
   sessionId: string;
   path: string;

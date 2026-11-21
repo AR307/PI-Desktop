@@ -1,6 +1,6 @@
 {
   "name": "@pi-desktop/desktop",
-  "version": "0.21.2",
+  "version": "0.24.0-beta.1",
   "desktopName": "pi-desktop.desktop",
   "private": true,
   "description": "PI-Desktop Electron application",
@@ -12,8 +12,8 @@
   "main": "./out/main/index.js",
   "type": "module",
   "scripts": {
-    "build:deps": "pnpm --filter '@pi-desktop/desktop^...' build",
-    "predev": "pnpm run build:deps && pnpm run bundle:runtime && cargo build --manifest-path ../../Cargo.toml -p host-core",
+    "build:deps": "pnpm --filter \"@pi-desktop/desktop^...\" build",
+    "predev": "pnpm run build:deps && cargo build --manifest-path ../../Cargo.toml -p host-core",
     "dev": "node ../../scripts/dev-electron.mjs",
     "build": "electron-vite build",
     "preview": "electron-vite preview",
@@ -36,8 +36,8 @@
     "electron-updater": "^6.8.9"
   },
   "devDependencies": {
-    "@earendil-works/pi-ai": "1.5.0",
-    "@earendil-works/pi-mcp": "1.5.0",
+    "@earendil-works/pi-ai": "1.5.2",
+    "@earendil-works/pi-mcp": "1.5.2",
     "@pi-desktop/agent-host": "workspace:*",
     "@pi-desktop/computer-use": "workspace:*",
     "@pi-desktop/agent-runtime": "workspace:*",
@@ -70,6 +70,7 @@
     "rehype-raw": "^7.0.0",
     "rehype-sanitize": "^6.0.0",
     "remark-gfm": "^4.0.1",
+    "remark-cjk-friendly": "^2.3.4",
     "remark-math": "^6.0.0",
     "remark-parse": "^11.0.0",
     "shiki": "^4.4.3",
@@ -106,7 +107,11 @@
       "!**/node_modules/**/*.{test,spec}.{js,cjs,mjs}",
       "!**/node_modules/node-addon-api/tools/**",
       "!**/node_modules/node-addon-api/*.{c,gyp,gypi,h,js,json}",
-      "!**/node_modules/node-addon-api/README.md"
+      "!**/node_modules/node-addon-api/README.md",
+      "!**/node_modules/koffi/{doc,vendor}/**",
+      "!**/node_modules/@picovoice/pvrecorder-node/{src/**,copy.js,jest.config.js,tsconfig.json}",
+      "!**/node_modules/@picovoice/pvrecorder-node/lib/!(${os}*|raspberry-pi)/**",
+      "!**/node_modules/@picovoice/pvrecorder-node/[!${os}]ib/raspberry-pi/**"
     ],
     "electronLanguages": [
       "en-US",
@@ -293,6 +298,8 @@
     "asarUnpack": [
       "node_modules/transcribe-cpp/**/*.node",
       "node_modules/transcribe-cpp/**/bin/**",
+      "node_modules/@transcribe-cpp/**",
+      "node_modules/@koromix/**/*.node",
       "node_modules/@picovoice/pvrecorder-node/**/*.node",
       "node_modules/@picovoice/pvrecorder-node/**/lib/**"
     ],

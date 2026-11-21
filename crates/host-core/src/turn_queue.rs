@@ -34,6 +34,8 @@ pub struct QueuedTurnInput {
     pub idempotency_key: Option<String>,
     pub input_hash: String,
     pub content: String,
+    #[serde(default)]
+    pub start_goal: bool,
     pub session_message_id: Option<String>,
     pub user_message_id: Option<String>,
     pub voice_origin: Option<VoiceOrigin>,
@@ -52,6 +54,7 @@ pub struct QueuedTurn {
     pub idempotency_key: Option<String>,
     pub input_hash: String,
     pub content: String,
+    pub start_goal: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub session_message_id: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -104,6 +107,7 @@ fn row_to_entry(row: &rusqlite::Row<'_>) -> rusqlite::Result<QueuedTurn> {
         idempotency_key: row.get(3)?,
         input_hash: row.get(4)?,
         content: row.get(5)?,
+        start_goal: row.get(15)?,
         session_message_id: row.get(10)?,
         attachments: attachments.and_then(|text| serde_json::from_str(&text).ok()),
         permission_mode: row.get(7)?,
@@ -118,7 +122,7 @@ fn row_to_entry(row: &rusqlite::Row<'_>) -> rusqlite::Result<QueuedTurn> {
 
 const SELECT: &str = "SELECT id, session_id, principal, idempotency_key, input_hash, content,
         attachments_json, permission_mode, position, created_at, session_message_id, priority,
-        user_message_id, voice_origin_json, quotes_json
+        user_message_id, voice_origin_json, quotes_json, start_goal
  FROM turn_queue";
 
 /// Delivery order: promoted entries first in click order (ascending
@@ -173,7 +177,7 @@ pub fn push(db: &Database, input: QueuedTurnInput) -> Result<QueuedTurn> {
             )
             .optional()?;
         if let Some(existing) = existing {
-            if existing.input_hash == input.input_hash {
+            if existing.input_hash == input.input_hash && existing.start_goal == input.start_goal {
                 return Ok(existing);
             }
             return Err(anyhow!("IDEMPOTENCY_CONFLICT"));
@@ -207,8 +211,8 @@ pub fn push(db: &Database, input: QueuedTurnInput) -> Result<QueuedTurn> {
         "INSERT INTO turn_queue (
             id, session_id, principal, idempotency_key, input_hash, content,
             attachments_json, permission_mode, position, created_at, session_message_id,
-            user_message_id, voice_origin_json, quotes_json
-         ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)",
+        user_message_id, voice_origin_json, quotes_json, start_goal
+         ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)",
         params![
             id,
             input.session_id,
@@ -227,7 +231,8 @@ pub fn push(db: &Database, input: QueuedTurnInput) -> Result<QueuedTurn> {
                 .quotes
                 .as_ref()
                 .map(serde_json::to_string)
-                .transpose()?
+                .transpose()?,
+            input.start_goal
         ],
     )?;
     tx.commit()?;
@@ -238,6 +243,7 @@ pub fn push(db: &Database, input: QueuedTurnInput) -> Result<QueuedTurn> {
         idempotency_key: input.idempotency_key,
         input_hash: input.input_hash,
         content: input.content,
+        start_goal: input.start_goal,
         session_message_id: input.session_message_id,
         user_message_id: input.user_message_id,
         voice_origin: input.voice_origin,
@@ -419,6 +425,7 @@ mod tests {
             quotes: None,
             attachments: None,
             permission_mode: "ask".into(),
+            start_goal: false,
         }
     }
 
@@ -450,6 +457,26 @@ mod tests {
             )
             .unwrap();
         assert_eq!(count, 0);
+    }
+
+    #[test]
+    fn explicit_goal_identity_survives_restart_and_idempotency() {
+        let (dir, db, session) = open_with_session();
+        let mut goal = input(&session, "new objective", Some("goal-key"));
+        goal.start_goal = true;
+        let accepted = push(&db, goal.clone()).unwrap();
+        assert!(accepted.start_goal);
+        assert_eq!(push(&db, goal.clone()).unwrap().id, accepted.id);
+        goal.start_goal = false;
+        assert!(push(&db, goal)
+            .unwrap_err()
+            .to_string()
+            .contains("IDEMPOTENCY_CONFLICT"));
+        drop(db);
+        let db = Database::open_in_dir(dir.path()).unwrap();
+        let restored = list(&db, Some(&session)).unwrap();
+        assert_eq!(restored, vec![accepted]);
+        assert!(restored[0].start_goal);
     }
 
     #[test]
@@ -601,7 +628,7 @@ mod tests {
             assert_eq!(entries[0].content, "existing");
             assert_eq!(entries[0].user_message_id.as_deref(), mobile_message_id);
             assert!(entries[0].voice_origin.is_none());
-            assert_eq!(crate::db::SCHEMA_VERSION, 30);
+            assert_eq!(crate::db::SCHEMA_VERSION, 34);
         }
     }
 

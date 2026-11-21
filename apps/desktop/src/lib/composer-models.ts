@@ -1,6 +1,7 @@
 import {
   bindingSupportsImages,
   effectiveContextWindow,
+  isImageOnlyChatModel,
   isImageGenerationModel,
   type ImageGenerationBindings,
   modelMatchesFilter,
@@ -15,6 +16,35 @@ type ConfiguredProvider = Pick<ProviderPublic, "id" | "models" | "defaultModelId
 /** UI identity is the complete wire id, not a catalog alias or a route suffix. */
 export function sameComposerModelId(left: string, right: string): boolean {
   return modelWireIdsEqual(left, right);
+}
+
+/**
+ * Catalog/discovery metadata for a configured model id — the same modalities
+ * source session launch reads from its catalog row. Callers of
+ * `isImageOnlyChatModel` must resolve and pass this so every chat-eligibility
+ * answer (picker, defaults, subagents, canSend, launch) sees one truth (#2253).
+ */
+export function composerModelMetadata(
+  discovered: readonly ModelInfo[] | undefined,
+  modelId: string | undefined,
+): ModelInfo | undefined {
+  if (!modelId) return undefined;
+  return (discovered ?? []).find((model) => sameComposerModelId(model.modelId, modelId));
+}
+
+/**
+ * One chat-eligibility answer everywhere: a model bound for image generation
+ * stays chat-eligible unless its discovered metadata names no text output or
+ * its id is a pure image-generation endpoint (#2253).
+ */
+export function composerModelChatEligible(
+  imageGeneration: ImageGenerationBindings | null | undefined,
+  providerId: string | undefined,
+  modelId: string | undefined,
+  discovered?: readonly ModelInfo[],
+): boolean {
+  const metadata = composerModelMetadata(discovered, modelId);
+  return !isImageOnlyChatModel(imageGeneration, providerId, modelId, metadata);
 }
 
 function configuredModelIds(provider: ConfiguredProvider): string[] {
@@ -41,14 +71,16 @@ export function composerModelsForProvider(
   const task = typeof imageGenerationOrTask === "string" ? imageGenerationOrTask : "chat";
   const imageGeneration = typeof imageGenerationOrTask === "string" ? undefined : imageGenerationOrTask;
   return configuredModelIds(provider).filter((modelId) => {
-    if ((discovered ?? []).some(model => sameComposerModelId(model.modelId, modelId) && model.discoveryState === "unlisted")) return false;
+    const metadata = discovered?.find((model) => sameComposerModelId(model.modelId, modelId));
+    if (metadata?.discoveryState === "unlisted") return false;
     if (provider.mirrorCoding) {
       return task === "image"
         ? Boolean(provider.mirrorCoding.imageRoutes?.[modelId] || provider.mirrorCoding.imageModels?.[modelId])
-        : Boolean(provider.mirrorCoding.routes[modelId]) && !isImageGenerationModel(imageGeneration, provider.id, modelId);
+        : Boolean(provider.mirrorCoding.routes[modelId]);
     }
-    if (task === "image") return isImageGenerationModel(imageGeneration, provider.id, modelId);
-    return !isImageGenerationModel(imageGeneration, provider.id, modelId);
+    return task === "image"
+      ? isImageGenerationModel(imageGeneration, provider.id, modelId)
+      : !isImageOnlyChatModel(imageGeneration, provider.id, modelId, metadata);
   }).map((modelId) => {
     const metadata = (discovered ?? []).find((model) =>
       sameComposerModelId(model.modelId, modelId),

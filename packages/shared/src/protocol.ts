@@ -1,8 +1,8 @@
 export const PROTOCOL_VERSION = 11 as const;
-export const SCHEMA_VERSION = 30 as const;
+export const SCHEMA_VERSION = 34 as const;
 export const APP_ID = "net.aiuo.pi-desktop";
 export const APP_NAME = "PI-Desktop";
-export const APP_VERSION = "0.21.2";
+export const APP_VERSION = "0.24.0-beta.1";
 
 export const APP_MENU_COMMANDS = [
   "newTask",
@@ -223,6 +223,7 @@ export const IPC = {
     backgroundTasksList: "pi-desktop/backgroundTasks/list",
     backgroundTasksOutput: "pi-desktop/backgroundTasks/output",
     backgroundTasksStop: "pi-desktop/backgroundTasks/stop",
+    backgroundTasksCancelContinuation: "pi-desktop/backgroundTasks/cancelContinuation",
     configSyncConfigure: "pi-desktop/configSync/configure",
     configSyncTest: "pi-desktop/configSync/test",
     configSyncSyncNow: "pi-desktop/configSync/syncNow",
@@ -418,9 +419,9 @@ export const IPC = {
      */
     pluginSessionActive: "pi-desktop/plugin/session/active",
     /**
-     * The shell's answer to one composer suggestion (`pi.composer.suggest`):
-     * whether it went on screen and, if not, why. The main process is waiting
-     * on this invoke, so a suggestion's caller learns what happened to it.
+     * The renderer's answer to a composer suggestion offer or target probe.
+     * A target probe returns an opaque renderer revision, never draft data.
+     * The main process waits on this invoke to resolve the plugin's call.
      */
     pluginComposerSuggestionResult: "pi-desktop/plugin/composer/suggestionResult",
     mcpList: "pi-desktop/mcp/list",
@@ -464,6 +465,7 @@ export const IPC = {
     subagentReveal: "pi-desktop/subagent/reveal",
     marketRefresh: "pi-desktop/market/refresh",
     marketSearch: "pi-desktop/market/search",
+    marketBrowse: "pi-desktop/market/browse",
     marketGetDetail: "pi-desktop/market/getDetail",
     marketInstall: "pi-desktop/market/install",
     marketCheckUpdates: "pi-desktop/market/checkUpdates",
@@ -560,9 +562,8 @@ export const IPC = {
      */
     pluginViewReveal: "pi-desktop/plugin/view/event/reveal",
     /**
-     * One composer suggestion (`pi.composer.suggest`): an offer to show a
-     * plugin's line in the placeholder layer, or the shell's order to drop what
-     * it shows. The shell owns the composer, so it decides and answers over
+     * Ask the renderer to probe an empty composer, show a suggestion group,
+     * or clear what it shows. The renderer answers probes and offers over
      * `pluginComposerSuggestionResult`.
      */
     pluginComposerSuggestion: "pi-desktop/plugin/composer/event/suggestion",

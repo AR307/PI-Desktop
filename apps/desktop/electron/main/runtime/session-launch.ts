@@ -2,25 +2,6 @@ import { subagentModelSources } from "./subagent-model-sources";
 import { highestThinkingLevel } from "@pi-desktop/shared";
 import { join } from "node:path";
 import {
-  GEN_UI_DIRECTORY_NAME,
-  ErrorCodes as SharedErrorCodes,
-  isActiveInProject,
-  isCommandShellCatalog,
-  JEV_API_KEY_SECRET_REF,
-  imageGenerationBindings,
-  isImageGenerationModel,
-  normalizeMode,
-  trustedExtensionAgentKeyFromProviderId,
-  type CommandShellCatalog,
-  type McpServerRecord,
-  type ModelBinding,
-  type Mode,
-  type Risk,
-  type SessionThinkingLevel,
-  type UserSkillRecord,
-  type UserSubagentRecord,
-} from "@pi-desktop/shared";
-import {
   capabilitiesFromModelConfig,
   clampThinkingLevel,
   loadCustomSystemPrompt,
@@ -30,24 +11,45 @@ import {
   mergeProviderHeaders,
   optionalProviderHeaders,
   resolveSubagentProviders,
-  visionFromModelConfig,
   type UserSubagentDocument,
   type RuntimeProviderConfig,
+  visionFromModelConfig,
 } from "@pi-desktop/agent-runtime";
+import {
+  type CommandShellCatalog,
+  GEN_UI_DIRECTORY_NAME,
+  imageGenerationBindings,
+  isActiveInProject,
+  isCommandShellCatalog,
+  isImageOnlyChatModel,
+  JEV_API_KEY_SECRET_REF,
+  type McpServerRecord,
+  type Mode,
+  type ModelBinding,
+  type ModelInfo,
+  modelWireIdsEqual,
+  normalizeMode,
+  type Risk,
+  type SessionThinkingLevel,
+  ErrorCodes as SharedErrorCodes,
+  trustedExtensionAgentKeyFromProviderId,
+  type UserSkillRecord,
+  type UserSubagentRecord,
+} from "@pi-desktop/shared";
+import { getActiveRemoteHostsBoot } from "../bootstrap/remote-hosts";
 import { builtinSkills, effectiveDisabledBuiltinSkills, VISUALIZE_SKILL_ID } from "../builtin-skills";
-import { OAUTH_AUTH_KIND, type VendorOAuth } from "../oauth";
+import type { Logger } from "../logger";
 import {
   catalogModelConfigFor,
   type ModelsDevCatalog,
 } from "../models-dev-catalog";
-import type { Logger } from "../logger";
+import { OAUTH_AUTH_KIND, type VendorOAuth } from "../oauth";
 import type { PluginRuntime } from "../plugin-runtime";
+import { loadRemoteWorkspaceInstructions } from "../remote/remote-workspace-instructions.js";
+import type { LoadedSkillDocument } from "../skill-document";
 import type { UserMcpRuntime } from "../user-mcp";
 import type { RuntimeState } from "./context";
 import type { RuntimeProvider } from "./provider-catalog";
-import type { LoadedSkillDocument } from "../skill-document";
-import { getActiveRemoteHostsBoot } from "../bootstrap/remote-hosts";
-import { loadRemoteWorkspaceInstructions } from "../remote/remote-workspace-instructions.js";
 
 const ErrorCodes = {
   ...SharedErrorCodes,
@@ -124,7 +126,9 @@ export function createSessionLaunchRuntime({
         projectPath: projectPath ?? null,
       });
       const servers = result.servers ?? [];
-      userMcp.setRecords(servers);
+      // Each workspace keeps its own active list; refreshing this one must not
+      // take another project's servers away from a turn running there.
+      userMcp.setRecords(servers, projectPath ?? null);
       return servers;
     } catch (error) {
       if (!isHostUnavailable(error)) {
@@ -330,6 +334,28 @@ export function createSessionLaunchRuntime({
     return root;
   }
 
+  async function discoveredContextWindow(provider: RuntimeProvider, modelId: string): Promise<number | undefined> {
+    try {
+      const { models } = await runtimeState.host!.call<{
+        models: (Pick<ModelInfo, "modelId" | "discoveryState"> & { reportedContextWindow?: number })[];
+      }>("providers.listModels", {
+        providerId: provider.id,
+        endpoint: { baseUrl: provider.baseUrl ?? "", apiStyle: provider.apiStyle ?? "" },
+      });
+      const window = models.find((model) =>
+        model.discoveryState === "published" && modelWireIdsEqual(model.modelId, modelId),
+      )?.reportedContextWindow;
+      return typeof window === "number" && Number.isSafeInteger(window) && window > 0
+        ? window
+        : undefined;
+    } catch (error) {
+      if (!isHostUnavailable(error)) {
+        logger.app("provider", "warn", "model discovery cache read failed", { data: String(error) });
+      }
+      return undefined;
+    }
+  }
+
   async function resolveAgentRuntimeLaunch(
     sessionId: string,
     session: any,
@@ -416,15 +442,6 @@ export function createSessionLaunchRuntime({
         errorCode: ErrorCodes.MODEL_NOT_CONFIGURED,
       });
     }
-    if (!isMirrorCodingAccount && isImageGenerationModel(
-      imageGenerationBindings(settings.imageGenerationModels, settings.imageGeneration),
-      provider.id,
-      modelId,
-    )) {
-      throw Object.assign(new Error("The image model cannot be used for conversation; select a chat model"), {
-        errorCode: ErrorCodes.MODEL_NOT_CONFIGURED,
-      });
-    }
     const mirrorCodingBinding = isMirrorCodingAccount
       ? await mirrorCodingBindingFor?.(provider.id, modelId, sessionId)
       : undefined;
@@ -462,7 +479,42 @@ export function createSessionLaunchRuntime({
         apiStyle,
         modelId,
       });
-    const modelConfig = catalogModelConfig;
+    // The stored binding owns the model's effective capabilities: an explicit
+    // supportsImages/supportsDocuments pin must reach the send path even when
+    // the catalog row (or a catalog miss on a custom provider) disagrees, and
+    // the alias/id spelling a custom endpoint serves must not pick a catalog
+    // row that would undo it (#2120). The subagent path and enrichProvider
+    // already apply the binding; the main session was the one path that
+    // dropped it. Without a stored binding the catalog answer stands.
+    const boundModelConfig = storedModel
+      ? modelConfigWithBinding(catalogModelConfig, storedModel)
+      : catalogModelConfig;
+    // The saved endpoint can serve a different window from the published model.
+    // Follow its discovered value for catalog-owned bindings, like the inspector.
+    const discoveredWindow = !isVendorAccount && storedModel?.contextWindowSource === "catalog"
+      ? await discoveredContextWindow(provider, modelId)
+      : undefined;
+    const modelConfig = discoveredWindow === undefined ? boundModelConfig : {
+      ...boundModelConfig,
+      contextWindow: discoveredWindow,
+      catalogContextWindow: discoveredWindow,
+      limit: { ...boundModelConfig.limit, context: discoveredWindow },
+    };
+    // Only a pure image-generation endpoint is rejected: a model the user
+    // marked for image generation that also supports conversation keeps its
+    // chat eligibility (#2253). The catalog row (or a catalog miss on a custom
+    // provider) owns the modalities answer; an unknown custom model stays
+    // chat-eligible.
+    if (isImageOnlyChatModel(
+      imageGenerationBindings(settings.imageGenerationModels, settings.imageGeneration),
+      provider.id,
+      modelId,
+      modelConfig,
+    )) {
+      throw Object.assign(new Error("The image model cannot be used for conversation; select a chat model"), {
+        errorCode: ErrorCodes.MODEL_NOT_CONFIGURED,
+      });
+    }
     const thinkingCapabilities = capabilitiesFromModelConfig(modelConfig);
     const ultra = overrides.ultra === true;
     const thinkingLevel = ultra ? highestThinkingLevel(thinkingCapabilities) : clampThinkingLevel(
@@ -781,11 +833,13 @@ export function createSessionLaunchRuntime({
       workspaceRoot,
       sidecarParams: {
         sessionId,
+        pluginModelContextEnabled: true,
         mode,
         ...(overrides.turnId ? { turnId: overrides.turnId } : {}),
         thinkingLevel,
         ultra,
         infiniteProviderRetry: settings.infiniteProviderRetry === true,
+        backgroundJobContinuationEnabled: settings.backgroundJobContinuationEnabled === true && mode === "agent",
         // The session `/fast` switch only reaches a model the user allowed it
         // for in model settings (ADR 0334).
         fastMode: session.fastMode === true && storedModel?.fastModeAllowed === true,
@@ -794,6 +848,10 @@ export function createSessionLaunchRuntime({
         // and refused on every call (ADR 0342 §13).
         ...(mode === "agent" && settings.computerUse?.enabled === true
           ? { computerUseEnabled: true }
+          : {}),
+        // Codemode is opt-in and Agent-only (ADR codemode-sandbox-boundary).
+        ...(mode === "agent" && settings.codemodeEnabled === true
+          ? { codemodeEnabled: true }
           : {}),
         commandShell,
         scratchDir: join(dataDir, "scratch", sessionId),

@@ -6,6 +6,7 @@ import { transcriptStatusProbe } from "./transcript-status";
 import { createRoot } from "react-dom/client";
 import { flushSync } from "react-dom";
 import { useState } from "react";
+import { bidiDirectionProbe } from "./bidi-direction";
 import { createInstance } from "i18next";
 import { I18nextProvider } from "react-i18next";
 import { en } from "@pi-desktop/i18n";
@@ -701,13 +702,33 @@ globalThis.transcriptRenderProbe = async () => {
       }
     }
 
+    // The saved snapshot must show the same warning after session restoration.
+    flushSync(() => useAppStore.setState({ settings: {
+      ...useAppStore.getState().settings!, smoothStreaming: false, inlineVisualizations: false,
+    } }));
+    const truncatedAnswer = message("truncated-answer", "assistant", "An incomplete answer", {
+      status: "complete", outputTruncated: true,
+    });
+    for (const snapshot of [truncatedAnswer, JSON.parse(JSON.stringify(truncatedAnswer))]) {
+      render([message("truncated-user", "user", "Write a long answer"), snapshot]);
+      assert(container.textContent?.includes("An incomplete answer"), "truncation hid the answer");
+      assert(container.querySelector('[role="status"]')?.textContent === i18n.t("chat.outputTruncated"),
+        "output-token warning missing from live or restored answer");
+      assert(container.querySelector('.message-output-notice')?.getBoundingClientRect().height,
+        "output-token warning is not visible");
+    }
+    render([message("normal-user", "user", "Reply"), message("normal-answer", "assistant", "Complete answer")]);
+    assert(!container.querySelector('.message-output-notice'), "normal answer has a truncation warning");
+
+    const bidi = await bidiDirectionProbe(i18n);
     const statusLifecycle = await transcriptStatusProbe();
     const markdownLinks = await markdownLinkInteractionProbe(i18n);
     const contextMenuSubmenu = await contextMenuSubmenuInteractionProbe();
     const turnProcess = await turnProcessProbe();
     const autoCollapse = await transcriptAutoCollapseProbe();
     return {
-      ok: statusLifecycle.ok && markdownLinks.ok && contextMenuSubmenu.ok && turnProcess.ok,
+      ok: bidi.ok && statusLifecycle.ok && markdownLinks.ok && contextMenuSubmenu.ok && turnProcess.ok,
+      bidi,
       statusLifecycle,
       markdownLinks,
       contextMenuSubmenu,
@@ -717,6 +738,7 @@ globalThis.transcriptRenderProbe = async () => {
       changedToolRenders: 1,
       taskLifecycleUpdated: true,
       taskTimingUpdated: true,
+      outputTruncationVisible: true,
       turnProcess,
       autoCollapse,
       messageEditing: await transcriptEditProbe(),

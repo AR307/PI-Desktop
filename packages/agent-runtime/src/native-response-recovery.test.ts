@@ -150,7 +150,6 @@ afterEach(() => vi.unstubAllGlobals());
 for (const [step, code, end] of [
   ["thinking", "MODEL_THINKING_ONLY", "thinking-only"],
   ["length", "MODEL_OUTPUT_TRUNCATED", "truncated"],
-  ["broken-tool", "MODEL_OUTPUT_TRUNCATED", "truncated"],
 ] as const) {
   it(
     "native " + step + " retains content without infinite replay or unfinished tool execution",
@@ -169,8 +168,9 @@ for (const [step, code, end] of [
         });
         expect(f.requests[0].body.thinking).not.toHaveProperty("budget_tokens");
         expect(r.messages().at(-1)).toMatchObject({
-          status: "error",
-          error: { code },
+          ...(step === "length"
+            ? { status: "complete", outputTruncated: true }
+            : { status: "error", error: { code } }),
           responseDiagnostics: {
             end,
             api: "anthropic-messages",
@@ -186,6 +186,21 @@ for (const [step, code, end] of [
     },
   );
 }
+
+it("native max_tokens rejects unfinished tool arguments and recovers without executing them", async () => {
+  const f = nativeFixture(["broken-tool", "answer"]);
+  const r = f.runtime();
+  try {
+    await r.agent.prompt("Read and report.");
+    expect(f.requests).toHaveLength(2);
+    expect(f.executions()).toBe(0);
+    expect(r.events.some(e => e.event.type === "tool_end" && e.event.isError)).toBe(true);
+    expect(r.messages().some(message => message.outputTruncated)).toBe(false);
+    expect(r.messages().at(-1)).toMatchObject({ status: "complete", content: "Explicit continuation completed" });
+  } finally {
+    await r.agent.dispose();
+  }
+});
 
 for (const step of ["interrupted", "thinking-interrupted", "tool-interrupted"] as const) {
   it(`native ${step} continues automatically while retaining completed tools and native output`, async () => {

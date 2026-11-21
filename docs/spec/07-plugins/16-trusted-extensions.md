@@ -312,7 +312,9 @@ not persisted.
 Neutral values: `getFlag` returns the declared default; `registerFlag` records
 the declaration so `getFlag` works but exposes no CLI or UI in v1;
 `sessionManager` accessors return empty results; UI setters return a no-op
-`dispose`.
+`dispose`. `getContextUsage()` returns `{ tokens, contextWindow, percent, autoCompactAt }`,
+where `contextWindow` is the session's hard input budget and `autoCompactAt` is
+the active automatic compaction threshold (`null` when automatic compaction is disabled).
 
 ## 6. Event mapping
 
@@ -327,7 +329,7 @@ are honored where the event type defines a result.
 | `resources_discover` | v1 note: not emitted; skills and prompt discovery stay in Electron main | n/a |
 | `before_agent_start` | Before the first provider request of a turn | Yes, returned system prompt replacements chain in handler order |
 | `context` | `transformContext`, before every provider request of a run, including the first | Yes, replacement message list for that request only; the run context and transcript keep the original messages |
-| `before_provider_request`, `before_provider_headers`, `after_provider_response` | Provider call wrapper | Request return value; headers mutate the payload in place |
+| `before_provider_request`, `before_provider_headers`, `after_provider_response` | Provider call wrapper | Yes, returned request payloads chain in handler order; headers mutate the payload in place |
 | `agent_start`, `agent_end`, `agent_settled` | Agent loop boundaries | No |
 | `turn_start`, `turn_end` | Turn boundaries | No |
 | `message_start`, `message_update`, `message_end` | Agent message events | v1 note: no, pi-agent-core offers no post-hoc replacement |
@@ -348,10 +350,18 @@ additions. Returning a different string, including an empty string, deliberately
 replaces the current prompt. Missing or non-string prompt fields, exceptions,
 timeouts, and unreturned input mutations retain the last accepted prompt.
 Cancelled dispatches return no result; late completions cannot change it.
+
+`before_provider_request` chains the same way: each handler receives its own
+copy of the payload last returned by an earlier handler, so several extensions
+can each add to the provider request. Unreturned input mutations are dropped.
 The user-run payload also carries `messageType: "user"` and `prompt`, matching
 the Pi 1.3 discriminator. This is additive to the legacy shim surface; it does
 not enable `sendMessage` or custom-message runs. Native Pi sessions continue
-using the upstream SDK event union and lifecycle.
+using the upstream SDK event union and lifecycle. Each provider call wrapper
+invocation also attaches a monotonic in-process `contextRequestId` to
+`before_provider_request` and `after_provider_response` so handlers can pair
+out-of-order async response notifications with their request without mutating
+outgoing headers or payloads.
 
 Each turn starts this chain from its freshly composed base prompt, so additions
 do not accumulate across turns. The same ordered handlers, base, and returned

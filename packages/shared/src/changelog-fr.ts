@@ -2,6 +2,57 @@ import type { ChangelogEntry } from "./changelog.js";
 
 export const frEntries: ChangelogEntry[] = [
   {
+    version: "0.24.0",
+    date: "2026-11-20",
+    highlights: [
+      "Sur une nouvelle installation, le plugin intégré Améliorations officielles génère automatiquement les titres de session ; les suggestions, l'amélioration des brouillons et la mémoire IA restent désactivées jusqu'à ce que vous les activiez.",
+      "Nouvelle tâche ouvre désormais une discussion temporaire hors de tout projet, et les conversations peuvent passer d'un projet à l'autre ou revenir en Discussion temporaire.",
+      "Sur l'accueil vide, cliquez sur le nom du projet ou sur « temporairement » dans le titre pour changer de projet ; la destination sans projet s'appelle désormais partout Discussion temporaire.",
+      "En option, les commandes d'arrière-plan terminées transmettent leurs résultats et reprennent une conversation inactive après la fin du tour ; désactivé par défaut.",
+      "Les plugins peuvent ajouter des entrées au menu contextuel de la conversation pour envoyer le texte sélectionné vers une vue ancrée, et proposer des suggestions et un contexte limité.",
+      "Les notes de progression des modèles OpenAI Responses restent dans le déroulé du tour, dans leur ordre d'origine, au lieu de se mêler à la réponse, y compris après réouverture ; Copier la dernière réponse ne copie que la réponse.",
+      "Les points de terminaison personnalisés compatibles OpenAI conservent leur cache de prompt d'un tour à l'autre, évitant de longues attentes avant le premier jeton dans les longues conversations.",
+      "Les paragraphes en persan, en arabe et dans d'autres langues de droite à gauche qui commencent par un mot anglais s'affichent maintenant dans le bon sens.",
+      "Le plugin Gestionnaire de fichiers 0.9.1 affiche en toute sécurité les images Markdown intégrées et prévisualise les feuilles de calcul en lecture seule.",
+      "Corrigé : la bifurcation depuis d'anciennes réponses chargées de l'historique, la synchronisation de configuration en échec répété après une suppression d'un côté, les noms de modèles tronqués dans les Réglages, le bouton du panneau de travail masquant la Recherche et les définitions d'outils refusées par certains points de terminaison Responses.",
+    ],
+  },
+  {
+    version: "0.23.0",
+    date: "2026-11-19",
+    highlights: [
+      "Activez OpenAI Fast par modèle et utilisez /fast dans une conversation pour demander un service prioritaire ; les limites d’abonnement peuvent baisser plus vite ou le coût par token augmenter.",
+      "Les visualisations intégrées se chargent plus vite grâce à des outils de graphique réutilisables ; les scripts en échec affichent désormais des erreurs utiles au lieu de cartes vides.",
+      "Testez les serveurs MCP depuis le dossier du projet sélectionné ; après un test réussi, les sessions du projet peuvent récupérer les connexions inactives en échec.",
+      "Après la reconstruction du runtime de l’agent, l’historique conserve le raisonnement du fournisseur et les signatures d’appels de fonction Gemini pour la requête suivante.",
+      "L’indicateur de contexte affiche l’estimation compactée dès la fin d’une compression manuelle ou automatique.",
+      "Avec une IME chinoise, les commandes slash attendent la validation de la composition et préservent le brouillon au lieu de dupliquer la barre oblique.",
+      "Les prompts régénérés gardent leur place après la réponse la plus récente lorsque leur archivage se termine hors de l’historique chargé.",
+      "Parcourez la marketplace de plugins dans une liste qui se charge au défilement, triez par recommandés, populaires, récents ou nom, et voyez le nombre de résultats par catégorie ; le dernier catalogue enregistré répond si le centre de plugins est injoignable.",
+      "Chaque plugin est désormais rangé sur une étagère bilingue : la marketplace se lit en français ou en chinois et filtre par la même catégorie.",
+      "Les détails d'un plugin affichent désormais l’éditeur, le readme et les notes de sécurité du catalogue, qui étaient perdus à la lecture.",
+      "Choisissez GPT-6.2 Sol et GPT-6.2 Astra avec OpenAI, ChatGPT, GitHub Copilot, OpenCode et les passerelles qui les publient, avec leurs limites et tarifs publiés.",
+      "Les paramètres s’ouvrent désormais dans une boîte de dialogue au-dessus de la page actuelle, la barre latérale place Nouvelle tâche, Planifiées et Marché des plugins en haut, et un court guide de démarrage vous aide à ajouter un modèle et à découvrir le raccourci du lanceur de plugins.",
+      "Choisissez les modules affichés dans la barre latérale via Paramètres → Apparence → Modules de la barre latérale : Nouvelle tâche, Planifiées, Marketplace de plugins, sessions épinglées, Sessions, Projets, leurs boutons et la version.",
+      "La section Sessions de la barre latérale devient Récentes : toutes les conversations non épinglées, des plus récentes aux plus anciennes, avec Charger plus ; le titre de l'accueil vide affiche aussi une flèche déroulante pour changer de projet.",
+    ],
+  },
+  {
+    version: "0.22.0",
+    date: "2026-11-08",
+    highlights: [
+      "Utilisez le moteur Pi 1.5 et consultez les coûts par tour et par session dans les vues d’utilisation.",
+      "Stabilisez les longues conversations grâce à une compression du contexte, un traitement des images et une exécution des outils plus sûrs.",
+      "Restaurez la disposition des projets et les éditeurs de tâches planifiées, et enregistrez les configurations MCP dans le projet sélectionné.",
+      "Laissez l’agent contrôler les applications de bureau via l’utilisation de l’ordinateur, avec autorisations explicites et curseur visible.",
+      "Lancez les applications installées et les commandes de plugins depuis un lanceur groupé, et épinglez les applications fréquentes.",
+      "Gardez les longues conversations lisibles en repliant les activités terminées et en revenant plus fluidement aux messages récents pendant le chargement de l’historique.",
+      "Collez des dossiers dans le champ de rédaction comme références et ouvrez les liens de répertoire directement dans le gestionnaire de fichiers.",
+      "Choisissez vos modèles dans un sélecteur repensé à deux volets, avec un accès direct aux réglages du fournisseur.",
+      "Orientez une demande vers un sous-agent nommé avec une mention @agent.",
+    ],
+  },
+  {
     version: "0.21.2",
     date: "2026-11-11",
     highlights: [
@@ -20,8 +71,12 @@ export const frEntries: ChangelogEntry[] = [
   },
   {
     version: "0.21.0",
-    date: "2026-10-25",
+    date: "2026-10-24",
     highlights: [
+      "Copiez les diagrammes Mermaid en texte SVG ou exportez-les en fichiers SVG autonomes, y compris depuis les aperçus README.",
+      "Voyez le coût de chaque tour et de toute la conversation dans l’inspecteur de contexte et la capsule d’usage du tour, l’usage d’abonnement restant distinct des dépenses à l’usage.",
+      "Utilisez votre propre vidéo comme animation de démarrage : déposez-en une dans le dossier « startup » ; l’interface apparaît ensuite en fondu.",
+      "Les plugins peuvent lister les projets enregistrés et leurs dossiers sans changer de session active.",
       "Importez les conversations, projets, images et contextes récupérables de Codex pour continuer dans des sessions PI natives.",
       "Citez le texte sélectionné ou posez une question dans un chat latéral temporaire avec modèle, brouillon, outils et autorisations indépendants.",
       "Affichez le solde à côté du quota disponible, effectuez le pointage quotidien et confirmez avant d’ouvrir le portefeuille. Le solde nécessite une prise en charge serveur.",

@@ -450,7 +450,12 @@ describe("non-destructive completion recovery through real provider adapters", (
           else expect((await f.subagent.run()).status).toBe("failed");
           expect(f.requests()).toBe(1);
           const ended = f.events.flatMap(e => e.event.type === "message_end" && e.event.message.role === "assistant" ? [e.event.message] : []);
-          expect(ended.at(-1)).toMatchObject({ status: "error", error: { code }, responseDiagnostics: { end: step === "length" ? "truncated" : "thinking-only" } });
+          expect(ended.at(-1)).toMatchObject({
+            ...(owner === "session" && step === "length"
+              ? { status: "complete", outputTruncated: true }
+              : { status: "error", error: { code } }),
+            responseDiagnostics: { end: step === "length" ? "truncated" : "thinking-only" },
+          });
           expect(ended.at(-1)?.thinking || ended.at(-1)?.content).toBeTruthy();
           expect(f.reads()).toBe(0);
         } finally { await f.runtime.dispose(); }

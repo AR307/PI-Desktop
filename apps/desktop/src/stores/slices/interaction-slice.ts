@@ -22,6 +22,15 @@ import { resolveSettingsTab } from "../../lib/settings-search";
 import type { StoreAccess } from "./types";
 
 const PLAN_APPROVAL_TIMEOUT = "PLAN_APPROVAL_TIMEOUT";
+
+/** The answering side no longer holds this request (already settled, expired
+ * or its runtime is gone), so retrying the same card cannot succeed. */
+const INTERACTION_REQUEST_GONE = new Set(["NOT_FOUND", "ASKTOOL_NOT_FOUND"]);
+
+function interactionRequestGone(error: unknown): boolean {
+  const code = (error as { code?: unknown } | null)?.code;
+  return typeof code === "string" && INTERACTION_REQUEST_GONE.has(code);
+}
 const TOAST_DURATION_MS = 4000;
 const TOAST_ERROR_DURATION_MS = 8000;
 const TOAST_STACK_LIMIT = 4;
@@ -39,6 +48,8 @@ export function createInteractionSlice({
 }: InteractionSliceDependencies): Pick<
   AppState,
   | "setPage"
+  | "openSettings"
+  | "closeSettings"
   | "setSettingsTab"
   | "setSettingsAnchor"
   | "canNavBack"
@@ -68,8 +79,10 @@ export function createInteractionSlice({
     setPage: (page, opts) => {
       runtime.beginNavigationIntent();
       const record = opts?.record !== false;
+      // Settings is a dialog over the page; a page navigation dismisses it,
+      // exactly as leaving the former full-window Settings route did.
       set((state) => {
-        if (!record) return { page };
+        if (!record) return { page, settingsOpen: false };
         const entry = {
           page,
           sessionId: page === "chat" ? state.activeSessionId : undefined,
@@ -81,6 +94,7 @@ export function createInteractionSlice({
         const nextStack = same ? stack : [...stack, entry].slice(-50);
         return {
           page,
+          settingsOpen: false,
           navStack: nextStack,
           navIndex: nextStack.length - 1,
         };
@@ -93,12 +107,20 @@ export function createInteractionSlice({
       // Resolving it here lands a retired id on its successor instead of
       // rendering an empty content pane.
       const settingsTab = resolveSettingsTab(requested);
-      get().setPage("settings");
       set((state) => ({
+        settingsOpen: true,
         settingsTab,
         settingsTabNonce: state.settingsTabNonce + 1,
       }));
     },
+    openSettings: (requested) => {
+      if (requested !== undefined) {
+        get().setSettingsTab(requested);
+        return;
+      }
+      set({ settingsOpen: true });
+    },
+    closeSettings: () => set({ settingsOpen: false, settingsAnchor: null }),
     setSettingsAnchor: (settingsAnchor) => set({ settingsAnchor }),
     canNavBack: () => get().navIndex > 0,
     canNavForward: () => get().navIndex < get().navStack.length - 1,
@@ -138,34 +160,41 @@ export function createInteractionSlice({
     resolvePermission: async (sessionId, requestId, decision) => {
       const permission = headPermission(get().pendingPermissions, sessionId);
       if (!permission || permission.requestId !== requestId) return;
+      const removeCard = () => set((state) => ({
+        pendingPermissions: removePermission(
+          state.pendingPermissions,
+          sessionId,
+          requestId,
+        ),
+      }));
       try {
         await api.resolvePermission({ requestId, decision });
-      } finally {
-        set((state) => ({
-          pendingPermissions: removePermission(
-            state.pendingPermissions,
-            sessionId,
-            requestId,
-          ),
-        }));
+      } catch (error) {
+        // A transient failure keeps the card so the user can retry. A request
+        // the Host no longer holds already ended with its tool call; retrying
+        // can never succeed, so the stale card is dropped without an error.
+        if (!interactionRequestGone(error)) throw error;
       }
+      removeCard();
     },
 
     resolveAsk: async (sessionId, resolution: AskToolResolution) => {
       const ask = headAsk(get().pendingAsks, sessionId);
       if (!ask || ask.requestId !== resolution.requestId) return;
+      const removeCard = () => set((state) => ({
+        pendingAsks: removeAsk(
+          state.pendingAsks,
+          sessionId,
+          resolution.requestId,
+        ),
+        askDrafts: removeAskDraft(state.askDrafts, resolution.requestId),
+      }));
       try {
         await api.resolveAskTool(resolution);
-      } finally {
-        set((state) => ({
-          pendingAsks: removeAsk(
-            state.pendingAsks,
-            sessionId,
-            resolution.requestId,
-          ),
-          askDrafts: removeAskDraft(state.askDrafts, resolution.requestId),
-        }));
+      } catch (error) {
+        if (!interactionRequestGone(error)) throw error;
       }
+      removeCard();
     },
 
     setAskDraft: (requestId: string, draft: AskDraft) => {

@@ -1954,3 +1954,19 @@ results are recorded in docs/releases/0.21.0-beta.5-validation.md.
 - Verify parent and worker Responses API configuration updates over local HTTP,
   including turning Ultra off/on and an imported alias mapping. See
   docs/spec/03-runtime/ultra-collaboration.md.
+
+## 2026-11-22 - Upstream main integration
+
+- Integrate upstream main `e89051fc7` (0.24.0-beta.1, Pi 1.5.2) with the
+  maintained MirrorCoding, Gemini, Ultra, mobile, quoted-reference and side-chat
+  features. Keep region capture and right-click selection dismissal.
+- Converge released fork schema 30 before upstream schema 34 migrations. Preserve
+  conversation history, quoted queue entries and mobile revisions across restart;
+  initialize the missing elapsed-time and explicit Goal columns.
+- Keep upstream output-limit annotations and truncated-tool recovery while
+  retaining transport recovery, partial text and completed-tool evidence.
+- Preserve the fork's Windows-only release lane and upstream native-platform
+  matrix. Validate merged configuration staging and queued Goal startup.
+- Recycle only the user-approved upstream removal list. Reuse compatible build
+  caches; isolate validation profiles and local provider fixtures. No running
+  client, real account or server is changed.

@@ -7,10 +7,9 @@
 
 ## Context
 
-Bug reports without an app version, OS, or reproduction steps cannot be
-triaged. Settings → Info already shows version and logs, but users had no
-in-app path to GitHub issue creation, and the existing issue forms treated
-those triage fields as optional.
+Bug reports without an app version, OS, or reproduction steps cannot be triaged, and
+although Settings → Info shows version and logs, users had no in-app path to GitHub
+issue creation while the issue forms treated those fields as optional.
 
 ## Decision
 
@@ -30,13 +29,9 @@ those triage fields as optional.
 
 ## Consequences
 
-- Triage data is collected at intake instead of in follow-up comments.
-- Opening GitHub follows the same Main-owned URL rule as the releases page.
-- No host-protocol, storage, or update-feed change.
+Triage data is collected at intake, opening GitHub follows the same Main-owned URL
+rule as the releases page, and no host, storage, or feed contract changes.
 
 ## Alternatives
 
-- Renderer `window.open` of a constructed URL: rejected because it would let
-  the sandbox choose the destination, unlike `updates/openReleases`.
-- Opening the template chooser without prefilling version: rejected because
-  the Settings row already has authoritative version info.
+- Renderer `window.open`: the sandbox would choose the destination.

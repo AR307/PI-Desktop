@@ -119,7 +119,7 @@ export function useAppShellRuntime() {
   const [sidebarWidth, setSidebarWidth] = useState(() => loadSidebarWidth());
   const { sidebarEntering, sidebarExiting, handleSidebarAnimationEnd } = useSidebarTransition(
     sidebarCollapsed,
-    ready && page !== "settings",
+    ready,
   );
   const [shellWidth, setShellWidth] = useState(0);
   const appShellRef = useRef<HTMLDivElement>(null);
@@ -351,8 +351,7 @@ export function useAppShellRuntime() {
   }, []);
 
   useEffect(() => {
-    const pageHidesWorkPanel =
-      page === "settings" || page === "plugins" || page === "scheduled";
+    const pageHidesWorkPanel = page === "plugins" || page === "scheduled";
     const shouldPresent =
       ready && !pageHidesWorkPanel && workPanelOpen;
     const request = ++workPanelReservationRequest.current;
@@ -427,6 +426,7 @@ export function useAppShellRuntime() {
         switch (command) {
           case "newTask":
             if (workPanelMaximizedRef.current) setWorkPanelMaximized(false);
+            store.closeSettings();
             await store.newSession();
             requestAnimationFrame(() =>
               document.querySelector<HTMLTextAreaElement>(".composer-input")?.focus(),
@@ -740,9 +740,7 @@ export function useAppShellRuntime() {
         ...(event.location ? { location: event.location } : {}),
       });
     });
-    // A plugin offered one line for the composer (`pi.composer.suggest`). The
-    // shell owns the composer, so it decides here and answers the main process,
-    // which is waiting on the plugin's call with that answer.
+    // The renderer owns the composer; only it can answer a target probe or offer.
     const offComposerSuggestion = api.onPluginComposerSuggestion((event) => {
       if (event.kind === "clear") {
         composerSuggestion.clear({
@@ -751,13 +749,16 @@ export function useAppShellRuntime() {
         });
         return;
       }
-      const outcome = composerSuggestion.offer({
-        pluginId: event.pluginId,
-        sessionId: event.sessionId,
-        ...(event.turnId ? { turnId: event.turnId } : {}),
-        text: event.text,
-        expiresAt: event.expiresAt,
-      });
+      if (event.kind === "target") {
+        const revision = composerSuggestion.getTarget(event.sessionId);
+        void api.pluginComposerSuggestionResult({
+          requestId: event.requestId,
+          shown: revision !== null,
+          ...(revision ? { revision } : {}),
+        });
+        return;
+      }
+      const outcome = composerSuggestion.offer(event);
       void api.pluginComposerSuggestionResult({
         requestId: event.requestId,
         shown: outcome.shown === true,
@@ -947,13 +948,15 @@ export function useAppShellRuntime() {
             break;
           case "openWorkPanel": {
             const p = useAppStore.getState().page;
-            if (p !== "settings" && p !== "plugins" && p !== "scheduled") {
+            if (p !== "plugins" && p !== "scheduled") {
               useAppStore.getState().toggleWorkPanel();
             }
             break;
           }
           case "abort":
-            void abort();
+            void abort().catch((error) => {
+              showToast(error instanceof Error ? error.message : String(error), { variant: "error" });
+            });
             break;
           case "toggleWindow":
             // The same native action the menu item runs (D438): hide the window

@@ -7,6 +7,7 @@ import { claudeCacheOptions } from "./claude-cache.js";
 import { assertMirrorCodingFast, withMirrorCodingFast } from "./mirrorcoding-fast.js";
 import { assistantReplay, prepareProviderRetryMessages, retainedAssistantForRetry, canRestorePartialResponse, responseContentFacts, responseDiagnostics, responseOutcome, responseOutcomeError, restoredAssistantBlocks } from "./response-outcome.js";
 import { upstreamRequestDiagnostics, type RequestDiagnostics } from "./request-diagnostics.js";
+import { appendLocalFileReferenceContext } from "@pi-desktop/shared";
 import { buildJobTools } from "./background-job-tools.js";
 import {
   MAX_MUTATION_RECOVERY_FAILURES, BASH_PATCH_FAILURE_KEY,
@@ -33,6 +34,8 @@ import { computerUseDescription, computerUseParameters } from "./computer-use/to
 import { imageGenerationDescription, imageGenerationParameters } from "./image-generation/tool.js";
 import { todoWriteDescription, todoWriteParameters } from "./todo-tool.js";
 import { createJevClassifierTool } from "./jev-classifier-tool.js";
+import { CODEMODE_TOOL_NAME } from "./codemode/limits.js";
+import { createSessionCodemodeTool } from "./codemode/session.js";
 import { scheduledToolParameters, scheduledToolDescriptions } from "./scheduled-tools.js";
 import { withPiFileOpToolNames } from "./pi-file-ops.js";
 import { IMAGE_TOOL_DESCRIPTIONS, IMAGE_TOOL_PARAMETERS } from "./image-tools.js";
@@ -58,6 +61,7 @@ import {
   type PrepareNextTurnContext,
 } from "@earendil-works/pi-agent-core";
 import {
+  cleanupSessionResources,
   isContextOverflow,
   getCurrentTools,
   getToolStateChanges,
@@ -159,6 +163,8 @@ import {
 } from "./assistant-provider-replay.js";
 import {
   assistantContent,
+  sameCommentaryBoundaries,
+  type CommentaryTranscript,
   isRecord,
   nowIso,
   timestampMs,
@@ -176,6 +182,7 @@ import { withExplicitRequired } from "./tool-schema.js";
 import { buildSessionContext } from "./session-context.js";
 import {
   collectMessageFileOperations,
+  executedToolCallIdsInEntries,
   prepareCompaction,
 } from "./pi-runtime-compaction-plan.js";
 import { compact } from "./pi-runtime-compaction-summary.js";
@@ -185,6 +192,7 @@ import {
   estimateTokens,
 } from "./pi-runtime-estimates.js";
 import { convertToLlm } from "./pi-runtime-messages.js";
+import { withPluginModelContext, type ReadPluginModelContext } from "./plugin-model-context.js";
 import type {
   CompactionEntry,
   CompactionPreparation,
@@ -242,6 +250,8 @@ import {
   effectiveModelContextWindow,
   estimateOutputCapInputTokens,
   requestTranscript,
+  supportsMidConversationSystemMessages,
+  truncateTextWithinOutputCap,
 } from "./output-cap.js";
 import {
   composeSubagentSystemPrompt,
@@ -289,6 +299,7 @@ import {
   openCodeEndpointFromProvider,
   withOpenCodeSessionHeaders,
 } from "./opencode-session-headers.js";
+import { withCodexCacheableInstructions } from "./codex-cacheable-instructions.js";
 import { withFastModeOptions } from "./fast-mode.js";
 import { withSessionAffinityOptions } from "./session-affinity.js";
 import { withCompactionRequestHeaders } from "./compaction-request.js";
@@ -361,6 +372,8 @@ export type RuntimePrompt = {
   /** Supplied only by the host-owned notification queue. */
   delegationNotification?: boolean;
   text: string;
+  /** Trusted Main delivery, already recorded as a tool row. */
+  backgroundCompletion?: UiMessage;
   /** Explicit user selection, resolved against the host-provided tool catalog. */
   mcpServerIds?: string[];
   mcpToolNames?: string[];
@@ -383,9 +396,10 @@ function promptText(input: RuntimePrompt): string {
   const references = (input.attachments ?? [])
     .map((attachment) => sessionReferenceBlock(attachment))
     .filter((block): block is string => block !== null);
-  return references.length
+  const text = references.length
     ? `${input.text}\n\n${references.join("\n\n")}`.trim()
     : input.text;
+  return appendLocalFileReferenceContext(text, input.attachments ?? []);
 }
 
 /** One provider image block for an attachment whose bytes crossed this turn. */
@@ -441,6 +455,7 @@ function runtimeAttachmentFromMessage(
     kind: attachment.kind,
     ...(attachment.mimeType ? { mimeType: attachment.mimeType } : {}),
     ...(attachment.size !== undefined ? { size: attachment.size } : {}),
+    ...(attachment.localReference ? { localReference: attachment.localReference } : {}),
     ...(attachment.text ? { text: attachment.text } : {}),
     // Recorded placement: the message content names this image at that spot, so
     // the restored prompt keeps the block there too.
@@ -767,6 +782,12 @@ const COMPACTION_FALLBACK_NOTICE_TOKENS = 512;
  * history than a successful checkpoint would (`fallbackRetainedTail`).
  */
 const COMPACTION_FALLBACK_KEEP_RECENT_RATIO = 0.25;
+/**
+ * Smallest fraction of that window the recovery path shrinks to before it
+ * gives up: seven halvings, enough for a calibrated estimate many times the
+ * local one (`recoverCompactionFailure`, issue #2494).
+ */
+const COMPACTION_FALLBACK_MIN_TAIL_SCALE = 1 / 128;
 export const COMPACTION_FALLBACK_MARKER =
   "[automatic context recovery: older context was omitted after summary generation failed]";
 /** Stored in place of a carried-forward summary when a fallback had none. */
@@ -984,6 +1005,23 @@ function turnAbortedError(message: string): Error {
 }
 
 const CONTEXT_COMPACTION_TOOL_NAME = "new_context";
+/**
+ * Tools a codemode script never calls: tool discovery, user interaction, mode
+ * and stage control, context control, and delegation lifecycle all belong to
+ * the model's own turn, not to a script.
+ */
+const CODEMODE_EXCLUDED_TOOL_NAMES: ReadonlySet<string> = new Set([
+  CODEMODE_TOOL_NAME,
+  TOOL_SEARCH_NAME,
+  ASK_TOOL_NAME,
+  ...MODE_TRANSITION_TOOL_NAMES,
+  COMPLETE_STAGE_TOOL_NAME,
+  CONTEXT_COMPACTION_TOOL_NAME,
+  SUBAGENT_TOOL_NAME,
+  SUBAGENT_WAIT_TOOL_NAME,
+  SUBAGENT_LIST_TOOL_NAME,
+  SUBAGENT_STOP_TOOL_NAME,
+]);
 /** Tools the read-only contract level may execute, besides plan-safe plugins. */
 const CONTRACT_ALLOWED_TOOL_NAMES = new Set([...CONTRACT_CORE_TOOL_NAMES, CONTEXT_COMPACTION_TOOL_NAME]);
 const CONTEXT_COMPACTION_TOOL_DESCRIPTION =
@@ -1057,11 +1095,13 @@ export type AgentRuntimeOptions = {
   modeDefinition?: ModeDefinition;
   /** Durable host turn ID for the current prompt, used by plan identity. */
   turnId?: string;
+  readPluginModelContext?: ReadPluginModelContext;
   provider: RuntimeProviderConfig;
   thinkingLevel: SessionThinkingLevel;
   ultra?: boolean;
   /** Persisted opt-in for retrying transient provider failures until success. */
   infiniteProviderRetry?: boolean;
+  backgroundJobContinuationEnabled?: boolean;
   /**
    * Fast mode for main turns, already resolved by the launcher from the
    * session `/fast` switch and the model binding's opt-in (ADR 0334).
@@ -1075,6 +1115,11 @@ export type AgentRuntimeOptions = {
    * prompt rather than advertised and refused on every call.
    */
   computerUseEnabled?: boolean;
+  /**
+   * Whether the opt-in `codemode` tool is offered (ADR
+   * codemode-sandbox-boundary). Resolved by Electron main from settings.
+   */
+  codemodeEnabled?: boolean;
   systemPrompt?: string;
   /** pi-compatible SYSTEM.md / APPEND_SYSTEM.md resolved for the session (issue #542). */
   customSystemPrompt?: CustomSystemPrompt;
@@ -1155,6 +1200,7 @@ export type RuntimeMatchConfig = {
   ultra?: boolean;
   jevApiKey?: string;
   computerUseEnabled?: boolean;
+  codemodeEnabled?: boolean;
   pluginTools?: PluginToolDef[];
   pluginSkills?: PluginSkillDef[];
   trustedExtensions?: TrustedExtensionSpec[];
@@ -1202,9 +1248,10 @@ function hasProgressForwardIntent(text: string): boolean {
 export function isProgressOnlyAssistantTurn(message: unknown): boolean {
   if (!isRecord(message) || message.role !== "assistant") return false;
   if (messageRequestsTools(message)) return false;
-  const content = isRecord(message) ? message.content : undefined;
-  const text = assistantContent(content).text.trim();
-  if (!text || !hasProgressForwardIntent(text)) return false;
+  const content = assistantContent(message.content);
+  const text = content.text.trim();
+  if (!text && content.transcript?.text.trim()) return true;
+  if (content.hasFinalAnswer || !text || !hasProgressForwardIntent(text)) return false;
   if (!PROGRESS_TERMINAL_LEAD.test(text)) return true;
 
   // A report can mention a completed step and still announce the next one.
@@ -1438,7 +1485,7 @@ function commandShellToolDescription(
     shellSyntaxGuidance(shell),
     `The session scratch directory variable is ${shellScratchVariable(shell)}.`,
     `An optional timeout from 1 to ${MAX_COMMAND_TIMEOUT_SECONDS} seconds may be supplied; without it, the command defaults to a 60-second timeout.`,
-    `Set runInBackground: true for long-lived processes the user needs after the turn ends (dev servers, watchers, builds). A background call returns a backgroundTaskId immediately, survives turn aborts and timeouts, and its output is visible in the composer's running-tasks bar. In Agent mode on supported local Hosts, use TaskList to find it, TaskWait with its job reference to read results, and TaskStop with that reference to stop it. Background completion does not automatically resume the model.`,
+    `Set runInBackground: true for long-lived processes the user needs after the turn ends (dev servers, watchers, builds). A background call returns a backgroundTaskId immediately, survives turn aborts and timeouts, and its output is visible in the composer's running-tasks bar. In Agent mode on supported local Hosts, use TaskList to find it, TaskWait with its job reference to read results, and TaskStop with that reference to stop it. By default, background completion does not automatically resume the model. If notifyOnExit is available in the schema, it may arrange completion-triggered continuation for finite tests/builds.`,
     ...(formattedScratch ? [`The session scratch directory is ${formattedScratch}.`] : []),
   ].join(" ");
 }
@@ -1609,11 +1656,6 @@ function appendToolProgress(current: string, chunk: string): string {
   return `${head}${TOOL_PROGRESS_TRUNCATION_MARKER}${tail}`;
 }
 
-/** Bound a checkpoint message's text, naming the cut the way pi's tail does. */
-function truncateTextForCheckpoint(text: string, maxChars: number): string {
-  return truncateTextWithMarker(text, maxChars, CHECKPOINT_TRUNCATION_MARKER);
-}
-
 /**
  * Flatten a user message to plain text so it can be truncated at a token
  * budget. Images and other non-text blocks are named rather than kept: a
@@ -1634,11 +1676,20 @@ function truncateUserMessageForCheckpoint(
   message: UserMessage,
   tokenBudget: number,
 ): UserMessage {
+  const text = userMessageTextForCheckpoint(message);
+  // Same ASCII ceiling as before (budget * 3.5). CJK is then shrunk to the
+  // output-cap estimate, which charges about one token per character.
+  const ceiling = Math.max(
+    1,
+    Math.floor(tokenBudget * ESTIMATED_TEXT_CHARS_PER_TOKEN),
+  );
   return {
     ...message,
-    content: truncateTextForCheckpoint(
-      userMessageTextForCheckpoint(message),
-      Math.max(1, Math.floor(tokenBudget * ESTIMATED_TEXT_CHARS_PER_TOKEN)),
+    content: truncateTextWithinOutputCap(
+      text,
+      tokenBudget,
+      CHECKPOINT_TRUNCATION_MARKER,
+      ceiling,
     ),
   };
 }
@@ -1657,7 +1708,15 @@ function selectRetainedUserMessages(
   let remaining = Math.max(0, maxTokens);
   for (let index = candidates.length - 1; index >= 0 && remaining > 0; index -= 1) {
     const message = candidates[index];
-    const tokens = estimateTokens(message);
+    // pi-ai's chars/3.5 estimate under-counts Han, kana, and Hangul, so a long
+    // CJK message looks like it fits and is kept whole. The output-cap
+    // estimate is the one the next request is gated on.
+    const tokens = Math.max(
+      estimateTokens(message),
+      estimateOutputCapInputTokens({
+        messages: [{ role: "user", content: message.content }],
+      }),
+    );
     if (tokens <= remaining) {
       selected.push(message);
       remaining -= tokens;
@@ -1872,6 +1931,7 @@ export class DesktopAgentRuntime {
   private planningState: PlanningState;
   private pendingPlanId?: string;
   private currentAssistant?: UiMessage;
+  private liveCommentary?: CommentaryTranscript;
   private pluginTools: PluginToolDef[];
   private pluginSkills: PluginSkillDef[];
   private trustedExtensionSpecs: TrustedExtensionSpec[];
@@ -1881,6 +1941,7 @@ export class DesktopAgentRuntime {
   private extensionTurnIndex = 0;
   /** Headers an extension edited in `before_provider_headers` for the current turn. */
   private extensionProviderHeaders?: Record<string, string>;
+  private extensionProviderRequestId = 0;
   /** Subagent definitions offered through the `Task` tool (ADR 0062). */
   private subagents: SubagentDefinition[];
   private subagentProviders: Record<string, RuntimeProviderConfig>;
@@ -2010,9 +2071,11 @@ export class DesktopAgentRuntime {
   private providerRateLimitRetryAttempt = 0;
   /** Opt-in mode removes only the retry-count ceiling; abort and backoff stay intact. */
   private infiniteProviderRetry = false;
+  private backgroundJobContinuationEnabled = false;
   private fastMode = false;
   private jevApiKey?: string;
   private computerUseEnabled = false;
+  private codemodeEnabled = false;
   private activeProviderRetryAttempt = 0;
   private providerRetryInProgress = false;
   private suppressProviderRetryRunEnd = false;
@@ -2092,6 +2155,8 @@ export class DesktopAgentRuntime {
   private readonly activeTurnSettlements = new Map<string, Promise<void>>();
   /** The in-flight checkpoint was cut short by Stop/dispose, not by a failure. */
   private compactionAborted = false;
+  /** Why the latest checkpoint attempt failed, for the turn error it causes. */
+  private lastCompactionFailure?: string;
   /** Set by the `new_context` tool, consumed at the next turn boundary. */
   private pendingModelCompaction = false;
   /** One-shot request to finish the current turn at the next boundary. */
@@ -2128,9 +2193,11 @@ export class DesktopAgentRuntime {
     this.ultra = opts.ultra === true;
     this.thinkingLevel = this.ultra ? highestThinkingLevel(opts.provider) : clampThinkingLevel(opts.provider, opts.thinkingLevel);
     this.infiniteProviderRetry = opts.infiniteProviderRetry === true;
+    this.backgroundJobContinuationEnabled = opts.backgroundJobContinuationEnabled === true;
     this.fastMode = opts.fastMode === true;
     this.jevApiKey = opts.jevApiKey;
     this.computerUseEnabled = opts.computerUseEnabled === true;
+    this.codemodeEnabled = opts.codemodeEnabled === true;
     this.host = opts.host;
     this.batchPlanner = new BatchPlanner(this.host, this.sessionId);
     this.onDiagnostic = opts.onDiagnostic ?? (() => undefined);
@@ -2174,7 +2241,7 @@ export class DesktopAgentRuntime {
     this.transcriptHistory = [...(opts.history ?? [])];
     this.fullEntries = opts.sideChatState?.entries ?? (opts.initialContext ? opts.initialContext.map((message, index) => ({
       type: "message" as const, id: "inherited-" + index, seq: index, parentId: index ? "inherited-" + (index - 1) : null, timestamp: timestampMs(message.timestamp), message,
-    })) : this.historyToEntries(this.transcriptHistory));
+    })) : this.historyToEntries(this.transcriptHistory, opts.compaction?.throughMessageId));
     // Inherited system declarations are context only, not new child records.
     if (opts.initialContext || opts.sideChatState) {
       for (const entry of this.fullEntries) this.systemJournal.remember(entry.message, entry.id);
@@ -2309,7 +2376,10 @@ export class DesktopAgentRuntime {
         // one-shot requests build their own options and keep the default.
         const hookedOptions = withFastModeOptions(
           withSessionAffinityOptions(
-            withMirrorCodingFast(this.withExtensionProviderHooks(requestOptions, m), this.provider),
+            withMirrorCodingFast(this.withExtensionProviderHooks(
+              withCodexCacheableInstructions(requestOptions, m),
+              m,
+            ), this.provider),
             {
               provider: this.provider,
               api: m.api,
@@ -2333,31 +2403,48 @@ export class DesktopAgentRuntime {
           maxTokens: clampOutputToContext(m, requestContext, hookedOptions.maxTokens),
         };
         const usageTurnId = this.turnId;
+        const openAttempt = (retryOptions: SimpleStreamOptions, input = requestContext) => {
+          // Each network attempt owns its idle clock and abort signal.
+          const stallAbort = new AbortController();
+          const timedOptions = {
+            ...retryOptions,
+            signal: AbortSignal.any([
+              ...(retryOptions.signal ? [retryOptions.signal] : []),
+              stallAbort.signal,
+            ]),
+            ...(input !== requestContext && retryOptions.maxTokens !== undefined
+              ? { maxTokens: clampOutputToContext(m, input, retryOptions.maxTokens) } : {}),
+          };
+          const stream = accountModelStream(m, () =>
+            this.thinkingLevel === "omit"
+              ? this.models.stream(omitThinkingModel(m), input, timedOptions)
+              : this.models.streamSimple(m, input, timedOptions), {
+              providerId: this.provider.id,
+              nativeCost: this.provider.modelConfig?.nativeCost,
+              onUsage: (usage) => this.emit({ type: "usage", usage }, usageTurnId),
+            });
+          return withStreamIdleTimeout(stream, m, streamIdleTimeoutMs(), () => stallAbort.abort());
+        };
+        const readPluginContext = opts.readPluginModelContext;
         const retryStream = createProviderRetryStream(
           m,
           requestContext,
           attemptOptions,
-          (retryOptions) => {
-            // Each network attempt owns its idle clock and abort signal.
-            // Deliberate backoff must not look like a stalled provider stream.
-            const stallAbort = new AbortController();
-            const timedOptions = {
-              ...retryOptions,
-              signal: AbortSignal.any([
-                ...(retryOptions.signal ? [retryOptions.signal] : []),
-                stallAbort.signal,
-              ]),
-            };
-            const stream = accountModelStream(m, () =>
-              this.thinkingLevel === "omit"
-                ? this.models.stream(omitThinkingModel(m), requestContext, timedOptions)
-                : this.models.streamSimple(m, requestContext, timedOptions), {
-                providerId: this.provider.id,
-                nativeCost: this.provider.modelConfig?.nativeCost,
-                onUsage: (usage) => this.emit({ type: "usage", usage }, usageTurnId),
-              });
-            return withStreamIdleTimeout(stream, m, streamIdleTimeoutMs(), () => stallAbort.abort());
-          },
+          readPluginContext && usageTurnId && this.activeTurnSettlements.has(usageTurnId)
+            ? async (retryOptions) => {
+                const signal = retryOptions.signal;
+                const contributions = await readPluginContext({
+                  sessionId: this.sessionId, turnId: usageTurnId,
+                  modelKey: `${this.provider.id}/${m.id}`,
+                }, signal).catch(() => undefined);
+                signal?.throwIfAborted();
+                const messages = this.turnId === usageTurnId && !this.runCancelled
+                  ? withPluginModelContext(requestContext.messages, contributions)
+                  : requestContext.messages;
+                return openAttempt(retryOptions, messages === requestContext.messages
+                  ? requestContext : { ...requestContext, messages });
+              }
+            : openAttempt,
           {
             claim: (error, phase) => this.claimProviderRetry(error, phase),
             headers: () => this.providerRetryHeaders,
@@ -2451,6 +2538,12 @@ export class DesktopAgentRuntime {
     process.stderr.write(
       `[agent-runtime] event handler failed (session=${this.sessionId} turn=${this.turnId} event=${event.type}): ${detail}\n`,
     );
+  }
+
+  /** Applied before the next prompt rebuilds its tool declarations. */
+  setBackgroundJobContinuationEnabled(enabled: boolean): void {
+    if (this.disposed) throw new Error("runtime disposed");
+    this.backgroundJobContinuationEnabled = enabled;
   }
 
   /** Update the opt-in retry policy without rebuilding an idle runtime. */
@@ -2896,6 +2989,8 @@ export class DesktopAgentRuntime {
       // Turning computer use on or off changes the tool list, so the runtime
       // is retired rather than left advertising a stale set.
       ["computerUseEnabled", this.computerUseEnabled === (config.computerUseEnabled === true)],
+      // Codemode changes the tool list as well.
+      ["codemodeEnabled", this.codemodeEnabled === (config.codemodeEnabled === true)],
       ["thinkingLevel", this.thinkingLevel === clampThinkingLevel(config.provider, config.thinkingLevel)],
       ["pluginTools", current === next],
       ["commandShell", safeJson(this.commandShell) === safeJson(config.commandShell)],
@@ -3109,6 +3204,7 @@ export class DesktopAgentRuntime {
           tokens: budget.tokens,
           contextWindow: budget.hardLimit,
           percent: budget.hardLimit > 0 ? Math.round((budget.tokens / budget.hardLimit) * 100) : null,
+          autoCompactAt: runtime.compactionEnabled ? automaticCompactionThresholdFor(budget) : null,
         };
       },
       compact: () => {
@@ -3217,7 +3313,7 @@ export class DesktopAgentRuntime {
    * turns after a restart. Losing either (the pre-D120 tool behavior)
    * collapsed a reseeded session to bare chat text. Failed assistant turns
    * stay transcript-only. */
-  private historyToEntries(history: UiMessage[]): MessageEntry[] {
+  private historyToEntries(history: UiMessage[], compactionThroughMessageId?: string): MessageEntry[] {
     const api = apiBindingForProviderModel(this.provider).api;
     const deepSeekCompletionsReplay =
       api === "openai-completions" &&
@@ -3245,14 +3341,25 @@ export class DesktopAgentRuntime {
     let toolCarrier: AssistantMessage | undefined;
     // Function-call signatures of the carrier's row, restored by call id.
     let carrierToolSignatures = new Map<string, string>();
+    let compactedCarrier: AssistantMessage | undefined;
+    let previousRowId: string | undefined;
     for (const m of orderSystemRows(history)) {
+      // A carrier before this boundary is removed by context compaction. Tool
+      // rows after it must reconstruct their calls on a surviving carrier.
+      if (compactionThroughMessageId && previousRowId === compactionThroughMessageId) {
+        compactedCarrier = toolCarrier;
+        toolCarrier = undefined;
+      }
+      previousRowId = m.id;
       // Subagent rows belong to the transcript and to review, never to the
       // parent's model context (ADR 0062): the parent only ever saw the `Task`
       // report, and replaying a delegate's messages would both contradict that
       // and reintroduce the context cost delegation exists to avoid.
-      // ReturnToParent is a runtime-owned receipt, not a parent model call.
-      // Its report is restored through the settled Task result exactly once.
       if (m.parentToolCallId || isReturnToParent(m)) continue;
+      // Calls a codemode script made are transcript children of the script's
+      // call. The model only ever saw the script's own result, and these rows
+      // have no issuing assistant call to attach to (ADR codemode-sandbox-boundary).
+      if (m.nestedParentToolCallId) continue;
       const timestamp = Date.parse(m.createdAt) || Date.now();
       if (m.role === "system" && m.modelSystem) {
         // An update recorded while a tool ran sits between the call and its
@@ -3261,6 +3368,7 @@ export class DesktopAgentRuntime {
         append(m.id, this.systemJournal.restore(m));
       } else if (m.role === "user") {
         toolCarrier = undefined;
+        compactedCarrier = undefined;
         const attachments = (m.attachments ?? []).map((attachment) =>
           runtimeAttachmentFromMessage(
             attachment,
@@ -3280,6 +3388,7 @@ export class DesktopAgentRuntime {
         append(m.id, { role: "user", content, timestamp });
       } else if (m.role === "assistant") {
         toolCarrier = undefined;
+        compactedCarrier = undefined;
         // Replay only valid partial content. Error strings and incomplete
         // tool calls remain display-only; native blocks use pi's converter.
         if ((m.status === "error" || m.isError || m.error) && !canRestorePartialResponse(m)) continue;
@@ -3342,15 +3451,16 @@ export class DesktopAgentRuntime {
           toolCarrier = {
             role: "assistant",
             content: [],
-            api,
-            provider: this.model.provider,
-            model: this.model.id,
+            api: compactedCarrier?.api ?? api,
+            provider: compactedCarrier?.provider ?? this.model.provider,
+            model: compactedCarrier?.model ?? this.model.id,
             usage: usageToPi(undefined),
             stopReason: "toolUse",
             timestamp,
           };
           append(`${m.id}:carrier`, toolCarrier);
-          carrierToolSignatures = new Map();
+          if (!compactedCarrier) carrierToolSignatures = new Map();
+          compactedCarrier = undefined;
         }
         const thoughtSignature = carrierToolSignatures.get(m.toolCallId);
         toolCarrier.content.push({
@@ -3366,6 +3476,8 @@ export class DesktopAgentRuntime {
     }
     return entries.filter(
       (entry) =>
+        // An empty call-only boundary still anchors the persisted checkpoint.
+        entry.id === compactionThroughMessageId ||
         entry.message.role !== "assistant" || entry.message.content.length > 0,
     );
   }
@@ -3613,6 +3725,9 @@ export class DesktopAgentRuntime {
               `Optional command timeout in seconds from 1 to ${MAX_COMMAND_TIMEOUT_SECONDS}; defaults to 60 seconds.`,
           }),
         ),
+        ...(this.backgroundJobContinuationEnabled && this.mode === "agent" && !this.remoteWorkspace ? {
+          notifyOnExit: Type.Optional(Type.Boolean({ description: "With runInBackground, arrange automatic delivery to this conversation after a finite test/build completes, even after the current turn ends. No extra approval; existing permissions still apply. Do not use for servers/watchers. TaskWait may still collect the result first." })),
+        } : {}),
         runInBackground: Type.Optional(
           Type.Boolean({
             description:
@@ -4236,6 +4351,8 @@ export class DesktopAgentRuntime {
       agentLevel && this.jevApiKey
         ? [createJevClassifierTool(this.jevApiKey)]
         : [];
+    const codemodeTools: AgentTool[] =
+      agentLevel && this.codemodeEnabled ? [this.buildCodemodeTool()] : [];
 
     // Plugins contribute Agent tools by default. Plan/Goal modes only
     // expose plugins that declare plan-safe actions (ADR 0211); the
@@ -4342,6 +4459,7 @@ export class DesktopAgentRuntime {
     return [
       ...builtins,
       ...jevTools,
+      ...codemodeTools,
       askTool,
       ...pluginTools,
       ...skillTools,
@@ -4357,6 +4475,41 @@ export class DesktopAgentRuntime {
    * declarations. Execution activation and Host permissions remain separate
    * from the provider-visible schemas.
    */
+  /**
+   * The opt-in `codemode` tool. Scripts call the session's active tools
+   * through the same hooks and Host path as direct calls; control,
+   * interactive and delegation tools stay out of reach.
+   */
+  private buildCodemodeTool(): AgentTool {
+    const tool = createSessionCodemodeTool({
+      sessionId: this.sessionId,
+      catalog: () => [...this.toolCatalog.values()],
+      active: () => this.activeTools().filter((tool) => this.isToolAllowedInMode(tool.name)),
+      excluded: CODEMODE_EXCLUDED_TOOL_NAMES,
+      hooks: {
+        beforeToolCall: (context) => this.beforeToolCall(context),
+        afterToolCall: (context) => this.afterToolCall(context),
+      },
+      model: () => this.model,
+      turnId: () => this.turnId,
+      emit: (envelope) => this.onEvent(envelope),
+      emitUsage: (usage, turnId) => this.emit({ type: "usage", usage }, turnId),
+      activeToolCalls: this.activeToolCalls,
+      settleBatch: (message) => this.batchPlanner.settleBatch(message),
+      provider: () => this.provider,
+      ...(this.jevApiKey ? { jevApiKey: this.jevApiKey } : {}),
+    });
+    return {
+      ...tool,
+      // Like a direct Read after a writable `Task` in the same message, a
+      // script waits for that delegate before any nested call runs.
+      execute: async (toolCallId, params, signal, onUpdate) => {
+        await this.waitForBatchWritableDelegations(toolCallId, signal);
+        return tool.execute(toolCallId, params, signal, onUpdate);
+      },
+    };
+  }
+
   private guardSteeredTool(tool: AgentTool): AgentTool {
     return { ...tool, execute: async (id, args, signal, update) => {
       if (tool.name !== SUBAGENT_WAIT_TOOL_NAME && this.pendingSteering.size &&
@@ -4475,6 +4628,8 @@ export class DesktopAgentRuntime {
       name === SUBAGENT_STOP_TOOL_NAME ||
       // A stage's completion must never hide behind ToolSearch.
       name === COMPLETE_STAGE_TOOL_NAME ||
+      // Codemode is opt-in; once enabled it is declared up front.
+      name === CODEMODE_TOOL_NAME ||
       (this.modeState.isAgentLevel()
         ? AGENT_CORE_TOOL_NAMES.has(name)
         : CONTRACT_CORE_TOOL_NAMES.has(name) || this.isPlanSafePluginTool(name))
@@ -4631,6 +4786,13 @@ export class DesktopAgentRuntime {
       // a graceful Stop does.
       endTurn: () => {
         this.gracefulStopRequested = true;
+      },
+      failTurn: (failure) => {
+        this.terminateParentTurn();
+        this.gracefulStopRequested = true;
+        const error = { ...classifyAgentError(new Error(failure.message)), code: failure.code, retriable: false };
+        this.finalizeCurrentAssistant("error", error);
+        this.emit({ type: "error", error });
       },
     });
   }
@@ -6284,7 +6446,7 @@ export class DesktopAgentRuntime {
           delegations.length === 0
             ? "No subagents have been started in this session."
             : delegations
-                .map((record) => `- ${formatDelegationHeartbeat(record)}; job=${JSON.stringify({ kind: "delegation", id: record.delegationId })}`)
+                .map((record) => `- ${formatDelegationHeartbeat(record)}; delegationIds=${JSON.stringify([record.delegationId])}`)
                 .join("\n"),
           this.delegationChains.resumableBlock({ runningDelegationIds }),
         ]
@@ -6913,6 +7075,17 @@ export class DesktopAgentRuntime {
   }
 
   private emit(event: AgentEventEnvelope["event"], turnId?: string, ts = Date.now()) {
+    // Business state is answer-only. Only the transcript transports the original
+    // signed text, so an old or restarted host can replay the same provider input.
+    if (this.liveCommentary &&
+        (event.type === "message_start" || event.type === "message_update" || event.type === "message_end") &&
+        event.message.id === this.currentAssistant?.id) {
+      const replay = event.type === "message_end" ? event.message.providerReplay : this.liveCommentary.replay;
+      // A failed or oversized terminal replay cannot identify raw progress on reload.
+      if (replay?.blocks.length) {
+        event = { ...event, message: { ...event.message, content: this.liveCommentary.text, providerReplay: replay } };
+      }
+    }
     this.onEvent({
       sessionId: this.sessionId,
       turnId: turnId ?? this.turnId,
@@ -7545,14 +7718,20 @@ export class DesktopAgentRuntime {
     // pi records file operations for `messagesToSummarize` and, on a split
     // turn, `turnPrefixMessages`. The tail is summarized too — including the
     // suffix a split left uncollected — so copy the sets and record it there.
-    // The sets pi returned stay unchanged.
+    // The sets pi returned stay unchanged. The tail's own collection obeys
+    // the executed-call contract those guarded slices follow: a mid-batch
+    // Stop leaves trailing calls with no result row and failed calls keep
+    // an error row — either way the call never touched its file. The
+    // lookup spans the whole transcript because a tail call's result row
+    // can sit anywhere in it.
     const fileOps: CompactionPreparation["fileOps"] = {
       read: new Set(preparation.fileOps.read),
       written: new Set(preparation.fileOps.written),
       edited: new Set(preparation.fileOps.edited),
     };
+    const executedCallIds = executedToolCallIdsInEntries(this.fullEntries);
     for (const message of preparation.retainedTail) {
-      collectMessageFileOperations(message, fileOps);
+      collectMessageFileOperations(message, fileOps, executedCallIds);
     }
     const latestUser = messagesToSummarize
       .filter((message): message is UserMessage => message.role === "user")
@@ -7648,9 +7827,11 @@ export class DesktopAgentRuntime {
       }
       // Continuing would immediately issue the provider request that this
       // guard exists to prevent. The Agent wrapper converts this failure to
-      // the normal error/agent_end event sequence.
+      // the normal error/agent_end event sequence. The checkpoint's own cause
+      // rides along so the turn error says why (#2494).
+      const cause = this.lastCompactionFailure;
       throw new Error(
-        "CONTEXT_COMPACTION_FAILED: unable to create a checkpoint before the next model request",
+        `CONTEXT_COMPACTION_FAILED: unable to create a checkpoint before the next model request${cause ? `: ${cause}` : ""}`,
       );
     }
     context = this.rebuiltAgentContext();
@@ -7671,19 +7852,16 @@ export class DesktopAgentRuntime {
     const remaining = Math.max(0, budget.hardLimit - budget.tokens);
     const reminder = this.claimContextBudgetReminder(remaining, budget);
     if (!reminder) return context;
-    const legacyContext = context as AgentContext & { systemPrompt?: string };
-    const systemPrompt =
-      typeof legacyContext.systemPrompt === "string"
-        ? `${legacyContext.systemPrompt}\n\n${reminder}`
-        : undefined;
-    return {
-      ...context,
-      ...(systemPrompt ? { systemPrompt } : {}),
-      messages: [
-        ...context.messages,
-        { role: "system", content: "", sections: { [CONTEXT_BUDGET_SECTION]: reminder }, timestamp: Date.now() },
-      ],
-    } as AgentContext;
+    // The reminder changes on every claim, so it must never reach the request
+    // prefix (issue #2458). A system section stays at the tail only where the
+    // adapter keeps mid-conversation system messages; elsewhere pi-ai folds it
+    // into the leading system message and invalidates the whole prefix cache.
+    // There it rides as a request-only user message appended at the tail,
+    // like steering, and is neither persisted nor carried into the next run.
+    const message: AgentMessage = supportsMidConversationSystemMessages(this.model)
+      ? { role: "system", content: "", sections: { [CONTEXT_BUDGET_SECTION]: reminder }, timestamp: Date.now() }
+      : { role: "user", content: [{ type: "text", text: reminder }], timestamp: Date.now() };
+    return { ...context, messages: [...context.messages, message] };
   }
 
   private claimContextBudgetReminder(
@@ -7719,6 +7897,7 @@ export class DesktopAgentRuntime {
     if (this.compactionInProgress) return false;
     this.compactionInProgress = true;
     this.compactionAborted = false;
+    this.lastCompactionFailure = undefined;
     const previous = this.agentActivity;
     this.setAgentActivity({
       phase: "compacting",
@@ -7770,6 +7949,7 @@ export class DesktopAgentRuntime {
     // A checkpoint cut short by the user's Stop is not a failed compaction;
     // it reports under the abort code so the turn reads as stopped.
     const aborted = this.compactionAborted;
+    if (!aborted) this.lastCompactionFailure = message;
     this.emit({
       type: "compaction_end",
       reason,
@@ -7978,6 +8158,7 @@ export class DesktopAgentRuntime {
     retentionMode: CompactionRetentionMode,
     budget: ContextBudget,
     failureReason: CompactionFailureReason,
+    tailScale = 1,
   ): ContextCompactionRecord {
     const previousSummary = preparation.previousSummary
       ? boundedText(
@@ -8000,6 +8181,7 @@ export class DesktopAgentRuntime {
       budget,
       maxSummaryChars,
       retentionMode,
+      tailScale,
     );
     return this.createCheckpoint(
       {
@@ -8037,6 +8219,7 @@ export class DesktopAgentRuntime {
     budget: ContextBudget,
     maxSummaryChars: number,
     retentionMode: CompactionRetentionMode,
+    tailScale: number,
   ): AgentMessage[] {
     const summaryTokens = Math.ceil(maxSummaryChars / 4);
     const available = Math.max(
@@ -8052,7 +8235,7 @@ export class DesktopAgentRuntime {
     );
     return selectRecentTail(
       preparation.messagesToSummarize,
-      Math.min(target, available),
+      Math.max(1, Math.floor(Math.min(target, available) * tailScale)),
       { latestUserGoal: retentionMode === "active_turn" },
     );
   }
@@ -8298,36 +8481,45 @@ export class DesktopAgentRuntime {
       return false;
     }
 
-    const checkpoint = this.createFallbackCheckpoint(
-      fallbackPreparation,
-      throughMessageId,
-      Math.max(
-        256,
-        Math.min(
-          COMPACTION_FALLBACK_MAX_SUMMARY_CHARS,
-          Math.floor(budget.hardLimit * 0.75),
+    // The tail is sized from the local estimate, but the install check below
+    // measures the calibrated one. A provider whose tokenizer counts more than
+    // the estimate (CJK text, for one) makes the first window too large, and
+    // failing here leaves every later turn at the same hard limit (#2494).
+    // Halve the window until it fits; the newest message is always kept.
+    for (let tailScale = 1; ; tailScale /= 2) {
+      const checkpoint = this.createFallbackCheckpoint(
+        fallbackPreparation,
+        throughMessageId,
+        Math.max(
+          256,
+          Math.min(
+            COMPACTION_FALLBACK_MAX_SUMMARY_CHARS,
+            Math.floor(budget.hardLimit * 0.75),
+          ),
         ),
-      ),
-      retentionMode,
-      budget,
-      failureReason,
-    );
-    const persisted = await this.persistCheckpoint(
-      checkpoint,
-      reason,
-      willRetry,
-      true,
-      "retained_tail",
-    );
-    if (persisted === "persisted") return true;
-    if (persisted === "oversized") {
-      this.emitCompactionFailure(
-        reason,
-        checkpoint.tokensBefore,
-        "Automatic context recovery could not reduce the retained context below the safe model budget",
+        retentionMode,
+        budget,
+        failureReason,
+        tailScale,
       );
+      const persisted = await this.persistCheckpoint(
+        checkpoint,
+        reason,
+        willRetry,
+        true,
+        "retained_tail",
+      );
+      if (persisted === "persisted") return true;
+      if (persisted === "failed") return false;
+      if (tailScale <= COMPACTION_FALLBACK_MIN_TAIL_SCALE) {
+        this.emitCompactionFailure(
+          reason,
+          checkpoint.tokensBefore,
+          "Automatic context recovery could not reduce the retained context below the safe model budget",
+        );
+        return false;
+      }
     }
-    return false;
   }
 
   private async generateCompaction(
@@ -8778,7 +8970,7 @@ export class DesktopAgentRuntime {
           this.providerHasContent = responseContentFacts(event.message).meaningful;
           this.clearAgentActivity();
           this.streamStartedAt = Date.now();
-          const content = assistantContent((event.message as any).content);
+          const content = assistantContent(event.message.content);
           const retryingAssistant =
             this.providerRetryInProgress ||
             this.overflowRecoveryInProgress ||
@@ -8801,6 +8993,7 @@ export class DesktopAgentRuntime {
               : this.progressTurnRerunInProgress || this.overflowRecoveryInProgress
                 ? retryingAssistant?.content ?? ""
                 : content.text;
+          this.liveCommentary = initialText === content.text ? content.transcript : undefined;
           this.currentAssistant = {
             id: retryingAssistant?.id ?? randomUUID(),
             role: "assistant",
@@ -8844,7 +9037,9 @@ export class DesktopAgentRuntime {
         if (this.currentAssistant && event.message.role === "assistant") {
           this.providerHasContent ||= responseContentFacts(event.message).meaningful;
           this.applyHostedSearch(event.message);
-          const content = assistantContent((event.message as any).content);
+          const content = assistantContent(event.message.content);
+          const previousCommentary = this.liveCommentary;
+          if (content.hasText) this.liveCommentary = content.transcript;
           const previousText = this.currentAssistant.content;
           const previousThinking = this.currentAssistant.thinking ?? "";
           const nextText = content.hasText ? content.text : previousText;
@@ -8852,7 +9047,7 @@ export class DesktopAgentRuntime {
             ? content.thinking
             : previousThinking;
           const textDelta = content.hasText
-            ? cumulativeDelta(previousText, content.text)
+            ? cumulativeDelta(previousCommentary?.text ?? previousText, this.liveCommentary?.text ?? content.text)
             : { delta: "", reset: false };
           const thinkingDelta = content.hasThinking
             ? cumulativeDelta(previousThinking, content.thinking)
@@ -8867,7 +9062,9 @@ export class DesktopAgentRuntime {
                 : {}),
             status: "streaming",
           };
-          if (
+          if (!sameCommentaryBoundaries(previousCommentary, this.liveCommentary) || (this.liveCommentary && textDelta.reset)) {
+            this.emit({ type: "message_update", message: this.currentAssistant });
+          } else if (
             textDelta.delta ||
             thinkingDelta.delta ||
             textDelta.reset ||
@@ -8898,6 +9095,7 @@ export class DesktopAgentRuntime {
               } });
             }
             this.currentAssistant = undefined;
+            this.liveCommentary = undefined;
             if (steering.toolNames.length) {
               this.activateDeferredTools(steering.toolNames);
               this.setAgentTools(this.activeTools());
@@ -8919,7 +9117,9 @@ export class DesktopAgentRuntime {
         }
         if (this.currentAssistant && event.message.role === "assistant") {
           const assistantId = this.currentAssistant.id;
-          const content = assistantContent((event.message as any).content);
+          const content = assistantContent(event.message.content);
+          const visibleTranscript = content.hasText ? content.transcript?.text : this.liveCommentary?.text;
+          this.liveCommentary = content.transcript;
           // pi-agent-core encodes stream failures in the final message
           // (stopReason "error"/"aborted" + errorMessage) and resolves the
           // prompt normally, so this is where provider/model errors surface.
@@ -9014,7 +9214,7 @@ export class DesktopAgentRuntime {
             this.streamStartedAt !== undefined
               ? Math.max(0, endedAt - this.streamStartedAt)
               : undefined;
-          if (!(this.allowSilentCompletion && outcome === "thinking-only")) classifiedError ??= responseOutcomeError(outcome);
+          if (outcome !== "truncated" && !(this.allowSilentCompletion && outcome === "thinking-only")) classifiedError ??= responseOutcomeError(outcome);
           const modelStreamDurationMs =
             (this.currentAssistant.modelStreamDurationMs ?? 0) +
             (streamMs ?? 0);
@@ -9213,7 +9413,7 @@ export class DesktopAgentRuntime {
           const responseOutputTokens =
             aborted && (!usage || usage.outputTokens <= 0)
               ? estimateVisibleResponseOutputTokens({
-                  content: nextText,
+                  content: visibleTranscript ?? nextText,
                   thinking: nextThinking,
                 })
               : undefined;
@@ -9237,6 +9437,10 @@ export class DesktopAgentRuntime {
             modelId: this.provider.modelId,
             providerId: this.provider.id,
             responseModelId: concreteResponseModel(event.message, this.provider.modelId),
+            // Tool-call truncation is recovered by Pi; annotate only a visible
+            // text answer, without turning the settled run into an error.
+            outputTruncated: !failed && !aborted && stopReason === "length" &&
+              Boolean(responseText.trim()) && !messageRequestsTools(event.message) || undefined,
             ...(usage ? { usage } : {}),
             ...(responseDurationMs !== undefined ? { responseDurationMs } : {}),
             ...(streamMs !== undefined ? { modelStreamDurationMs } : {}),
@@ -9254,20 +9458,21 @@ export class DesktopAgentRuntime {
             providerReplay: failed
               ? undefined
               : providerReplayForBubble(
-                  captureAssistantProviderReplay((event.message as any).content),
+                  captureAssistantProviderReplay(event.message.content),
                   nextText === content.text && nextThinking === content.thinking,
                 ),
           };
           if (classifiedError) {
             this.currentAssistant.error = { ...classifiedError, details: { ...classifiedError.details, response: this.currentAssistant.responseDiagnostics } };
-            // Stop pi's tool/continuation loop on a truncated or thinking-only
-            // answer. The original termination is retained in diagnostics.
+            // A thinking-only response cannot continue Pi's tool loop.
+            // Length limits retain Pi's own truncated-tool recovery.
             event.message.stopReason = "error";
             event.message.errorMessage = classifiedError.message;
           }
           if (!this.currentAssistant.providerReplay) delete this.currentAssistant.providerReplay;
           if (!this.currentAssistant.responseModelId) delete this.currentAssistant.responseModelId;
           this.emit({ type: "message_end", message: this.currentAssistant });
+          this.liveCommentary = undefined;
           this.activeProviderRetryAttempt = 0;
           this.streamStartedAt = undefined;
           this.currentAssistant = undefined;
@@ -9494,7 +9699,10 @@ export class DesktopAgentRuntime {
         (responseDurationMs ?? 0);
       const responseOutputTokens =
         status === "aborted"
-          ? estimateVisibleResponseOutputTokens(this.currentAssistant)
+          ? estimateVisibleResponseOutputTokens({
+              content: this.liveCommentary?.text ?? this.currentAssistant.content,
+              thinking: this.currentAssistant.thinking,
+            })
           : undefined;
       this.currentAssistant = {
         ...this.currentAssistant,
@@ -9514,6 +9722,7 @@ export class DesktopAgentRuntime {
     // burns its retries before giving up shows here as a large providerWaitMs.
     this.streamStartedAt = undefined;
     this.currentAssistant = undefined;
+    this.liveCommentary = undefined;
   }
 
   /** Keep a pre-flight user message in context so a reused runtime and the
@@ -9533,10 +9742,10 @@ export class DesktopAgentRuntime {
   }
 
   private failBeforeProviderRequest(
-    incomingUserMessage: AgentMessage,
+    incomingUserMessage: AgentMessage | undefined,
     error: ReturnType<typeof classifyAgentError>,
   ): void {
-    this.keepPreflightUserMessage(incomingUserMessage);
+    if (incomingUserMessage) this.keepPreflightUserMessage(incomingUserMessage);
     this.failCurrentPreflight(error);
   }
 
@@ -9593,6 +9802,7 @@ export class DesktopAgentRuntime {
     this.turnEndEmitted = false;
     this.delegationHandoff = false;
     this.currentAssistant = undefined;
+    this.liveCommentary = undefined;
     this.requestStartedAt = Date.now();
     // An approved plan runs as a plain Agent turn, never as a mode run turn.
     this.modeState.clearTurn();
@@ -9769,34 +9979,37 @@ export class DesktopAgentRuntime {
       if (selectedTools.length) this.activateDeferredTools(selectedTools);
       this.setAgentTools(this.activeTools());
       if (modePromptChanged) this.setAgentSystemPrompt(this.composeSystemPrompt());
+      const completion = typeof input === "string" ? undefined : input.backgroundCompletion;
+      const completionEntries = completion ? this.historyToEntries([completion]) : [];
       const content = promptContent(modelInput);
       const incomingUserMessage: AgentMessage = {
         role: "user",
         content,
         timestamp: Date.now(),
       };
-      if (this.automaticCompactionNeeded([incomingUserMessage])) {
+      const incomingMessages = completion ? completionEntries.map(entry => entry.message) : [incomingUserMessage];
+      if (this.automaticCompactionNeeded(incomingMessages)) {
         const compacted = await this.runCompaction("threshold", false);
         if (!compacted) {
           if (this.compactionAborted) {
             // Stop landed during the pre-flight checkpoint. Keep the user's
             // message in context and end the turn as aborted, the same way a
             // stop during the provider request ends it (the catch below).
-            this.keepPreflightUserMessage(incomingUserMessage);
+            if (!completion) this.keepPreflightUserMessage(incomingUserMessage);
             throw turnAbortedError("Turn aborted while compacting context");
           }
           // A soft-trigger summary failure is recoverable while the hard
           // provider budget still has room; retain the hard guard below.
-          if (this.automaticCompactionWouldExceedHardLimit([incomingUserMessage])) {
-            this.failBeforeProviderRequest(incomingUserMessage, {
+          if (this.automaticCompactionWouldExceedHardLimit(incomingMessages)) {
+            this.failBeforeProviderRequest(completion ? undefined : incomingUserMessage, {
               code: "CONTEXT_COMPACTION_FAILED",
               message: "Automatic context compaction failed before the model request",
               retriable: false,
             });
             return { turnId: this.turnId };
           }
-        } else if (this.automaticCompactionWouldExceedHardLimit([incomingUserMessage])) {
-          this.failBeforeProviderRequest(incomingUserMessage, {
+        } else if (this.automaticCompactionWouldExceedHardLimit(incomingMessages)) {
+          this.failBeforeProviderRequest(completion ? undefined : incomingUserMessage, {
             code: "CONTEXT_TOO_LARGE",
             message:
               "The pending prompt still exceeds the safe model context budget after compaction",
@@ -9807,9 +10020,9 @@ export class DesktopAgentRuntime {
       }
       if (
         !this.compactionEnabled &&
-        this.automaticCompactionWouldExceedHardLimit([incomingUserMessage])
+        this.automaticCompactionWouldExceedHardLimit(incomingMessages)
       ) {
-        this.failBeforeProviderRequest(incomingUserMessage, {
+        this.failBeforeProviderRequest(completion ? undefined : incomingUserMessage, {
           code: "CONTEXT_TOO_LARGE",
           message:
             "The pending prompt exceeds the safe model context budget while automatic compaction is disabled",
@@ -9819,13 +10032,15 @@ export class DesktopAgentRuntime {
       }
       await this.extensionBeforeAgentStart(modelInput);
       if (this.runCancelled || this.disposed) {
-        this.keepPreflightUserMessage(incomingUserMessage);
+        if (!completion) this.keepPreflightUserMessage(incomingUserMessage);
         throw turnAbortedError("Turn aborted during extension hooks");
       }
-      // Every preflight passed: the wake turn's reports are now part of the
-      // model request, so their single delivery shot is spent (D628).
       wakeDelivery?.markDelivered();
-      if (typeof modelInput === "string") {
+      if (completion) {
+        for (const entry of completionEntries) this.appendLiveEntry(entry.id, entry.message);
+        this.setAgentMessages([...this.agent.state.messages, ...incomingMessages]);
+        await this.agent.continue();
+      } else if (typeof modelInput === "string") {
         await this.agent.prompt(modelInput);
       } else {
         // pi's `(text, images)` form appends every image after the text; the
@@ -9901,6 +10116,8 @@ export class DesktopAgentRuntime {
     const runner = this.extensionRunner;
     if (!runner) return options;
     const next: SimpleStreamOptions = { ...options };
+    // Notification handlers can finish out of order; this local id never leaves the process.
+    const contextRequestId = ++this.extensionProviderRequestId;
     if (this.extensionProviderHeaders) {
       next.headers = mergeProviderHeaders(options.headers, this.extensionProviderHeaders);
     }
@@ -9908,11 +10125,7 @@ export class DesktopAgentRuntime {
       next.onPayload = async (payload, payloadModel) => {
         const base = await options.onPayload?.(payload, payloadModel);
         const current = base ?? payload;
-        const replaced = await runner.emit<unknown>(
-          "before_provider_request",
-          { type: "before_provider_request", payload: current },
-          (_acc, value) => value,
-        );
+        const replaced = await runner.emitBeforeProviderRequest(current, { contextRequestId });
         return replaced ?? base;
       };
     }
@@ -9921,6 +10134,7 @@ export class DesktopAgentRuntime {
         await options.onResponse?.(response, responseModel);
         void runner.emit("after_provider_response", {
           type: "after_provider_response",
+          contextRequestId,
           response,
           model: model as unknown,
         });
@@ -10169,5 +10383,8 @@ export class DesktopAgentRuntime {
     this.compactionAbort?.abort();
     await closingExtensions;
     await Promise.all(settlements);
+    // Release pi-ai's per-session provider state (Anthropic message-thread
+    // continuation, strict-tool downgrades) once nothing can send for it.
+    cleanupSessionResources(this.sessionId);
   }
 }

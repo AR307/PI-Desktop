@@ -17,7 +17,8 @@ test("provider failures stay in the transcript as structured assistant messages"
     readStoreSource(),
   ]);
 
-  assert.match(runtime, /error:\s*classifiedError,\s*isError:\s*true/);
+  assert.match(runtime, /const messageError = classifiedError \?\? textCallDiagnostic/);
+  assert.match(runtime, /error: \{ \.\.\.messageError,[^\n]*isError: true/);
   assert.match(runtime, /m\.status === "error" \|\| m\.isError \|\| m\.error/);
   const errorMessage = {
     id: "provider-failure", role: "assistant", content: "", status: "error",
