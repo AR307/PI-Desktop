@@ -60,7 +60,7 @@ const { appDir, electronBinary } = process.env.PI_E2E_ELECTRON
   : resolveElectronBinary();
 const env = { ...process.env, PI_DESKTOP_DATA_DIR: dataDir, PI_DESKTOP_START_MAXIMIZED: "0", ELECTRON_RENDERER_URL: "" };
 delete env.ELECTRON_RUN_AS_NODE;
-let app, page;
+let app, page, guideDismissed = false;
 const close = async () => {
   if (!app) return;
   const current = app;
@@ -74,6 +74,13 @@ const launch = async () => {
   page.setDefaultTimeout(15000);
   await page.locator('.composer-input[contenteditable="true"]').first().waitFor({ timeout: 45000 });
   await page.locator(".startup-splash").waitFor({ state: "hidden", timeout: 45000 });
+  if (!guideDismissed) {
+    const guide = page.locator('[data-surface="startup-guide"]');
+    await guide.waitFor();
+    await guide.getByRole("button", { name: "Skip", exact: true }).first().click();
+    await guide.waitFor({ state: "hidden" });
+    guideDismissed = true;
+  }
 };
 const invoke = (name, input) => page.evaluate(async ({ name, input }) => {
   const result = await window.piDesktop.invoke(window.piDesktop.channels.invoke[name], input);

@@ -1970,3 +1970,5 @@ results are recorded in docs/releases/0.21.0-beta.5-validation.md.
 - Recycle only the user-approved upstream removal list. Reuse compatible build
   caches; isolate validation profiles and local provider fixtures. No running
   client, real account or server is changed.
+- Update isolated user-path fixtures to dismiss the new startup guide through
+  its visible Skip control and cover upstream dual text/image eligibility.

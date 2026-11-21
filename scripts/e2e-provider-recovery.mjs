@@ -420,13 +420,9 @@ try {
   );
   const settings = await ipc("settingsGet");
   await ipc("settingsSet", { ...settings, language: "zh-CN", autoGenerateTitle: false });
-  await waitFor(() => evaluate(`(() => {
-    const skip = [...document.querySelectorAll('button')].find(button => /^(暂时跳过|Skip for now)$/i.test(button.textContent.trim()));
-    if (!skip) return false;
-    skip.click();
-    return true;
-  })()`), "fresh-profile onboarding Skip");
-  await waitFor(async () => !(await bodyText()).includes("暂时跳过"), "onboarding dismissed");
+  await waitFor(() => evaluate("!!document.querySelector('[data-surface=startup-guide]')"), "fresh-profile startup guide");
+  await evaluate("document.querySelector('.startup-guide-header button').click()");
+  await waitFor(() => evaluate("!document.querySelector('[data-surface=startup-guide]')"), "startup guide dismissed");
   console.log("ARTIFACTS", artifacts);
   await run("01-network-recovery", "recover");
   await run("02-stream-recovery", "stream");

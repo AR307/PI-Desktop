@@ -69,8 +69,10 @@ try {
     return result.data;
   }, { key, args });
   await page.locator('.composer-input[contenteditable="true"]').waitFor({ timeout: 60000 });
-  const skip = page.getByRole("button", { name: /Skip for now/ });
-  if (await skip.isVisible()) await skip.click();
+  const guide = page.locator('[data-surface="startup-guide"]');
+  await guide.waitFor();
+  await guide.getByRole("button", { name: "Skip", exact: true }).first().click();
+  await guide.waitFor({ state: "hidden" });
   const images = () => {
     const path = join(scratch, "data", "scratch");
     return existsSync(path) ? readdirSync(path, { recursive: true }).filter(name => name.endsWith(".png")).map(name => join(path, name)) : [];

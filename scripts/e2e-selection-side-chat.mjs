@@ -356,9 +356,9 @@ try {
     45000,
     "composer ready",
   );
-  await evaluate(
-    "[...document.querySelectorAll('button')].find(e=>e.textContent.includes('暂时跳过'))?.click()",
-  );
+  await waitFor(() => evaluate("!!document.querySelector('[data-surface=startup-guide]')"), 15000, "fresh-profile startup guide");
+  await click(".startup-guide-header button");
+  await waitFor(() => evaluate("!document.querySelector('[data-surface=startup-guide]')"), 5000, "startup guide dismissed");
   await type(mainInput, "INITIAL_CONTEXT");
   await key("Enter", 13);
   await waitFor(
