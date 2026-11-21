@@ -1,5 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { readFile } from "node:fs/promises";
+import { fileURLToPath } from "node:url";
+import { createServer, loadConfigFromFile } from "vite";
 import { screenshotPixelRect } from "../electron/screenshot-contract.ts";
 import { composerToolbar } from "./helpers/composer-toolbar.mjs";
 import { slotSsr } from "./helpers/slot-ssr.mjs";
@@ -26,4 +29,23 @@ test("the camera follows the composer's attachment and busy restrictions", async
     const disabled = await composerToolbar(t, ssr, props);
     assert.match(camera(disabled()), /\bdisabled/, JSON.stringify(props));
   }
+});
+
+test("the development selector permits Vite scripts without relaxing packaged script policy", async (t) => {
+  const root = fileURLToPath(new URL("../", import.meta.url));
+  const filename = fileURLToPath(new URL("../screenshot.html", import.meta.url));
+  const config = await loadConfigFromFile({ command: "serve", mode: "development" }, `${root}/electron.vite.config.ts`, root, "silent");
+  const server = await createServer({
+    root, configFile: false, plugins: config.config.renderer.plugins, logLevel: "silent",
+    server: { middlewareMode: true, hmr: { port: 0 }, ws: false, watch: null },
+    optimizeDeps: { noDiscovery: true, include: [] }, appType: "custom",
+  });
+  t.after(() => server.close());
+  const source = await readFile(filename, "utf8");
+  const html = await server.transformIndexHtml("/screenshot.html", source);
+  assert.match(html, /@react-refresh/);
+  assert.match(html, /script-src 'self' 'unsafe-inline';/);
+  assert.match(html, /connect-src 'self' ws:\/\/localhost:\* ws:\/\/127\.0\.0\.1:\*;/);
+  const buildPolicy = config.config.renderer.plugins.find(plugin => plugin.name === "pi-tighten-csp");
+  assert.match(buildPolicy.transformIndexHtml(source), /script-src 'self';/);
 });

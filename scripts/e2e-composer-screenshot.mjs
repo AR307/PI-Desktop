@@ -71,13 +71,13 @@ try {
   await page.locator('.composer-input[contenteditable="true"]').waitFor({ timeout: 60000 });
   const skip = page.getByRole("button", { name: /Skip for now/ });
   if (await skip.isVisible()) await skip.click();
-  if (process.platform === "win32") execFileSync("powershell.exe", ["-NoProfile", "-File", join(root, "scripts/e2e/show-fixture-window.ps1"), "-targetProcessId", String(child.pid)], { windowsHide: true });
   const images = () => {
     const path = join(scratch, "data", "scratch");
     return existsSync(path) ? readdirSync(path, { recursive: true }).filter(name => name.endsWith(".png")).map(name => join(path, name)) : [];
   };
   const overlays = () => context.pages().filter(page => page.url().includes("screenshot.html"));
   async function openCapture(button) {
+    if (process.platform === "win32") execFileSync("powershell.exe", ["-NoProfile", "-File", join(root, "scripts/e2e/show-fixture-window.ps1"), "-targetProcessId", String(child.pid)]);
     await page.bringToFront();
     await button.click();
     let overlay;

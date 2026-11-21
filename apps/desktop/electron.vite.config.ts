@@ -112,7 +112,16 @@ export default defineConfig({
         },
       },
     },
-    plugins: [react(), tailwindcss(), tightenCsp(), dropLegacyFontFallbacks()],
+    plugins: [react(), tailwindcss(), tightenCsp(), dropLegacyFontFallbacks(), {
+      name: "pi-screenshot-dev-csp",
+      apply: "serve",
+      transformIndexHtml(html, context) {
+        if (!context.filename.endsWith("screenshot.html")) return html;
+        return html
+          .replace("script-src 'self';", "script-src 'self' 'unsafe-inline';")
+          .replace("connect-src 'none';", "connect-src 'self' ws://localhost:* ws://127.0.0.1:*;");
+      },
+    }],
     resolve: {
       alias: [
         { find: "@renderer", replacement: resolve("src") },

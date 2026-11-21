@@ -12,7 +12,7 @@
 - Add real Electron user-path coverage for context-menu selection, cancellation,
   cropping, explicit send and side-chat ownership; keep new tooltip copy marked
   for review in docs/composer-screenshot-copy-review.md.
-- Validation: 41 targeted desktop tests and 40 i18n tests pass; desktop
+- Validation: 42 targeted desktop tests and 40 i18n tests pass; desktop
   typecheck, Electron build, scoped lint, style tokens and documentation checks
   pass. Native Windows acceptance covers Home, main/side drafts, cancellation,
   crop dimensions/pixels, explicit vision input, narrow layout and owner reload.
@@ -21,6 +21,9 @@
 - Native acceptance explicitly shows its own Windows fixture and requires its
   colored marker in the captured pixels; CDP-only interaction with a hidden
   window must not count as screen-capture acceptance.
+- Reassert fixture visibility immediately before each capture. Permit Vite's
+  inline refresh preamble only in development; packaged selector scripts retain
+  their self-only CSP. Cover both HTML policies with the real Vite transform.
 - Existing composer-paste acceptance still fails its preview-cancel focus probe
   on both this candidate and the unchanged release worktree. No unrelated
   preview behavior is changed, and no production profile or database is used.
