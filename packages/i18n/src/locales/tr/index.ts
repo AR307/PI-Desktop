@@ -392,6 +392,7 @@ export const tr = {
     placeholderShortcut: "Yeni satır için Shift+Enter · göndermek için Gönder",
     suggestionHint: "Tab kabul · Esc yoksay",
     addFiles: "Dosya ekle",
+    screenshot: "[Screenshot]",
     filesAttached: "Taslağa {{count}} öğe eklendi",
     filesPasted: "Yapıştırılan {{count}} dosya oturum klasörüne kaydedildi",
     largeTextPasted: "Uzun yapıştırılan metin @{{name}} olarak kaydedildi",

@@ -11,6 +11,9 @@ one reference per source message. Buttons, inputs, hidden content, and existing
 reference controls are excluded. Tab enters the toolbar; Escape dismisses it.
 The actions use compact ghost buttons without an enclosing bordered, rounded
 or raised container, matching the existing Desktop toolbar controls.
+Right-click dismisses these floating actions without clearing the text selection
+or suppressing the ordinary context menu. Scroll, resize and notifications for
+the same selection do not reopen them; a new pointer or keyboard selection does.
 
 Add to conversation appends structured references without replacing typed text
 or attachments and without sending. A borderless reference count expands to

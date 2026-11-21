@@ -390,6 +390,7 @@ export const en = {
     placeholderShortcut: "Shift+Enter for newline · Use Send to submit",
     suggestionHint: "Tab to accept · Esc to ignore",
     addFiles: "Add files",
+    screenshot: "[Screenshot]",
     filesAttached: "Added {{count}} item(s) to the draft",
     filesPasted: "Saved {{count}} pasted file(s) to the session scratch folder",
     largeTextPasted: "Saved large pasted text as @{{name}}",

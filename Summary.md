@@ -1,3 +1,27 @@
+## 2026-11-21 - Message context menu and composer screenshots
+
+- Keep selected text and the regular context menu while dismissing floating
+  quote actions on right-click; a new selection restores those actions.
+- Add the composer camera action and isolated region-selection windows. Main
+  owns native screen capture; a narrow preload connects the selector renderer;
+  accepted PNGs reuse the existing session-scratch and attachment draft pipeline.
+- Preserve drafts, references and main/side session ownership. Cancellation does
+  not create an attachment or send; no database or runtime protocol is changed.
+- Bind picker/capture completion to the calling composer instead of the global
+  main-session selection, so a side attachment appears immediately in that side.
+- Add real Electron user-path coverage for context-menu selection, cancellation,
+  cropping, explicit send and side-chat ownership; keep new tooltip copy marked
+  for review in docs/composer-screenshot-copy-review.md.
+- Validation: 41 targeted desktop tests and 40 i18n tests pass; desktop
+  typecheck, Electron build, scoped lint, style tokens and documentation checks
+  pass. Native Windows acceptance covers Home, main/side drafts, cancellation,
+  crop dimensions/pixels, explicit vision input, narrow layout and owner reload.
+  Candidate/base revisions and native evidence are recorded locally under
+  .artifacts/evidence; macOS/Linux and secondary-monitor crops are not validated.
+- Existing composer-paste acceptance still fails its preview-cancel focus probe
+  on both this candidate and the unchanged release worktree. No unrelated
+  preview behavior is changed, and no production profile or database is used.
+
 ## 2026-11-11 - Synchronize upstream for PI-Desktop 0.21.2
 
 - Integrate upstream 4ad0094e: Pi 1.5.0, custom/staged modes, Computer Use,

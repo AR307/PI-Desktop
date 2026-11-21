@@ -30,6 +30,7 @@ export const TOOLBAR_PROPS = {
   controlsBlocked: false,
   pasting: false,
   pickAndAttach: idle,
+  captureAndAttach: idle,
   configureActiveSession: idle,
   showToast: noop,
   modelMenu: {

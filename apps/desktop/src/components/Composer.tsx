@@ -254,6 +254,7 @@ export function Composer({
     dropTargetActive,
     droppedDirectories,
     pickAndAttach,
+    captureAndAttach,
     pasteClipboardFiles,
     onComposerDragEnter,
     onComposerDragOver,
@@ -667,6 +668,7 @@ export function Composer({
             stopAllowed={sessionAllows(capabilitySession, "canStop")}
             pasting={pasting}
             pickAndAttach={pickAndAttach}
+            captureAndAttach={captureAndAttach}
             configureActiveSession={configureActiveSession}
             showToast={showToast}
             modelMenu={modelMenu}

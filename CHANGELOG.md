@@ -1,3 +1,9 @@
+## Unreleased - Composer screenshots and selection context menu
+
+- Dismiss floating quote actions on right-click without clearing selected text.
+- Add a camera action below the composer for region screenshots. Captures become
+  draft attachments; Escape or right-click cancels without sending.
+
 ## Unreleased - Interrupted response recovery
 
 - Automatically retry transient stream interruptions and timeouts even after

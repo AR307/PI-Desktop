@@ -10,6 +10,23 @@
 
 ## 1. 键盘快捷键基线
 
+### Composer region screenshots
+
+The camera action beside Add files opens an isolated, screen-sized selector on
+each monitor. Drag in either direction within one monitor to capture that region
+at the captured image's pixel density. Release adds a PNG through the existing
+session-scratch attachment pipeline; it never sends a message or changes the
+clipboard. Existing text, references and attachments are retained. Home and side
+composers use the same attachment ownership rules. Attachment-disabled sessions
+and a busy composer disable the action.
+
+Escape, right-click or closing a selector cancels without adding an attachment.
+Duplicate capture requests do not open another selector. Closing/reloading the
+owner closes all selectors. The native screen-recording permission remains in
+force; a capture failure is visible and leaves the composer usable. Selection
+windows expose only their private screenshot bridge, not the application API;
+MCP cannot initiate this action. Cross-monitor drags are not supported.
+
 ### 1. 1 全局快捷键
 
 | 快捷方式 | 行动 | 背景 |

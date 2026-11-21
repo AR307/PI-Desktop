@@ -383,6 +383,7 @@ export const fr = {
     "placeholderShortcut": "Maj+Entrée pour une nouvelle ligne · Utilisez Envoyer pour soumettre",
     "suggestionHint": "Tab accepter · Échap ignorer",
     "addFiles": "Ajoutez des fichiers et plus encore",
+    "screenshot": "[Screenshot]",
     "filesAttached": "Ajout de {{count}} élément(s) au brouillon",
     "filesPasted": "Enregistrement de {{count}} fichier(s) collé(s) dans le dossier de travail de la session",
     "largeTextPasted": "Enregistrement d'un texte collé volumineux sous @{{name}}",

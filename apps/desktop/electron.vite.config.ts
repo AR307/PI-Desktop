@@ -87,6 +87,7 @@ export default defineConfig({
         input: {
           index: resolve(__dirname, "electron/preload/index.ts"),
           "plugin-panel": resolve(__dirname, "electron/preload/plugin-panel.ts"),
+          screenshot: resolve(__dirname, "electron/preload/screenshot.ts"),
         },
         output: {
           format: "cjs",
@@ -107,6 +108,7 @@ export default defineConfig({
       rollupOptions: {
         input: {
           index: resolve(__dirname, "index.html"),
+          screenshot: resolve(__dirname, "screenshot.html"),
         },
       },
     },

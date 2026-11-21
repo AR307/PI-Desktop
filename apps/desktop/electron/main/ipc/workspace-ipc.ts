@@ -1,6 +1,7 @@
 import { clipboard } from "electron";
 import { registerSidebarPreferencesIpc } from "./sidebar-preferences-ipc";
 import { readComposerClipboardDirectories } from "../composer-clipboard-directories";
+import { captureComposerScreenshot } from "../composer-screenshot";
 import { BrowserWindow, dialog, shell, type OpenDialogOptions } from "electron";
 import { dirname } from "node:path";
 import { homedir } from "node:os";
@@ -582,6 +583,12 @@ export function registerWorkspaceIpc({
       properties: ["openFile", "multiSelections"],
     }),
   );
+
+  handleWithEvent(IPC.invoke.composerScreenshot, async (event) => {
+    assertMainWindowSender(event);
+    if (event.senderFrame !== event.sender.mainFrame) throw new Error("Invalid screenshot sender");
+    return captureComposerScreenshot(BrowserWindow.fromWebContents(event.sender)!);
+  });
 
   handleWithEvent(IPC.invoke.composerPickPhotos, async (event) =>
     openComposerPicker(event, {

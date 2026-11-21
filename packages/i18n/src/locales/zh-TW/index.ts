@@ -385,6 +385,7 @@ export const zhTW = {
     placeholderShortcut: "Shift+Enter 換行 · 點擊發送提交",
     suggestionHint: "Tab 接受 · Esc 忽略",
     addFiles: "新增檔案等內容",
+    screenshot: "[截圖]",
     filesAttached: "已將 {{count}} 項加入草稿",
     filesPasted: "已將 {{count}} 個貼上檔案儲存到會話臨時目錄",
     largeTextPasted: "已將大段貼上文本儲存為 @{{name}}",

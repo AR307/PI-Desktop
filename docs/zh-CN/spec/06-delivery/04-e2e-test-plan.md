@@ -119,6 +119,20 @@ Runtime HTTP 测试还覆盖委派请求、显式不缓存请求及不受影响�
 
 ## 选中文本引用与临时侧聊
 
+### Selection context menu and region screenshot
+
+Run `node scripts/e2e-composer-screenshot.mjs` in the task worktree using the
+shared Host/Electron/Playwright binaries and an isolated profile. Only the local
+HTTP provider is simulated; screen capture, selection windows, preload, importer,
+drafts and sends use production wiring. Retain only fixture-window evidence.
+
+| ID | User sequence and required result |
+| --- | --- |
+| E2E-EXCERPT-CONTEXT | Select message text, right-click, then scroll/resize. Only the context menu remains and the selected text survives. Select again and add the quote normally. |
+| E2E-SCREENSHOT-CANCEL | Type a draft, open capture twice, cancel with Esc. One selection flow exists, all selectors close, no file/request is created and the draft survives. |
+| E2E-SCREENSHOT-ATTACH | Open the camera action, reverse-drag a region, release. The PNG dimensions/pixels match the selected region, text/quotes survive and no request is sent until Enter. |
+| E2E-SCREENSHOT-SIDE | Capture from a side composer. Its own session owns the image, the main draft stays unchanged, and right-click cancellation adds nothing. |
+
 在请求工作树中运行 `node scripts/e2e-selection-side-chat.mjs`，使用共享 Host/Electron 工具链。测试会创建隔离 profile 和本地 HTTP 模型 fixture、保留证据，且不会使用用户正在运行的实例。
 
 | ID | 用户操作序列与预期结果 |

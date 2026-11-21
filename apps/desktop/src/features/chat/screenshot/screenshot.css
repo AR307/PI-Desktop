@@ -1,0 +1,8 @@
+html, body, #root { margin: 0; width: 100%; height: 100%; overflow: hidden; }
+.screenshot-surface { position: fixed; inset: 0; cursor: crosshair; user-select: none; touch-action: none; }
+.screenshot-surface > img { width: 100%; height: 100%; pointer-events: none; }
+.screenshot-mask { position: absolute; inset: 0; background: var(--ds-scrim); pointer-events: none; }
+.screenshot-surface:has(.screenshot-region) .screenshot-mask { display: none; }
+.screenshot-region { position: absolute; outline: 1px solid var(--ds-accent); box-shadow: 0 0 0 99999px var(--ds-scrim); pointer-events: none; }
+.screenshot-cancel { position: fixed; top: 16px; right: 16px; cursor: pointer; }
+.screenshot-surface > pre { position: fixed; inset: 24px; color: var(--ds-text-primary); }

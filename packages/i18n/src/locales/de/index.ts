@@ -383,6 +383,7 @@ export const de = {
     "placeholderShortcut": "Umschalt+Eingabetaste für Zeilenumbruch · Verwenden Sie Senden, um zu senden",
     "suggestionHint": "Tab übernehmen · Esc verwerfen",
     "addFiles": "Dateien hinzufügen und mehr",
+    "screenshot": "[Screenshot]",
     "filesAttached": "{{count}} Element(e) zum Entwurf hinzugefügt",
     "filesPasted": "{{count}} eingefügte Datei(en) im Sitzungs-Scratch-Ordner gespeichert",
     "largeTextPasted": "Großen eingefügten Text gespeichert als @{{name}}",

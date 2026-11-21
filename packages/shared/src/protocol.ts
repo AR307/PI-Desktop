@@ -479,6 +479,7 @@ export const IPC = {
     startupAnimationOpenFolder: "pi-desktop/startupAnimation/openFolder",
     devtoolsToggle: "pi-desktop/devtools/toggle",
     composerPickFiles: "pi-desktop/composer/pickFiles",
+    composerScreenshot: "pi-desktop/composer/screenshot",
     composerPickPhotos: "pi-desktop/composer/pickPhotos",
     composerImportFiles: "pi-desktop/composer/importFiles",
     composerPasteFiles: "pi-desktop/composer/pasteFiles",
