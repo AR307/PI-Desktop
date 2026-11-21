@@ -24,6 +24,8 @@
 - Reassert fixture visibility immediately before each capture. Permit Vite's
   inline refresh preamble only in development; packaged selector scripts retain
   their self-only CSP. Cover both HTML policies with the real Vite transform.
+- Keep the isolated Windows capture fixture above desktop wallpaper windows
+  during native acceptance; this test-only ordering never changes app defaults.
 - Existing composer-paste acceptance still fails its preview-cancel focus probe
   on both this candidate and the unchanged release worktree. No unrelated
   preview behavior is changed, and no production profile or database is used.

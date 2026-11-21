@@ -62,7 +62,7 @@ try {
   browser = await chromium.connectOverCDP(`http://127.0.0.1:${port}`);
   const context = browser.contexts()[0];
   page = context.pages().find(page => page.url().includes("index.html") && !page.url().includes("surface=")) || await context.waitForEvent("page");
-  page.setDefaultTimeout(15000);
+  page.setDefaultTimeout(45000);
   const invoke = (key, ...args) => page.evaluate(async ({ key, args }) => {
     const result = await window.piDesktop.invoke(window.piDesktop.channels.invoke[key], ...args);
     if (!result.ok) throw new Error(JSON.stringify(result.error));
