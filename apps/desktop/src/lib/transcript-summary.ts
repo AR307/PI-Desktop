@@ -1,6 +1,7 @@
 import type { MessageUsage, UiMessage } from "@pi-desktop/shared";
 import type { AssistantActivityItem, AssistantTurnEntry, AssistantTurnPart } from "./assistant-turns";
 import { isSubagentReturnPart } from "./assistant-turns";
+import { projectAssistantCommentary } from "./assistant-commentary";
 
 const contentFacts = new WeakMap<UiMessage, { trimmedContent: string; hasContent: boolean }>();
 
@@ -70,10 +71,20 @@ export function getAssistantTurnSummary(entry: AssistantTurnEntry): AssistantTur
     }
     const message = part.message;
     result.messages.push(message);
-    if (part === answer || message.error || message.imageGeneration) result.responses.push(part);
-    else result.process.push(part);
-    if (messageContentFacts(message).hasContent) {
-      result.actionMessage = message;
+    const projection = projectAssistantCommentary(message);
+    if (projection) {
+      for (const progress of projection.progress) result.process.push(progress);
+    }
+    const reply = projection?.reply ?? part;
+    const hasReply = messageContentFacts(reply.message).hasContent;
+    // Only the marked prose moves. A notice/error still belongs to its row,
+    // and usage and timing below count the source message, not display parts.
+    if (!projection || hasReply || message.error || message.outputTruncated) {
+      if (part === answer || message.error || message.imageGeneration) result.responses.push(reply);
+      else result.process.push(reply);
+    }
+    if (hasReply) {
+      result.actionMessage = reply.message;
       result.hasContent = true;
     }
     if (message.modelId || message.usage || message.responseDurationMs || message.responseOutputTokens) {
@@ -109,7 +120,7 @@ export function getAssistantTurnSummary(entry: AssistantTurnEntry): AssistantTur
 /** Do not retain duplicated reply text in the session-wide projection cache. */
 export function getAssistantTurnContent(entry: AssistantTurnEntry): string {
   return getAssistantTurnSummary(entry).messages
-    .map((message) => messageContentFacts(message).trimmedContent)
+    .map((message) => messageContentFacts(projectAssistantCommentary(message)?.reply.message ?? message).trimmedContent)
     .filter(Boolean)
     .join("\n\n");
 }

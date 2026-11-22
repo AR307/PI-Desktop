@@ -283,6 +283,8 @@ pub struct ModelCatalogItem {
     pub capabilities: Vec<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub context_window: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reported_context_window: Option<u32>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -294,4 +296,6 @@ pub struct DiscoveredModelInput {
     pub capabilities: Vec<String>,
     #[serde(default)]
     pub context_window: Option<u32>,
+    #[serde(default)]
+    pub reported_context_window: Option<u32>,
 }

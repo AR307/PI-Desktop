@@ -47,6 +47,7 @@ import {
   mergeLiveSessionMessages,
 } from "../../lib/session-transcript";
 import { sessionReadLooksEmpty } from "../../lib/session-transcript-read";
+import { transcriptViewMessages } from "../../lib/transcript-reading";
 import type {
   AppState,
   DraftSessionConfiguration,
@@ -61,6 +62,7 @@ import { switchWorkPanelSession } from "./work-panel-slice";
 
 export type SessionSliceDependencies = StoreAccess & {
   runtime: SessionRuntime;
+  flushPendingSessionConfiguration: (sessionId: string) => Promise<void>;
   decorateSessions: (
     sessions: SessionSummary[],
     meta: Record<string, SessionMeta>,
@@ -145,6 +147,21 @@ function replacePendingQueue<T>(
   return { ...queues, [sessionId]: queue };
 }
 
+/** Resolve a visible reply fork anchor without hydrating the live source transcript. */
+function findVisibleAssistantForkAnchor(
+  state: Pick<AppState, "messages" | "transcriptViews">,
+  sessionId: string,
+  messageId: string,
+): UiMessage | undefined {
+  const fromLive = state.messages.find((candidate) => candidate.id === messageId);
+  if (fromLive) return fromLive;
+  // Historical pages are already on screen via transcriptViews. Do not copy
+  // them onto state.messages: that would overwrite a concurrently streaming tail.
+  return transcriptViewMessages(state.messages, state.transcriptViews[sessionId]).find(
+    (candidate) => candidate.id === messageId,
+  );
+}
+
 export function createSessionSlice({
   get,
   set,
@@ -156,6 +173,7 @@ export function createSessionSlice({
   rememberSessionCompactions,
   commitForkedSession,
   persistSessionAndSelect,
+  flushPendingSessionConfiguration,
 }: SessionSliceDependencies): Pick<
   AppState,
   | "refreshSessions"
@@ -261,6 +279,7 @@ export function createSessionSlice({
                   ...session,
                   mode: modeAfterPlanningUpdate(durableMode, hostState, () =>
                     sessionModeForPlanningState(hostState, nextKind),
+                    wasPending ? checkpoint : undefined,
                   ),
                 }
               : session,
@@ -407,7 +426,7 @@ export function createSessionSlice({
           stateAtStart.sessionHistory[stateAtStart.activeSessionId],
         );
       }
-      set({ selectingSessionId: id, page: "chat" });
+      set({ selectingSessionId: id, page: "chat", settingsOpen: false });
       const outcomeAcknowledgement = get().acknowledgeSessionOutcome(id);
 
       const commitSelection = (
@@ -494,6 +513,11 @@ export function createSessionSlice({
           runtime.cacheSessionTranscript(id, [], EMPTY_SESSION_WINDOW);
           commitSelection([], true, EMPTY_SESSION_WINDOW);
         }
+        // Baseline for the stale-read guard below. It is taken after this
+        // selection's own provisional commits (which can move the cache entry
+        // themselves) but before workspace alignment, so an idle edit landing
+        // during alignment or the read is still detected.
+        const transcriptBeforeAlignment = runtime.sessionTranscriptCache.get(id);
         if (summary) {
           if (
             !(await runtime.queueWorkspaceAlignment(() =>
@@ -564,6 +588,22 @@ export function createSessionSlice({
             }
           : { messageStart: 0, hasMoreBefore: false };
         const currentState = get();
+        // An idle-session edit (message delete, revision switch) that landed
+        // while this selection aligned the workspace or awaited the bounded
+        // read replaces the transcript cache entry; committing the stale
+        // window now would revert that edit on screen. loadSessionDetail
+        // already refuses to cache such a read, but its baseline predates this
+        // selection's own provisional commits, so the caller keeps its own.
+        // An entry that vanished (cache eviction) is not an edit.
+        const transcriptNow = runtime.sessionTranscriptCache.get(id);
+        const supersedingTranscript =
+          transcriptNow !== undefined &&
+          transcriptNow !== transcriptBeforeAlignment &&
+          !runtime.liveSessionTranscripts.has(id) &&
+          currentState.runningSessions[id] !== true
+            ? transcriptNow
+            : undefined;
+        const transcriptMovedWhileReading = supersedingTranscript !== undefined;
         const liveMessages =
           (runningAtSelection ||
             currentState.runningSessions[id] === true ||
@@ -578,6 +618,7 @@ export function createSessionSlice({
             ? mergeLiveSessionMessages(detail.session.messages ?? [], liveMessages)
             : detail.session.messages ?? []
           : liveMessages ?? [];
+        const committedMessages = supersedingTranscript ?? selectedMessages;
         if (detail.session) {
           if (isRemoteSession(detail.session)) {
           const { messages: _messages, ...summary } = detail.session;
@@ -585,9 +626,15 @@ export function createSessionSlice({
             safeSessionSummary(summary), ...state.sessions.filter((session) => session.id !== id),
           ], state.sessionMeta) }));
           }
-          runtime.cacheSessionTranscript(id, selectedMessages, historyWindow);
+          if (!transcriptMovedWhileReading) {
+            runtime.cacheSessionTranscript(id, selectedMessages, historyWindow);
+          }
         }
-        commitSelection(selectedMessages, false, historyWindow);
+        commitSelection(
+          committedMessages,
+          false,
+          transcriptMovedWhileReading ? undefined : historyWindow,
+        );
         if (
           currentState.runningSessions[id] !== true &&
           durableCoversLiveSessionMessages(detail.session?.messages ?? [], liveMessages)
@@ -608,10 +655,12 @@ export function createSessionSlice({
         ) {
           const pin = pinnedSessionModelBinding({
             session: selected,
-            messages: selectedMessages,
+            messages: committedMessages,
             settings: get().settings,
             providers: get().providers,
             recentModels: get().recentModels,
+            discovered: get().providers.flatMap((candidate) =>
+              get().providerModels[candidate.id] ?? []),
           });
           if (pin.providerId && pin.modelId) {
             set((state) => ({
@@ -670,10 +719,15 @@ export function createSessionSlice({
       if (!(options && "projectPath" in options) && isRemoteSession(activeSession ?? (
         get().activeSessionId?.startsWith("remote:") ? { id: get().activeSessionId! } : undefined
       ))) throw new Error(i18n.t("remote:REMOTE_PROJECT_REQUIRED"));
+      // A global New Task (sidebar, titlebar, Cmd/Ctrl+N, palette, search)
+      // starts a temporary conversation; only an explicit `projectPath` (a
+      // project row's +, the home project picker, the project index, or a
+      // worktree) attaches it to a project (issue #2455). An active remote
+      // project is the exception above: it has no temporary group.
       const requestedProjectPath =
         options && "projectPath" in options
           ? options.projectPath ?? null
-          : get().workspace?.path ?? null;
+          : null;
       const isolated = options?.isolated === true;
       const scopeKey = `${runtime.newSessionScopeKey(requestedProjectPath)}${isolated ? "\u0000isolated" : ""}`;
       const pending = runtime.pendingNewSessionRequests.get(scopeKey);
@@ -781,7 +835,7 @@ export function createSessionSlice({
       const state = get();
       const sessionId = state.activeSessionId;
       if (!sessionId || state.selectingSessionId) return;
-      const message = state.messages.find((candidate) => candidate.id === messageId);
+      const message = findVisibleAssistantForkAnchor(state, sessionId, messageId);
       const source = state.sessions.find((session) => session.id === sessionId);
       if (!message || message.role !== "assistant" || !source) return;
       if (!sessionAllows(source, "canEditMessages")) return;
@@ -826,8 +880,35 @@ export function createSessionSlice({
       }
       if (!sessionAllows(get().sessions.find((session) => session.id === sessionId), "canConfigureModel")) return;
       if (get().pendingPlans[sessionId]?.status === "pending") return;
-      const result = await api.configureSession(sessionId, config);
-      set((state) => ({
+      if (config.mode !== get().sessions.find((session) => session.id === sessionId)?.mode) {
+        runtime.sessionModeSelections.set(sessionId, (runtime.sessionModeSelections.get(sessionId) ?? 0) + 1);
+      }
+      if (
+        get().runningSessions[sessionId] ||
+        runtime.sessionConfigurationFlushes.has(sessionId)
+      ) {
+        runtime.pendingSessionConfigurations.set(
+          sessionId,
+          runtime.mergeSessionConfiguration(
+            runtime.pendingSessionConfigurations.get(sessionId),
+            config,
+          ),
+        );
+        set((state) => ({
+          sessions: state.sessions.map((session) =>
+            session.id === sessionId
+              ? applyOptimisticSessionConfiguration(session, config)
+              : session,
+          ),
+        }));
+        return;
+      }
+      const payload = runtime.mergeSessionConfiguration(
+        runtime.pendingSessionConfigurations.get(sessionId),
+        config,
+      );
+      runtime.pendingSessionConfigurations.delete(sessionId);
+      const write = api.configureSession(sessionId, payload).then((result) => set((state) => ({
         sessions: state.sessions.map((session) =>
           session.id === sessionId
             ? {
@@ -843,7 +924,16 @@ export function createSessionSlice({
           ...state.planningStates,
           [sessionId]: result.session.mode === "plan" ? "planning" : "inactive",
         },
-      }));
+      })));
+      runtime.sessionConfigurationFlushes.set(sessionId, write);
+      try {
+        await write;
+      } finally {
+        if (runtime.sessionConfigurationFlushes.get(sessionId) === write) {
+          runtime.sessionConfigurationFlushes.delete(sessionId);
+        }
+        await flushPendingSessionConfiguration(sessionId);
+      }
     },
 
     /** Abort one session's running turn, whether or not it is the visible one. */

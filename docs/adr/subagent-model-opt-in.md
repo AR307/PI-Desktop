@@ -6,11 +6,11 @@
 
 ## Context
 
-Electron resolves definition pins and automatically selectable models into one
-credential-bearing `subagentProviders` map. Treating every map key as a
-`Task.model` selection both advertises private pins and bypasses main's
-`availableForSubagents` check on the on-demand path. A definition pin expresses
-one delegate's default, not permission to select that model for any delegate.
+Electron resolved definition pins and automatically selectable models into one
+credential-bearing `subagentProviders` map, and treating every map key as a
+`Task.model` selection both advertised private pins and bypassed main's
+`availableForSubagents` check. A definition pin expresses one delegate's default, not
+permission to select that model for any delegate.
 
 ## Decision
 
@@ -27,21 +27,13 @@ gets a separate routing entry. A stale account default group does not hide the
 other groups. Ambiguous account aliases require an explicit channel choice.
 One account's opt-in cannot authorize another account's pinned credentials.
 
-The runtime uses the separate keys for its model summary. Missing keys mean
-no cached override authorization. Other keys still use the existing
-main-owned `provider.resolveSubagentModel` check; only a successful response
-can populate a separate override cache. That cache is not part of launch
-reuse matching and must not overwrite a definition pin with a different
-provider id. On-demand provider matching uses the same unique id / vendor /
-name rule as pin resolution; ambiguous vendor aliases fail closed unless the
-caller uses the exact provider id. A changed launch list retires an idle
-runtime on the next prompt, including after opt-in is revoked. On-demand grants
-expire at every new parent prompt or approved plan/goal execution, even when the
-launch list is unchanged. Late responses from an expired turn are discarded.
-Resume uses the same authorization boundary: only the current definition's
-pin/fallbacks, session inheritance, and current override grants may be selected;
-a remembered key is reauthorized when necessary. Other definitions' pins do not
-authorize a model-id match (#841).
+The runtime uses those keys for its model summary, and missing keys mean no cached
+override authorization. Other keys still pass `provider.resolveSubagentModel`, whose
+response may fill a separate override cache that never takes part in launch reuse
+matching; on-demand matching uses the same unique id, vendor, and name rule and fails
+closed on ambiguous aliases, a changed launch list retires an idle runtime on the next
+prompt, and on-demand grants expire at every new parent prompt or approved plan/goal
+execution.
 
 The opt-in belongs to the decision, not to the Task tool: it governs every
 entry point through which the AI picks a model for work it delegates.
@@ -71,12 +63,8 @@ is not authorization for the parent to claim or substitute the requested model.
 
 ## Consequences
 
-- No provider credential leaves its existing process boundary. No Host RPC,
-  persisted setting, database schema, or Plugin SDK change is required.
-- Older callers that omit the additive field retain definition defaults and
-  session inheritance. Explicit overrides require on-demand authorization;
-  missing authorization support fails closed instead of promoting pins.
-- Runtime, model transport, and launch wiring regression coverage prove the
-  boundary. The deterministic sidecar E2E uses a local OpenAI-compatible model
-  fixture; provider UI interaction and external provider quality are separate.
-- Reversing model-selection priority is a product decision outside this fix.
+- No provider credential leaves its process boundary, and no host RPC, setting,
+  schema, or Plugin SDK change is required.
+- Callers omitting the field keep definition defaults and session inheritance, while
+  explicit overrides require on-demand authorization and fail closed without it.
+- Reversing model-selection priority stays a product decision outside this fix.

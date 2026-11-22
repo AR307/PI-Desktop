@@ -8,7 +8,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { once } from "node:events";
 import { Host, resolveHostBinary } from "./e2e/host.mjs";
-import { desktopPaths, resolveElectronBinary } from "./e2e/boot.mjs";
+import { desktopPaths, disableFixtureAutoTitles, resolveElectronBinary } from "./e2e/boot.mjs";
 import { waitFor } from "./e2e/wait.mjs";
 import { assertSideChatLayout } from "./e2e/side-chat-layout.mjs";
 import { assertMessageQuotes, assertSelectionActions } from "./e2e/selected-reference-layout.mjs";
@@ -19,6 +19,7 @@ const scratch = mkdtempSync(join(tmpdir(), "pi-selection-side-chat-"));
 const dataDir = join(scratch, "data"),
   project = join(scratch, "project");
 mkdirSync(project);
+disableFixtureAutoTitles(dataDir);
 console.log("EVIDENCE " + scratch);
 const requests = [],
   held = new Set();
@@ -183,7 +184,6 @@ await host.call("settings.set", {
   theme: "dark",
   mirrorCodingWelcomeCompleted: true,
   onboardingDismissed: true,
-  autoGenerateTitle: false,
   defaultProviderId: provider.id,
   defaultModelId: "fixture",
   defaultMode: "agent",
@@ -356,9 +356,9 @@ try {
     45000,
     "composer ready",
   );
-  await evaluate(
-    "[...document.querySelectorAll('button')].find(e=>e.textContent.includes('暂时跳过'))?.click()",
-  );
+  await waitFor(() => evaluate("!!document.querySelector('[data-surface=startup-guide]')"), 15000, "fresh-profile startup guide");
+  await click(".startup-guide-header button");
+  await waitFor(() => evaluate("!document.querySelector('[data-surface=startup-guide]')"), 5000, "startup guide dismissed");
   await type(mainInput, "INITIAL_CONTEXT");
   await key("Enter", 13);
   await waitFor(
@@ -944,7 +944,7 @@ try {
     10000,
     "light theme applied",
   );
-  await click('[data-nav="back-to-app"]');
+  await click('[data-nav="close-settings"]');
   await waitFor(
     () => evaluate("!!document.querySelector('.side-chat-pane')"),
     10000,

@@ -70,10 +70,14 @@ const HOST_PROXY_ALLOWED = new Set([
   "plans.submit",
   "plans.pending",
   "plans.abort",
+  // Host validates the live session/run/turn claim; user controls stay private.
+  "modes.completeStage",
+  "modes.gateResult",
   "project.instructions.resolve",
   "provider.resolveAuth",
   "provider.resolveSubagentModel",
   "app.health",
+  "plugins.modelContext.read",
   // Trusted extensions (D387): answered by the embedding host, plus the
   // session methods the ExtensionAPI reaches (spec 16 §10.1).
   "extensions.commands.publish",
@@ -161,6 +165,11 @@ export class AgentSidecar {
   private projectInstructionRoots = new Map<string, string>();
   private vendorAuthResolver: VendorAuthResolver | null = null;
   private trustedExtensionBridge: TrustedExtensionSidecarBridge | null = null;
+  private pluginModelContextReader?: (params: Record<string, unknown>) => Promise<unknown>;
+
+  setPluginModelContextReader(reader: (params: Record<string, unknown>) => Promise<unknown>): void {
+    this.pluginModelContextReader = reader;
+  }
   // Vendor-account rows this session was launched with. The sidecar can only
   // ask for auth it is already using, and a session that never bound an OAuth
   // row can ask for nothing at all.
@@ -510,6 +519,11 @@ export class AgentSidecar {
           this.writeToChild(
             JSON.stringify({ jsonrpc: "2.0", id: msg.id, result }) + "\n",
           );
+          return;
+        }
+        if (method === "plugins.modelContext.read") {
+          const result = await this.pluginModelContextReader?.(params) ?? [];
+          this.writeToChild(JSON.stringify({ jsonrpc: "2.0", id: msg.id, result }) + "\n");
           return;
         }
         if (method.startsWith("extensions.") || method === "session.queuePush" || method === "session.queuePrioritize") {

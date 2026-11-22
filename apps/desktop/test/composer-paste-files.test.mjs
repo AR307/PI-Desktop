@@ -101,12 +101,14 @@ test("paste IPC is a typed renderer-to-main bridge", () => {
   assert.match(protocol, /composerImportFiles: "pi-desktop\/composer\/importFiles"/);
   assert.match(api, /pasteFiles: \(sessionId: string, files: ComposerPasteFile\[\]\)/);
   assert.match(api, /pickFiles: \(\) =>[\s\S]*token: string \| null/);
-  assert.match(api, /importFiles: \(sessionId: string, token: string\)/);
+  assert.match(api, /importFiles: \(sessionId: string, token: string, reference = false\)/);
   assert.match(api, /IPC\.invoke\.composerPasteFiles/);
   assert.match(api, /recordClipboardPaste: \(text: string\)/);
   assert.match(api, /IPC\.invoke\.clipboardRecordPaste/);
   assert.match(api, /IPC\.invoke\.composerImportFiles/);
-  assert.match(main, /host\.call\("session\.get", \{ id: sessionId \}\)/);
+  // The session check needs metadata only; an unbounded read loads the whole transcript.
+  assert.equal(main.match(/host\.call\("session\.get", \{ id: sessionId, messageLimit: 1 \}\)/g)?.length, 2);
+  assert.doesNotMatch(main, /host\.call\("session\.get", \{ id: sessionId \}\)/);
   assert.match(main, /saveComposerPasteFiles\(dataDir, sessionId, files\)/);
   assert.match(main, /recordPastedClipboardFiles\(files\)/);
   assert.match(main, /assertMainWindowSender\(event\)/);
@@ -125,7 +127,7 @@ test("picker attachments materialize a session before importing paths", () => {
     composer,
     /const sessionId = sourceSessionId \?\? \(await materializeDraftSession\(\)\)/,
   );
-  assert.match(composer, /api\.importFiles\(\s*sessionId,\s*result\.token\s*\)/);
+  assert.match(composer, /api\.importFiles\(\s*sessionId,\s*picked!\.token!\s*\)/);
   assert.match(
     composer,
     /createFileReference\(file\.path, file\.name, sessionId, \{[\s\S]*kind: file\.kind/,
@@ -143,8 +145,8 @@ test("composer opens one unified file picker directly from the plus button", () 
   assert.ok(leftStart >= 0 && plusIndex > leftStart && modeIndex > leftStart);
   assert.ok(plusIndex < modeIndex, "upload must precede the agent mode chip");
   assert.match(composer, /void pickAndAttach\(\);/);
-  assert.match(composer, /const pickAndAttach = async \(\) =>/);
-  assert.match(composer, /const result = await api\.pickFiles\(\);/);
+  assert.match(composer, /const pickAndAttach = \(\) => attachFromPicker\("files"\)/);
+  assert.match(composer, /source === "files" \? await api\.pickFiles\(\) : null/);
   assert.doesNotMatch(composer, /plusOpen|plusRef|composer-plus-menu|pickAndAttach\("photos"\)/);
 });
 

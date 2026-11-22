@@ -25,6 +25,8 @@ export type ComposerPluginPart =
     };
 
 export type ComposerDraftFileReference = {
+  size?: number;
+  localReference?: string;
   path: string;
   name: string;
   kind?: "image" | "file" | "session" | "directory" | "agent";

@@ -30,6 +30,20 @@ const [
   read("../../../scripts/export-linux-asar.mjs"),
 ]);
 
+const releaseMatrices = releaseWorkflowSource.match(
+  /fromJSON\(github\.repository == 'AR307\/PI-Desktop' &&\s*'(\[[\s\S]*?\])' \|\|\s*'(\[[\s\S]*?\])'/,
+);
+assert.ok(releaseMatrices, "release matrix must distinguish the fork from upstream");
+const forkReleaseLanes = JSON.parse(releaseMatrices[1]);
+const upstreamReleaseLanes = JSON.parse(releaseMatrices[2]);
+
+test("the fork publishes only Windows x64", () => {
+  assert.deepEqual(forkReleaseLanes, [{
+    name: "Windows x64", os: "windows-latest", arch: "x64",
+    artifact: "windows-x64", platform: "windows", dist: "dist:win",
+  }]);
+});
+
 test("CI skips documentation-only pushes and pull requests", () => {
   assert.equal(
     (ciWorkflowSource.match(/- 'docs\/\*\*'/g) ?? []).length,
@@ -164,11 +178,10 @@ test("release workflow publishes the Linux ASAR beside installers", () => {
 });
 
 test("the release matrix ships native Linux x64 and arm64 lanes", () => {
-  assert.match(
-    releaseWorkflowSource,
-    /name: Linux arm64[\s\S]*?os: ubuntu-22\.04-arm[\s\S]*?arch: arm64[\s\S]*?runner_arch: aarch64[\s\S]*?artifact: linux-arm64[\s\S]*?platform: linux[\s\S]*?dist: dist:linux/,
-    "the arm64 lane runs on a native arm64 runner",
-  );
+  assert.deepEqual(upstreamReleaseLanes.filter(lane => lane.platform === "linux"), [
+    { name: "Linux x64", os: "ubuntu-22.04", arch: "x64", runner_arch: "x86_64", artifact: "linux-x64", platform: "linux", feed: "latest-linux.yml", dist: "dist:linux" },
+    { name: "Linux arm64", os: "ubuntu-22.04-arm", arch: "arm64", runner_arch: "aarch64", artifact: "linux-arm64", platform: "linux", feed: "latest-linux-arm64.yml", dist: "dist:linux" },
+  ]);
   // A runner that is not the architecture it packages would pair one
   // architecture's Electron app with the other's Rust sidecar.
   assert.match(
@@ -184,8 +197,6 @@ test("the release matrix ships native Linux x64 and arm64 lanes", () => {
     releaseWorkflowSource,
     /name: Verify the Linux update feed[\s\S]*?feed="apps\/desktop\/release\/\$\{\{ matrix\.feed \}\}"/,
   );
-  assert.match(releaseWorkflowSource, /feed: latest-linux\.yml/);
-  assert.match(releaseWorkflowSource, /feed: latest-linux-arm64\.yml/);
   // The pi-host bundles the SSH bootstrap installs track the desktop's Linux
   // lanes one for one.
   assert.match(
@@ -216,14 +227,10 @@ test("the Linux package config lets the workflow choose the architecture", () =>
 });
 
 test("release matrix packages both native macOS architectures", () => {
-  assert.match(
-    releaseWorkflowSource,
-    /name: macOS arm64[\s\S]*?os: macos-15[\s\S]*?arch: arm64[\s\S]*?runner_arch: arm64/,
-  );
-  assert.match(
-    releaseWorkflowSource,
-    /name: macOS Intel x64[\s\S]*?os: macos-15-intel[\s\S]*?arch: x64[\s\S]*?runner_arch: x86_64/,
-  );
+  assert.deepEqual(upstreamReleaseLanes.filter(lane => lane.platform === "macos"), [
+    { name: "macOS arm64", os: "macos-15", arch: "arm64", runner_arch: "arm64", artifact: "mac-arm64", platform: "macos", dist: "dist:mac" },
+    { name: "macOS Intel x64", os: "macos-15-intel", arch: "x64", runner_arch: "x86_64", artifact: "mac-x64", platform: "macos", dist: "dist:mac" },
+  ]);
   assert.match(
     releaseWorkflowSource,
     /name: Package installers \(\$\{\{ matrix\.dist \}\}\)[\s\S]*?if: matrix\.platform != 'macos'[\s\S]*?run: pnpm --filter @pi-desktop\/desktop run \$\{\{ matrix\.dist \}\} -- --\$\{\{ matrix\.arch \}\}/,

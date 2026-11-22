@@ -3,6 +3,7 @@ import { closeSideChat, confirmSideChatDiscard } from "../../features/chat/side-
 import i18n from "i18next";
 import type { ProjectWorkspace } from "@pi-desktop/shared";
 import { api } from "../../lib/api";
+import { isRemoteSession } from "../../lib/remote-session-safety";
 import {
   rememberProject,
   removeRecentProject,
@@ -116,7 +117,7 @@ async function createNamedProjectGroup(
       if (!workspace || !runtime.navigationIntentIsCurrent(intent)) return;
       const onboarding = await api.getOnboarding();
       if (!runtime.navigationIntentIsCurrent(intent)) return;
-      set({ createProjectDialogOpen: false, createProjectDialogRemoteHostKey: undefined, onboarding, page: "chat" });
+      set({ createProjectDialogOpen: false, createProjectDialogRemoteHostKey: undefined, onboarding, page: "chat", settingsOpen: false });
       return;
     }
   }
@@ -133,7 +134,7 @@ async function createNamedProjectGroup(
   get().renameProject(groupPrimary, normalizedName);
   const onboarding = await api.getOnboarding();
   if (!runtime.navigationIntentIsCurrent(intent)) return;
-  set({ createProjectDialogOpen: false, createProjectDialogRemoteHostKey: undefined, onboarding, page: "chat" });
+  set({ createProjectDialogOpen: false, createProjectDialogRemoteHostKey: undefined, onboarding, page: "chat", settingsOpen: false });
 }
 
 /**
@@ -426,7 +427,7 @@ export function createProjectSlice({
       get().renameProject(group.primaryPath, normalizedName);
       const onboarding = await api.getOnboarding();
       if (!runtime.navigationIntentIsCurrent(intent)) return;
-      set({ createProjectDialogOpen: false, createProjectDialogRemoteHostKey: undefined, onboarding, page: "chat" });
+      set({ createProjectDialogOpen: false, createProjectDialogRemoteHostKey: undefined, onboarding, page: "chat", settingsOpen: false });
     },
     createProjectFromGit: async ({ name, url, parentPath }) => {
       // Clone first, then create the project through the same group path, so a
@@ -578,13 +579,15 @@ export function createProjectSlice({
     },
 
     moveSessionProject: async (id, projectPath) => {
-      const destinationKey = normalizeProjectPath(projectPath);
       const state = get();
       const session = state.sessions.find((item) => item.id === id);
-      if (!id || !session || !destinationKey) return false;
+      if (!id || !session || session.source === "pi-native" || isRemoteSession(session)) return false;
       if (state.runningSessions[id]) return false;
-      if (normalizeProjectPath(session.projectPath) === destinationKey) return true;
+      const destinationKey = projectPath === null ? null : normalizeProjectPath(projectPath);
+      if (projectPath !== null && !destinationKey) return false;
+      if ((normalizeProjectPath(session.projectPath) || null) === destinationKey) return true;
       if (
+        destinationKey !== null &&
         !state.openProjectPaths.some(
           (path) => normalizeProjectPath(path) === destinationKey,
         )
@@ -594,9 +597,13 @@ export function createProjectSlice({
       const result = await api.moveSessionProject(id, projectPath);
       set((current) => ({
         sessions: current.sessions.map((item) =>
-          item.id === id ? { ...item, ...result.session } : item,
+          item.id === id ? { ...item, ...result.session, projectPath: result.session.projectPath ?? undefined } : item,
         ),
       }));
+      // The active session decides the visible project: follow it so the
+      // composer, file tree, and project instructions match the new owner.
+      // Re-selecting aligns the workspace while keeping the conversation.
+      if (get().activeSessionId === id) await get().selectSession(id, { record: false });
       return true;
     },
 
@@ -608,7 +615,18 @@ export function createProjectSlice({
         if (!(await confirmSideChatDiscard(side.id))) return;
         await closeSideChat(side.id);
       }
-      await api.deleteSession(id);
+      try {
+        await api.deleteSession(id);
+      } catch (error) {
+        // The main-side running guard is the backstop for races the sidebar's
+        // pre-check cannot see (issue #2291); surface it translated instead
+        // of the raw IPC error.
+        if (error instanceof Error && error.message.includes("Cannot delete a running session")) {
+          get().showToast(i18n.t("nav.deleteRunningSessionBlocked"), { variant: "warning" });
+          return;
+        }
+        throw error;
+      }
       void api.pluginViewClose("pi.browser", "browser", { sessionId: id })
         .catch((error) => get().showToast(String(error), { variant: "error" }));
       clearLocalSessionState({ get, set, runtime, withoutRecordKey }, id);

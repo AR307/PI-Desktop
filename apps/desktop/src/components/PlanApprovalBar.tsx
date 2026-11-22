@@ -9,10 +9,7 @@ import type {
 import { useAppStore } from "../stores/app-store";
 import { preferredFileWorkPanelTab } from "../lib/work-panel-tabs";
 import { PLAN_APPROVAL_DEFAULT_MODE } from "../lib/plan-mode-state";
-import {
-  readPlanApprovalMode,
-  rememberPlanApprovalMode,
-} from "../lib/plan-approval-preferences";
+import { readPlanApprovalMode } from "../lib/plan-approval-preferences";
 import {
   IconCheck,
   IconChevronDown,
@@ -57,6 +54,12 @@ export function PlanApprovalBar({ proposal }: { proposal: PlanProposal }) {
   const { t } = useTranslation();
   const resolvePlan = useAppStore((state) => state.resolvePlan);
   const showToast = useAppStore((state) => state.showToast);
+  const permissionMode = useAppStore((state) =>
+    state.sessions.find((session) => session.id === proposal.sessionId)?.permissionMode,
+  );
+  const defaultPermissionMode = useAppStore(
+    (state) => state.settings?.defaultPermissionMode,
+  );
   const pluginViews = useAppStore((state) => state.pluginViews);
   const openWorkPanelTabForSession = useAppStore(
     (state) => state.openWorkPanelTabForSession,
@@ -64,7 +67,7 @@ export function PlanApprovalBar({ proposal }: { proposal: PlanProposal }) {
   const [menuOpen, setMenuOpen] = useState(false);
   const [resolving, setResolving] = useState(false);
   const [approvalMode, setApprovalMode] = useState<GlobalPermissionMode>(
-    readPlanApprovalMode(),
+    readPlanApprovalMode(permissionMode, defaultPermissionMode),
   );
   const kind: ProposalKind = proposal.kind === "goal" ? "goal" : "plan";
   const copy = (name: string) => t(copyKey(kind, name));
@@ -73,9 +76,9 @@ export function PlanApprovalBar({ proposal }: { proposal: PlanProposal }) {
   const busy = resolving;
 
   useEffect(() => {
-    setApprovalMode(readPlanApprovalMode());
+    setApprovalMode(readPlanApprovalMode(permissionMode, defaultPermissionMode));
     setMenuOpen(false);
-  }, [proposal.id]);
+  }, [proposal.id, permissionMode, defaultPermissionMode]);
 
   useEffect(() => {
     setResolving(false);
@@ -96,7 +99,6 @@ export function PlanApprovalBar({ proposal }: { proposal: PlanProposal }) {
     if (action === "approve") {
       const selectedMode = targetPermissionMode ?? PLAN_APPROVAL_DEFAULT_MODE;
       setApprovalMode(selectedMode);
-      rememberPlanApprovalMode(selectedMode);
     }
     setResolving(true);
     try {

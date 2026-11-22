@@ -71,25 +71,69 @@ describe("session job controls", () => {
     },
   );
 
-  it.each([["other"], ["delegate", "other"], "delegate", null].map(delegationIds => ({ delegationIds })))(
-    "rejects conflicting or malformed delegation selectors (%j) before dispatch",
+  it.each([["other"], ["delegate", "other"]].map(delegationIds => ({ delegationIds })))(
+    "falls through to multi-target delegation selectors when job conflicts (%j)",
+    async ({ delegationIds }) => {
+      const { wait, stop, dispatch, delegates } = fixture();
+      const params = {
+        job: { kind: "delegation", id: "delegate" }, delegationIds,
+        mode: "any", minCompleted: 2, timeoutSeconds: 180,
+      };
+      const signal = new AbortController().signal;
+      const update = vi.fn();
+      const waitResult = await wait.execute("wait", params, signal, update);
+      expect(waitResult.content).toEqual([{ type: "text", text: "delegate report" }]);
+      expect(delegates.wait.execute).toHaveBeenCalledWith("wait", params, signal, update);
+      await stop.execute("stop", params, signal, update);
+      expect(delegates.stop.execute).toHaveBeenCalledWith("stop", params, signal, update);
+      expect(dispatch).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each(["delegate", null, ["delegate", null], [42]].map(delegationIds => ({ delegationIds })))(
+    "rejects malformed delegation selectors (%j) with an actionable error",
     async ({ delegationIds }) => {
       const { wait, stop, dispatch, delegates } = fixture();
       const params = { job: { kind: "delegation", id: "delegate" }, delegationIds };
-      await expect(wait.execute("wait", params)).rejects.toThrow("omit delegationIds or pass only job.id");
-      await expect(stop.execute("stop", params)).rejects.toThrow("omit delegationIds or pass only job.id");
+      await expect(wait.execute("wait", params)).rejects.toThrow("delegationIds must be an array of delegation ids");
+      await expect(stop.execute("stop", params)).rejects.toThrow("delegationIds must be an array of delegation ids");
       expect(delegates.wait.execute).not.toHaveBeenCalled();
       expect(delegates.stop.execute).not.toHaveBeenCalled();
       expect(dispatch).not.toHaveBeenCalled();
     },
   );
 
-  it.each(["delegationIds", "mode", "minCompleted"])("rejects mixed selectors before dispatch (%s)", async key => {
-    const { wait, stop, dispatch } = fixture();
-    const args = { job: { kind: "bash", id: "process" }, [key]: [] };
-    await expect(wait.execute("wait", args)).rejects.toThrow("cannot be combined");
-    await expect(stop.execute("stop", args)).rejects.toThrow("cannot be combined");
+  it.each([
+    { delegationIds: [] },
+    { mode: "all" },
+    { minCompleted: 1 },
+    { delegationIds: [], mode: "all", minCompleted: 1 },
+    { delegationIds: [], mode: "any", minCompleted: 1 },
+  ])("accepts redundant Bash selectors (%j) without dispatching to delegates", async selectors => {
+    const { wait, stop, dispatch, delegates, snapshot } = fixture();
+    const args = { job: snapshot.job, ...selectors, timeoutSeconds: 12, sessionId: "foreign" };
+    expect((await wait.execute("wait", args)).details).toEqual({ status: "completed", job: snapshot });
+    expect(dispatch).toHaveBeenLastCalledWith("backgroundJobs.wait", { sessionId: "owner", id: "process", timeoutMs: 0 });
+    expect((await stop.execute("stop", args)).details).toEqual({ status: "completed", job: snapshot });
+    expect(dispatch).toHaveBeenLastCalledWith("backgroundJobs.stop", { sessionId: "owner", id: "process", timeoutMs: 1000 });
+    expect(delegates.wait.execute).not.toHaveBeenCalled();
+    expect(delegates.stop.execute).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    { delegationIds: ["other"] }, { delegationIds: ["process"] },
+    { delegationIds: null }, { delegationIds: "process" }, { delegationIds: {} },
+    { mode: [] }, { mode: "invalid" }, { mode: null },
+    { minCompleted: [] }, { minCompleted: 2 }, { minCompleted: 0 },
+    { minCompleted: "1" }, { minCompleted: null },
+  ])("rejects conflicting or malformed Bash selectors (%j) before dispatch", async selectors => {
+    const { wait, stop, dispatch, delegates } = fixture();
+    const args = { job: { kind: "bash", id: "process" }, ...selectors };
+    await expect(wait.execute("wait", args)).rejects.toThrow("A Bash job accepts only");
+    await expect(stop.execute("stop", args)).rejects.toThrow("A Bash job accepts only");
     expect(dispatch).not.toHaveBeenCalled();
+    expect(delegates.wait.execute).not.toHaveBeenCalled();
+    expect(delegates.stop.execute).not.toHaveBeenCalled();
   });
 
   it("returns running at the deadline and never requests a stop", async () => {
@@ -106,6 +150,28 @@ describe("session job controls", () => {
     expect(dispatch.mock.calls.map(call => call[0])).not.toContain("backgroundJobs.stop");
   });
 
+  it.each(["capabilities", "stop"])("abandons a pending %s RPC without dispatching stop again", async stalled => {
+    const { stop, dispatch, snapshot } = fixture();
+    let finishRpc!: () => void;
+    dispatch.mockImplementation(async method => method.endsWith(stalled)
+      ? new Promise((resolve, reject) => {
+        finishRpc = stalled === "capabilities"
+          ? () => resolve({ version: 1, supported: true })
+          : () => reject(new Error("late transport failure"));
+      })
+      : { version: 1, supported: true });
+    const controller = new AbortController();
+    const stopping = stop.execute("stop", { job: snapshot.job }, controller.signal);
+    const assertion = expect(stopping).rejects.toMatchObject({ errorCode: "TOOL_ABORTED" });
+    await vi.waitFor(() => expect(dispatch).toHaveBeenCalledWith(`backgroundJobs.${stalled}`, expect.anything()));
+    controller.abort();
+    await assertion;
+    finishRpc();
+    await new Promise<void>(resolve => setImmediate(resolve));
+    expect(dispatch.mock.calls.map(([method]) => method)).toEqual(stalled === "capabilities"
+      ? ["backgroundJobs.capabilities"] : ["backgroundJobs.capabilities", "backgroundJobs.stop"]);
+  });
+
   it("abandons an in-flight wait promptly without stopping, and observes a late failure", async () => {
     const { wait, dispatch, snapshot } = fixture();
     let fail: (error: Error) => void = () => {};
@@ -114,6 +180,37 @@ describe("session job controls", () => {
       : new Promise((_, reject) => { fail = reject; }));
     const controller = new AbortController();
     const result = wait.execute("wait", { job: snapshot.job }, controller.signal);
+    const assertion = expect(result).rejects.toMatchObject({ errorCode: "TOOL_ABORTED" });
+    await vi.waitFor(() => expect(dispatch).toHaveBeenCalledWith("backgroundJobs.wait", expect.anything()));
+    controller.abort();
+    await assertion;
+    fail(new Error("late transport failure"));
+    await Promise.resolve();
+    expect(dispatch.mock.calls.map(call => call[0])).not.toContain("backgroundJobs.stop");
+  });
+
+  it.each(["all", "any"])("redundant %s defaults preserve the wait deadline without stopping", async mode => {
+    vi.useFakeTimers();
+    const { wait, dispatch, snapshot } = fixture();
+    dispatch.mockImplementation(async method => {
+      if (method.endsWith("capabilities")) return { version: 1, supported: true };
+      await new Promise(resolve => setTimeout(resolve, 1000));
+      return { ...snapshot, state: "running", exitCode: null };
+    });
+    const result = wait.execute("wait", { job: snapshot.job, delegationIds: [], mode, minCompleted: 1, timeoutSeconds: 2 });
+    await vi.advanceTimersByTimeAsync(2000);
+    expect((await result).details).toMatchObject({ status: "timeout", job: { state: "running", exitCode: null } });
+    expect(dispatch.mock.calls.map(call => call[0])).not.toContain("backgroundJobs.stop");
+  });
+
+  it.each(["all", "any"])("redundant %s defaults preserve cancellation and late-failure handling", async mode => {
+    const { wait, dispatch, snapshot } = fixture();
+    let fail: (error: Error) => void = () => {};
+    dispatch.mockImplementation(async method => method.endsWith("capabilities")
+      ? { version: 1, supported: true }
+      : new Promise((_, reject) => { fail = reject; }));
+    const controller = new AbortController();
+    const result = wait.execute("wait", { job: snapshot.job, delegationIds: [], mode, minCompleted: 1 }, controller.signal);
     const assertion = expect(result).rejects.toMatchObject({ errorCode: "TOOL_ABORTED" });
     await vi.waitFor(() => expect(dispatch).toHaveBeenCalledWith("backgroundJobs.wait", expect.anything()));
     controller.abort();

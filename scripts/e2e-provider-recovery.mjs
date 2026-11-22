@@ -4,13 +4,14 @@ import { spawn } from "node:child_process";
 import { mkdir, writeFile } from "node:fs/promises";
 import { resolve, join } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
-import { resolveElectronBinary } from "./e2e/boot.mjs";
+import { disableFixtureAutoTitles, resolveElectronBinary } from "./e2e/boot.mjs";
 import { resolveHostBinary } from "./e2e/host.mjs";
 import { verifyProviderRecovery } from "./e2e/provider-recovery-assertions.mjs";
 
 const root = resolve(import.meta.dirname, "..");
 const artifacts = join(root, ".artifacts", "issue-699", String(Date.now()));
 await mkdir(join(artifacts, "workspace"), { recursive: true });
+disableFixtureAutoTitles(join(artifacts, "data"));
 await writeFile(
   join(artifacts, "workspace", "fixture.txt"),
   "Network retry test fixture.\n",
@@ -419,14 +420,10 @@ try {
     "desktop ready",
   );
   const settings = await ipc("settingsGet");
-  await ipc("settingsSet", { ...settings, language: "zh-CN", autoGenerateTitle: false });
-  await waitFor(() => evaluate(`(() => {
-    const skip = [...document.querySelectorAll('button')].find(button => /^(暂时跳过|Skip for now)$/i.test(button.textContent.trim()));
-    if (!skip) return false;
-    skip.click();
-    return true;
-  })()`), "fresh-profile onboarding Skip");
-  await waitFor(async () => !(await bodyText()).includes("暂时跳过"), "onboarding dismissed");
+  await ipc("settingsSet", { ...settings, language: "zh-CN" });
+  await waitFor(() => evaluate("!!document.querySelector('[data-surface=startup-guide]')"), "fresh-profile startup guide");
+  await evaluate("document.querySelector('.startup-guide-header button').click()");
+  await waitFor(() => evaluate("!document.querySelector('[data-surface=startup-guide]')"), "startup guide dismissed");
   console.log("ARTIFACTS", artifacts);
   await run("01-network-recovery", "recover");
   await run("02-stream-recovery", "stream");

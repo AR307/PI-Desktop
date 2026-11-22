@@ -36,11 +36,13 @@ import { currentSystemProxyRelayUrl } from "../network-proxy";
 
 export type SidecarRuntimeDependencies = {
   runtimeState: RuntimeState;
+  observeBackgroundResult?: (event: AgentEventEnvelope) => void;
   steeringReplies: Set<string>;
   logger: Logger;
   sendToRenderer: (channel: string, payload: unknown) => void;
   persistAgentEvent: (envelope: AgentEventEnvelope) => UiMessage | undefined;
   activeTurns: Map<string, string>;
+  readPluginModelContext?: (params: Record<string, unknown>) => Promise<unknown>;
   approvedExecutionIdsBySession: Map<string, string>;
   claimedExecutionSessions: Map<string, string>;
   inflightCheckpointer: InflightCheckpointer;
@@ -80,11 +82,13 @@ export type SidecarRuntimeDependencies = {
 
 export function createSidecarRuntime({
   runtimeState,
+  observeBackgroundResult,
   steeringReplies,
   logger,
   sendToRenderer,
   persistAgentEvent,
   activeTurns,
+  readPluginModelContext,
   approvedExecutionIdsBySession,
   claimedExecutionSessions,
   inflightCheckpointer,
@@ -207,7 +211,9 @@ export function createSidecarRuntime({
       return;
     }
     if (method === "agent.event") {
+      if (runtimeState.sidecar !== s) return;
       const envelope = params as AgentEventEnvelope;
+      observeBackgroundResult?.(envelope);
       const event = envelope.event;
       if (event.type === "tool_start") {
         activeToolCalls.set(toolKey(envelope.sessionId, event.toolCallId), {
@@ -378,19 +384,27 @@ export function createSidecarRuntime({
   const s = new AgentSidecar((text) => logger.child("agent", text));
   wireSidecar(s);
   registerImageTools(s, mirrorCoding.images, () => runtimeState.host);
+  if (readPluginModelContext) {
+    s.setPluginModelContextReader((params) => runtimeState.sidecar === s && !isQuitting()
+      ? readPluginModelContext(params) : Promise.resolve([]));
+  }
   // The directory a session's file tools work in: its isolated worktree
-  // (ADR 0329), resolved by host-core from its own registry, or its project.
+  // (ADR 0329), project, or host-owned scratch directory (ADR 0124).
   const sessionFileRoot = async (sessionId: string): Promise<string | null> => {
     const host = runtimeState.host;
     if (!host) return null;
     const res = await host.call<{
       session: { projectPath?: string; worktree?: unknown } | null;
-    }>("session.get", { id: sessionId });
+    }>("session.get", { id: sessionId, messageLimit: 1 });
     if (res?.session?.worktree) {
       const location = await host.call<{ path?: string }>("worktree.location", { sessionId });
       return location.path?.trim() || null;
     }
-    return res?.session?.projectPath?.trim() || null;
+    if (!res?.session) return null;
+    const projectPath = res.session.projectPath?.trim();
+    if (projectPath) return projectPath;
+    const scratch = await host.call<{ path: string }>("session.getScratchPath", { sessionId });
+    return scratch.path?.trim() || null;
   };
   s.setProjectInstructionResolver(async ({ sessionId, projectPath, path }) => {
     // The root is registered by Electron main from the host-owned session
@@ -482,7 +496,7 @@ export function createSidecarRuntime({
         sessionId: String(params.sessionId ?? ""),
         content: String(params.content ?? ""),
         ...(typeof params.idempotencyKey === "string" ? { idempotencyKey: params.idempotencyKey } : {}),
-      }, params.notification === "subagent-report");
+      }, undefined, params.notification === "subagent-report");
     },
     queuePrioritize: async (params) => {
       if (!runtimeState.agentHostBridge) throw new Error("agent host unavailable");
@@ -701,13 +715,7 @@ export function createSidecarRuntime({
   // Plugin authoring (D171): scaffold, validate and package a plugin without
   // leaving the session. Paths stay inside the open workspace.
   registerPluginDevTools(s, {
-    resolveWorkspace: async (sessionId) => {
-      try {
-        return await sessionFileRoot(sessionId);
-      } catch {
-        return null;
-      }
-    },
+    resolveWorkspace: sessionFileRoot,
     registerDevPlugin: async (path) => {
       if (!runtimeState.host) throw new Error("host unavailable");
       const loaded = await runtimeState.host.call<{ plugin?: { permissions?: string[] } }>(

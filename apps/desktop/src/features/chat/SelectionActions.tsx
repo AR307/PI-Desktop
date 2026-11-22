@@ -37,10 +37,26 @@ export function SelectionActions({
       setSelection(null);
       return;
     }
+    let dismissedSelection: { anchor: Node | null; anchorOffset: number; focus: Node | null; focusOffset: number } | null = null;
+    const hideForContextMenu = () => {
+      const selected = window.getSelection();
+      dismissedSelection = selected ? {
+        anchor: selected.anchorNode, anchorOffset: selected.anchorOffset,
+        focus: selected.focusNode, focusOffset: selected.focusOffset,
+      } : null;
+      setSelection(null);
+    };
+    const beginSelection = (event: PointerEvent) => {
+      if (event.button === 0 && event.target instanceof Node && rootRef.current?.contains(event.target)) dismissedSelection = null;
+    };
     const update = () => {
       if (menuRef.current?.contains(document.activeElement)) return;
       const root = rootRef.current;
       const selected = window.getSelection();
+      if (dismissedSelection && selected &&
+        selected.anchorNode === dismissedSelection.anchor && selected.anchorOffset === dismissedSelection.anchorOffset &&
+        selected.focusNode === dismissedSelection.focus && selected.focusOffset === dismissedSelection.focusOffset) return;
+      dismissedSelection = null;
       const quotes = root ? selectedQuotes(root, selected, sessionId) : [];
       if (!quotes.length || !selected) {
         setSelection(null);
@@ -65,12 +81,16 @@ export function SelectionActions({
       }
     };
     document.addEventListener("selectionchange", update);
+    document.addEventListener("contextmenu", hideForContextMenu, true);
+    document.addEventListener("pointerdown", beginSelection, true);
     document.addEventListener("keydown", key);
     window.addEventListener("resize", update);
     rootRef.current?.addEventListener("scroll", update, true);
     const root = rootRef.current;
     return () => {
       document.removeEventListener("selectionchange", update);
+      document.removeEventListener("contextmenu", hideForContextMenu, true);
+      document.removeEventListener("pointerdown", beginSelection, true);
       document.removeEventListener("keydown", key);
       window.removeEventListener("resize", update);
       root?.removeEventListener("scroll", update, true);

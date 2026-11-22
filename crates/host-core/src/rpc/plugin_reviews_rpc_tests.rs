@@ -183,6 +183,10 @@ async fn serve(mut stream: TcpStream, state: Arc<StdMutex<CenterState>>) {
         state.requests.push(target.clone());
         if state.hang {
             None
+        } else if path == "/catalog.json" {
+            // Unrelated AppState initialization may read this shared fixture;
+            // only review API traffic should consume its one-shot redirect.
+            Some(Reply::Body(404, "{}".to_string()))
         } else if let Some(location) = state.redirect_to.take() {
             Some(Reply::Redirect(location))
         } else if path == "/api/v1/review-summaries" {

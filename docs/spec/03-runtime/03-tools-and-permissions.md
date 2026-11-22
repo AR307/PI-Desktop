@@ -103,7 +103,7 @@ See [ordered preparation](../../adr/parallel-read-batches.md) and
 | Topic | Decision |
 |---|---|
 | Default mode | Agent |
-| Agent tools | Read / Glob / Grep / Write / Edit / Bash + Computer under an active scope grant + registered plugin tools + optional Jev classifier |
+| Agent tools | Read / Glob / Grep / Write / Edit / Bash + Computer under an active scope grant + registered plugin tools + optional Jev classifier + optional `codemode` |
 | Plan tools | Read / Glob / Grep / BrowserPreview / Bash / SubmitPlan + plugin tools that declare plan-safe actions |
 | Goal tools | Read / Glob / Grep / BrowserPreview / Bash / SubmitGoal + plugin tools that declare plan-safe actions |
 | Plan and Goal hard deny | Write / Edit / Computer / plugin tools without `planSafeActions` / unknown tools / the other kind's submit tool |
@@ -196,6 +196,39 @@ never bypasses execution permissions. Missing selection fields retain normal
 on-demand discovery. Main rejects a selected MCP command without task text or
 an attachment before opening or persisting a turn. See
 `docs/adr/composer-mcp-invocations.md`.
+
+### 2.2 Codemode (ADR codemode-sandbox-boundary)
+
+`codemode` is offered only in Agent mode and only when Settings → Agent
+behavior → Execution enables it (`AppSettings.codemodeEnabled`, off when
+absent). When enabled it is declared with the first request. Its `code` runs
+as the body of an async function in a QuickJS-WASI worker with no Node,
+filesystem, network, timer, or module access.
+
+- `tools.<name>(args)` reaches only the session's currently active tools: core
+  tools plus tools activated through `ToolSearch`, allowed in the current mode.
+  `ToolSearch`, `asktool`, mode/stage control, `new_context`, `Task`,
+  `TaskWait`, `TaskList`, `TaskStop`, and `codemode` are never callable.
+- Every nested call runs through the same preparation, hooks and Host
+  `tools.execute` path as a direct call. Permission modes, approval cards,
+  denials, path rules, file admission, audit and mutation recovery are
+  unchanged. Read, Glob and Grep may overlap; other tools, including Write and
+  Edit, run one at a time. A script that follows a writable `Task` in the same
+  assistant message waits for that delegate before any nested call, as a direct
+  read does. A failed nested call always rejects inside the script.
+- Stop aborts the script and sends `tools.abort` for an in-flight nested Host
+  call. A failed script lists the nested calls that already ran; their side
+  effects are not undone.
+- Limits: 256 MiB VM heap, 64 KiB source, 120 s default and 600 s maximum
+  deadline, 256 nested calls, 10 000 output tokens by default and 50 000 at
+  most (`// @options:` first line), two sandbox workers per sidecar.
+- `models.list()` returns allowlisted metadata only. `models.complete()` uses
+  the session's own model binding, `models.classify()` uses Jev when enabled,
+  and `models.generateImages()` is a nested `GenerateImages` call when that tool
+  is callable. Each physical model request records its own identified usage.
+- Nested calls are recorded as `<callId>/<n>` with `nestedParentToolCallId`;
+  they never set `parentToolCallId` and never re-enter the model context.
+  Delegates never inherit `codemode`.
 
 ## 3. Common Tool Constraints
 
@@ -322,7 +355,11 @@ session gets a scratch directory outside the workspace:
 <data_dir>/scratch/<sessionId>/
 ```
 
-OS clipboard files and images pasted into the composer are materialized by
+Native disk-file pastes retain main-registered live paths and byte sizes; they
+do not copy or read file contents, including referenced images. Subsequent reads
+use normal tool permissions. See [local file references](../../adr/composer-local-file-references.md).
+
+Generated clipboard files and images pasted into the composer are materialized by
 Electron main below `<data_dir>/scratch/<sessionId>/pasted/` before their
 paths and metadata are captured as transient composer references. At dispatch,
 main validates the source against the session scratch/project roots. Images are
@@ -863,6 +900,21 @@ Builtins: Agent uses `agent`; Plan uses `contract`; Goal is a staged run whose
 `work` stage uses `agent`. A legacy Goal session without a snapshot, and any
 mode id the Host cannot resolve, falls back to `contract` (fail closed).
 
+Prompt admission first claims an existing staged run through the Host and uses
+its persisted snapshot without consulting the current catalog. Editing, removing,
+or making the catalog definition simple does not change an existing run.
+Without a claim, simple custom modes carry the current catalog definition to the
+runtime. An unavailable mode closes the admission turn without persisting a user
+message or invoking the sidecar. Plan-state projection may rename only Agent/Plan
+sessions; an inactive projection preserves Goal and custom-mode identity unless
+a legacy Goal proposal was approved. Live approval and restoration of a pending
+legacy proposal then show Agent; unrelated historical approvals do not rename
+a newly selected staged Goal.
+New Goal/custom sessions pass the catalog snapshot in the single Host creation
+call. Host validation, snapshot storage and session insertion share a transaction;
+a rejected snapshot or failed insert leaves neither an incomplete session nor
+an orphan snapshot. Legacy callers without a snapshot keep their existing behavior.
+
 ### Notes
 - `contract` hard-denies Write/Edit and plugin tools without `planSafeActions` before permission UI; a direct host
   call cannot bypass the matrix. Plugin tools that declare a non-empty list are admitted; the runner still rejects any action outside that list (ADR 0211).
@@ -872,9 +924,14 @@ mode id the Host cannot resolve, falls back to `contract` (fail closed).
   the UI must make that tradeoff visible.
 - `Computer` and scheduled-task tools are available only in the builtin Agent
   mode, never in a user-defined mode.
-- A turn the Host starts by itself for a staged run (loop continuation,
-  `onFail.goto`) evaluates `auto` as `accept-edits`. Turns the user starts, and
-  the turn after an approval, keep the session permission mode.
+- Builtin Goal retains the session permission on its first and subsequent
+  claimed turns, including Host continuation; `auto` is not downgraded.
+  Other Host-started staged turns (loop continuation, `onFail.goto`) continue
+  to evaluate `auto` as `accept-edits`. User and approval turns retain the
+  session permission. Narrower turn ceilings and external-path checks remain.
+- After Goal input resets to Agent, its active Host-owned claim still selects
+  the run snapshot and stage policy. Ordinary Agent work does not inherit an
+  unclaimed Goal. An explicit Plan selection retains contract hard denies.
 - allow-session is remembered per toolName for the active session only
 - Session grants follow `sessionId` across project-tab switches and are never
   inherited by another session or Temporary conversation
@@ -1025,3 +1082,7 @@ the supervisor's process-tree cleanup and reports its actual settled outcome
 or a still-running snapshot with stopRequested. The model's reads and desktop
 reads do not consume each other's logs. Retention and Host restart still bound
 how long a finished ID can be queried.
+
+On macOS, if exit cleanup is denied after the Host successfully signalled the
+group and reaped the child, it briefly checks whether the process group still
+exists. Only a confirmed disappearance clears that denial.

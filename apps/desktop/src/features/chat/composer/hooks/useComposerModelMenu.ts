@@ -1,5 +1,4 @@
 import { useTranslation } from "react-i18next";
-import { sameRecentModel } from "../../../../lib/recent-models";
 import type {
   Mode,
   ProviderPublic,
@@ -12,7 +11,7 @@ import {
   imageGenerationBindings,
   initialThinkingLevelForBinding,
   initialThinkingLevelForUnmatchedModel,
-  isImageGenerationModel,
+  isImageOnlyChatModel,
 } from "@pi-desktop/shared";
 import { type KeyboardEvent, useEffect, useMemo, useRef, useState } from "react";
 import {
@@ -25,6 +24,7 @@ import {
   providerDisplayName,
   providerSearchText,
 } from "../../../../lib/provider-display";
+import { sameRecentModel } from "../../../../lib/recent-models";
 import { providerThinkingLevels } from "../../../../lib/session-thinking";
 import { useAppStore } from "../../../../stores/app-store";
 import {
@@ -380,13 +380,16 @@ export function useComposerModelMenu({
     }
     thinkingQueueRef.current?.invalidate();
     await thinkingQueueRef.current?.idle();
-    if (task !== "image" && isImageGenerationModel(
-      imageGenerationBindings(
-        useAppStore.getState().settings?.imageGenerationModels,
-        useAppStore.getState().settings?.imageGeneration,
-      ),
+    // A pure image-generation endpoint cannot be selected for chat; a
+    // dual-capability model marked for image generation stays selectable
+    // (#2253). The discovered row's modalities are the same answer session
+    // launch reads, so the menu cannot offer what launch would reject.
+    if (task !== "image" && !candidate.mirrorCoding && isImageOnlyChatModel(
+      imageGenerationCandidates,
       candidate.id,
       nextModelId,
+      providerModels[candidate.id]?.find((entry) =>
+        sameComposerModelId(entry.modelId, nextModelId)),
     )) return;
     try {
       if (task === "image") {

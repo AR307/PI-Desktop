@@ -1,3 +1,35 @@
+## 2026-11-21 - Message context menu and composer screenshots
+
+- Keep selected text and the regular context menu while dismissing floating
+  quote actions on right-click; a new selection restores those actions.
+- Add the composer camera action and isolated region-selection windows. Main
+  owns native screen capture; a narrow preload connects the selector renderer;
+  accepted PNGs reuse the existing session-scratch and attachment draft pipeline.
+- Preserve drafts, references and main/side session ownership. Cancellation does
+  not create an attachment or send; no database or runtime protocol is changed.
+- Bind picker/capture completion to the calling composer instead of the global
+  main-session selection, so a side attachment appears immediately in that side.
+- Add real Electron user-path coverage for context-menu selection, cancellation,
+  cropping, explicit send and side-chat ownership; keep new tooltip copy marked
+  for review in docs/composer-screenshot-copy-review.md.
+- Validation: 42 targeted desktop tests and 40 i18n tests pass; desktop
+  typecheck, Electron build, scoped lint, style tokens and documentation checks
+  pass. Native Windows acceptance covers Home, main/side drafts, cancellation,
+  crop dimensions/pixels, explicit vision input, narrow layout and owner reload.
+  Candidate/base revisions and native evidence are recorded locally under
+  .artifacts/evidence; macOS/Linux and secondary-monitor crops are not validated.
+- Native acceptance explicitly shows its own Windows fixture and requires its
+  colored marker in the captured pixels; CDP-only interaction with a hidden
+  window must not count as screen-capture acceptance.
+- Reassert fixture visibility immediately before each capture. Permit Vite's
+  inline refresh preamble only in development; packaged selector scripts retain
+  their self-only CSP. Cover both HTML policies with the real Vite transform.
+- Keep the isolated Windows capture fixture above desktop wallpaper windows
+  during native acceptance; this test-only ordering never changes app defaults.
+- Existing composer-paste acceptance still fails its preview-cancel focus probe
+  on both this candidate and the unchanged release worktree. No unrelated
+  preview behavior is changed, and no production profile or database is used.
+
 ## 2026-11-11 - Synchronize upstream for PI-Desktop 0.21.2
 
 - Integrate upstream 4ad0094e: Pi 1.5.0, custom/staged modes, Computer Use,
@@ -1922,3 +1954,35 @@ results are recorded in docs/releases/0.21.0-beta.5-validation.md.
 - Verify parent and worker Responses API configuration updates over local HTTP,
   including turning Ultra off/on and an imported alias mapping. See
   docs/spec/03-runtime/ultra-collaboration.md.
+
+## 2026-11-22 - Upstream main integration
+
+- Integrate upstream main `e89051fc7` (0.24.0-beta.1, Pi 1.5.2) with the
+  maintained MirrorCoding, Gemini, Ultra, mobile, quoted-reference and side-chat
+  features. Keep region capture and right-click selection dismissal.
+- Converge released fork schema 30 before upstream schema 34 migrations. Preserve
+  conversation history, quoted queue entries and mobile revisions across restart;
+  initialize the missing elapsed-time and explicit Goal columns.
+- Keep upstream output-limit annotations and truncated-tool recovery while
+  retaining transport recovery, partial text and completed-tool evidence.
+- Preserve the fork's Windows-only release lane and upstream native-platform
+  matrix. Validate merged configuration staging and queued Goal startup.
+- Recycle only the user-approved upstream removal list. Reuse compatible build
+  caches; isolate validation profiles and local provider fixtures. No running
+  client, real account or server is changed.
+- Update isolated user-path fixtures to dismiss the new startup guide through
+  its visible Skip control and cover upstream dual text/image eligibility.
+- Apply the approved Screenshot labels and prepare the Windows prerelease as
+  `0.24.0-beta.1.mc.1`. Establish the actual native maximize state before the
+  screenshot journey checks restore and the narrow side-chat toolbar.
+- Seed the Official Enhancements title preference in request-sensitive test
+  profiles instead of the removed core title setting. Keep metadata completions
+  separate from side-chat, capture, cache and recovery acceptance.
+- Route cache and side-chat acceptance through the upstream settings dialog's
+  close action; the removed full-page Back action is no longer a test target.
+- Select models through the upstream menu's direct search field during cache
+  acceptance, and wait for the completed search reset before checking controls.
+- Validate region capture, side-chat, cache controls and eight recovery scenarios
+  in isolated Electron. Verify the NSIS payload with 800 fixture sessions and the
+  portable launcher through an actual local-provider chat. Record Windows-only
+  qualification and the disabled hosted CI in the prerelease validation report.

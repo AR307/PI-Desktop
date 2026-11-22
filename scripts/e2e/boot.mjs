@@ -1,4 +1,4 @@
-import { existsSync, mkdtempSync, readFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -47,4 +47,11 @@ export function assertDesktopBuild(root = repositoryRoot()) {
 
 export function createTempDataDir(prefix) {
   return mkdtempSync(join(tmpdir(), prefix));
+}
+
+/** Keep metadata completions out of request-sensitive, fresh-profile journeys. */
+export function disableFixtureAutoTitles(dataDir) {
+  const directory = join(dataDir, "plugins", "data", "pi.official-enhancements");
+  mkdirSync(directory, { recursive: true });
+  writeFileSync(join(directory, "settings.json"), JSON.stringify({ titlesEnabled: false }) + "\n");
 }

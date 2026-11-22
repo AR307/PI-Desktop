@@ -10,7 +10,7 @@ import { repositoryRoot, resolveElectronBinary } from "../../../scripts/e2e/boot
 const root = repositoryRoot();
 const { build } = createRequire(join(root, "packages/agent-runtime/package.json"))("esbuild");
 
-test("image-model marking explains chat exclusion and remains visible when Advanced is collapsed", {
+test("image-model marking discloses its role without hiding conversation-capable models", {
   timeout: 60_000,
   skip: process.platform === "linux" && !process.env.DISPLAY ? "Electron requires a display" : false,
 }, async () => {
@@ -50,7 +50,11 @@ click(document.querySelector('[aria-label="' + i18n.t("settings.setImageModel") 
 click(advanced());
 assert(row().textContent.includes(i18n.t("settings.imageModelSelected")), "Collapsed row must disclose the image role");
 const provider = { id: "fixture", models: bindings };
-assert(composerModelsForProvider(provider, [], selected.map(modelId => ({ providerId: provider.id, modelId }))).length === 0, "Saved marking must exclude chat");
+const marked = selected.map(modelId => ({ providerId: provider.id, modelId }));
+assert(composerModelsForProvider(provider, [], marked).length === 1, "An unknown custom model remains chat-eligible");
+assert(composerModelsForProvider(provider, [{ modelId: "custom-chat", modalities: { output: ["text", "image"] } }], marked).length === 1, "Dual-capability marking must retain chat");
+assert(composerModelsForProvider(provider, [{ modelId: "custom-chat", modalities: { output: ["image"] } }], marked).length === 0, "Published image-only output must exclude chat");
+assert(composerModelsForProvider({ id: "fixture", models: [{ id: "gpt-image-1" }] }, [], [{ providerId: "fixture", modelId: "gpt-image-1" }]).length === 0, "A pure image endpoint must exclude chat");
 click(advanced());
 click(document.querySelector('input[aria-label="' + i18n.t("settings.imageModelSelected") + '"]'));
 assert(!row().textContent.includes(i18n.t("settings.imageModelSelected")), "Unmark must remove the badge");

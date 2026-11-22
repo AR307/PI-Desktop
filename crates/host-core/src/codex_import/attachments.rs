@@ -132,6 +132,7 @@ pub fn read(content: &Value, source: &Path, cwd: Option<&str>) -> ImportedAttach
             result.warnings.push(format!("File attachment {name} is preserved for viewing; its original model representation is unavailable"));
         }
         result.attachments.push(MessageAttachment {
+            local_reference: None,
             kind: if mime.starts_with("image/") {
                 "image"
             } else {

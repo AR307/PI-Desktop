@@ -29,6 +29,8 @@ mod grep_rg;
 pub mod hashline;
 pub mod ignore_rules;
 mod image_dimensions;
+#[cfg(any(unix, test))]
+mod process_group;
 pub mod shell;
 #[cfg(windows)]
 mod windows_process_tree;
@@ -226,19 +228,9 @@ impl ProcessOwnership {
 
     #[cfg(unix)]
     fn terminate(&self, pid: u32) -> Result<(), String> {
-        if pid == 0 {
-            return Err("shell runner has no process group".into());
-        }
-        let result = unsafe { libc::killpg(pid as libc::pid_t, libc::SIGKILL) };
-        if result == 0 {
-            return Ok(());
-        }
-        let error = io::Error::last_os_error();
-        if error.raw_os_error() == Some(libc::ESRCH) {
-            Ok(())
-        } else {
-            Err(format!("killpg failed for the shell runner: {error}"))
-        }
+        process_group::signal(pid, libc::SIGKILL)
+            .map(|_| ())
+            .map_err(|error| format!("killpg failed for the shell runner: {error}"))
     }
 
     #[cfg(all(not(windows), not(unix)))]
@@ -257,6 +249,30 @@ impl ProcessOwnership {
 
     #[cfg(not(windows))]
     fn close_now(&mut self) {}
+
+    /// On macOS distinguish a delivered stop from an already absent group.
+    pub(crate) fn request_background_stop(&mut self, pid: u32) -> Result<bool, String> {
+        #[cfg(target_os = "macos")]
+        {
+            process_group::signal(pid, libc::SIGKILL)
+                .map_err(|error| format!("killpg failed for the shell runner: {error}"))
+        }
+        #[cfg(not(target_os = "macos"))]
+        self.terminate_fail_closed(pid).map(|()| true)
+    }
+
+    pub(crate) async fn cleanup_after_stopped_exit(&mut self, pid: u32) -> Result<(), String> {
+        #[cfg(target_os = "macos")]
+        {
+            process_group::confirm_cleanup(process_group::signal(pid, libc::SIGKILL), || {
+                process_group::signal(pid, 0)
+            })
+            .await
+            .map_err(|error| format!("killpg failed for the shell runner: {error}"))
+        }
+        #[cfg(not(target_os = "macos"))]
+        self.terminate_fail_closed(pid)
+    }
 
     pub(crate) fn terminate_fail_closed(&mut self, pid: u32) -> Result<(), String> {
         match self.terminate(pid) {
@@ -880,6 +896,7 @@ pub struct BashExecutionOptions {
     /// Start as a background task detached from the turn: no timeout, no
     /// abort wiring. The caller owns the registry; see `background_tasks`.
     pub run_in_background: bool,
+    pub continuation_turn_id: Option<String>,
     /// Host state the background spawn registers into. Present for RPC-driven
     /// calls; `None` for test/`local` constructions that never go background.
     pub app_state: Option<Arc<tokio::sync::Mutex<crate::state::AppState>>>,
@@ -896,6 +913,7 @@ impl BashExecutionOptions {
             output_tx: None,
             extra_env: Vec::new(),
             run_in_background: false,
+            continuation_turn_id: None,
             app_state: None,
         }
     }
@@ -3005,17 +3023,19 @@ async fn tool_bash(
                 "background execution requires host state (not available for local calls)".into(),
             ));
         };
-        let started = crate::background_tasks::spawn_background_task_detached(
+        let started = crate::background_tasks::spawn_background_task_with_continuation(
             app_state,
             &options.session_id,
             command,
             &options.command_shell_id,
             root,
             scratch,
+            options.continuation_turn_id.as_deref(),
         )
         .await?;
         return Ok(serde_json::json!({
             "backgroundTaskId": started,
+            "continuationRequested": options.continuation_turn_id.is_some(),
             "job": { "kind": "bash", "id": started },
             "command": command,
             "commandShellId": options.command_shell_id,
@@ -3342,7 +3362,7 @@ pub fn builtin_tool_defs() -> Value {
             "name": "Edit",
             "description": "Replace, insert, or delete lines in an existing file. Names positions and supplies new content only — never old_string. Required args: path, tag (4 hex from the latest Read/Grep/Write/Edit), ops. \
     Ops: `PUT N.=M:` replace inclusive lines N–M (body rows required); `PUT <N:` insert before N; `PUT >N:` insert after N; `PUT >$:` append; `CUT N.=M` delete; `REM` delete the file; `MV DEST` rename after other ops. \
-    Body rows are `+` plus the final line text; a bare `+` is an empty line. Every PUT with body rows must include the trailing colon, for example `PUT 48.=48:` followed by a `+replacement` row; `PUT 48.=48` followed by `+` rows is invalid. A colonless PUT is only for a register paste such as `PUT <1 @name`. No `-old` or context rows. Ranges name only the lines being changed — a pure insert uses a gap locator, not a widened PUT that restates survivors. \
+    Delete with `CUT`, not an empty `PUT`. Do not paste unified-diff or Markdown wrappers into ops. Body rows are `+` plus the final line text; a bare `+` is an empty line. Every PUT with body rows must include the trailing colon, for example `PUT 48.=48:` followed by a `+replacement` row; `PUT 48.=48` followed by `+` rows is invalid. A colonless PUT is only for a register paste such as `PUT <1 @name`. No `-old` or context rows. Ranges name only the lines being changed — a pure insert uses a gap locator, not a widened PUT that restates survivors. \
     All line numbers refer to the tagged snapshot and are 1-indexed. Re-ground on the tag returned by every successful write. After one failed Edit, classify the error: Read the live file for a stale tag or unseen lines (or retry unchanged on a complete EDIT_LINES_UNSEEN reveal), but correct syntax or range errors directly; do not guess.",
             "risk": "high",
             "parameters": {
@@ -4905,6 +4925,18 @@ mod tests {
         assert!(edit["description"]
             .as_str()
             .unwrap()
+            .contains("Delete with `CUT`, not an empty `PUT`"));
+        assert!(edit["description"]
+            .as_str()
+            .unwrap()
+            .contains("unified-diff or Markdown wrappers"));
+        assert!(edit["description"]
+            .as_str()
+            .unwrap()
+            .contains("survivors. All line numbers"));
+        assert!(edit["description"]
+            .as_str()
+            .unwrap()
             .contains("classify the error"));
         assert!(edit["parameters"]["required"]
             .as_array()
@@ -5120,6 +5152,7 @@ mod tests {
                 output_tx: None,
                 extra_env: Vec::new(),
                 run_in_background: false,
+                continuation_turn_id: None,
                 app_state: None,
             }),
         )
@@ -5164,6 +5197,7 @@ mod tests {
                 output_tx: None,
                 extra_env: Vec::new(),
                 run_in_background: false,
+                continuation_turn_id: None,
                 app_state: None,
             }),
         )
@@ -5203,6 +5237,7 @@ mod tests {
                 output_tx: None,
                 extra_env: Vec::new(),
                 run_in_background: false,
+                continuation_turn_id: None,
                 app_state: None,
             }),
         )
@@ -5275,6 +5310,7 @@ mod tests {
             output_tx: Some(tx),
             extra_env: Vec::new(),
             run_in_background: false,
+            continuation_turn_id: None,
             app_state: None,
         };
         let mut notifier = OutputNotifier::new(&options);
@@ -5303,6 +5339,7 @@ mod tests {
             output_tx: None,
             extra_env: Vec::new(),
             run_in_background: false,
+            continuation_turn_id: None,
             app_state: None,
         };
 
@@ -5393,6 +5430,7 @@ mod tests {
             output_tx: None,
             extra_env: Vec::new(),
             run_in_background: false,
+            continuation_turn_id: None,
             app_state: None,
         };
         execute_tool_with_options(

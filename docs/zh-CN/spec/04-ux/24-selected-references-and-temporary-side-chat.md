@@ -6,6 +6,10 @@
 
 ## 用户流程
 
+Right-click dismisses the floating actions without clearing the text selection
+or suppressing the ordinary context menu. Scroll, resize and notifications for
+the same selection do not reopen them; a new pointer or keyboard selection does.
+
 在本地桌面端的用户消息或助手回复正文中选中文字后，会出现**添加到对话**和**在侧边聊天中提问**。代码会保留换行，渲染后的数学公式使用其 TeX 源码。跨多个消息的选区按来源拆成多个引用。按钮、输入框、隐藏内容及已有引用控件不会被选入。按 Tab 可进入工具栏，按 Escape 可关闭。操作按钮采用紧凑的 ghost 样式，不包在带边框、圆角或凸起效果的容器中，与桌面端现有工具栏一致。
 
 添加到对话会追加结构化引用，不会覆盖已输入文本或附件，也不会自动发送。无边框的引用数量控件可展开为带编号的摘录，并以细微的引用竖线标示。将鼠标悬停或聚焦到编号来源时，会显示完整的会话和消息标识；摘录本身不显示冗长标识。草稿中的引用使用带可访问移除标签的小型关闭按钮。主对话、侧聊和已发送引用共用此展示。普通发送、排队发送、即时引导、主聊和侧聊的消息编辑/重试，以及未回答时停止后的草稿恢复，都会保留引用。引用在已保存消息中仍是结构化数据；统一转换逻辑会先添加用户角色的引用材料，再添加问题。不会将引用提升为系统消息，也不使用 Codex 私有注释协议。
@@ -39,4 +43,4 @@ Host schema 26 增加父子生命周期归属与排队引用元数据。既有�
 
 ## 验证
 
-见 [E2E 计划](../06-delivery/04-e2e-test-plan.md#selected-references-and-temporary-side-chat)及[架构决策](../../../adr/temporary-side-chat-runtime.md)。执行结果和平台限制记录在[本地验证](../../../selection-side-chat-validation.md)中。
+见 [E2E 计划](/spec/06-delivery/04-e2e-test-plan.md#selected-references-and-temporary-side-chat)及[架构决策](../../../adr/temporary-side-chat-runtime.md)。执行结果和平台限制记录在[本地验证](../../../selection-side-chat-validation.md)中。

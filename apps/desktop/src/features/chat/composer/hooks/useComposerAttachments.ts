@@ -59,6 +59,7 @@ export type ComposerAttachmentsController = {
   setDropTargetActive: (active: boolean) => void;
   droppedDirectories: ComposerDropItem[];
   pickAndAttach: () => Promise<void>;
+  captureAndAttach: () => Promise<void>;
   pasteClipboardFiles: (event: ClipboardEvent<HTMLDivElement>) => void;
   attachDroppedItems: (items: ComposerDropItem[]) => Promise<void>;
   onComposerDragEnter: (event: ReactDragEvent<HTMLDivElement>) => void;
@@ -85,6 +86,8 @@ export function useComposerAttachments({
   draft,
 }: UseComposerAttachmentsOptions): ComposerAttachmentsController {
   const [pasting, setPasting] = useState(false);
+  const activeSessionRef = useRef(activeSessionId);
+  activeSessionRef.current = activeSessionId;
   const pickerInFlight = useRef(false);
   const [dropTargetActive, setDropTargetActive] = useState(false);
   const [droppedDirectories, setDroppedDirectories] = useState<ComposerDropItem[]>([]);
@@ -93,17 +96,12 @@ export function useComposerAttachments({
   const snapshotReferences = (sourceSessionId: string) =>
     draft.snapshotReferences(sourceSessionId);
 
-  const pickAndAttach = async () => {
+  const attachFromPicker = async (source: "files" | "screenshot") => {
     // The ref closes the gap before React re-renders the disabled button.
     if (pickerInFlight.current || isInputBlocked) return;
     pickerInFlight.current = true;
     setPasting(true);
     try {
-      // The picker accepts regular files; the importer classifies images from
-      // MIME/extension metadata after selection.
-      const result = await api.pickFiles();
-      if (result.canceled || !result.token) return;
-
       const editor = draft.ref.current;
       const sourceValue = editor ? readEditorValue(editor) : draft.valueRef.current;
       const { start: selectionStart, end: selectionEnd } = editor
@@ -111,12 +109,22 @@ export function useComposerAttachments({
         : { start: sourceValue.length, end: sourceValue.length };
       const sourceSessionId = activeSessionId;
       const sourceDraftKey = draftKey;
+      const sourceWorkspacePath = useAppStore.getState().workspace?.path ?? "";
       const previousReferences = snapshotReferences(sourceSessionId ?? "");
+      const screenshot = source === "screenshot" ? await api.captureScreenshot() : null;
+      const picked = source === "files" ? await api.pickFiles() : null;
+      if (!screenshot && (!picked?.token || picked.canceled)) return;
+      if (!sourceSessionId) {
+        const current = useAppStore.getState();
+        if (current.activeSessionId || (current.workspace?.path ?? "") !== sourceWorkspacePath) return;
+      }
       // A picker action is real input, so a home draft gets a durable owner
       // before native paths are copied into scratch.
       const sessionId = sourceSessionId ?? (await materializeDraftSession());
       if (!sessionId) throw new Error("session unavailable");
-      const imported = await api.importFiles(sessionId, result.token);
+      const imported = screenshot
+        ? await api.pasteFiles(sessionId, [screenshot])
+        : await api.importFiles(sessionId, picked!.token!);
       const chips = imported.files.map((file) => {
         const token = nextChipToken();
         return {
@@ -147,7 +155,9 @@ export function useComposerAttachments({
           ...chips.map((chip) => draftFileReference(chip.reference)),
         ],
       });
-      const currentSessionId = useAppStore.getState().activeSessionId;
+      const currentSessionId = sourceSessionId
+        ? activeSessionRef.current
+        : useAppStore.getState().activeSessionId;
       if (currentSessionId === sessionId) {
         draft.applyEditorDraft(nextText, nextReferences, selectionStart + inserted.length);
       } else if (sourceDraftKey === HOME_DRAFT_KEY) {
@@ -161,6 +171,8 @@ export function useComposerAttachments({
       setPasting(false);
     }
   };
+  const pickAndAttach = () => attachFromPicker("files");
+  const captureAndAttach = () => attachFromPicker("screenshot");
 
   /** The chip label for one referenced conversation. */
   const sessionChipName = (id: string) => {
@@ -289,10 +301,10 @@ export function useComposerAttachments({
 
         let result;
         if (native) {
-          const imported = native.token ? await api.importFiles(sessionId, native.token) : { files: [] };
+          const imported = native.token ? await api.importFiles(sessionId, native.token, true) : { files: [] };
           let index = 0;
           result = { files: native.items.map(item => item.kind === "directory"
-            ? { path: item.path, name: item.name, kind: "directory" as const, mimeType: undefined }
+            ? { path: item.path, name: item.name, kind: "directory" as const, mimeType: undefined, size: undefined, localReference: undefined }
             : imported.files[index++]) };
         } else {
           result = await api.pasteFiles(sessionId, payload);
@@ -319,6 +331,8 @@ export function useComposerAttachments({
             reference: createFileReference(file.path, file.name, sessionId, {
               kind: file.kind,
               mimeType: file.mimeType,
+              size: file.size,
+              localReference: file.localReference,
               token,
             }),
           };
@@ -532,6 +546,7 @@ export function useComposerAttachments({
     setDropTargetActive,
     droppedDirectories,
     pickAndAttach,
+    captureAndAttach,
     pasteClipboardFiles,
     attachDroppedItems,
     onComposerDragEnter,

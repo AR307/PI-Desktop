@@ -6,7 +6,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { Host, resolveHostBinary } from "./e2e/host.mjs";
-import { desktopPaths, resolveElectronBinary } from "./e2e/boot.mjs";
+import { desktopPaths, disableFixtureAutoTitles, resolveElectronBinary } from "./e2e/boot.mjs";
 
 // Real settings -> IPC -> Rust storage -> runtime -> Anthropic HTTP adapter.
 // Only the provider endpoint is simulated; retain profiles and screenshots.
@@ -22,6 +22,7 @@ writeFileSync(join(scratch, "candidate.json"), JSON.stringify({
 }, null, 2));
 const dataDir = join(scratch, "data"), project = join(scratch, "project");
 mkdirSync(project);
+disableFixtureAutoTitles(dataDir);
 const requests = [];
 const modelId = "claude-sonnet-4-6";
 const server = createServer(async (req, res) => {
@@ -53,14 +54,14 @@ const { provider } = await host.call("providers.create", {
   baseUrl: "http://127.0.0.1:" + server.address().port, authKind: "none", apiStyle: "anthropic_messages", defaultModelId: modelId,
   models: [modelId, "gpt-5"].map(id => ({ id, contextWindow: 200000, maxTokens: 8192, thinkingLevels: ["off"], defaultThinkingLevel: "off" })),
 });
-await host.call("settings.set", { language: "en", theme: "dark", mirrorCodingWelcomeCompleted: true, onboardingDismissed: true, autoGenerateTitle: false, defaultProviderId: provider.id, defaultModelId: modelId, defaultMode: "agent", defaultPermissionMode: "ask" });
+await host.call("settings.set", { language: "en", theme: "dark", mirrorCodingWelcomeCompleted: true, onboardingDismissed: true, defaultProviderId: provider.id, defaultModelId: modelId, defaultMode: "agent", defaultPermissionMode: "ask" });
 await host.stop();
 const { appDir, electronBinary } = process.env.PI_E2E_ELECTRON
   ? { appDir: desktopPaths().appDir, electronBinary: process.env.PI_E2E_ELECTRON }
   : resolveElectronBinary();
 const env = { ...process.env, PI_DESKTOP_DATA_DIR: dataDir, PI_DESKTOP_START_MAXIMIZED: "0", ELECTRON_RENDERER_URL: "" };
 delete env.ELECTRON_RUN_AS_NODE;
-let app, page;
+let app, page, guideDismissed = false;
 const close = async () => {
   if (!app) return;
   const current = app;
@@ -74,6 +75,13 @@ const launch = async () => {
   page.setDefaultTimeout(15000);
   await page.locator('.composer-input[contenteditable="true"]').first().waitFor({ timeout: 45000 });
   await page.locator(".startup-splash").waitFor({ state: "hidden", timeout: 45000 });
+  if (!guideDismissed) {
+    const guide = page.locator('[data-surface="startup-guide"]');
+    await guide.waitFor();
+    await guide.getByRole("button", { name: "Skip", exact: true }).first().click();
+    await guide.waitFor({ state: "hidden" });
+    guideDismissed = true;
+  }
 };
 const invoke = (name, input) => page.evaluate(async ({ name, input }) => {
   const result = await window.piDesktop.invoke(window.piDesktop.channels.invoke[name], input);
@@ -112,7 +120,7 @@ const choose = async (label, keyboard = false) => {
   await page.locator(".provider-setup-head").waitFor({ state: "hidden" });
   const saved = await invoke("providersList");
   assert.equal(saved.providers.find(p => p.id === provider.id).models.find(m => m.id === modelId).claudeCacheTtl, label === "1 hour" ? "1h" : "5m");
-  await page.locator('[data-nav="back-to-app"]').click();
+  await page.locator('[data-nav="close-settings"]').click();
 };
 const openComposerMenu = async () => {
   const trigger = page.locator(".composer-model-thinking-chip").first();
@@ -121,12 +129,11 @@ const openComposerMenu = async () => {
 };
 const selectComposerModel = async (id, mirrorCoding = false) => {
   const menu = await openComposerMenu();
-  await menu.locator(".composer-menu-entry").filter({ has: page.locator(".composer-menu-entry-label", { hasText: /^Model$/ }) }).click();
-  await menu.locator("input").fill(id);
+  await menu.getByRole("textbox", { name: "Search models", exact: true }).fill(id);
   const option = menu.locator(".composer-model-option").filter({ has: page.locator(".composer-model-label", { hasText: id }) });
   await option.and(menu.getByRole(mirrorCoding ? "menuitem" : "menuitemradio")).first().click();
   if (mirrorCoding) await menu.locator(".mirrorcoding-group-option").filter({ hasText: "Fixture" }).click();
-  await menu.locator(".composer-menu-root").waitFor();
+  await page.waitForFunction(() => document.querySelector('.composer-model-thinking-menu input[aria-label="Search models"]')?.value === "");
   return menu;
 };
 const chooseComposerCache = async (ttl, keyboard = false, selectedProviderId = provider.id) => {
@@ -200,7 +207,7 @@ try {
   await other.locator(".provider-chosen-advanced-toggle").click();
   assert.equal(await other.getByRole("button", { name: "Claude cache duration", exact: true }).count(), 0);
   await page.getByRole("button", { name: "Cancel", exact: true }).click();
-  await page.locator('[data-nav="back-to-app"]').click();
+  await page.locator('[data-nav="close-settings"]').click();
   await choose("5 minutes");
   menu = await openComposerMenu();
   assert.equal(await menu.getByRole("radio", { name: "5 minutes", exact: true }).getAttribute("aria-checked"), "true");
@@ -251,7 +258,7 @@ try {
   const accountProvider = accountSaved.providers.find(p => p.mirrorCoding?.scope === "account");
   assert.equal(accountProvider.models.find(m => m.id === modelId).claudeCacheTtl, "5m");
   await page.screenshot({ path: join(scratch, "mirrorcoding-cache.png") });
-  await page.locator('[data-nav="back-to-app"]').click();
+  await page.locator('[data-nav="close-settings"]').click();
   menu = await openComposerMenu();
   assert.equal(await menu.getByRole("radio", { name: "5 minutes", exact: true }).getAttribute("aria-checked"), "true");
   console.log("PASS composer model selection, immediate cache save, keyboard, draft/reasoning preservation and two-way settings sync");

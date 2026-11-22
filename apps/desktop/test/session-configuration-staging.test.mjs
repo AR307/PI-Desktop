@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import assert from "node:assert/strict";
 import test from "node:test";
 import { resolve } from "node:path";
@@ -33,6 +34,37 @@ test("desktop and mobile save next-turn fields without changing the captured act
     releaseTurnConfiguration(host, saved.id, "turn-b");
     assert.equal(currentTurnConfiguration(host, saved.id), undefined);
   } finally { off(); }
+});
+
+const sessionRuntime = readFileSync(new URL("../src/stores/runtime/session-runtime.ts", import.meta.url), "utf8");
+const sessionSlice = readFileSync(new URL("../src/stores/slices/session-slice.ts", import.meta.url), "utf8");
+
+const between = (source, startMarker, endMarker) => {
+  const start = source.indexOf(startMarker);
+  assert.ok(start >= 0, `missing ${startMarker}`);
+  const end = source.indexOf(endMarker, start);
+  assert.ok(end > start, `missing ${endMarker} after ${startMarker}`);
+  return source.slice(start, end);
+};
+
+test("staged next-turn configuration merges per field instead of replacing", () => {
+  const merge = between(
+    sessionRuntime,
+    "mergeSessionConfiguration: (",
+    "\n    queueWorkspaceAlignment,",
+  );
+  // Only defined fields overwrite; an omitted permissionMode keeps the staged one.
+  assert.match(merge, /if \(!current\) return next;/);
+  assert.match(merge, /if \(value !== undefined\) merged\[key\] = value;/);
+  assert.match(
+    sessionSlice,
+    /runtime\.pendingSessionConfigurations\.set\(\n\s*sessionId,\n\s*runtime\.mergeSessionConfiguration\(\n\s*runtime\.pendingSessionConfigurations\.get\(sessionId\),\n\s*config,\n\s*\),\n\s*\)/,
+  );
+  // The direct (idle) path folds a leftover staged entry under the new fields.
+  assert.match(
+    sessionSlice,
+    /const payload = runtime\.mergeSessionConfiguration\(\n\s*runtime\.pendingSessionConfigurations\.get\(sessionId\),\n\s*config,\n\s*\);\n\s*runtime\.pendingSessionConfigurations\.delete\(sessionId\);\n\s*const write = api\.configureSession\(sessionId, payload\)/,
+  );
 });
 
 test("failed configuration does not publish an unconfirmed update", async () => {

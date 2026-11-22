@@ -11,8 +11,15 @@ Post-baseline MirrorCoding amendment (2026-09-20): protocol version 12 adds
 main-owned account authorization and group providers without a database schema
 change. See [MirrorCoding account](03-runtime/21-mirrorcoding-account.md) and
 ADR 0299. Historical baseline version references below describe their releases.
+> [Session-owned Plan approval permissions](../adr/plan-approval-session-permission.md)
+> makes the Plan/legacy Goal approval default follow the owning Session's effective
+> permission. Device-wide approval history no longer overrides that Session.
+
 > [Pasted directory references](../adr/composer-pasted-directory-references.md) add
 > folder cards and lazy dir prompt context without copying trees or granting access.
+> [Pasted local file references](../adr/composer-local-file-references.md) extend
+> native clipboard paste to live file paths and byte sizes, with metadata-only
+> dispatch and unchanged tool permissions.
 
 
 - Baseline Version: `0.4.22`
@@ -219,7 +226,8 @@ ADR 0299. Historical baseline version references below describe their releases.
     structured fields in the existing `plan_approvals` row. The row records the
     artifact path/hash/size and execution fields. Approve/reject are the only
     actions; approval explicitly selects `ask`, `accept-edits`, or `auto` with
-    Ask as the UI default, opens the artifact for review, and expires after 30
+    the Session's effective permission as the UI default (Ask when unavailable),
+    opens the artifact for review, and expires after 30
     absolute minutes with `PLAN_APPROVAL_TIMEOUT`.**
 46. Plan recovery and shells: **a startup transaction marks prior pending,
     queued, and running Plan work interrupted before serving RPC, with no

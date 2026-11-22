@@ -38,9 +38,9 @@ describe("Browser recovery IPC", () => {
 });
 
 describe("Plan protocol contracts", () => {
-  it("uses protocol v11/schema v30 and exposes the plan, schedule, and shell channels", () => {
+  it("uses protocol v11/schema v34 and exposes the plan, schedule, and shell channels", () => {
     expect(PROTOCOL_VERSION).toBe(11);
-    expect(SCHEMA_VERSION).toBe(30);
+    expect(SCHEMA_VERSION).toBe(34);
     expect(IPC_WHITELIST.has(IPC.invoke.sideChatOpen)).toBe(true);
     expect(IPC_WHITELIST.has(IPC.invoke.sideChatClose)).toBe(true);
     expect(IPC_WHITELIST.has(IPC.invoke.plansPending)).toBe(true);

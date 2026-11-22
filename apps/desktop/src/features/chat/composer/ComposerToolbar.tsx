@@ -16,6 +16,7 @@ import { ComposerControlSlots } from "./ComposerControlSlots";
 import { TooltipButton } from "../../../components/ui";
 import {
   IconArrowUp,
+  IconCamera,
   IconPlus,
   IconSparkles,
   IconStop,
@@ -51,6 +52,7 @@ export type ComposerToolbarProps = {
   stopAllowed?: boolean;
   pasting: boolean;
   pickAndAttach: () => Promise<void>;
+  captureAndAttach: () => Promise<void>;
   configureActiveSession: AppState["configureActiveSession"];
   showToast: AppState["showToast"];
   modelMenu: ModelMenuController;
@@ -98,6 +100,7 @@ export function ComposerToolbar({
   stopAllowed = true,
   pasting,
   pickAndAttach,
+  captureAndAttach,
   configureActiveSession,
   showToast,
   modelMenu,
@@ -142,6 +145,21 @@ export function ComposerToolbar({
             <IconPlus size={15} aria-hidden="true" />
           </TooltipButton>
         </div>
+        <TooltipButton
+          type="button"
+          className="icon-btn icon-btn-square"
+          tooltip={t("chat.screenshot")}
+          ariaLabel={t("chat.screenshot")}
+          disabled={controlsBlocked || pasting || !attachmentsAllowed}
+          onClick={() => {
+            setPermissionOpen(false);
+            modelMenu.setOpen(false);
+            setModeOpen(false);
+            void captureAndAttach();
+          }}
+        >
+          <IconCamera size={15} aria-hidden="true" />
+        </TooltipButton>
         {task === "chat" && localToolsAllowed && globalComposerControlsAllowed ? <LiveVoiceControls t={t} workSessionId={workSessionId} /> : null}
         {task === "chat" && localToolsAllowed && globalComposerControlsAllowed ? <ComputerUseIndicator sessionId={workSessionId ?? null} abort={abort} /> : null}
         <ComposerModePicker
@@ -244,7 +262,9 @@ export function ComposerToolbar({
             tooltip={t("chat.stopGenerating")}
             ariaLabel={t("chat.stopGenerating")}
             disabled={!stopAllowed}
-            onClick={() => void abort()}
+            onClick={() => void abort().catch((error) => {
+              showToast(error instanceof Error ? error.message : String(error), { variant: "error" });
+            })}
           >
             <IconStop size={14} />
           </TooltipButton>

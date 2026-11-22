@@ -4,6 +4,7 @@ import { isIP } from "node:net";
 import { chmod, mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { SESSION_COLLABORATION_OPERATIONS } from "./session-collaboration-control";
+import { markAutomationRequest } from "./runtime/user-message-provenance";
 
 /** A small JSON Schema subset used by MCP's tools/list response. */
 export type McpJsonSchema = {
@@ -240,6 +241,7 @@ const CONTROL_OPERATION_SPECS: OperationSpec[] = [
   spec("closeBehaviorGet", "window/closeBehavior/get", "Read close behavior.", "read", []),
   spec("scheduledList", "scheduled/list", "List scheduled tasks.", "read", []),
   spec("toolResolvePermission", "tool/resolvePermission", "Resolve a pending tool permission request.", "dangerous", ["resolution"]),
+  spec("pendingInteractive", "agent/pendingInteractive", "List pending Agent questions and tool permission requests.", "read", ["input"]),
   spec("askToolResolve", "agent/askTool/resolve", "Answer an Agent question.", "dangerous", ["resolution"]),
   spec("plansPending", "plans/pending", "List pending Plan or Goal approvals.", "read", ["input"]),
   spec("plansResolve", "plans/resolve", "Approve or reject a Plan or Goal checkpoint.", "dangerous", ["resolution"]),
@@ -458,6 +460,7 @@ export const MCP_CONTROL_BLOCKED_CHANNEL_KEYS = [
   "pluginLauncherDismiss",
   "skillImport",
   "composerPickFiles",
+  "composerScreenshot",
   "composerPickPhotos",
   "composerImportFiles",
   "composerPasteFiles",
@@ -800,6 +803,7 @@ export function createMcpControlController(options: {
         });
       }
       const sanitized = args.map((value) => stripSecretMaterial(value)) as unknown[];
+      if (operation.id === "agent/prompt") markAutomationRequest(sanitized[0]);
       const result = operation.channel === "internal:session-collaboration"
         ? await options.invokeSessionCollaboration!({ ...input, args: sanitized })
         : await options.invoke(operation.channel, sanitized);

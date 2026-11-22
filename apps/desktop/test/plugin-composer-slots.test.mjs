@@ -19,6 +19,7 @@ import { parseProbe, probed, propsProbe, slotMounts, slotSsr } from "./helpers/s
 // Every label-driven trigger states its control and its current value.
 const HOST_LEFT = [
   "chat.addFiles",
+  "chat.screenshot",
   "settings.mode: settings.modeAgent",
   "chat.permissionMode",
 ];
