@@ -1980,3 +1980,5 @@ results are recorded in docs/releases/0.21.0-beta.5-validation.md.
   separate from side-chat, capture, cache and recovery acceptance.
 - Route cache and side-chat acceptance through the upstream settings dialog's
   close action; the removed full-page Back action is no longer a test target.
+- Select models through the upstream menu's direct search field during cache
+  acceptance, and wait for the selected row before checking its controls.

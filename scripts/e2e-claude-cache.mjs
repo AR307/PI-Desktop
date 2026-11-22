@@ -129,12 +129,11 @@ const openComposerMenu = async () => {
 };
 const selectComposerModel = async (id, mirrorCoding = false) => {
   const menu = await openComposerMenu();
-  await menu.locator(".composer-menu-entry").filter({ has: page.locator(".composer-menu-entry-label", { hasText: /^Model$/ }) }).click();
-  await menu.locator("input").fill(id);
+  await menu.getByRole("textbox", { name: "Search models", exact: true }).fill(id);
   const option = menu.locator(".composer-model-option").filter({ has: page.locator(".composer-model-label", { hasText: id }) });
   await option.and(menu.getByRole(mirrorCoding ? "menuitem" : "menuitemradio")).first().click();
   if (mirrorCoding) await menu.locator(".mirrorcoding-group-option").filter({ hasText: "Fixture" }).click();
-  await menu.locator(".composer-menu-root").waitFor();
+  await menu.locator(".composer-model-option.active").filter({ has: page.locator(".composer-model-label", { hasText: id }) }).first().waitFor();
   return menu;
 };
 const chooseComposerCache = async (ttl, keyboard = false, selectedProviderId = provider.id) => {
