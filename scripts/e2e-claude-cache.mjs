@@ -133,7 +133,7 @@ const selectComposerModel = async (id, mirrorCoding = false) => {
   const option = menu.locator(".composer-model-option").filter({ has: page.locator(".composer-model-label", { hasText: id }) });
   await option.and(menu.getByRole(mirrorCoding ? "menuitem" : "menuitemradio")).first().click();
   if (mirrorCoding) await menu.locator(".mirrorcoding-group-option").filter({ hasText: "Fixture" }).click();
-  await menu.locator(".composer-model-option.active").filter({ has: page.locator(".composer-model-label", { hasText: id }) }).first().waitFor();
+  await page.waitForFunction(() => document.querySelector('.composer-model-thinking-menu input[aria-label="Search models"]')?.value === "");
   return menu;
 };
 const chooseComposerCache = async (ttl, keyboard = false, selectedProviderId = provider.id) => {
