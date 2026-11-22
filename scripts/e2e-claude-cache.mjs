@@ -6,7 +6,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { Host, resolveHostBinary } from "./e2e/host.mjs";
-import { desktopPaths, resolveElectronBinary } from "./e2e/boot.mjs";
+import { desktopPaths, disableFixtureAutoTitles, resolveElectronBinary } from "./e2e/boot.mjs";
 
 // Real settings -> IPC -> Rust storage -> runtime -> Anthropic HTTP adapter.
 // Only the provider endpoint is simulated; retain profiles and screenshots.
@@ -22,6 +22,7 @@ writeFileSync(join(scratch, "candidate.json"), JSON.stringify({
 }, null, 2));
 const dataDir = join(scratch, "data"), project = join(scratch, "project");
 mkdirSync(project);
+disableFixtureAutoTitles(dataDir);
 const requests = [];
 const modelId = "claude-sonnet-4-6";
 const server = createServer(async (req, res) => {
@@ -53,7 +54,7 @@ const { provider } = await host.call("providers.create", {
   baseUrl: "http://127.0.0.1:" + server.address().port, authKind: "none", apiStyle: "anthropic_messages", defaultModelId: modelId,
   models: [modelId, "gpt-5"].map(id => ({ id, contextWindow: 200000, maxTokens: 8192, thinkingLevels: ["off"], defaultThinkingLevel: "off" })),
 });
-await host.call("settings.set", { language: "en", theme: "dark", mirrorCodingWelcomeCompleted: true, onboardingDismissed: true, autoGenerateTitle: false, defaultProviderId: provider.id, defaultModelId: modelId, defaultMode: "agent", defaultPermissionMode: "ask" });
+await host.call("settings.set", { language: "en", theme: "dark", mirrorCodingWelcomeCompleted: true, onboardingDismissed: true, defaultProviderId: provider.id, defaultModelId: modelId, defaultMode: "agent", defaultPermissionMode: "ask" });
 await host.stop();
 const { appDir, electronBinary } = process.env.PI_E2E_ELECTRON
   ? { appDir: desktopPaths().appDir, electronBinary: process.env.PI_E2E_ELECTRON }

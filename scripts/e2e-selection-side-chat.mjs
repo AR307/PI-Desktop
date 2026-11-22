@@ -8,7 +8,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { once } from "node:events";
 import { Host, resolveHostBinary } from "./e2e/host.mjs";
-import { desktopPaths, resolveElectronBinary } from "./e2e/boot.mjs";
+import { desktopPaths, disableFixtureAutoTitles, resolveElectronBinary } from "./e2e/boot.mjs";
 import { waitFor } from "./e2e/wait.mjs";
 import { assertSideChatLayout } from "./e2e/side-chat-layout.mjs";
 import { assertMessageQuotes, assertSelectionActions } from "./e2e/selected-reference-layout.mjs";
@@ -19,6 +19,7 @@ const scratch = mkdtempSync(join(tmpdir(), "pi-selection-side-chat-"));
 const dataDir = join(scratch, "data"),
   project = join(scratch, "project");
 mkdirSync(project);
+disableFixtureAutoTitles(dataDir);
 console.log("EVIDENCE " + scratch);
 const requests = [],
   held = new Set();
@@ -183,7 +184,6 @@ await host.call("settings.set", {
   theme: "dark",
   mirrorCodingWelcomeCompleted: true,
   onboardingDismissed: true,
-  autoGenerateTitle: false,
   defaultProviderId: provider.id,
   defaultModelId: "fixture",
   defaultMode: "agent",

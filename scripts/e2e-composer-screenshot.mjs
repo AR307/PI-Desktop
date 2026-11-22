@@ -6,7 +6,7 @@ import { createServer } from "node:http";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { Host, resolveHostBinary } from "./e2e/host.mjs";
-import { repositoryRoot, resolveElectronBinary } from "./e2e/boot.mjs";
+import { disableFixtureAutoTitles, repositoryRoot, resolveElectronBinary } from "./e2e/boot.mjs";
 import { waitFor } from "./e2e/wait.mjs";
 
 const { chromium } = createRequire(import.meta.url)(process.env.PI_TEST_PLAYWRIGHT || "playwright");
@@ -14,6 +14,7 @@ const root = repositoryRoot();
 const artifacts = join(root, ".artifacts");
 mkdirSync(artifacts, { recursive: true });
 const scratch = mkdtempSync(join(artifacts, "composer-screenshot-"));
+disableFixtureAutoTitles(join(scratch, "data"));
 const requests = [];
 const server = createServer(async (request, response) => {
   if (request.method === "GET") {
@@ -44,7 +45,7 @@ try {
   });
   await host.call("settings.set", {
     language: "en", theme: "dark", mirrorCodingWelcomeCompleted: true,
-    onboardingDismissed: true, autoGenerateTitle: false,
+    onboardingDismissed: true,
     defaultProviderId: provider.id, defaultModelId: "fixture", defaultMode: "agent",
   });
   await host.stop();
