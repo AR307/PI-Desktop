@@ -1972,3 +1972,6 @@ results are recorded in docs/releases/0.21.0-beta.5-validation.md.
   client, real account or server is changed.
 - Update isolated user-path fixtures to dismiss the new startup guide through
   its visible Skip control and cover upstream dual text/image eligibility.
+- Apply the approved Screenshot labels and prepare the Windows prerelease as
+  `0.24.0-beta.1.mc.1`. Establish the actual native maximize state before the
+  screenshot journey checks restore and the narrow side-chat toolbar.

@@ -404,7 +404,7 @@ export const tr = {
     suggestionPrevious: "Önceki öneri",
     suggestionNext: "Sonraki öneri",
     addFiles: "Dosya ekle",
-    screenshot: "[Screenshot]",
+    screenshot: "Ekran görüntüsü",
     filesAttached: "Taslağa {{count}} öğe eklendi",
     filesPasted: "Yapıştırılan {{count}} dosya oturum klasörüne kaydedildi",
     largeTextPasted: "Uzun yapıştırılan metin @{{name}} olarak kaydedildi",

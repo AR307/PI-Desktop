@@ -394,7 +394,7 @@ export const ptBR = {
     suggestionPrevious: "Sugestão anterior",
     suggestionNext: "Próxima sugestão",
     addFiles: "Adicionar arquivos",
-    screenshot: "[Screenshot]",
+    screenshot: "Captura de tela",
     filesAttached: "{{count}} item(ns) adicionado(s) ao rascunho",
     filesPasted: "{{count}} arquivo(s) colado(s) salvo(s) na pasta temporária da sessão",
     largeTextPasted: "Texto longo colado salvo como @{{name}}",

@@ -395,7 +395,7 @@ export const de = {
     "suggestionPrevious": "Vorheriger Vorschlag",
     "suggestionNext": "Nächster Vorschlag",
     "addFiles": "Dateien hinzufügen und mehr",
-    "screenshot": "[Screenshot]",
+    "screenshot": "Screenshot",
     "filesAttached": "{{count}} Element(e) zum Entwurf hinzugefügt",
     "filesPasted": "{{count}} eingefügte Datei(en) im Sitzungs-Scratch-Ordner gespeichert",
     "largeTextPasted": "Großen eingefügten Text gespeichert als @{{name}}",

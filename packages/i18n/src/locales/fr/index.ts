@@ -395,7 +395,7 @@ export const fr = {
     "suggestionPrevious": "Suggestion précédente",
     "suggestionNext": "Suggestion suivante",
     "addFiles": "Ajoutez des fichiers et plus encore",
-    "screenshot": "[Screenshot]",
+    "screenshot": "Capture d’écran",
     "filesAttached": "Ajout de {{count}} élément(s) au brouillon",
     "filesPasted": "Enregistrement de {{count}} fichier(s) collé(s) dans le dossier de travail de la session",
     "largeTextPasted": "Enregistrement d'un texte collé volumineux sous @{{name}}",

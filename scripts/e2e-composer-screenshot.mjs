@@ -97,7 +97,7 @@ try {
   if (!process.argv.includes("--context-menu-only")) {
     await invoke("windowControl", { action: "toggleMaximize" });
     await waitFor(async () => (await invoke("windowControl", { action: "getState" })).maximized, 5000, "maximized fixture window");
-    const button = page.locator(".composer-dock").first().getByRole("button", { name: "[Screenshot]", exact: true });
+    const button = page.locator(".composer-dock").first().getByRole("button", { name: "Screenshot", exact: true });
     const beforeHome = (await invoke("sessionList")).sessions.length;
     assert.equal(beforeHome, 0);
     let overlay = await openCapture(button);
@@ -150,7 +150,7 @@ try {
   await page.locator('.composer-dock [data-message-quotes]').waitFor();
   console.log("PASS selection -> context menu only -> new selection -> add quote");
   if (!process.argv.includes("--context-menu-only")) {
-    const screenshotButton = page.locator(".composer-dock").getByRole("button", { name: "[Screenshot]", exact: true });
+    const screenshotButton = page.locator(".composer-dock").getByRole("button", { name: "Screenshot", exact: true });
     const requestCount = requests.length;
     const existingImages = images();
     await editor.fill("Keep this screenshot draft");
@@ -226,7 +226,7 @@ try {
     const side = page.locator(".side-chat-pane");
     const sideEditor = side.locator('.composer-input[contenteditable="true"]');
     await sideEditor.fill("Side screenshot draft");
-    overlay = await openCapture(side.getByRole("button", { name: "[Screenshot]", exact: true }));
+    overlay = await openCapture(side.getByRole("button", { name: "Screenshot", exact: true }));
     await overlay.mouse.move(180, 180); await overlay.mouse.down();
     await overlay.mouse.move(380, 320); await overlay.mouse.up();
     await sideEditor.locator(".composer-chip[data-image]").waitFor();
@@ -234,11 +234,17 @@ try {
     assert.equal(await editor.locator(".composer-chip[data-image]").count(), 0, "side capture does not contaminate the main draft");
     assert.equal(new Set(images().map(path => resolve(path, "../.."))).size, 2, "main and side captures use their own session scratch");
     await page.screenshot({ path: join(scratch, "side-screenshot-attached.png") });
-    overlay = await openCapture(side.getByRole("button", { name: "[Screenshot]", exact: true }));
+    overlay = await openCapture(side.getByRole("button", { name: "Screenshot", exact: true }));
     await overlay.mouse.click(100, 100, { button: "right" });
     await waitFor(() => overlays().length === 0, 5000, "right-click cancels screen selection");
     assert.equal(images().length, existingImages.length + 2);
     console.log("PASS side-chat screenshot isolation and right-click cancellation");
+    // Native fixture activation can restore the window during earlier captures.
+    // Establish the maximize state before testing its restore transition.
+    if (!(await invoke("windowControl", { action: "getState" })).maximized) {
+      await invoke("windowControl", { action: "toggleMaximize" });
+      await waitFor(async () => (await invoke("windowControl", { action: "getState" })).maximized, 5000, "maximized side-chat fixture");
+    }
     await invoke("windowControl", { action: "toggleMaximize" });
     await waitFor(async () => !(await invoke("windowControl", { action: "getState" })).maximized, 5000, "restored fixture window");
     const layout = await side.locator(".composer-toolbar").evaluate(toolbar => {
@@ -255,7 +261,7 @@ try {
     await page.screenshot({ path: join(scratch, "narrow-side-toolbar.png") });
     console.log("PASS narrow side toolbar", layout.width);
     const finalRequests = requests.length;
-    overlay = await openCapture(side.getByRole("button", { name: "[Screenshot]", exact: true }));
+    overlay = await openCapture(side.getByRole("button", { name: "Screenshot", exact: true }));
     await page.reload({ waitUntil: "domcontentloaded" });
     await waitFor(() => overlays().length === 0, 5000, "owner reload closes all screen selectors");
     await page.locator('.composer-input[contenteditable="true"]').first().waitFor();

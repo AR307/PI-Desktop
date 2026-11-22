@@ -395,7 +395,7 @@ export const es = {
     "suggestionPrevious": "Sugerencia anterior",
     "suggestionNext": "Siguiente sugerencia",
     "addFiles": "Agregar archivos y más",
-    "screenshot": "[Screenshot]",
+    "screenshot": "Captura de pantalla",
     "filesAttached": "Se agregaron {{count}} elementos al borrador",
     "filesPasted": "Se guardaron {{count}} archivos pegados en la carpeta temporal de la sesión",
     "largeTextPasted": "Se guardó el texto pegado de gran tamaño como @{{name}}",

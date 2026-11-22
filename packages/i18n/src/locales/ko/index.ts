@@ -404,7 +404,7 @@ export const ko = {
     suggestionPrevious: "이전 제안",
     suggestionNext: "다음 제안",
     addFiles: "파일 추가",
-    screenshot: "[Screenshot]",
+    screenshot: "스크린샷",
     filesAttached: "초안에 항목 {{count}}개 추가됨",
     filesPasted: "붙여넣은 파일 {{count}}개를 세션 임시 폴더에 저장함",
     largeTextPasted: "큰 붙여넣기 텍스트를 @{{name}}으로 저장함",
