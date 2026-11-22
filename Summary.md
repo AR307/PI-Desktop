@@ -1978,3 +1978,5 @@ results are recorded in docs/releases/0.21.0-beta.5-validation.md.
 - Seed the Official Enhancements title preference in request-sensitive test
   profiles instead of the removed core title setting. Keep metadata completions
   separate from side-chat, capture, cache and recovery acceptance.
+- Route cache and side-chat acceptance through the upstream settings dialog's
+  close action; the removed full-page Back action is no longer a test target.

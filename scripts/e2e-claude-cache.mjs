@@ -120,7 +120,7 @@ const choose = async (label, keyboard = false) => {
   await page.locator(".provider-setup-head").waitFor({ state: "hidden" });
   const saved = await invoke("providersList");
   assert.equal(saved.providers.find(p => p.id === provider.id).models.find(m => m.id === modelId).claudeCacheTtl, label === "1 hour" ? "1h" : "5m");
-  await page.locator('[data-nav="back-to-app"]').click();
+  await page.locator('[data-nav="close-settings"]').click();
 };
 const openComposerMenu = async () => {
   const trigger = page.locator(".composer-model-thinking-chip").first();
@@ -208,7 +208,7 @@ try {
   await other.locator(".provider-chosen-advanced-toggle").click();
   assert.equal(await other.getByRole("button", { name: "Claude cache duration", exact: true }).count(), 0);
   await page.getByRole("button", { name: "Cancel", exact: true }).click();
-  await page.locator('[data-nav="back-to-app"]').click();
+  await page.locator('[data-nav="close-settings"]').click();
   await choose("5 minutes");
   menu = await openComposerMenu();
   assert.equal(await menu.getByRole("radio", { name: "5 minutes", exact: true }).getAttribute("aria-checked"), "true");
@@ -259,7 +259,7 @@ try {
   const accountProvider = accountSaved.providers.find(p => p.mirrorCoding?.scope === "account");
   assert.equal(accountProvider.models.find(m => m.id === modelId).claudeCacheTtl, "5m");
   await page.screenshot({ path: join(scratch, "mirrorcoding-cache.png") });
-  await page.locator('[data-nav="back-to-app"]').click();
+  await page.locator('[data-nav="close-settings"]').click();
   menu = await openComposerMenu();
   assert.equal(await menu.getByRole("radio", { name: "5 minutes", exact: true }).getAttribute("aria-checked"), "true");
   console.log("PASS composer model selection, immediate cache save, keyboard, draft/reasoning preservation and two-way settings sync");

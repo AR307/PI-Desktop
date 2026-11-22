@@ -944,7 +944,7 @@ try {
     10000,
     "light theme applied",
   );
-  await click('[data-nav="back-to-app"]');
+  await click('[data-nav="close-settings"]');
   await waitFor(
     () => evaluate("!!document.querySelector('.side-chat-pane')"),
     10000,
