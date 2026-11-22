@@ -1982,3 +1982,7 @@ results are recorded in docs/releases/0.21.0-beta.5-validation.md.
   close action; the removed full-page Back action is no longer a test target.
 - Select models through the upstream menu's direct search field during cache
   acceptance, and wait for the completed search reset before checking controls.
+- Validate region capture, side-chat, cache controls and eight recovery scenarios
+  in isolated Electron. Verify the NSIS payload with 800 fixture sessions and the
+  portable launcher through an actual local-provider chat. Record Windows-only
+  qualification and the disabled hosted CI in the prerelease validation report.
